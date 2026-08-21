@@ -2,6 +2,8 @@ import type { BuildConfig } from "../../config/types";
 import type { OccupancyModel, Occupant } from "../../core/occupancy";
 import type { EngineFinding } from "../../core/engine";
 import type { EvidenceLevel } from "../../core/evidence";
+import { needsHba } from "../../core/policy";
+import n6Profile from "../../../data/cases/jonsbo-n6/profile.json";
 
 /** Official N6 published envelope (mm) from constraint registry / manual. */
 export const N6_ENVELOPE = {
@@ -9,6 +11,10 @@ export const N6_ENVELOPE = {
   depthMm: 353,
   heightMm: 318,
 } as const;
+
+function looksLikeSfx(psuId: string): boolean {
+  return /sfx|sf750|sf-750/i.test(psuId);
+}
 
 /**
  * Slot graph for N6. Internal AABB anchors that are not in the manual
@@ -75,13 +81,52 @@ export function buildN6Slots(): OccupancyModel["slots"] {
       evidence: "inferred" as EvidenceLevel,
       note: "Tray pitch reconstructed for planning — verify against manual photos",
     })),
+    // Lower-chamber structure. These are chassis parts, not purchases, but they own
+    // real volume: leaving them out of the slot graph made the lower half read as
+    // free space it is not.
+    {
+      id: "backplane.pcb",
+      kind: "structure",
+      box: { x: 180, y: 20, z: 172, w: 250, h: 102, d: 8 },
+      evidence: "inferred",
+      note: "Backplane sits behind the tray stack with the four power inlets in a row (manual §13 p.14); exact PCB outline is a planning envelope",
+    },
+    {
+      id: "tray.frame",
+      kind: "structure",
+      box: { x: 175, y: 16, z: 18, w: 258, h: 110, d: 152 },
+      evidence: "inferred",
+      note: "Steel cage around the nine trays — envelope reconstructed from the tray pitch, not CAD",
+    },
+    {
+      id: "fan.left_bracket",
+      kind: "structure",
+      box: { x: 2, y: 16, z: 40, w: 4, h: 124, d: 272 },
+      exclusiveWith: ["psu.bottom_sfx"],
+      evidence: "official",
+      note: "Removable 4-screw bracket carrying the left 120×2; must come off to reach the backplane inlets (§13.1) and stays off when the bottom PSU rack takes its place (§8.1)",
+    },
   ];
 }
 
 export function occupantsFromConfig(config: BuildConfig): Occupant[] {
   const occ: Occupant[] = [];
   const topo = config.selection.psuTopology;
-  const psuFormHint = config.selection.psuId.includes("sf") || config.selection.psuId.includes("sfx");
+  const psuFormHint = looksLikeSfx(config.selection.psuId);
+  const caseId = config.caseId || "case.jonsbo-n6";
+
+  // Chassis structure is always in the box; the bracket is the one piece that comes
+  // and goes, and it leaves precisely when the bottom PSU rack takes its place.
+  occ.push({ id: "occ-backplane", skuId: caseId, slotIds: ["backplane.pcb"], evidence: "inferred" });
+  occ.push({ id: "occ-tray-frame", skuId: caseId, slotIds: ["tray.frame"], evidence: "inferred" });
+  if (topo !== "bottom" && topo !== "dual") {
+    occ.push({
+      id: "occ-left-fan-bracket",
+      skuId: caseId,
+      slotIds: ["fan.left_bracket"],
+      evidence: "official",
+    });
+  }
 
   if (topo === "dual") {
     occ.push({
@@ -92,7 +137,7 @@ export function occupantsFromConfig(config: BuildConfig): Occupant[] {
     });
     occ.push({
       id: "occ-psu-secondary",
-      skuId: config.selection.secondaryPsuId ?? "unknown-sfx",
+      skuId: config.selection.secondaryPsuId ?? "psu.sfx-450-unlocked",
       slotIds: ["psu.bottom_sfx"],
       evidence: "inferred",
     });
@@ -119,7 +164,7 @@ export function occupantsFromConfig(config: BuildConfig): Occupant[] {
     evidence: "inferred",
   });
 
-  if (config.selection.coolerId.includes("aio240")) {
+  if (config.selection.coolerId.includes("aio-240") || config.selection.coolerId.includes("aio240")) {
     occ.push({
       id: "occ-rad-240",
       skuId: config.selection.coolerId,
@@ -134,18 +179,14 @@ export function occupantsFromConfig(config: BuildConfig): Occupant[] {
       skuId: config.selection.gpuId,
       slotIds: ["pcie.slot1"],
       evidence: "unknown",
-      note: "Exact GPU envelope requires locked SKU",
-    } as Occupant);
+    });
   }
 
-  const hbaNeeded =
-    config.selection.hbaMode === "always" ||
-    config.selection.diskCount >= 9 ||
-    (config.selection.diskCount >= 8 && config.selection.boot === "bay");
+  const hbaNeeded = needsHba(config.selection, n6Profile.hba);
   if (hbaNeeded) {
     occ.push({
       id: "occ-hba",
-      skuId: config.selection.hbaSkuId ?? "hba.lsi-9300-8i",
+      skuId: config.selection.hbaSkuId ?? n6Profile.hba.defaultSkuId,
       slotIds: ["pcie.slot2"],
       evidence: "inferred",
     });
@@ -155,7 +196,7 @@ export function occupantsFromConfig(config: BuildConfig): Occupant[] {
     if (config.selection.boot === "bay" && i === 9) break;
     occ.push({
       id: `occ-disk-${i}`,
-      skuId: config.selection.diskSkuId ?? "storage.hdd-placeholder",
+      skuId: config.selection.diskSkuId ?? n6Profile.defaults.diskSkuId,
       slotIds: [`bay.${i}`],
       evidence: "official",
     });
@@ -164,7 +205,7 @@ export function occupantsFromConfig(config: BuildConfig): Occupant[] {
   if (config.selection.boot === "bay") {
     occ.push({
       id: "occ-boot-bay",
-      skuId: "storage.boot-sata-25",
+      skuId: n6Profile.defaults.bootBaySkuId,
       slotIds: ["bay.9"],
       evidence: "inferred",
     });
@@ -176,11 +217,11 @@ export function occupantsFromConfig(config: BuildConfig): Occupant[] {
 export function n6DomainFindings(config: BuildConfig): EngineFinding[] {
   const findings: EngineFinding[] = [];
   const frontSfx =
-    (config.selection.psuTopology === "auto" &&
-      (config.selection.psuId.includes("sf") || config.selection.psuId.includes("sfx"))) ||
-    false;
+    config.selection.psuTopology === "auto" && looksLikeSfx(config.selection.psuId);
+  const dualFront =
+    config.selection.psuTopology === "dual" && looksLikeSfx(config.selection.psuId);
 
-  if (frontSfx || (config.selection.psuTopology === "dual" && true)) {
+  if (frontSfx || dualFront) {
     findings.push({
       id: "n6.front-sfx-fan",
       verdict: "warn",
@@ -210,12 +251,22 @@ export function n6DomainFindings(config: BuildConfig): EngineFinding[] {
     });
   }
 
+  if (config.selection.psuTopology === "bottom") {
+    findings.push({
+      id: "n6.bottom-sfx-bracket",
+      verdict: "warn",
+      evidence: "official",
+      message: "Bottom SFX requires removal of the left-side fan bracket (N6 manual)",
+      related: ["psu.bottom_sfx"],
+    });
+  }
+
   return findings;
 }
 
 export function buildN6Occupancy(config: BuildConfig): OccupancyModel {
   return {
-    caseId: "jonsbo-n6",
+    caseId: config.caseId || "case.jonsbo-n6",
     slots: buildN6Slots(),
     occupants: occupantsFromConfig(config),
   };

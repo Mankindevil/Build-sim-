@@ -21,7 +21,9 @@ export type SlotKind =
   | "cooler"
   | "memory"
   | "m2"
-  | "cable_clearance";
+  | "cable_clearance"
+  /** Chassis structure that owns volume without being a purchase. */
+  | "structure";
 
 export interface OccupancySlot {
   id: string;
@@ -96,6 +98,29 @@ export function detectConflicts(model: OccupancyModel): ConflictHit[] {
           evidence: slot?.evidence ?? "inferred",
           message: `Slot ${slotId} claimed by both ${a.skuId} and ${b.skuId}`,
         });
+      }
+    }
+  }
+
+  // exclusiveWith: if slot A is occupied and any exclusive sibling slot is also occupied
+  for (const slot of model.slots) {
+    if (!slot.exclusiveWith?.length) continue;
+    const here = occupantsBySlot.get(slot.id) ?? [];
+    if (here.length === 0) continue;
+    for (const otherId of slot.exclusiveWith) {
+      const there = occupantsBySlot.get(otherId) ?? [];
+      if (there.length === 0) continue;
+      for (const a of here) {
+        for (const b of there) {
+          hits.push({
+            id: `excl:${slot.id}:${otherId}:${a.id}:${b.id}`,
+            a: a.id,
+            b: b.id,
+            verdict: "warn",
+            evidence: slot.evidence === "official" || slotById.get(otherId)?.evidence === "official" ? "inferred" : (slot.evidence ?? "unknown"),
+            message: `Slot ${slot.id} is exclusive with ${otherId} (${a.skuId} vs ${b.skuId})`,
+          });
+        }
       }
     }
   }
