@@ -92,6 +92,52 @@ describe("spec matching for spec-word searches", () => {
   });
 });
 
+describe("bare model designators (N6, C6) instead of a real part number", () => {
+  const n6 = { brand: "JONSBO" };
+
+  it("accepts the case when the title names the model", () => {
+    const result = scoreTitleAgainstMpn("乔思伯JONSBO电脑NAS机箱N6黑9盘位", "N6", { spec: n6 });
+    expect(result.kind).toBe("mpn");
+  });
+
+  it("still accepts a listing that offers sibling models alongside ours", () => {
+    // A real Taobao listing sells N2 / N3 / N5 / N6 under one link; the variant
+    // picker is what separates them, so the listing itself is not wrong.
+    expect(scoreTitleAgainstMpn("乔思伯 NAS机箱 N2 N3 N5 N6 多规格", "N6", { spec: n6 }).kind).toBe("mpn");
+  });
+
+  it("rejects a sibling model, which brand-only matching used to call a spec match", () => {
+    const result = scoreTitleAgainstMpn("乔思伯C6机箱MATX台式电脑机箱", "N6", { spec: n6 });
+    expect(result.kind).toBe("reject");
+    expect(result.reasons.join()).toContain("C6");
+  });
+
+  it("does not accept a longer model that merely starts with ours", () => {
+    expect(scoreTitleAgainstMpn("乔思伯 N600 中塔机箱", "N6", { spec: n6 }).kind).toBe("reject");
+    expect(scoreTitleAgainstMpn("乔思伯 N6P 机箱", "N6", { spec: n6 }).kind).toBe("reject");
+  });
+
+  it("rejects a title that never names the model, brand match or not", () => {
+    // The brand is not a spec: it cannot tell an N6 from anything else JONSBO
+    // sells, and for a part whose only identity is its model name there is
+    // nothing else left to check.
+    const result = scoreTitleAgainstMpn("乔思伯 机箱 9盘位", "N6", { spec: n6 });
+    expect(result.kind).toBe("reject");
+    expect(result.reasons.join()).toContain("未出现型号 N6");
+    expect(canAuditWithoutOverride(result)).toBe(false);
+  });
+
+  it("does not call an interface name a rival model", () => {
+    const result = scoreTitleAgainstMpn("乔思伯 机箱 支持M2固态", "N6", { spec: n6 });
+    expect(result.kind).toBe("reject");
+    expect(result.reasons.join()).not.toContain("M2");
+  });
+
+  it("leaves long part numbers to the substring rule", () => {
+    expect(scoreTitleAgainstMpn("Corsair SF750 CP-9020284 电源", "CP-9020284").kind).toBe("mpn");
+  });
+});
+
 describe("scoring a page of scraped titles", () => {
   const kit = { brand: "Kingston", ddr: 5, speedMt: 6400, capacityGb: 32, modules: 2, ecc: false };
   const ecc = { brand: "Kingston", ddr: 5, speedMt: 4800, capacityGb: 64, modules: 2, ecc: true };

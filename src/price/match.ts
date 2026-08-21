@@ -49,6 +49,47 @@ export function normalizeForMatch(text: string): string {
   return text.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+/**
+ * A part number short enough that a substring hit proves nothing: `N6` is inside
+ * `N600` and `N6P`, and JONSBO sells a C6, an N2, an N3 and an N5 besides. Long
+ * numbers (`KF564C32RSK2-32`, `CP-9020284`) carry their own uniqueness and keep
+ * using the substring rule.
+ */
+const MODEL_DESIGNATOR = /^[A-Z]{1,3}\d{1,4}[A-Z]?$/;
+
+/** Interface names shaped like a model designator; never a rival product. */
+const INTERFACE_TOKENS = new Set(["M2", "U2"]);
+
+export function modelDesignator(core: string): string | null {
+  const upper = core.trim().toUpperCase();
+  return MODEL_DESIGNATOR.test(upper) ? upper : null;
+}
+
+/**
+ * Alphanumeric runs of a title. CJK separates tokens, so `乔思伯N6机箱` yields
+ * `N6` — the model has to appear as its own word, not as a prefix of `N600`.
+ */
+export function titleTokens(title: string): string[] {
+  return title
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/)
+    .filter(Boolean);
+}
+
+/** Tokens shaped like our designator, worth naming in a rejection reason. */
+function rivalModels(tokens: string[], designator: string): string[] {
+  const letters = designator.replace(/[^A-Z]/g, "").length;
+  const digits = designator.replace(/[^0-9]/g, "").length;
+  return tokens.filter(
+    (t) =>
+      t !== designator &&
+      !INTERFACE_TOKENS.has(t) &&
+      MODEL_DESIGNATOR.test(t) &&
+      t.replace(/[^A-Z]/g, "").length === letters &&
+      t.replace(/[^0-9]/g, "").length === digits,
+  );
+}
+
 /** Part number without trailing notes such as `(Ver 5.43.13)`. */
 export function mpnCore(mpn: string): string {
   return searchQueryFromMpn(mpn);
@@ -84,6 +125,12 @@ interface SpecVerdict {
   conflicts: string[];
   confirmed: string[];
   unconfirmed: string[];
+  /**
+   * Confirmations that actually narrow the field. The brand is excluded: it
+   * cannot tell an N6 from anything else JONSBO sells, so a brand hit on its own
+   * must never read as "all specs line up".
+   */
+  discriminating: number;
 }
 
 function checkSpec(title: string, spec: MatchSpec): SpecVerdict {
@@ -126,6 +173,8 @@ function checkSpec(title: string, spec: MatchSpec): SpecVerdict {
     unconfirmed.push("标题含 ECC，目标为非 ECC 内存");
   }
 
+  const discriminating = confirmed.length;
+
   if (spec.brand) {
     const zh = brandZh(spec.brand) as string | null;
     const hit =
@@ -134,7 +183,7 @@ function checkSpec(title: string, spec: MatchSpec): SpecVerdict {
     else unconfirmed.push("品牌未出现");
   }
 
-  return { conflicts, confirmed, unconfirmed };
+  return { conflicts, confirmed, unconfirmed, discriminating };
 }
 
 export function scoreTitleAgainstMpn(
@@ -169,13 +218,32 @@ export function scoreTitleAgainstMpn(
   }
   if (verdict?.confirmed.length) reasons.push(`规格 ${verdict.confirmed.join(" / ")} ✓`);
 
+  const designator = core ? modelDesignator(core) : null;
+  if (designator) {
+    const tokens = titleTokens(title);
+    if (tokens.includes(designator)) {
+      reasons.unshift(`型号 ${designator} ✓`);
+      return { kind: "mpn", reasons };
+    }
+    // Nothing else identifies a part whose whole part number is its model name,
+    // so an unnamed model is not a cheaper listing of it — it is an unknown
+    // product, and pricing it would be a guess dressed up as a quote.
+    const rivals = rivalModels(tokens, designator);
+    return {
+      kind: "reject",
+      reasons: rivals.length
+        ? [`标题型号 ${rivals.join("/")} ≠ ${designator}`, `标题未出现型号 ${designator}`]
+        : [`标题未出现型号 ${designator}`],
+    };
+  }
+
   const hasMpn = Boolean(core) && normalizeForMatch(title).includes(normalizeForMatch(core));
   if (hasMpn) {
     return { kind: "mpn", reasons };
   }
 
   reasons.push(...(verdict?.unconfirmed ?? []));
-  if (verdict && verdict.unconfirmed.length === 0 && verdict.confirmed.length > 0) {
+  if (verdict && verdict.unconfirmed.length === 0 && verdict.discriminating > 0) {
     reasons.unshift("规格全部对上，但标题无料号");
     return { kind: "spec", reasons };
   }

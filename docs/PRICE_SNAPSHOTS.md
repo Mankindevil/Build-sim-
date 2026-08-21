@@ -139,11 +139,20 @@ filters narrow the list: 只看料号匹配 and 隐藏可疑价格.
 Fetched rows are always `evidence: "unknown"`. The panel scores each title against the SKU:
 
 - **料号匹配** — title contains the part number → one-click 确认入账.
-- **规格匹配** — brand, DDR generation, speed, capacity and ECC all confirmed, no part
-  number → needs the 「我已核对标题」 checkbox.
+- **规格匹配** — DDR generation, speed, capacity and ECC all confirmed, no part number → needs
+  the 「我已核对标题」 checkbox. The brand alone never earns this: it cannot tell an N6 from
+  anything else JONSBO sells.
 - **需人工核对** — something unconfirmed (e.g. brand missing) → needs the checkbox.
 - **已排除** — 二手 / 拆机 / 散片 / 兼容品, or a spec that contradicts the SKU (wrong
   capacity, wrong speed, DDR4 vs DDR5, single stick for a kit part number).
+
+Some parts have no part number beyond their model name (`N6`), and there a substring test is
+worthless: `N6` sits inside `N600`, and JONSBO also sells a C6, N2, N3 and N5. Such a designator
+must appear as its own word — CJK counts as a word boundary, so `乔思伯N6机箱` qualifies — and a
+title that never names it is **rejected**, not merely weakened. There is nothing else to check on
+a part whose identity *is* the model name, so pricing an unnamed one would be a guess dressed up
+as a quote. A listing that offers siblings alongside ours (`N2/N3/N5/N6` under one link) still
+matches, because the variant picker is what separates them.
 
 On top of the title score, a row must also clear the audit gates: a resolved variant price, in CNY,
 with no plausibility flag. The button's tooltip states which of those is missing.
