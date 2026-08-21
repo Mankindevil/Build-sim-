@@ -1,0 +1,891 @@
+{
+  "schemaVersion": 1,
+  "subject": "JONSBO N6 + ASUS Pro WS W680M-ACE SE NAS simulator",
+  "purpose": "Handbook-derived compatibility regression scenarios for the interactive build preview",
+  "mergeSemantics": "Every scenario input is complete for compatibility evaluation; expected.requiredWarnings is a required subset, not necessarily the complete warning list.",
+  "references": {
+    "n6Manual": "../references/jonsbo-n6-manual.pdf",
+    "w680mManual": "../references/asus-w680m-manual.pdf",
+    "preview": "/Users/jintingzhou/.codex/visualizations/2026/08/19/01a018a5-d534-7be3-90cf-24ebf45ab620/n6-build-preview.html"
+  },
+  "verdicts": {
+    "ok": "No known incompatibility or unresolved purchase-critical warning",
+    "warn": "Mechanically possible after normalization, but one or more explicit checks remain",
+    "bad": "Impossible, officially unsupported, or should not be presented as installable"
+  },
+  "rules": {
+    "N6-DRIVE-001": {
+      "level": "official",
+      "text": "N6 has nine shared trays; each tray accepts either one 2.5-inch SSD or one 3.5-inch HDD."
+    },
+    "MB-SATA-001": {
+      "level": "official",
+      "text": "W680M-ACE SE exposes four native SATA ports plus up to four SATA devices through SlimSAS, for eight motherboard SATA devices total."
+    },
+    "N6-PSU-001": {
+      "level": "official",
+      "text": "N6 supports ATX power supplies up to 220 mm and SFX power supplies up to 100 mm."
+    },
+    "N6-DUAL-001": {
+      "level": "official",
+      "text": "The manual illustrates ATX+SFX and SFX+SFX dual-power layouts and an independent PSU for the HDD backplane; it does not describe redundant failover."
+    },
+    "N6-FRONT-001": {
+      "level": "inferred",
+      "text": "The front SFX rack overlaps at least part of the front 2x120/2x140 or 240 mm radiator plane; a complete fan pair or radiator must not be certified as coexisting without measurement."
+    },
+    "N6-BOTTOM-SFX-001": {
+      "level": "official",
+      "text": "Installing the lower SFX PSU requires removal of the left-side fan bracket."
+    },
+    "N6-COOLER-001": {
+      "level": "mixed",
+      "text": "N6 publishes a 65-160 mm cooler-height range. Mapping 65 mm to an overhead ATX layout and 160 mm to a cleared upper chamber is a structural inference."
+    },
+    "N6-GPU-001": {
+      "level": "mixed",
+      "text": "N6 publishes a 275-320 mm GPU-length range but does not map each endpoint to front fans, SFX PSU, or radiator configurations."
+    },
+    "MB-PCIE-001": {
+      "level": "official",
+      "text": "W680M-ACE SE provides a CPU PCIe 5.0 x16 slot, a chipset PCIe 4.0 x4 long slot, and a PCIe 3.0 x1 slot."
+    },
+    "MB-PCIE-002": {
+      "level": "inferred",
+      "text": "A single- or dual-slot GPU in the main x16 slot preserves the bottom x4 envelope; a 2.5- or 3-slot GPU intrudes into it."
+    },
+    "MB-M2-001": {
+      "level": "official",
+      "text": "Both M.2 slots accept 2242/2260/2280 PCIe 4.0 x4 devices, with no documented SATA or expansion-slot disablement."
+    },
+    "MB-RAM-001": {
+      "level": "official",
+      "text": "The board has four DDR5 ECC/non-ECC UDIMM slots; use A2 for one DIMM and A2+B2 for two DIMMs."
+    },
+    "N6-BPWR-001": {
+      "level": "official",
+      "text": "The backplane has two SATA-power and two PATA/Molex inputs; the manual recommends all four connected, with one independent PSU lead per input."
+    },
+    "MB-FAN-001": {
+      "level": "official",
+      "text": "The board has three chassis-fan headers plus CPU_FAN, CPU_OPT, and W_PUMP+; each listed header is rated up to 3 A / 36 W."
+    }
+  },
+  "scenarios": [
+    {
+      "id": "hdd1-sata-boot-atx-baseline",
+      "covers": ["1 HDD", "SATA Boot", "ATX", "RAM", "M.2"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "none",
+        "ramKey": "d16",
+        "disks": 1,
+        "boot": "bay",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "dataHddMax": 8,
+        "sataDevices": 2,
+        "hbaRequired": false,
+        "hbaPresent": false,
+        "psuTopology": "rear_upper_atx",
+        "frontFansEffective": true,
+        "rearFanAvailable": false,
+        "installedDimmSlots": ["A2"],
+        "m2Roles": ["fast_pool_mirror_member", "fast_pool_mirror_member"],
+        "requiredWarnings": [
+          "boot_uses_ninth_tray",
+          "cpu_clearance_endpoint_mapping_inferred",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["N6-DRIVE-001", "N6-COOLER-001", "N6-BPWR-001", "MB-RAM-001", "MB-M2-001"]
+    },
+    {
+      "id": "hdd1-m2-boot-two-980pro",
+      "covers": ["1 HDD", "M.2 Boot", "two 980 PRO", "single DIMM"],
+      "input": {
+        "psuKey": "focus750",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "none",
+        "ramKey": "d16",
+        "disks": 1,
+        "boot": "m2",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "dataHddMax": 9,
+        "sataDevices": 1,
+        "hbaRequired": false,
+        "hbaPresent": false,
+        "installedDimmSlots": ["A2"],
+        "m2Roles": ["truenas_boot", "single_or_spare"],
+        "requiredWarnings": [
+          "m2_boot_breaks_fast_pool_mirror",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["MB-M2-001", "N6-BPWR-001"]
+    },
+    {
+      "id": "hdd1-usb-boot-keeps-m2-mirror",
+      "covers": ["1 HDD", "USB Boot", "two 980 PRO"],
+      "input": {
+        "psuKey": "focus750",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "none",
+        "ramKey": "d32",
+        "disks": 1,
+        "boot": "usbssd",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "dataHddMax": 9,
+        "sataDevices": 1,
+        "hbaRequired": false,
+        "hbaPresent": false,
+        "installedDimmSlots": ["A2"],
+        "m2Roles": ["fast_pool_mirror_member", "fast_pool_mirror_member"],
+        "requiredWarnings": [
+          "usb_boot_external_link_risk",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["N6-DRIVE-001", "MB-M2-001", "N6-BPWR-001"]
+    },
+    {
+      "id": "hdd4-sata-boot-board-slimsas",
+      "covers": ["4 HDD", "SATA Boot", "SlimSAS", "no HBA"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "none",
+        "ramKey": "d16",
+        "disks": 4,
+        "boot": "bay",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "dataHddMax": 8,
+        "sataDevices": 5,
+        "hbaRequired": false,
+        "hbaPresent": false,
+        "dataPath": "4_native_sata_plus_1_slimsas_sata",
+        "requiredWarnings": [
+          "boot_uses_ninth_tray",
+          "slimsas_to_sata_cable_required",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["N6-DRIVE-001", "MB-SATA-001", "N6-BPWR-001"]
+    },
+    {
+      "id": "hdd4-forced-hba-a4000",
+      "covers": ["4 HDD", "forced HBA", "A4000", "GPU+HBA"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "a4000",
+        "ramKey": "d16",
+        "disks": 4,
+        "boot": "m2",
+        "hbaMode": "always",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "sataDevices": 4,
+        "hbaRequired": false,
+        "hbaPresent": true,
+        "gpuHbaCoexistence": "yes",
+        "gpuSlotEnvelope": 1,
+        "requiredWarnings": [
+          "hba_forced_but_not_required",
+          "m2_boot_breaks_fast_pool_mirror",
+          "gpu_exact_clearance_inferred",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["MB-PCIE-001", "MB-PCIE-002", "MB-M2-001", "N6-BPWR-001"]
+    },
+    {
+      "id": "hdd8-sata-boot-hba-a4000",
+      "covers": ["8 HDD", "SATA Boot", "required HBA", "A4000"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "a4000",
+        "ramKey": "d16",
+        "disks": 8,
+        "boot": "bay",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "dataHddMax": 8,
+        "sataDevices": 9,
+        "hbaRequired": true,
+        "hbaPresent": true,
+        "dataPath": "8_hdd_on_hba_plus_boot_on_motherboard_sata",
+        "gpuHbaCoexistence": "yes",
+        "trayRoles": ["HDD1", "HDD2", "HDD3", "HDD4", "HDD5", "HDD6", "HDD7", "HDD8", "SATA_BOOT"],
+        "requiredWarnings": [
+          "boot_uses_ninth_tray",
+          "gpu_exact_clearance_inferred",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["N6-DRIVE-001", "MB-SATA-001", "MB-PCIE-001", "MB-PCIE-002", "N6-BPWR-001"]
+    },
+    {
+      "id": "hdd8-m2-boot-no-hba-two-slot-gpu",
+      "covers": ["8 HDD", "M.2 Boot", "no required HBA", "2-slot GPU"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "a5000",
+        "ramKey": "d32",
+        "disks": 8,
+        "boot": "m2",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "sataDevices": 8,
+        "hbaRequired": false,
+        "hbaPresent": false,
+        "gpuHbaCoexistence": "reserved_envelope_preserved",
+        "gpuSlotEnvelope": 2,
+        "installedDimmSlots": ["A2"],
+        "m2Roles": ["truenas_boot", "single_or_spare"],
+        "requiredWarnings": [
+          "m2_boot_breaks_fast_pool_mirror",
+          "gpu_200w_plus_needs_side_airflow_and_power_limit",
+          "gpu_exact_clearance_inferred",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["MB-SATA-001", "MB-PCIE-001", "MB-PCIE-002", "MB-M2-001", "N6-GPU-001"]
+    },
+    {
+      "id": "hdd8-usb-boot-no-hba-ecc-two-dimm",
+      "covers": ["8 HDD", "USB Boot", "ECC RAM", "two DIMMs", "M.2 mirror"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "none",
+        "ramKey": "ecc64",
+        "disks": 8,
+        "boot": "usbssd",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "sataDevices": 8,
+        "hbaRequired": false,
+        "hbaPresent": false,
+        "installedDimmSlots": ["A2", "B2"],
+        "m2Roles": ["fast_pool_mirror_member", "fast_pool_mirror_member"],
+        "requiredWarnings": [
+          "usb_boot_external_link_risk",
+          "ecc_udimm_not_rdimm",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["MB-SATA-001", "MB-RAM-001", "MB-M2-001", "N6-BPWR-001"]
+    },
+    {
+      "id": "hdd9-sata-boot-must-clamp",
+      "covers": ["9 HDD", "SATA Boot", "hard tray conflict", "normalization"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "none",
+        "ramKey": "d16",
+        "disks": 9,
+        "boot": "bay",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "normalize",
+        "rawVerdict": "bad",
+        "verdict": "warn",
+        "normalized": {
+          "disks": 8
+        },
+        "dataHddMax": 8,
+        "sataDevicesAfterNormalization": 9,
+        "hbaRequiredAfterNormalization": true,
+        "trayRolesAfterNormalization": ["HDD1", "HDD2", "HDD3", "HDD4", "HDD5", "HDD6", "HDD7", "HDD8", "SATA_BOOT"],
+        "requiredWarnings": [
+          "sata_boot_9hdd_impossible",
+          "disk_slider_clamped_to_8",
+          "boot_uses_ninth_tray"
+        ]
+      },
+      "basis": ["N6-DRIVE-001", "MB-SATA-001"]
+    },
+    {
+      "id": "hdd9-m2-boot-hba-a4000",
+      "covers": ["9 HDD", "M.2 Boot", "required HBA", "A4000"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "a4000",
+        "ramKey": "d32",
+        "disks": 9,
+        "boot": "m2",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "dataHddMax": 9,
+        "sataDevices": 9,
+        "hbaRequired": true,
+        "hbaPresent": true,
+        "dataPath": "8_hdd_on_hba_plus_hdd9_on_motherboard_sata",
+        "gpuHbaCoexistence": "yes",
+        "m2Roles": ["truenas_boot", "single_or_spare"],
+        "requiredWarnings": [
+          "m2_boot_breaks_fast_pool_mirror",
+          "gpu_exact_clearance_inferred",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["N6-DRIVE-001", "MB-SATA-001", "MB-PCIE-001", "MB-PCIE-002", "MB-M2-001"]
+    },
+    {
+      "id": "hdd9-usb-boot-hba-two-slot",
+      "covers": ["9 HDD", "USB Boot", "required HBA", "2-slot GPU"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "a5000",
+        "ramKey": "ecc64",
+        "disks": 9,
+        "boot": "usbssd",
+        "hbaMode": "auto",
+        "frontFans": false,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "sataDevices": 9,
+        "hbaRequired": true,
+        "hbaPresent": true,
+        "gpuHbaCoexistence": "yes",
+        "gpuSlotEnvelope": 2,
+        "installedDimmSlots": ["A2", "B2"],
+        "m2Roles": ["fast_pool_mirror_member", "fast_pool_mirror_member"],
+        "requiredWarnings": [
+          "usb_boot_external_link_risk",
+          "gpu_200w_plus_needs_side_airflow_and_power_limit",
+          "rear_upper_atx_without_front_intake",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["MB-SATA-001", "MB-PCIE-001", "MB-PCIE-002", "MB-RAM-001", "MB-M2-001"]
+    },
+    {
+      "id": "hdd9-usb-boot-hba-three-slot-conflict",
+      "covers": ["9 HDD", "USB Boot", "required HBA", "3-slot GPU", "hard PCIe conflict"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "rtx3090",
+        "ramKey": "d32",
+        "disks": 9,
+        "boot": "usbssd",
+        "hbaMode": "auto",
+        "frontFans": false,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "reject",
+        "verdict": "bad",
+        "sataDevices": 9,
+        "hbaRequired": true,
+        "hbaPresent": true,
+        "gpuHbaCoexistence": "no",
+        "requiredWarnings": [
+          "gpu_blocks_bottom_pcie_x4",
+          "usb_boot_external_link_risk",
+          "gpu_300w_plus_thermal_density"
+        ]
+      },
+      "basis": ["MB-PCIE-001", "MB-PCIE-002", "MB-SATA-001"]
+    },
+    {
+      "id": "atx-overhead-tower-cooler-conflict",
+      "covers": ["ATX", "tower cooler", "CPU cooler height"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "u9s",
+        "gpuKey": "none",
+        "ramKey": "d16",
+        "disks": 1,
+        "boot": "bay",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "reject",
+        "verdict": "bad",
+        "psuTopology": "rear_upper_atx",
+        "coolerPlanningLimitMm": 65,
+        "coolerHeightMm": 125,
+        "requiredWarnings": [
+          "cooler_exceeds_planning_limit",
+          "cpu_clearance_endpoint_mapping_inferred"
+        ]
+      },
+      "basis": ["N6-PSU-001", "N6-COOLER-001"]
+    },
+    {
+      "id": "front-sfx-tower-disables-front-pair",
+      "covers": ["SFX front", "tower cooler", "front fans", "normalization"],
+      "input": {
+        "psuKey": "sf750",
+        "psuPosition": "auto",
+        "coolerKey": "u9s",
+        "gpuKey": "none",
+        "ramKey": "d16",
+        "disks": 4,
+        "boot": "m2",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "normalize",
+        "verdict": "warn",
+        "normalized": {
+          "frontFans": false
+        },
+        "psuTopology": "front_sfx",
+        "coolerPlanningLimitMm": 160,
+        "frontFansEffective": false,
+        "rearFanAvailable": true,
+        "requiredWarnings": [
+          "front_sfx_blocks_full_front_fan_pair",
+          "single_remaining_front_fan_unverified",
+          "cpu_clearance_endpoint_mapping_inferred",
+          "m2_boot_breaks_fast_pool_mirror"
+        ]
+      },
+      "basis": ["N6-FRONT-001", "N6-COOLER-001", "N6-PSU-001"]
+    },
+    {
+      "id": "bottom-sfx-tower-keeps-front-pair",
+      "covers": ["SFX bottom", "tower cooler", "front fans", "left side fan bracket"],
+      "input": {
+        "psuKey": "sf750",
+        "psuPosition": "bottom",
+        "coolerKey": "u9s",
+        "gpuKey": "a4000",
+        "ramKey": "d16",
+        "disks": 4,
+        "boot": "usbssd",
+        "hbaMode": "always",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "psuTopology": "bottom_sfx",
+        "frontFansEffective": true,
+        "leftSideFanPairAvailable": false,
+        "rightSideFanPairAvailable": true,
+        "gpuHbaCoexistence": "yes",
+        "requiredWarnings": [
+          "bottom_sfx_removes_left_fan_bracket",
+          "side_fans_mean_right_pair_only",
+          "usb_boot_external_link_risk",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["N6-BOTTOM-SFX-001", "N6-PSU-001", "MB-PCIE-002"]
+    },
+    {
+      "id": "dual-atx-plus-bottom-sfx",
+      "covers": ["dual PSU", "ATX+SFX", "backplane PSU"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "dual",
+        "coolerKey": "axp90",
+        "gpuKey": "a4000",
+        "ramKey": "d32",
+        "disks": 8,
+        "boot": "bay",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "psuTopology": "rear_upper_atx_plus_bottom_sfx",
+        "mainPsuLoads": ["motherboard", "cpu", "gpu", "hba"],
+        "secondaryPsuLoads": ["hdd_backplane"],
+        "hbaRequired": true,
+        "gpuHbaCoexistence": "yes",
+        "leftSideFanPairAvailable": false,
+        "requiredWarnings": [
+          "dual_psu_not_redundant",
+          "dual_psu_sync_and_harness_unverified",
+          "bottom_sfx_removes_left_fan_bracket",
+          "hba_passive_cooling_required"
+        ]
+      },
+      "basis": ["N6-DUAL-001", "N6-BOTTOM-SFX-001", "N6-BPWR-001", "MB-PCIE-002"]
+    },
+    {
+      "id": "dual-front-sfx-plus-bottom-sfx",
+      "covers": ["dual PSU", "SFX+SFX", "front fans"],
+      "input": {
+        "psuKey": "sf750",
+        "psuPosition": "dual",
+        "coolerKey": "u9s",
+        "gpuKey": "none",
+        "ramKey": "ecc64",
+        "disks": 9,
+        "boot": "usbssd",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "normalize",
+        "verdict": "warn",
+        "normalized": {
+          "frontFans": false
+        },
+        "psuTopology": "front_sfx_plus_bottom_sfx",
+        "hbaRequired": true,
+        "frontFansEffective": false,
+        "leftSideFanPairAvailable": false,
+        "rearFanAvailable": true,
+        "installedDimmSlots": ["A2", "B2"],
+        "requiredWarnings": [
+          "dual_psu_not_redundant",
+          "dual_psu_sync_and_harness_unverified",
+          "front_sfx_blocks_full_front_fan_pair",
+          "bottom_sfx_removes_left_fan_bracket",
+          "hba_passive_cooling_required",
+          "usb_boot_external_link_risk"
+        ]
+      },
+      "basis": ["N6-DUAL-001", "N6-FRONT-001", "N6-BOTTOM-SFX-001", "MB-RAM-001"]
+    },
+    {
+      "id": "front-sfx-plus-front240-conflict",
+      "covers": ["SFX front", "240 AIO", "hard front conflict"],
+      "input": {
+        "psuKey": "sf750",
+        "psuPosition": "auto",
+        "coolerKey": "aio240",
+        "gpuKey": "none",
+        "ramKey": "d16",
+        "disks": 1,
+        "boot": "bay",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "reject",
+        "verdict": "bad",
+        "psuTopology": "front_sfx",
+        "frontFansEffective": false,
+        "requiredWarnings": [
+          "front_sfx_front240_unverified_conflict",
+          "front_sfx_blocks_full_front_fan_pair"
+        ]
+      },
+      "basis": ["N6-FRONT-001"]
+    },
+    {
+      "id": "atx-plus-front240-conditional",
+      "covers": ["ATX", "240 AIO", "front radiator", "GPU length uncertainty"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "aio240",
+        "gpuKey": "a4000",
+        "ramKey": "d32",
+        "disks": 4,
+        "boot": "usbssd",
+        "hbaMode": "auto",
+        "frontFans": false,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "psuTopology": "rear_upper_atx",
+        "frontCooling": "240mm_radiator_plus_2x120_fans",
+        "gpuPlanningLimitMm": 320,
+        "gpuHbaCoexistence": "reserved_envelope_preserved",
+        "requiredWarnings": [
+          "front240_thickness_tubes_gpu_clearance_unverified",
+          "gpu_length_endpoint_mapping_inferred",
+          "usb_boot_external_link_risk",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["N6-FRONT-001", "N6-GPU-001", "N6-BPWR-001"]
+    },
+    {
+      "id": "front-fans-long-gpu-conditional-range",
+      "covers": ["front fans", "long GPU", "275-320 mapping"],
+      "input": {
+        "psuKey": "sf750",
+        "psuPosition": "bottom",
+        "coolerKey": "u9s",
+        "gpuKey": "rtx5070",
+        "ramKey": "d16",
+        "disks": 4,
+        "boot": "m2",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": false
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "frontFansEffective": true,
+        "gpuPlanningLimitMm": 320,
+        "gpuLengthMm": 285,
+        "requiredWarnings": [
+          "gpu_length_276_320_is_conditional",
+          "gpu_endpoint_topology_mapping_unknown",
+          "specific_consumer_sku_required"
+        ]
+      },
+      "basis": ["N6-GPU-001"]
+    },
+    {
+      "id": "is55-one-low-profile-dimm",
+      "covers": ["IS-55", "RAM clearance", "single DIMM", "M.2 mirror"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "is55",
+        "gpuKey": "none",
+        "ramKey": "d16",
+        "disks": 1,
+        "boot": "bay",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "coolerHeightMm": 57,
+        "coolerPlanningLimitMm": 65,
+        "estimatedVerticalGapMm": 8,
+        "ramHeightMm": 31,
+        "ramPlanningLimitMm": 33,
+        "installedDimmSlots": ["A2"],
+        "m2Roles": ["fast_pool_mirror_member", "fast_pool_mirror_member"],
+        "requiredWarnings": [
+          "is55_ram_service_clearance",
+          "cpu_clearance_endpoint_mapping_inferred",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["N6-COOLER-001", "MB-RAM-001", "MB-M2-001"]
+    },
+    {
+      "id": "is55-two-ecc-low-profile-dimms",
+      "covers": ["IS-55", "ECC RAM", "two DIMMs", "RAM serviceability"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "is55",
+        "gpuKey": "a4000",
+        "ramKey": "ecc64",
+        "disks": 8,
+        "boot": "bay",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": true,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "ramHeightMm": 32,
+        "ramPlanningLimitMm": 33,
+        "installedDimmSlots": ["A2", "B2"],
+        "hbaRequired": true,
+        "gpuHbaCoexistence": "yes",
+        "requiredWarnings": [
+          "is55_ram_service_clearance",
+          "ecc_udimm_not_rdimm",
+          "boot_uses_ninth_tray",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["MB-RAM-001", "N6-COOLER-001", "N6-DRIVE-001", "MB-PCIE-002"]
+    },
+    {
+      "id": "hba-without-side-airflow-warning",
+      "covers": ["HBA", "passive cooling", "side fans"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "a4000",
+        "ramKey": "d16",
+        "disks": 8,
+        "boot": "bay",
+        "hbaMode": "auto",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "hbaRequired": true,
+        "hbaPresent": true,
+        "gpuHbaCoexistence": "yes",
+        "requiredWarnings": [
+          "hba_passive_cooling_required",
+          "boot_uses_ninth_tray",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["MB-PCIE-001", "MB-PCIE-002", "MB-SATA-001"]
+    },
+    {
+      "id": "all-fan-groups-require-splitters-or-hub",
+      "covers": ["front fans", "drive fans", "side fans", "fan headers"],
+      "input": {
+        "psuKey": "focus850",
+        "psuPosition": "auto",
+        "coolerKey": "axp90",
+        "gpuKey": "a4000",
+        "ramKey": "d32",
+        "disks": 8,
+        "boot": "m2",
+        "hbaMode": "always",
+        "frontFans": true,
+        "driveFans": true,
+        "sideFans": true,
+        "rearFan": false,
+        "preserveHba": true
+      },
+      "expected": {
+        "action": "accept",
+        "verdict": "warn",
+        "chassisFanGroups": 3,
+        "chassisFanCount": 6,
+        "chassisFanHeaders": 3,
+        "fanPowerPlan": "one_split_pair_per_chassis_header_or_sata_powered_pwm_hub",
+        "requiredWarnings": [
+          "verify_each_header_group_below_3a_36w",
+          "hba_and_gpu_need_directed_airflow",
+          "m2_boot_breaks_fast_pool_mirror",
+          "backplane_four_independent_leads_unverified"
+        ]
+      },
+      "basis": ["MB-FAN-001", "MB-PCIE-001", "N6-BPWR-001"]
+    }
+  ]
+}

@@ -1,0 +1,1432 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-08-20",
+  "scope": "JONSBO N6 + ASUS Pro WS W680M-ACE SE 互动装机 V1 的机械、电气与展示约束",
+  "sourcePolicy": {
+    "networkUsed": true,
+    "manufacturerManualsAreLocalSnapshots": true,
+    "officialAppearanceAssetsAreNotGeometry": true,
+    "unknownMustNotBeConvertedToOfficialCompatibility": true
+  },
+  "evidenceLevels": {
+    "official": "制造商手册明确给出的尺寸、接口、安装位或安装步骤",
+    "standard": "手册明确引用的标准外形或接口规格；不能替代具体 SKU 数据表",
+    "inferred": "由官方数量、位置或装配步骤作出的明确结构推算；不是厂商 CAD、CFD 或实测",
+    "unknown": "本地参考集不足以确认；不得据此作出硬兼容或购买结论"
+  },
+  "sources": {
+    "n6Manual": {
+      "file": "references/jonsbo-n6-manual.pdf",
+      "sha256": "15f026946a18b5e4fc0ebf585f8b60ed8e3044f41efe699326adfa0ee3d480cd",
+      "type": "manufacturer-manual"
+    },
+    "w680mManual": {
+      "file": "references/asus-w680m-manual.pdf",
+      "sha256": "dbb482ef25ababeae9d4d1063e176a78c0544f18dacffd16dc830a1a2f203d2e",
+      "type": "manufacturer-manual"
+    },
+    "manifest": {
+      "file": "references/REFERENCE-MANIFEST.md",
+      "type": "local-reference-index"
+    }
+  },
+  "constraints": [
+    {
+      "id": "n6.case.externalEnvelope",
+      "value": {
+        "widthMm": 305,
+        "depthMm": 353,
+        "heightMm": 318,
+        "heightIncludesBaseMm": 6
+      },
+      "rule": "外部包络只能按 305×353×318 mm 展示；318 mm 高度包含 6 mm 底座。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 2,
+          "printed": "Product Specification"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方外部尺寸",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "note": "仅适合外部摆放空间判断，不代表内部净空。"
+      }
+    },
+    {
+      "id": "n6.case.motherboardFormFactors",
+      "value": [
+        "Mini-ITX",
+        "Micro-ATX"
+      ],
+      "rule": "N6 官方支持 ITX 与 M-ATX 主板。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 2,
+          "printed": "Product Specification"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方兼容",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "n6.case.driveTrays",
+      "value": {
+        "sharedTrayCount": 9,
+        "acceptedMediaPerTray": [
+          "2.5-inch SSD",
+          "3.5-inch HDD"
+        ],
+        "simultaneousMaximumDevices": 9
+      },
+      "rule": "九个盘位为共享托盘；每个托盘装 2.5 英寸 SSD 或 3.5 英寸 HDD，不能把 9 SSD 与 9 HDD 相加成 18 个设备。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": [
+            2,
+            19
+          ],
+          "printed": [
+            "Product Specification",
+            "17"
+          ]
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方盘位",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "note": "数据盘与占托盘的 SATA 启动盘合计不得超过 9。"
+      }
+    },
+    {
+      "id": "n6.case.pcieExpansionSlots",
+      "value": 4,
+      "rule": "机箱提供 4 个 PCI 扩展槽开口。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 2,
+          "printed": "Product Specification"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方槽位数",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "n6.case.psuLengthLimits",
+      "value": {
+        "atxMaxLengthMm": 220,
+        "sfxMaxLengthMm": 100
+      },
+      "rule": "电源型号的机身长度必须分别满足 ATX ≤220 mm 或 SFX ≤100 mm；线材弯折空间另行核验。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 2,
+          "printed": "Product Specification"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方长度上限",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "note": "不能把机身长度上限当作含模组插头与线材弯折后的净空。"
+      }
+    },
+    {
+      "id": "n6.case.cpuCoolerPublishedRange",
+      "value": {
+        "minEndpointMm": 65,
+        "maxEndpointMm": 160,
+        "topologyMapping": "unknown"
+      },
+      "rule": "手册只发布 CPU 散热器高度范围 ≤65–160 mm，未在本地参考页中把两个端点逐一映射到每种电源拓扑。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 2,
+          "printed": "Product Specification"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方范围，端点映射未知",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "note": "只有获得具体拓扑对应关系后才能作硬兼容判断。"
+      }
+    },
+    {
+      "id": "n6.case.gpuLengthPublishedRange",
+      "value": {
+        "minEndpointMm": 275,
+        "maxEndpointMm": 320,
+        "topologyMapping": "unknown"
+      },
+      "rule": "手册只发布显卡长度范围 ≤275–320 mm，未在本地参考页中把两个端点逐一映射到所有电源、风扇和冷排拓扑。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 2,
+          "printed": "Product Specification"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方范围，端点映射未知",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "note": "不得用单一 275 mm 或 320 mm 值覆盖全部拓扑。"
+      }
+    },
+    {
+      "id": "n6.cooling.supportedMounts",
+      "value": {
+        "front": [
+          "2x120mm fan",
+          "2x140mm fan",
+          "240mm radiator"
+        ],
+        "left": [
+          "2x120mm fan"
+        ],
+        "right": [
+          "2x120mm fan"
+        ],
+        "rear": [
+          "1x120mm fan"
+        ],
+        "driveBay": [
+          "2x120mm fan"
+        ]
+      },
+      "rule": "界面只能把这些位置称为官方支持安装位；支持安装位不等于已随用户 SKU 附送或已经安装。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": [
+            2,
+            17
+          ],
+          "printed": [
+            "Product Specification",
+            "15"
+          ]
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方安装位",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "note": "默认盘区风扇状态必须为未安装，除非用户确认具体 SKU 包装。"
+      }
+    },
+    {
+      "id": "n6.psu.rearUpperPosition",
+      "value": {
+        "position": "rear-upper",
+        "shownInManual": true
+      },
+      "rule": "常规电源安装章节展示后上方电源位。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 8,
+          "printed": "6"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方安装位置",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "n6.psu.frontSfxPosition",
+      "value": {
+        "position": "front",
+        "psuFormFactor": "SFX"
+      },
+      "rule": "前置安装步骤明确使用 SFX 电源与前置电源支架。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": [
+            9,
+            10
+          ],
+          "printed": [
+            "7",
+            "8"
+          ]
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方前置 SFX",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "n6.psu.frontSfxBracketConversion",
+      "value": {
+        "remove": "power-supply bracket",
+        "install": "rear-fan bracket"
+      },
+      "rule": "前置 SFX 的安装步骤要求拆下电源支架并换装后置风扇支架。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 9,
+          "printed": "7",
+          "step": "7.1"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方支架转换",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "note": "三维视图应同步改变支架状态。"
+      }
+    },
+    {
+      "id": "n6.psu.bottomSfxPosition",
+      "value": {
+        "position": "bottom",
+        "psuFormFactor": "SFX"
+      },
+      "rule": "底部安装步骤明确使用 SFX 电源。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 11,
+          "printed": "9"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方底部 SFX",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "n6.psu.bottomSfxLeftFanConflict",
+      "value": {
+        "bottomSfxRequiresRemovingLeftFanBracket": true,
+        "leftFanCapacityAfterRemoval": 0
+      },
+      "rule": "选择底部 SFX 后，左侧风扇支架必须拆除，不能同时显示或计入左侧 2×120 mm 风扇。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 11,
+          "printed": "9",
+          "step": "8.1"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方装配冲突",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "autoResolve": "disable-left-fan-bracket"
+      }
+    },
+    {
+      "id": "n6.psu.dualSupportedCombinations",
+      "value": [
+        "ATX + SFX",
+        "SFX + SFX"
+      ],
+      "rule": "手册明确给出 ATX+SFX 与 SFX+SFX 两种双电源组合。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 12,
+          "printed": "10"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方双电源组合",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "n6.psu.dualPurpose",
+      "value": "independent power supply for hard-disk backplane",
+      "rule": "手册把双电源用途描述为可给硬盘背板独立供电；这不等同于冗余、热备或自动故障切换。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 12,
+          "printed": "10"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方用途",
+        "enforcement": "warning",
+        "mayDriveCompatibility": true,
+        "note": "UI 不得默认显示为冗余电源。"
+      }
+    },
+    {
+      "id": "n6.psu.adjustableBracket",
+      "value": {
+        "position": "right-side",
+        "adjustable": true
+      },
+      "rule": "手册展示右侧可调电源支架；可调不等于任意电源与任意线束都能获得足够弯折净空。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 13,
+          "printed": "11"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方可调支架",
+        "enforcement": "informational",
+        "mayDriveCompatibility": false
+      }
+    },
+    {
+      "id": "n6.backplane.powerInputs",
+      "value": {
+        "sataPowerInputs": 2,
+        "pataPowerInputs": 2,
+        "totalPowerInputs": 4
+      },
+      "rule": "硬盘背板有 2 个 SATA 供电口与 2 个 PATA 供电口。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 16,
+          "printed": "14"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方背板供电",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "n6.backplane.powerCableRule",
+      "value": {
+        "connectAllFourInputs": true,
+        "onePsuCablePerBackplaneInput": true
+      },
+      "rule": "按手册建议接满四个背板供电口，并让电源单根线只接一个背板供电口；不得用一条菊链线同时喂多个背板口来宣称合规。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 16,
+          "printed": "14"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方接线建议",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "note": "购买清单必须单独核对 PSU 可用线束，而不只核对插头总数。"
+      }
+    },
+    {
+      "id": "n6.package.genericHardware",
+      "value": {
+        "motherboardPsuBracketScrews": 20,
+        "threePointFiveDriveScrews": 37,
+        "twoPointFiveDriveScrews": 37,
+        "fanScrews": 12,
+        "gaskets": 10,
+        "cableTies": 5,
+        "powerAdapterCable": 1,
+        "rearFanBracket": 1,
+        "lowerPsuRack": 1,
+        "frontPsuRack": 1
+      },
+      "rule": "通用手册零件表列出以上安装件；实际用户 SKU 到货仍应逐项验货。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 4,
+          "printed": "2"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "通用包装清单",
+        "enforcement": "informational",
+        "mayDriveCompatibility": false,
+        "note": "不能替代用户 ¥629 具体 SKU 的到货清点。"
+      }
+    },
+    {
+      "id": "w680m.board.formFactor",
+      "value": {
+        "name": "Micro-ATX",
+        "widthMm": 244,
+        "heightMm": 244
+      },
+      "rule": "主板为 9.6×9.6 英寸（24.4×24.4 cm）Micro-ATX。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": 11,
+          "printed": "xi"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方主板尺寸",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "w680m.board.pcieSlots",
+      "value": [
+        {
+          "name": "PCIEX16(G5)",
+          "electrical": "PCIe 5.0 x16"
+        },
+        {
+          "name": "PCIEX4(G4)",
+          "electrical": "PCIe 4.0 x4",
+          "physicalPosition": "bottom expansion position"
+        },
+        {
+          "name": "PCIEX1(G3)",
+          "electrical": "PCIe 3.0 x1"
+        }
+      ],
+      "rule": "显卡与 HBA 的逻辑规划必须使用主 x16 与底部 x4 的实际电气通道，不得把机箱 4 个挡板槽等同于 4 个主板插槽。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": 18,
+          "printed": "1-6"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方 PCIe 拓扑",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "w680m.memory.slotsAndCapacity",
+      "value": {
+        "dimmSlots": 4,
+        "maximumCapacityGb": 192,
+        "type": "DDR5 unbuffered",
+        "eccBoardSupport": true,
+        "nonEccBoardSupport": true
+      },
+      "rule": "主板提供 4 个 DDR5 DIMM 槽，手册版本标称最大 192 GB，并列出 ECC 与非 ECC unbuffered DDR5 支持。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            8,
+            16
+          ],
+          "printed": [
+            "viii",
+            "1-4"
+          ]
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方内存规格",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "note": "具体 CPU、容量、频率和 ECC 工作状态仍需支持清单确认。"
+      }
+    },
+    {
+      "id": "w680m.memory.population",
+      "value": {
+        "oneDimm": [
+          "A2"
+        ],
+        "twoDimms": [
+          "A2",
+          "B2"
+        ]
+      },
+      "rule": "单条优先 A2；两条优先 A2+B2。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": 17,
+          "printed": "1-5"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方插槽顺序",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "note": "3D 内存条数量与槽位应按此顺序显示。"
+      }
+    },
+    {
+      "id": "w680m.storage.m2Slots",
+      "value": [
+        {
+          "name": "M.2_1",
+          "sizes": [
+            2242,
+            2260,
+            2280
+          ],
+          "mode": "PCIe 4.0 x4"
+        },
+        {
+          "name": "M.2_2",
+          "sizes": [
+            2242,
+            2260,
+            2280
+          ],
+          "mode": "PCIe 4.0 x4"
+        }
+      ],
+      "rule": "主板可同时规划两块 PCIe M.2；两块 980 PRO 的容量与健康状态不在该事实中。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            8,
+            20
+          ],
+          "printed": [
+            "viii",
+            "1-8"
+          ]
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方 M.2 数量与规格",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "w680m.storage.nativeSata",
+      "value": 4,
+      "rule": "主板上有 4 个原生 SATA 6 Gb/s 接口。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            8,
+            21
+          ],
+          "printed": [
+            "viii",
+            "1-9"
+          ]
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方 SATA 数量",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "w680m.storage.slimSasModes",
+      "value": {
+        "modes": [
+          "PCIe 4.0 x4 NVMe",
+          "up to 4 SATA devices via separately purchased transfer cable"
+        ],
+        "simultaneousModeUse": false
+      },
+      "rule": "SlimSAS 按一种模式使用：NVMe 或通过另购转接线连接最多 4 个 SATA 设备；不能同时把两种能力重复计数。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            8,
+            21
+          ],
+          "printed": [
+            "viii",
+            "1-9"
+          ]
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方 SlimSAS 模式",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "note": "启用 8 盘主板直连时必须显示另购 SlimSAS-to-4×SATA 线。"
+      }
+    },
+    {
+      "id": "w680m.storage.maximumSataWithoutAddonController",
+      "value": 8,
+      "rule": "4 个原生 SATA 加 SlimSAS 的最多 4 个 SATA，推得不加扩展控制器时最多连接 8 个 SATA 设备；前提是 SlimSAS 使用 SATA 模式且转接线已购。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            8,
+            21
+          ],
+          "printed": [
+            "viii",
+            "1-9"
+          ]
+        }
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "由官方接口数推算",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "note": "这是数量推算，不代表背板线材已经齐全。"
+      }
+    },
+    {
+      "id": "w680m.cooling.fanHeaders",
+      "value": {
+        "cpuFan": 1,
+        "cpuOpt": 1,
+        "chassisFanHeaders": 3,
+        "waterPumpPlus": 1,
+        "maximumPerHeaderA": 3,
+        "maximumPerHeaderW": 36
+      },
+      "rule": "主板提供 CPU_FAN、CPU_OPT、CHA_FAN1/2/3 与 W_PUMP+；每个接头上限 3 A / 36 W。风扇数量超过接头数时仍需按每路电流核算分线器或集线器。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": 19,
+          "printed": "1-7"
+        }
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方风扇接头",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "derived.storage.sataBootConsumesTray",
+      "value": {
+        "sataBootTray": 9,
+        "maximumDataDisksWhenUsed": 8
+      },
+      "rule": "若 2.5 英寸 SATA 启动 SSD 占第 9 托盘，则数据盘最大只能为 8；数据盘=9 与该启动方式不能共存。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": [
+            2,
+            19
+          ],
+          "printed": [
+            "Product Specification",
+            "17"
+          ]
+        }
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "盘位数量推算",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true,
+        "autoResolve": "clamp-data-disks-to-8-or-change-boot-location"
+      }
+    },
+    {
+      "id": "derived.storage.m2BootConsumesNoTray",
+      "value": {
+        "trayConsumption": 0,
+        "sataPortConsumption": 0
+      },
+      "rule": "使用主板 M.2 启动盘不会占用 N6 的九个 2.5/3.5 英寸托盘，也不会消耗 SATA 口。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": 20,
+          "printed": "1-8"
+        }
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "接口形态推算",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "derived.storage.addonControllerThreshold",
+      "value": {
+        "thresholdSataDevices": 8,
+        "controllerNeededAtOrAbove": 9
+      },
+      "rule": "同时连接的 SATA 设备数超过 8 时需要额外 SATA/SAS 控制器；本 UI 若只建模 HBA，应明确 HBA 是一种实现而不是唯一理论实现。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            8,
+            21
+          ],
+          "printed": [
+            "viii",
+            "1-9"
+          ]
+        }
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "接口数量推算",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "derived.storage.eightDataPlusSataBoot",
+      "value": {
+        "dataDisks": 8,
+        "sataBootDevices": 1,
+        "totalSataDevices": 9,
+        "addonControllerRequired": true
+      },
+      "rule": "8 个 SATA 数据盘加第九托盘 SATA 启动盘正好占满 9 托盘，同时构成 9 个 SATA 设备，因此还需要扩展控制器。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            8,
+            21
+          ],
+          "printed": [
+            "viii",
+            "1-9"
+          ],
+          "crossReference": "references/jonsbo-n6-manual.pdf PDF 2/19"
+        }
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "盘位与接口联合推算",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "derived.storage.nineDataWithNonTrayBoot",
+      "value": {
+        "dataDisks": 9,
+        "bootLocation": "M.2 or external non-tray device",
+        "totalSataDataDevices": 9,
+        "addonControllerRequired": true
+      },
+      "rule": "9 个 SATA 数据盘只有在启动设备不占托盘时才满足物理盘位数量，但仍因 9 个 SATA 设备超过主板直连上限而需要扩展控制器。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            8,
+            20,
+            21
+          ],
+          "printed": [
+            "viii",
+            "1-8",
+            "1-9"
+          ],
+          "crossReference": "references/jonsbo-n6-manual.pdf PDF 2/19"
+        }
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "盘位与接口联合推算",
+        "enforcement": "hard",
+        "mayDriveCompatibility": true
+      }
+    },
+    {
+      "id": "derived.pcie.gpuHbaSlotArithmetic",
+      "value": {
+        "gpuLogicalSlot": "PCIEX16(G5)",
+        "hbaLogicalSlot": "PCIEX4(G4)",
+        "logicalCoexistence": true,
+        "physicalCoexistence": "conditional"
+      },
+      "rule": "主 x16 放 GPU、底部 x4 放 HBA 在逻辑槽位上可共存；物理共存仍取决于 GPU 实际厚度、HBA 外形、接头方向和线缆弯折。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            14,
+            18
+          ],
+          "printed": [
+            "1-2",
+            "1-6"
+          ]
+        }
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "槽位结构推算",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "note": "不能仅凭二维包络宣布具体 GPU+HBA 可下单。"
+      }
+    },
+    {
+      "id": "derived.pcie.tripleSlotGpuBottomX4Risk",
+      "value": {
+        "gpuThicknessClass": ">=3 expansion slots",
+        "bottomX4Status": "likely obstructed"
+      },
+      "rule": "三槽或更厚 GPU 从主 x16 向下占位时，大概率遮挡底部 x4 HBA 位；由于具体显卡外壳与插槽偏置未知，只能作为保守冲突提示。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            14,
+            18
+          ],
+          "printed": [
+            "1-2",
+            "1-6"
+          ]
+        }
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "结构推算",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "defaultPlannerAction": "show-conflict-until-exact-sku-geometry-is-verified"
+      }
+    },
+    {
+      "id": "derived.psu.dualIsNotRedundantByDefault",
+      "value": {
+        "dualPsuSupported": true,
+        "redundancyOrFailoverProven": false
+      },
+      "rule": "双电源安装与硬盘背板独立供电已被手册证明，但没有证据证明负载均衡、冗余、热备或自动切换。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 12,
+          "printed": "10"
+        }
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "由官方用途边界推算",
+        "enforcement": "warning",
+        "mayDriveCompatibility": true,
+        "note": "界面文案只能写双电源/独立背板供电，不能写冗余。"
+      }
+    },
+    {
+      "id": "model.internalGeometry",
+      "value": "structural-planning-inference",
+      "rule": "除外部包络与手册明确尺寸外，三维组件锚点、间隙和包络位置均为结构推算，不是厂商 CAD。",
+      "source": {
+        "file": "references/REFERENCE-MANIFEST.md",
+        "page": "Evidence tiers used in the UI"
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "结构推算",
+        "enforcement": "informational",
+        "mayDriveCompatibility": false,
+        "note": "不得作为开孔、定制线材、毫米级净空或购买依据。"
+      }
+    },
+    {
+      "id": "model.heatmapEvidence",
+      "value": {
+        "isCFD": false,
+        "isMeasured": false,
+        "isPlanningEstimate": true
+      },
+      "rule": "热力图只表达配置变化的相对规划趋势，不是 CFD，也不是实测温度。",
+      "source": {
+        "file": "references/REFERENCE-MANIFEST.md",
+        "page": "Evidence tiers used in the UI"
+      },
+      "evidenceLevel": "inferred",
+      "uiPolicy": {
+        "label": "非 CFD、非实测",
+        "enforcement": "hard",
+        "mayDriveCompatibility": false,
+        "note": "热力图可见区域必须始终显示该标签。"
+      }
+    },
+    {
+      "id": "model.appearanceAssets",
+      "value": "presentation-thumbnails-only",
+      "rule": "assets/official 中的产品图仅用于外观识别，不得转换成三维几何、安装孔位或净空证据。",
+      "source": {
+        "file": "references/REFERENCE-MANIFEST.md",
+        "page": "Official product appearance sources"
+      },
+      "evidenceLevel": "official",
+      "uiPolicy": {
+        "label": "官方外观参考",
+        "enforcement": "hard",
+        "mayDriveCompatibility": false
+      }
+    },
+    {
+      "id": "unknown.n6.fanInclusionForPurchasedSku",
+      "value": "unknown",
+      "rule": "通用零件表未列风扇，但这不足以证明用户 ¥629 具体 SKU 一定不附送；在用户验货前默认未安装。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 4,
+          "printed": "2"
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "具体 SKU 未确认",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "defaultValue": "not-installed"
+      }
+    },
+    {
+      "id": "unknown.n6.frontSfxFrontFanCoexistence",
+      "value": "unknown",
+      "rule": "手册分别展示前置 SFX 与前置风扇安装位，但未给出前置 SFX 与完整前置风扇阵列的共存矩阵。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": [
+            9,
+            10,
+            17
+          ],
+          "printed": [
+            "7",
+            "8",
+            "15"
+          ]
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "共存关系未知",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "defaultPlannerAction": "show-conservative-conflict-warning"
+      }
+    },
+    {
+      "id": "unknown.n6.frontSfxSingleFrontFanCoexistence",
+      "value": "unknown",
+      "rule": "本地手册没有确认前置 SFX 后是否还能保留一个特定位置的前置 120/140 mm 风扇。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": [
+            9,
+            10,
+            17
+          ],
+          "printed": [
+            "7",
+            "8",
+            "15"
+          ]
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "未核实",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false
+      }
+    },
+    {
+      "id": "unknown.n6.frontSfxFront240RadiatorCoexistence",
+      "value": "unknown",
+      "rule": "手册确认前置 240 mm 冷排安装位，也确认前置 SFX 安装法，但未确认二者可同时安装。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": [
+            9,
+            10,
+            17
+          ],
+          "printed": [
+            "7",
+            "8",
+            "15"
+          ]
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "共存关系未知",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "defaultPlannerAction": "treat-as-conflict-until-physical-verification"
+      }
+    },
+    {
+      "id": "unknown.n6.rearRadiatorSupport",
+      "value": "unknown",
+      "rule": "手册只把后部列为 1×120 mm 风扇位，没有在本地参考中声明后置冷排支持。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 17,
+          "printed": "15"
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "未声明冷排支持",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "defaultPlannerAction": "do-not-offer-as-official-option"
+      }
+    },
+    {
+      "id": "unknown.n6.radiatorThicknessAndTubeRoute",
+      "value": "unknown",
+      "rule": "本地手册未给出冷排总厚度、风扇叠加厚度、接头朝向与水管路径净空。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 17,
+          "printed": "15"
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "具体水冷 SKU 未核实",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false
+      }
+    },
+    {
+      "id": "unknown.n6.coolerEndpointTopologyMapping",
+      "value": "unknown",
+      "rule": "≤65–160 mm 的两个端点与 ATX、前置 SFX、底部 SFX、双电源拓扑之间的精确对应关系未由本地手册明确。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": [
+            2,
+            8,
+            9,
+            10,
+            11,
+            12
+          ],
+          "printed": [
+            "Product Specification",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10"
+          ]
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "端点映射未知",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false
+      }
+    },
+    {
+      "id": "unknown.n6.gpuEndpointTopologyMapping",
+      "value": "unknown",
+      "rule": "≤275–320 mm 的两个端点与前部占用、风扇、冷排及电源拓扑之间的精确对应关系未由本地手册明确。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": [
+            2,
+            9,
+            10,
+            17
+          ],
+          "printed": [
+            "Product Specification",
+            "7",
+            "8",
+            "15"
+          ]
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "端点映射未知",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false
+      }
+    },
+    {
+      "id": "unknown.n6.internalCadAnchorsAndClearances",
+      "value": "unknown",
+      "rule": "本地参考集没有 N6 内部 CAD、基准坐标、孔位或可用于毫米级碰撞判断的内部尺寸链。",
+      "source": {
+        "file": "references/REFERENCE-MANIFEST.md",
+        "page": "Evidence tiers used in the UI"
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "无官方内部 CAD",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "note": "三维视图只能用于空间规划。"
+      }
+    },
+    {
+      "id": "unknown.psu.dualStartSyncWiring",
+      "value": "unknown",
+      "rule": "本地手册未定义第二电源的 PS_ON、同步启动、关机时序或故障处理接线。",
+      "source": {
+        "file": "references/jonsbo-n6-manual.pdf",
+        "page": {
+          "pdf": 12,
+          "printed": "10"
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "双电源电气方案未核实",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "note": "没有明确同步/启动方案时不得显示为完整可下单拓扑。"
+      }
+    },
+    {
+      "id": "unknown.psu.exactSkuHarnessCount",
+      "value": "unknown",
+      "rule": "本地参考集没有具体 ATX/SFX 电源 SKU 的独立 SATA/PATA 线束数量、线长、插头间距与弯折半径。",
+      "source": {
+        "file": "references/REFERENCE-MANIFEST.md",
+        "page": "Official product appearance sources"
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "具体线束未核实",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "note": "外观图不能作为线束数量证据。"
+      }
+    },
+    {
+      "id": "unknown.gpu.exactSkuEnvelope",
+      "value": "unknown",
+      "rule": "具体 GPU 的长度、PCB/散热器高度、厚度、供电插头位置和侧板线材弯折尚未由本地数据表统一确认。",
+      "source": {
+        "file": "references/REFERENCE-MANIFEST.md",
+        "page": "Official product appearance sources"
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "具体 GPU SKU 未核实",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "note": "选择单槽/双槽/三槽类别只能触发规划提示。"
+      }
+    },
+    {
+      "id": "unknown.gpu.a4000HbaFullPhysicalCoexistence",
+      "value": "unknown",
+      "rule": "RTX A4000 与底部 HBA 在槽位数量上可规划，但本地参考集不足以证明具体 HBA、线缆、风道与侧板净空全部可共存。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            14,
+            18
+          ],
+          "printed": [
+            "1-2",
+            "1-6"
+          ],
+          "crossReference": "references/REFERENCE-MANIFEST.md official appearance sources"
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "逻辑可规划，物理未核实",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false
+      }
+    },
+    {
+      "id": "unknown.hba.exactGeometryAndElectricalDowntraining",
+      "value": "unknown",
+      "rule": "本地参考集没有具体 HBA 的卡长、卡高、SAS 接头方向、线缆弯折，也没有证明特定 x8 HBA 在主板 x4 电气槽中的降速兼容。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": 18,
+          "printed": "1-6"
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "HBA SKU 未核实",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "note": "不能只凭‘能插入’宣布控制器可用。"
+      }
+    },
+    {
+      "id": "unknown.cooler.exactSkuFitAndRamClearance",
+      "value": "unknown",
+      "rule": "散热器具体底座、热管、风扇悬挑、供电散热片与内存高度净空未由本地 SKU 数据表确认。",
+      "source": {
+        "file": "references/REFERENCE-MANIFEST.md",
+        "page": "Official product appearance sources"
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "散热器与内存净空未核实",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false
+      }
+    },
+    {
+      "id": "unknown.memory.exactSkuQvlEccAndHeight",
+      "value": "unknown",
+      "rule": "具体过渡内存的料号、ECC 类型、QVL 状态、容量组合与物理高度尚未确定；主板支持 ECC 不自动证明任意 ECC 条与当前 CPU 组合能启用 ECC。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": [
+            8,
+            17
+          ],
+          "printed": [
+            "viii",
+            "1-5"
+          ]
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "具体内存组合未核实",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false
+      }
+    },
+    {
+      "id": "unknown.storage.owned980ProCapacityAndHealth",
+      "value": "unknown",
+      "rule": "已知主板有两个 M.2 位，但两块已有 980 PRO 的容量、固件、健康度与用途分配不在本地参考集中。",
+      "source": {
+        "file": "references/REFERENCE-MANIFEST.md",
+        "page": "Official product appearance sources"
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "已有 SSD 状态待录入",
+        "enforcement": "informational",
+        "mayDriveCompatibility": false
+      }
+    },
+    {
+      "id": "unknown.board.i5_14500BiosSupportInLocalSnapshot",
+      "value": "unknown",
+      "rule": "2023 年本地手册摘要明确写 12/13 代并要求查询在线 CPU 支持列表；本地快照本身不能证明 i5-14500 所需 BIOS 版本。",
+      "source": {
+        "file": "references/asus-w680m-manual.pdf",
+        "page": {
+          "pdf": 8,
+          "printed": "viii"
+        }
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "本地手册未覆盖 14 代支持表",
+        "enforcement": "warning",
+        "mayDriveCompatibility": false,
+        "note": "不得据此误报不兼容；只提示验 BIOS 版本。"
+      }
+    },
+    {
+      "id": "unknown.model.powerThermalNoiseCalibration",
+      "value": "unknown",
+      "rule": "本地参考集没有整机墙上功耗、温度、噪音或 PSU 低负载效率的实测曲线；所有数值只能作为规划估算。",
+      "source": {
+        "file": "references/REFERENCE-MANIFEST.md",
+        "page": "Evidence tiers used in the UI"
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "规划估算，非实测",
+        "enforcement": "hard",
+        "mayDriveCompatibility": false,
+        "note": "不得以单点估算承诺温度、噪音或电费。"
+      }
+    },
+    {
+      "id": "unknown.price.marketAndOfficialOriginal",
+      "value": "unknown",
+      "rule": "本地参考集没有可审计的京东/拼多多实时价、历史价或官方原价；价格字段不能被标为已核实。",
+      "source": {
+        "file": "references/REFERENCE-MANIFEST.md",
+        "page": "entire manifest; no price source recorded"
+      },
+      "evidenceLevel": "unknown",
+      "uiPolicy": {
+        "label": "价格未核实",
+        "enforcement": "informational",
+        "mayDriveCompatibility": false,
+        "note": "已购价可作为用户输入；参考价与官方原价必须分别标注来源日期。"
+      }
+    }
+  ]
+}
