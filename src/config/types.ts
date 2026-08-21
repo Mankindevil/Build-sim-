@@ -15,6 +15,8 @@ export interface BuildSelection {
   memoryId: string;
   diskCount: number;
   diskSkuId?: string;
+  /** NVMe drives installed. Past the board's M.2 slots they claim the SlimSAS port. */
+  nvmeCount?: number;
   boot: BootMode;
   hbaMode: HbaMode;
   hbaSkuId?: string | null;

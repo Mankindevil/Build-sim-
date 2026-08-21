@@ -1,6 +1,7 @@
 import type { EvidenceLevel } from "../core/evidence";
 
-export type DataPortKind = "sata" | "slimsas" | "hba" | "nvme" | "usb";
+/** `none` marks a bay the controllers cannot reach — a shortfall, not a spare tray. */
+export type DataPortKind = "sata" | "slimsas" | "hba" | "nvme" | "usb" | "none";
 
 export interface BayDataPath {
   bayId: string;

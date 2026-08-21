@@ -74,7 +74,14 @@
       ],
       "attrs": {
         "formFactor": "Micro-ATX",
-        "chipset": "W680"
+        "chipset": "W680",
+        "nativeSataPorts": 4,
+        "slimsasSataPorts": 4,
+        "m2Slots": 2,
+        "sataPortsEvidence": "official",
+        "sataPortsNote": "手册 p.1-9（pdf 21）：4 个原生 SATA 6Gb/s；SlimSAS 另购转接线最多再带 4 个 SATA。SlimSAS 的 NVMe 与 SATA 模式互斥，本机两条 980 PRO 占 M.2_1/M.2_2，SlimSAS 留给 SATA 模式。对应 constraint-registry 的 w680m.storage.nativeSata 与 w680m.storage.slimSasModes；两者相加得 8 是推算，不代表转接线已购。",
+        "sataPortsSourceFile": "references/asus-w680m-manual.pdf",
+        "sataPortsSourceUrl": "https://www.asus.com/us/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/"
       },
       "appearance": {
         "image": "assets/official/w680m.png",
@@ -783,7 +790,13 @@
       "attrs": {
         "type": "down-draft",
         "maxRamHeightMm": 99,
-        "fitHint": "official"
+        "fitHint": "official",
+        "thetaKPerW": {
+          "lo": 0.47,
+          "hi": 0.78
+        },
+        "thetaEvidence": "inferred",
+        "thetaNote": "厂商不公布 θ(CPU 壳到进风空气)。此区间由同级评测的 ΔT/W 反算后取 ±25% 规划包络，装机后可用实测温度收窄。"
       },
       "appearance": {
         "image": "assets/official/axp90.png",
@@ -817,7 +830,13 @@
       "attrs": {
         "type": "down-draft",
         "maxRamHeightMm": 33,
-        "fitHint": "official"
+        "fitHint": "official",
+        "thetaKPerW": {
+          "lo": 0.41,
+          "hi": 0.69
+        },
+        "thetaEvidence": "inferred",
+        "thetaNote": "厂商不公布 θ(CPU 壳到进风空气)。此区间由同级评测的 ΔT/W 反算后取 ±25% 规划包络，装机后可用实测温度收窄。"
       }
     },
     {
@@ -846,7 +865,13 @@
       "attrs": {
         "type": "down-draft",
         "maxRamHeightMm": 99,
-        "fitHint": "tight"
+        "fitHint": "tight",
+        "thetaKPerW": {
+          "lo": 0.43,
+          "hi": 0.71
+        },
+        "thetaEvidence": "inferred",
+        "thetaNote": "厂商不公布 θ(CPU 壳到进风空气)。此区间由同级评测的 ΔT/W 反算后取 ±25% 规划包络，装机后可用实测温度收窄。"
       }
     },
     {
@@ -876,7 +901,13 @@
       "attrs": {
         "type": "tower",
         "maxRamHeightMm": 99,
-        "fitHint": "sfx"
+        "fitHint": "sfx",
+        "thetaKPerW": {
+          "lo": 0.3,
+          "hi": 0.5
+        },
+        "thetaEvidence": "inferred",
+        "thetaNote": "厂商不公布 θ(CPU 壳到进风空气)。此区间由同级评测的 ΔT/W 反算后取 ±25% 规划包络，装机后可用实测温度收窄。"
       }
     },
     {
@@ -904,7 +935,13 @@
       "attrs": {
         "type": "aio",
         "radiatorMm": 120,
-        "fitHint": "experimental"
+        "fitHint": "experimental",
+        "thetaKPerW": {
+          "lo": 0.32,
+          "hi": 0.53
+        },
+        "thetaEvidence": "inferred",
+        "thetaNote": "厂商不公布 θ(CPU 壳到进风空气)。此区间由同级评测的 ΔT/W 反算后取 ±25% 规划包络，装机后可用实测温度收窄。"
       }
     },
     {
@@ -934,7 +971,13 @@
       "attrs": {
         "type": "aio",
         "radiatorMm": 240,
-        "fitHint": "front240"
+        "fitHint": "front240",
+        "thetaKPerW": {
+          "lo": 0.23,
+          "hi": 0.39
+        },
+        "thetaEvidence": "inferred",
+        "thetaNote": "厂商不公布 θ(CPU 壳到进风空气)。此区间由同级评测的 ΔT/W 反算后取 ±25% 规划包络，装机后可用实测温度收窄。"
       }
     },
     {

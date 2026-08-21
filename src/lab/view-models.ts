@@ -34,8 +34,7 @@ export type PsuView = {
 export type CoolerView = {
   name: string;
   type: string;
-  height: number;
-  theta: number;
+  height: number;
   idleNoise: number;
   maxNoise: number;
   price: [number, number];
@@ -116,8 +115,7 @@ function midOf(band: [number, number]): number {
 /** Extra display fields not yet fully modeled on SkuRecord.attrs */
 const COOLER_EXTRAS: Record<string, Partial<CoolerView>> = {
   "cooler.thermalright-axp90-x53-full": {
-    type: "下压风冷",
-    theta: 0.62,
+    type: "下压风冷",
     idleNoise: 18,
     maxNoise: 22.4,
     price: [240, 350],
@@ -125,8 +123,7 @@ const COOLER_EXTRAS: Record<string, Partial<CoolerView>> = {
     note: "纯铜、不会大面积压住 DIMM；ATX 路线约留 12mm 进风间隙。",
   },
   "cooler.id-cooling-is-55-black": {
-    type: "下压风冷",
-    theta: 0.55,
+    type: "下压风冷",
     idleNoise: 19,
     maxNoise: 31.2,
     price: [195, 260],
@@ -134,8 +131,7 @@ const COOLER_EXTRAS: Record<string, Partial<CoolerView>> = {
     note: "当前官方总高 57mm；ATX 路线只余约 8mm，并要求 ≤33mm 低矮内存。",
   },
   "cooler.noctua-nh-l9x65": {
-    type: "下压风冷",
-    theta: 0.57,
+    type: "下压风冷",
     idleNoise: 17,
     maxNoise: 23.6,
     price: [399, 499],
@@ -143,8 +139,7 @@ const COOLER_EXTRAS: Record<string, Partial<CoolerView>> = {
     note: "高度正好等于 65mm 官方上限，公差与进风均无余量；ATX 路线不建议。",
   },
   "cooler.noctua-nh-u9s": {
-    type: "塔式风冷",
-    theta: 0.4,
+    type: "塔式风冷",
     idleNoise: 17,
     maxNoise: 22.8,
     price: [449, 599],
@@ -152,8 +147,7 @@ const COOLER_EXTRAS: Record<string, Partial<CoolerView>> = {
     note: "仅 SFX 释放 CPU 上方后适合；散热、维护和低噪音最好。",
   },
   "cooler.aio-120-experimental": {
-    type: "水冷",
-    theta: 0.42,
+    type: "水冷",
     idleNoise: 25,
     maxNoise: 38,
     price: [399, 699],
@@ -161,8 +155,7 @@ const COOLER_EXTRAS: Record<string, Partial<CoolerView>> = {
     note: "N6 官方未列水冷排兼容；后置 120 位可能与 PSU、冷管和主板空间冲突。",
   },
   "cooler.aio-240-front": {
-    type: "水冷",
-    theta: 0.31,
+    type: "水冷",
     idleNoise: 24,
     maxNoise: 36,
     price: [299, 799],
@@ -379,8 +372,7 @@ export function buildLabCatalogs(catalog: SkuCatalog): {
     coolers[sku.id] = {
       name: sku.name,
       type: ex.type ?? "散热器",
-      height: sku.dims.heightMm ?? 0,
-      theta: ex.theta ?? 0.5,
+      height: sku.dims.heightMm ?? 0,
       idleNoise: ex.idleNoise ?? 20,
       maxNoise: ex.maxNoise ?? 30,
       price: displayBand(sku, ex.price),

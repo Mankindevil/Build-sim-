@@ -9,7 +9,13 @@ import type {
   BackplaneSpinUpLoad,
   WiringChecklistItem,
 } from "./types";
-import { needsHba } from "../core/policy";
+import {
+  boardStorage,
+  buildSataPorts,
+  nativeSataCeiling,
+  needsHba,
+  slimsasMode,
+} from "../core/policy";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 
 const BP = n6Profile.backplanePower;
@@ -262,7 +268,12 @@ export function checkBackplaneHarness(
 export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPlan {
   const diskCount = config.selection.diskCount;
   const boot = config.selection.boot;
-  const useHba = needsHba(config.selection, n6Profile.hba);
+  const board = boardStorage(catalog, config.boardId);
+  const nvmeCount = config.selection.nvmeCount ?? 0;
+  const slimsasNvme = slimsasMode(board, nvmeCount) === "nvme";
+  const boardPorts = buildSataPorts(catalog, config);
+  const boardCeiling = nativeSataCeiling(boardPorts);
+  const useHba = needsHba(config.selection, boardPorts);
 
   // The card's own port count is the ceiling. A 9300-8i has eight, so a ninth drive
   // has to fall back to the board — the planner must never invent an HBA port.
@@ -278,6 +289,31 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
   let hbaUsed = 0;
   let boardUsed = 0;
 
+  /** Next free board port, or `null` once the board's own ports are gone. */
+  const takeBoardSlot = (): { slot: number; viaSlim: boolean } | null => {
+    if (boardUsed >= boardCeiling) return null;
+    const slot = boardUsed++;
+    return { slot, viaSlim: slot >= boardPorts.nativeSata };
+  };
+
+  /** A bay no controller can reach. Recorded as a shortfall so it cannot pass silently. */
+  const unreachable: BayDataPath[] = [];
+  const noPort = (bayIndex: number, device: string): BayDataPath => {
+    const path: BayDataPath = {
+      bayId: `bay-${bayIndex}`,
+      bayIndex,
+      target: "none",
+      portLabel: "无可用端口",
+      evidence: "inferred",
+      note:
+        boardCeiling === 0
+          ? `主板 SKU 未记录 SATA 端口数，${device}无处可接`
+          : `HBA 与主板端口均已用尽，${device}无处可接`,
+    };
+    unreachable.push(path);
+    return path;
+  };
+
   const bayPaths: BayDataPath[] = [];
   for (let i = 1; i <= n6Profile.trayCount; i++) {
     const isBootBay = boot === "bay" && i === n6Profile.trayCount;
@@ -286,17 +322,20 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
     if (isBootBay) {
       // The boot SSD consumes a board port like any other device, so it has to go
       // through the same allocator — otherwise its cable never reaches the checklist.
-      const slot = boardUsed++;
-      const viaSlim = slot >= n6Profile.nativeSata;
+      const slot = takeBoardSlot();
+      if (!slot) {
+        bayPaths.push(noPort(i, "启动盘"));
+        continue;
+      }
       bayPaths.push({
         bayId: `bay-${i}`,
         bayIndex: i,
-        target: viaSlim ? "slimsas" : "sata",
-        portLabel: viaSlim
-          ? `SlimSAS lane plan #${slot - n6Profile.nativeSata + 1}（启动盘）`
-          : `MB SATA_${slot + 1}（启动盘）`,
+        target: slot.viaSlim ? "slimsas" : "sata",
+        portLabel: slot.viaSlim
+          ? `SlimSAS lane plan #${slot.slot - boardPorts.nativeSata + 1}（启动盘）`
+          : `MB SATA_${slot.slot + 1}（启动盘）`,
         evidence: "inferred",
-        note: `2.5″ SATA boot occupies tray 9 — cannot also count 9 data HDDs${viaSlim ? "；且它是第 " + (slot + 1) + " 个 SATA 设备，已超出 4 路原生口，要占 SlimSAS 扩展" : ""}`,
+        note: `2.5″ SATA boot occupies tray 9 — cannot also count 9 data HDDs${slot.viaSlim ? "；且它是第 " + (slot.slot + 1) + " 个 SATA 设备，已超出 " + boardPorts.nativeSata + " 路原生口，要占 SlimSAS 扩展" : ""}`,
       });
       continue;
     }
@@ -328,26 +367,29 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
 
     // Board fallback, used both without an HBA and for drives past its last port.
     const overflow = useHba;
-    const slot = boardUsed++;
-    const viaSlim = slot >= n6Profile.nativeSata;
+    const slot = takeBoardSlot();
+    if (!slot) {
+      bayPaths.push(noPort(i, `第 ${i} 盘`));
+      continue;
+    }
     bayPaths.push({
       bayId: `bay-${i}`,
       bayIndex: i,
-      target: viaSlim ? "slimsas" : "sata",
-      portLabel: viaSlim
-        ? `SlimSAS lane plan #${slot - n6Profile.nativeSata + 1}`
-        : `MB SATA_${slot + 1}`,
-      evidence: viaSlim ? "inferred" : "official",
+      target: slot.viaSlim ? "slimsas" : "sata",
+      portLabel: slot.viaSlim
+        ? `SlimSAS lane plan #${slot.slot - boardPorts.nativeSata + 1}`
+        : `MB SATA_${slot.slot + 1}`,
+      evidence: slot.viaSlim ? "inferred" : "official",
       note: overflow
-        ? `超出 ${hbaSku?.name ?? "HBA"} 的 ${hbaPortCount} 个口，第 ${i} 盘回落到主板${viaSlim ? " SlimSAS 扩展" : "原生 SATA"}`
-        : viaSlim
-          ? "W680M SlimSAS can expose extra SATA; confirm breakout cable MPN before buy"
+        ? `超出 ${hbaSku?.name ?? "HBA"} 的 ${hbaPortCount} 个口，第 ${i} 盘回落到主板${slot.viaSlim ? " SlimSAS 扩展" : "原生 SATA"}`
+        : slot.viaSlim
+          ? "Board SlimSAS can expose extra SATA; confirm breakout cable MPN before buy"
           : "Native board SATA",
     });
   }
   const hbaBreakouts = hbaPortCount > 0 ? Math.ceil(hbaUsed / fanout) : 0;
-  const boardNativeUsed = Math.min(boardUsed, n6Profile.nativeSata);
-  const boardSlimUsed = Math.max(0, boardUsed - n6Profile.nativeSata);
+  const boardNativeUsed = Math.min(boardUsed, boardPorts.nativeSata);
+  const boardSlimUsed = Math.max(0, boardUsed - boardPorts.nativeSata);
 
   const backplaneHarness = checkBackplaneHarness(config, catalog);
   const backplanePower: BackplanePowerFeed[] = ([1, 2, 3, 4] as const).map((n) => {
@@ -380,6 +422,23 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
       label: "SlimSAS → SATA breakout (MPN TBD)",
       evidence: "unknown",
       purchaseHint: "Lock ASUS-compatible breakout before purchase",
+    },
+    {
+      id: "slimsas-nvme-adapter",
+      kind: "data",
+      requiredQty: slimsasNvme ? 1 : 0,
+      label: "SlimSAS(SFF-8654) → NVMe 转接",
+      evidence: "unknown",
+      ...(slimsasNvme
+        ? { purchaseHint: "目录里没有锁定的 MPN；转接件针脚定义必须与主板 SlimSAS 一致" }
+        : {}),
+    },
+    {
+      id: "extra-nvme",
+      kind: "other",
+      requiredQty: Math.max(0, nvmeCount - n6Profile.defaults.ownedNvmeQty),
+      label: `额外 NVMe（超出自有 ${n6Profile.defaults.ownedNvmeQty} 块，型号未锁定）`,
+      evidence: "unknown",
     },
     {
       id: "hba-minisas",
@@ -424,7 +483,30 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
   ];
 
   const warnings: string[] = [];
-  if (useHba && hbaUsed >= hbaPortCount && boardUsed > 0) {
+  if (slimsasNvme) {
+    warnings.push(
+      `第 ${nvmeCount} 块 NVMe 占用 SlimSAS（板上只有 ${board.m2Slots} 个 M.2 槽），该口不能同时供 SATA：主板 SATA 天花板从 ${board.nativeSata + board.slimsasSata} 降到 ${board.nativeSata}，HBA 触发点相应提前。这块盘挂在 SlimSAS 上的物理位置尚未建模。`,
+    );
+  }
+  if (boardCeiling === 0) {
+    warnings.push(
+      `主板 ${config.boardId} 的 SKU 没有记录 SATA 端口数（nativeSataPorts / slimsasSataPorts），规划器不会替它假设端口：先补齐这两项，否则数据链路和 HBA 触发都不可信。`,
+    );
+  }
+  if (useHba && hbaPortCount === 0) {
+    warnings.push(
+      `${hbaSku?.name ?? config.selection.hbaSkuId ?? "所选 HBA"} 的 SKU 缺少可用的 ports 字段，规划器只能把全部盘位压回主板端口。`,
+    );
+  }
+  if (unreachable.length > 0) {
+    const supply = useHba
+      ? `HBA ${hbaUsed}/${hbaPortCount} 口 + 主板 ${boardUsed}/${boardCeiling} 口`
+      : `主板 ${boardUsed}/${boardCeiling} 口`;
+    warnings.push(
+      `${unreachable.length} 个盘位没有数据端口可接（${supply} 已用尽）：减少盘数，或换端口更多的 HBA。`,
+    );
+  }
+  if (useHba && hbaPortCount > 0 && hbaUsed >= hbaPortCount && boardUsed > 0) {
     warnings.push(
       `${hbaSku?.name ?? "HBA"} 只有 ${hbaPortCount} 个口，第 ${hbaPortCount + 1}–${hbaUsed + boardUsed} 盘回落到主板端口（原生 SATA ${boardNativeUsed} 路${boardSlimUsed > 0 ? ` + SlimSAS ${boardSlimUsed} 路` : ""}）：这不是一张卡吃下全部盘位，混用两个控制器要在系统里确认盘序与直通设置。`,
     );

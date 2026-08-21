@@ -41,6 +41,20 @@ export interface Occupant {
   /** Optional exact envelope when SKU geometry is known. */
   envelope?: BoxMm;
   evidence: EvidenceLevel;
+  /**
+   * Evidence for *where* the envelope sits, as opposed to how big it is. Almost
+   * always `inferred` for the N6: the manual publishes no internal anchors. A
+   * conflict resting on a guessed anchor cannot be reported as a hard failure.
+   */
+  anchorEvidence?: EvidenceLevel;
+  /** Parent occupant. A child is meant to sit inside its parent, so the pair is skipped. */
+  mountedOn?: string;
+  /** Occupants sharing a group are one assembly and never clash with each other. */
+  group?: string;
+  /** Reserved service / routing volume rather than a solid part. */
+  clearance?: boolean;
+  /** Display name for conflict messages; falls back to `skuId`. */
+  label?: string;
 }
 
 export interface ConflictHit {
@@ -50,6 +64,8 @@ export interface ConflictHit {
   verdict: "warn" | "bad";
   evidence: EvidenceLevel;
   message: string;
+  /** Intersection depth in mm on the shallowest axis, when known. */
+  overlapMm?: number;
 }
 
 export interface OccupancyModel {
@@ -69,10 +85,53 @@ export function boxesOverlap(a: BoxMm, b: BoxMm, epsilon = 0.5): boolean {
   );
 }
 
-/** Detect exclusive-slot clashes and optional AABB overlaps. */
+/** Smallest per-axis intersection depth in mm; ≤ 0 when the boxes are clear. */
+export function overlapDepthMm(a: BoxMm, b: BoxMm): number {
+  const dx = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const dy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  const dz = Math.min(a.z + a.d, b.z + b.d) - Math.max(a.z, b.z);
+  return Math.min(dx, dy, dz);
+}
+
+const ORDER: EvidenceLevel[] = ["official", "standard", "inferred", "unknown"];
+
+function weakest(levels: (EvidenceLevel | undefined)[]): EvidenceLevel {
+  return levels.reduce<EvidenceLevel>(
+    (worst, l) => (l && ORDER.indexOf(l) > ORDER.indexOf(worst) ? l : worst),
+    "official",
+  );
+}
+
+/** True when either occupant is an ancestor of the other. */
+function nested(a: Occupant, b: Occupant, byId: Map<string, Occupant>): boolean {
+  const climbs = (from: Occupant, targetId: string): boolean => {
+    let cur: Occupant | undefined = from;
+    const seen = new Set<string>();
+    while (cur?.mountedOn && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      if (cur.mountedOn === targetId) return true;
+      cur = byId.get(cur.mountedOn);
+    }
+    return false;
+  };
+  return climbs(a, b.id) || climbs(b, a.id);
+}
+
+const nameOf = (o: Occupant): string => o.label ?? o.skuId;
+
+/**
+ * Detect exclusive-slot clashes and envelope intersections.
+ *
+ * Envelope intersections are graded, not absolute. A box whose *anchor* is a
+ * planning reconstruction cannot prove incompatibility, so those come back as
+ * `warn` with the reason stated; only two parts whose size and placement are
+ * both evidenced can produce a `bad`. Clearance volumes are always `warn`:
+ * losing service space is a trade-off, not a failure to assemble.
+ */
 export function detectConflicts(model: OccupancyModel): ConflictHit[] {
   const hits: ConflictHit[] = [];
   const slotById = new Map(model.slots.map((s) => [s.id, s]));
+  const occById = new Map(model.occupants.map((o) => [o.id, o]));
 
   const occupantsBySlot = new Map<string, Occupant[]>();
   for (const occ of model.occupants) {
@@ -117,7 +176,10 @@ export function detectConflicts(model: OccupancyModel): ConflictHit[] {
             a: a.id,
             b: b.id,
             verdict: "warn",
-            evidence: slot.evidence === "official" || slotById.get(otherId)?.evidence === "official" ? "inferred" : (slot.evidence ?? "unknown"),
+            evidence:
+              slot.evidence === "official" || slotById.get(otherId)?.evidence === "official"
+                ? "inferred"
+                : (slot.evidence ?? "unknown"),
             message: `Slot ${slot.id} is exclusive with ${otherId} (${a.skuId} vs ${b.skuId})`,
           });
         }
@@ -130,22 +192,42 @@ export function detectConflicts(model: OccupancyModel): ConflictHit[] {
       const a = model.occupants[i]!;
       const b = model.occupants[j]!;
       if (!a.envelope || !b.envelope) continue;
+      if (a.group && a.group === b.group) continue;
+      if (nested(a, b, occById)) continue;
       if (!boxesOverlap(a.envelope, b.envelope)) continue;
-      const weakest: EvidenceLevel =
-        a.evidence === "unknown" || b.evidence === "unknown"
-          ? "unknown"
-          : a.evidence === "inferred" || b.evidence === "inferred"
-            ? "inferred"
-            : a.evidence === "standard" || b.evidence === "standard"
-              ? "standard"
-              : "official";
+
+      const overlapMm = Math.round(overlapDepthMm(a.envelope, b.envelope) * 10) / 10;
+      const sizeEvidence = weakest([a.evidence, b.evidence]);
+      const anchorEvidence = weakest([a.anchorEvidence, b.anchorEvidence]);
+      const evidence = weakest([sizeEvidence, anchorEvidence]);
+
+      if (a.clearance || b.clearance) {
+        const zone = a.clearance ? a : b;
+        const part = a.clearance ? b : a;
+        hits.push({
+          id: `clear:${zone.id}:${part.id}`,
+          a: zone.id,
+          b: part.id,
+          verdict: "warn",
+          evidence,
+          message: `${nameOf(part)} 侵入「${nameOf(zone)}」预留净空 ${overlapMm}mm；净空区本身是规划包络，需按实物核对走线与维护空间。`,
+          overlapMm,
+        });
+        continue;
+      }
+
+      // Only an evidenced size *and* an evidenced anchor can prove interference.
+      const provable = anchorEvidence === "official" || anchorEvidence === "standard";
       hits.push({
         id: `aabb:${a.id}:${b.id}`,
         a: a.id,
         b: b.id,
-        verdict: weakest === "unknown" ? "warn" : "bad",
-        evidence: weakest,
-        message: `Envelope intersection between ${a.skuId} and ${b.skuId}`,
+        verdict: provable && sizeEvidence !== "unknown" ? "bad" : "warn",
+        evidence,
+        message: provable
+          ? `${nameOf(a)} 与 ${nameOf(b)} 包络相交 ${overlapMm}mm。`
+          : `${nameOf(a)} 与 ${nameOf(b)} 的规划包络相交 ${overlapMm}mm；锚点为按手册重建的推算值，不能据此断定不兼容，需实物核对。`,
+        overlapMm,
       });
     }
   }

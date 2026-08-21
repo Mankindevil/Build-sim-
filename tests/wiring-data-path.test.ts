@@ -31,6 +31,11 @@ const config = (diskCount: number, boot: BootMode): BuildConfig => ({
 const qty = (plan: ReturnType<typeof planN6Wiring>, id: string): number =>
   plan.checklist.find((c) => c.id === id)?.requiredQty ?? 0;
 
+const withNvme = (diskCount: number, nvmeCount: number): BuildConfig => {
+  const base = config(diskCount, "m2");
+  return { ...base, selection: { ...base.selection, nvmeCount } };
+};
+
 describe("HBA data paths", () => {
   it("never assigns more drives than the card has ports", () => {
     const plan = planN6Wiring(config(9, "m2"), catalog);
@@ -78,5 +83,85 @@ describe("HBA data paths", () => {
     expect(boot?.target).toBe("slimsas");
     expect(qty(plan, "sata-data")).toBe(4);
     expect(qty(plan, "slimsas-breakout")).toBe(1);
+  });
+});
+
+describe("board SATA ports", () => {
+  it("come from the board SKU, and are absent for an unlisted board", async () => {
+    const { boardSataPorts, nativeSataCeiling } = await import("../src/core/policy");
+    expect(boardSataPorts(catalog, "board.asus-w680m-ace-se")).toEqual({
+      nativeSata: 4,
+      slimsasSata: 4,
+    });
+    expect(nativeSataCeiling(boardSataPorts(catalog, "board.not-in-catalog"))).toBe(0);
+  });
+
+  it("force an HBA when the board has none on record", () => {
+    const plan = planN6Wiring({ ...config(2, "m2"), boardId: "board.not-in-catalog" }, catalog);
+    expect(plan.bayPaths.filter((b) => b.target === "hba")).toHaveLength(2);
+    expect(plan.warnings.some((w) => w.includes("没有记录 SATA 端口数"))).toBe(true);
+  });
+
+  it("cap the board fallback instead of inventing a lane", () => {
+    const base = config(9, "m2");
+    // A cable SKU has no `ports`, so the card absorbs nothing and all nine drives fall
+    // back to a board that only has eight ports.
+    const plan = planN6Wiring(
+      { ...base, selection: { ...base.selection, hbaSkuId: "accessory.slimsas-4xsata" } },
+      catalog,
+    );
+    expect(plan.bayPaths.filter((b) => b.target === "sata" || b.target === "slimsas")).toHaveLength(
+      8,
+    );
+    expect(plan.bayPaths.filter((b) => b.target === "none")).toHaveLength(1);
+    expect(plan.warnings.some((w) => w.includes("缺少可用的 ports 字段"))).toBe(true);
+    expect(plan.warnings.some((w) => w.includes("没有数据端口可接"))).toBe(true);
+  });
+
+  it("drop the SlimSAS four once an NVMe claims that port", async () => {
+    const { boardSataPorts, boardStorage, slimsasMode } = await import("../src/core/policy");
+    const board = boardStorage(catalog, "board.asus-w680m-ace-se");
+    expect(board.m2Slots).toBe(2);
+    expect(slimsasMode(board, 2)).toBe("sata");
+    expect(slimsasMode(board, 3)).toBe("nvme");
+    expect(boardSataPorts(catalog, "board.asus-w680m-ace-se", 3)).toEqual({
+      nativeSata: 4,
+      slimsasSata: 0,
+    });
+  });
+
+  it("leave the ninth bay unreachable when neither controller can take it", () => {
+    // Unlisted board => zero board ports, so the 9300-8i's eight ports are all there is.
+    const plan = planN6Wiring({ ...config(9, "m2"), boardId: "board.not-in-catalog" }, catalog);
+    expect(plan.bayPaths.filter((b) => b.target === "hba")).toHaveLength(8);
+    const ninth = plan.bayPaths.find((b) => b.bayIndex === 9);
+    expect(ninth?.target).toBe("none");
+    expect(ninth?.note).toContain("主板 SKU 未记录 SATA 端口数");
+  });
+});
+
+describe("SlimSAS mode", () => {
+  it("keeps five disks on the board while SlimSAS is still in SATA mode", () => {
+    const plan = planN6Wiring(withNvme(5, 2), catalog);
+    expect(plan.bayPaths.some((b) => b.target === "hba")).toBe(false);
+    expect(qty(plan, "slimsas-breakout")).toBe(1);
+    expect(qty(plan, "slimsas-nvme-adapter")).toBe(0);
+  });
+
+  it("pulls the HBA trigger forward when a third NVMe takes the port", () => {
+    const plan = planN6Wiring(withNvme(5, 3), catalog);
+    // Ceiling drops 8 -> 4, so five devices no longer fit on the board at all.
+    expect(plan.bayPaths.filter((b) => b.target === "hba")).toHaveLength(5);
+    expect(qty(plan, "slimsas-breakout")).toBe(0);
+    expect(qty(plan, "slimsas-nvme-adapter")).toBe(1);
+    expect(qty(plan, "extra-nvme")).toBe(1);
+    expect(plan.warnings.some((w) => w.includes("占用 SlimSAS"))).toBe(true);
+  });
+
+  it("keeps the BOM free of parts that have no locked SKU", () => {
+    const bom = evaluateBuild(withNvme(5, 3), catalog).bom;
+    // The third NVMe and its adapter are checklist items, not invented purchases.
+    expect(bom.filter((b) => b.skuId === "storage.samsung-980-pro")).toHaveLength(1);
+    expect(bom.some((b) => b.skuId === "accessory.slimsas-4xsata")).toBe(false);
   });
 });

@@ -1,0 +1,279 @@
+{
+  "caseId": "case.jonsbo-n6",
+  "frame": {
+    "unit": "mm",
+    "origin": "case envelope geometric centre",
+    "axes": { "x": "width, positive right", "y": "height, positive up", "z": "depth, positive rear" },
+    "evidence": "standard",
+    "note": "唯一坐标约定。盒子以中心 + 全长记录（c/w/h/d），最小角形式由 src/core/geometry.ts 的 toBoxMm 转换。外壳尺寸是官方的；壳内所有锚点都是按手册图示重建的规划值，anchorEvidence 一律 inferred，不得当作厂商 CAD 使用。"
+  },
+  "envelope": {
+    "w": 305,
+    "h": 318,
+    "d": 353,
+    "evidence": "official",
+    "source": "JONSBO N6 manual p2 规格表：305W × 353D × 318H mm（高度含 6mm 底座）"
+  },
+  "interior": {
+    "baseHeightMm": 6,
+    "yFloor": -153,
+    "evidence": "official",
+    "source": "官方规格表注明 318mm 含 6mm 底座，因此机内可用底面在 y = -159 + 6 = -153",
+    "note": "底座那 6mm 不是可用空间。壳内所有件都必须在 y ≥ -153 之上，几何测试对此有断言。"
+  },
+  "deck": {
+    "y": -23,
+    "thicknessMm": 4,
+    "anchorEvidence": "inferred",
+    "sizeEvidence": "inferred",
+    "source": "手册图示上下分腔，但未标注隔板高度或板厚",
+    "note": "隔板下缘 -25、上缘 -21：下层净高约 128mm，上层约 180mm。高度由约束反解——下层必须同时容纳竖装 3.5″（101.6mm）与手册 §14 的左侧 120mm 风扇位，上层必须容纳 mATX + 65mm 散热器上限 + ATX 电源 86mm 截面。这块隔板同时是热模型两个腔体的边界。"
+  },
+  "board": {
+    "c": [0, -9, 20],
+    "w": 244,
+    "h": 3,
+    "d": 244,
+    "topY": -7.5,
+    "sizeEvidence": "standard",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "244×244mm mATX 标准尺寸 · 锚点推算",
+    "source": "mATX 规范 244×244mm（ASUS 手册 p11）；机箱内安装孔位置手册未标注"
+  },
+  "socket": {
+    "c": [35, 20],
+    "w": 37.5,
+    "h": 5,
+    "d": 45,
+    "keepoutMm": 95,
+    "mountPitchMm": 78,
+    "sizeEvidence": "standard",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "LGA1700 标准包络 · 锚点推算",
+    "source": "LGA1700 封装尺寸为标准；socket keepout 95×95mm 为 Intel 平台通用保留区；散热器安装孔距 78×78mm 见 Intel LGA1700 散热方案规范",
+    "note": "c 只给 [x, z]，y 由 board.topY 决定。keepout 用来把散热器拆成「底座 / 插座立柱 / 外伸鳍片」三层，见 cooler.note；底座那一层只占 mountPitchMm 见方，因此板面上的 M.2（含导热片）从底座下方通过而不是嵌进底座里。"
+  },
+  "memory": {
+    "xTwoModules": [86, 98],
+    "xOneModule": [92],
+    "w": 5,
+    "d": 133.35,
+    "sizeEvidence": "standard",
+    "anchorEvidence": "inferred",
+    "zCenter": 18,
+    "dimsLabel": "133.35mm DDR5 UDIMM 标准长度 · 高度取 SKU · 锚点推算",
+    "source": "DDR5 UDIMM 长度为 JEDEC 标准；插槽在机箱内的绝对位置手册未标注"
+  },
+  "m2": {
+    "slots": [
+      { "id": "m2_1", "c": [-35, -50], "note": "CPU 直连 M.2；锚点自 z=-42 后移到 -50 以避免与 HBA 卡包络互穿 1.8mm（原值使模型自相矛盾）" },
+      { "id": "m2_2", "c": [48, 100], "note": "芯片组 M.2；锚点自 z=88 前移到 100 以避免与下压散热器底座包络互穿（原值使模型自相矛盾）" }
+    ],
+    "w": 22,
+    "h": 3,
+    "d": 80,
+    "sizeEvidence": "standard",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "M.2 2280 · 22×80mm · 锚点推算",
+    "source": "M.2 2280 为标准尺寸；插槽位置手册未标注"
+  },
+  "psu": {
+    "rearUpperAtx": {
+      "c": [15, 100],
+      "zRear": 105,
+      "w": 150,
+      "h": 86,
+      "sizeEvidence": "standard",
+      "anchorEvidence": "inferred",
+      "dimsLabel": "ATX 150×86mm 标准截面 · 长度取 SKU · 后面板贴合",
+      "source": "ATX12V 规范截面 150×86mm；手册 §6 只画后上安装位，不给坐标",
+      "note": "后面板贴合，所以长度增加时向机箱前方生长，而不是两端等分。"
+    },
+    "frontSfx": {
+      "c": [82, 63],
+      "zFront": -158,
+      "w": 125,
+      "h": 63.5,
+      "sizeEvidence": "standard",
+      "anchorEvidence": "inferred",
+      "dimsLabel": "SFX 125×63.5mm 标准截面 · 长度取 SKU · 前面板贴合",
+      "source": "SFX12V 规范截面 125×63.5mm；手册 §7 p.10 前置 SFX 安装页"
+    },
+    "bottomSfx": {
+      "c": [-68, -116],
+      "zRear": 142,
+      "w": 125,
+      "h": 63.5,
+      "sizeEvidence": "standard",
+      "anchorEvidence": "inferred",
+      "dimsLabel": "SFX 125×63.5mm 标准截面 · 长度取 SKU · 装在随箱电源架上",
+      "source": "手册 §8 p.9 下置电源安装：只支持 SFX，且先装到随箱电源架上",
+      "note": "y 由随箱电源架托板上表面反解，不是独立猜的高度。"
+    }
+  },
+  "cooler": {
+    "baseHeightMm": 15,
+    "downdraftFootprintMm": 96,
+    "towerFootprintMm": 95,
+    "footprintBySku": {
+      "cooler.thermalright-axp90-x53-full": 96,
+      "cooler.id-cooling-is-55-black": 120,
+      "cooler.noctua-nh-l9x65": 95,
+      "cooler.noctua-nh-u9s": 95
+    },
+    "aioPump": { "c": [35, 20, 20], "w": 75, "h": 55, "d": 75 },
+    "sizeEvidence": "inferred",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "总高取 SKU 官方规格 · 底座与外伸分层为推算",
+    "source": "厂商只公布总高与内存限高；底座高度、鳍片起始高度与冷头包络手册与规格书均未给出",
+    "note": "散热器拆成三层：底座（socket.mountPitchMm 见方，落到板面，高 baseHeightMm）、插座立柱（socket.keepoutMm 见方，从底座上表面起）与外伸鳍片（完整 footprint，下缘抬到 attrs.maxRamHeightMm）。这样「内存限高」这个唯一公布的数字变成可判交的几何，而不是一条文字警告。footprint 无厂商数据时按类型取上面三个规划值。"
+  },
+  "gpu": {
+    "zRear": 164,
+    "x": -80,
+    "slotPitchMm": 20.32,
+    "heightWorkstationLowMm": 69,
+    "heightWorkstationMm": 112,
+    "heightConsumerMm": 125,
+    "sizeEvidence": "inferred",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "长度与槽数取 SKU · 卡高按类型推算 · 挡板贴合后面板",
+    "source": "PCIe 槽距 20.32mm 为标准；卡高、PCB 厚度与机箱内绝对位置手册与目录均未给出",
+    "note": "挡板贴合后面板，长度增加时向机箱前方生长。"
+  },
+  "hba": {
+    "c": [-46, 80],
+    "w": 20.3,
+    "h": 64.4,
+    "d": 167.6,
+    "sizeEvidence": "standard",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "167.6×64.4×20.3mm HH/HL PCIe 参考包络 · 锚点推算",
+    "source": "PCIe HH/HL 规格尺寸；LSI 9300-8i 实际 PCB 长度随 OEM 变化，目录未记录"
+  },
+  "trays": {
+    "count": 9,
+    "pitchMm": 27,
+    "c": [0, -98.75, -96],
+    "bootC": [0, -115, -96],
+    "drive35": { "w": 26.1, "h": 101.6, "d": 147 },
+    "boot25": { "w": 7, "h": 69.85, "d": 100 },
+    "sizeEvidence": "standard",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "3.5″ 101.6×147×26.1mm 标准尺寸 · 竖装横向单排 · 托架间距推算",
+    "source": "3.5″/2.5″ 盘体尺寸为标准；手册 p.19 证明九个托架横向单排且 2.5/3.5 二选一，但不给托架间距",
+    "note": "第 i 个托架的 x = (i - 4) × pitchMm，从 0 开始计。"
+  },
+  "trayFrame": {
+    "bars": [
+      { "id": "bottom", "c": [0, -151.5, -96], "w": 258, "h": 3, "d": 152 },
+      { "id": "top", "c": [0, -46, -96], "w": 258, "h": 3, "d": 152 },
+      { "id": "left", "c": [-127, -98.75, -96], "w": 3, "h": 108.5, "d": 152 },
+      { "id": "right", "c": [127, -98.75, -96], "w": 3, "h": 108.5, "d": 152 }
+    ],
+    "sizeEvidence": "inferred",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "9 托架钢框包络 · 推算",
+    "source": "手册未给托架笼的外形、板厚或孔位；这里按托架排布反推包络：底梁贴机内底面 y=-153，顶梁留出到隔板的送风间隙，净高刚好放下竖装 3.5″"
+  },
+  "backplane": {
+    "pcb": { "c": [0, -99, -17], "w": 250, "h": 104, "d": 6 },
+    "inlet": { "c": [0, -139, -9], "w": 18, "h": 14, "d": 10, "pitchMm": 22, "x0": -33 },
+    "sizeEvidence": "inferred",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "板形为规划包络 · 接口种类与排列为手册 §13",
+    "source": "手册 §13 p.14 图示：一排四个供电口，左二 SATA 供电、右二 PATA 供电；PCB 轮廓、板厚与孔位未标注"
+  },
+  "lowerLeftWall": {
+    "fanBracket": {
+      "c": [-151, -90, 0],
+      "w": 2.5,
+      "h": 126,
+      "d": 272,
+      "dimsLabel": "承载左侧 120×2 · 4 螺丝可拆 · 板形推算",
+      "source": "手册 §8.1 p.9 + §13.1 p.14：四颗螺丝取下；接背板供电必须先拆，装下置电源时被电源架取代"
+    },
+    "psuRackPlate": { "c": [-68, -150, 92], "w": 134, "h": 3, "d": 108 },
+    "psuRackSide": { "c": [-151, -114, 92], "w": 2.5, "h": 72, "d": 108 },
+    "driveFanZ": [-62, 62],
+    "driveFanC": [-141, -89],
+    "sizeEvidence": "inferred",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "电源架托板与侧固定板包络 · 推算（手册未标尺寸）",
+    "source": "手册 §8.1–8.3 p.9：取下左侧风扇架 → SFX 装到随箱电源架 → 电源架整体装回"
+  },
+  "fanMounts": {
+    "front140": { "c": [0, 63, -163], "xOffsets": [-70, 70], "frameMm": 135, "thicknessMm": 15 },
+    "front120": { "c": [0, 63, -139], "xOffsets": [-60, 60], "frameMm": 116, "thicknessMm": 15 },
+    "rear120": { "c": [0, 64, 163], "xOffsets": [0], "frameMm": 116, "thicknessMm": 15 },
+    "sideRight120": { "c": [144, 40, 0], "zOffsets": [-62, 62], "frameMm": 116, "thicknessMm": 15 },
+    "radiator240Front": { "c": [0, 63, -157], "w": 277, "h": 120, "d": 27 },
+    "radiator120Rear": { "c": [0, 64, 158], "w": 120, "h": 120, "d": 27 },
+    "sizeEvidence": "standard",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "120/140mm 标准风扇框 · 安装面为手册 §14 · 具体坐标推算",
+    "source": "手册 §14 p.15：前 120×2 或 140×2（可装 240 冷排）/ 左 120×2 / 右 120×2 / 后 120×1。手册只给安装位与尺寸，不给坐标、风量或共存矩阵"
+  },
+  "externalUsbBoot": {
+    "c": [198, -112, 112],
+    "w": 42,
+    "h": 12,
+    "d": 110,
+    "sizeEvidence": "inferred",
+    "anchorEvidence": "inferred",
+    "dimsLabel": "110×42×12mm 规划包络 · 机外",
+    "source": "外置盘不在手册范围内；此包络只用于提醒线材固定，不占机箱内空间"
+  },
+  "clearances": [
+    {
+      "id": "clearance.cable_area_a",
+      "name": "理线区 A · CPU 与硬盘供电",
+      "c": [-141, 30, 108],
+      "w": 22,
+      "h": 100,
+      "d": 136,
+      "sizeEvidence": "inferred",
+      "anchorEvidence": "inferred",
+      "dimsLabel": "手册 §11 指定的走线区域 · 通道断面为推算",
+      "source": "手册 §11 p.12：CPU 供电与硬盘供电走 A 区。手册只圈出区域，不给通道断面或插头弯折半径"
+    },
+    {
+      "id": "clearance.cable_area_b",
+      "name": "理线区 B · 风扇与 SATA 数据",
+      "c": [141, 30, 30],
+      "w": 22,
+      "h": 100,
+      "d": 180,
+      "sizeEvidence": "inferred",
+      "anchorEvidence": "inferred",
+      "dimsLabel": "手册 §11 指定的走线区域 · 通道断面为推算",
+      "source": "手册 §11 p.12：风扇与 SATA 数据线走 B 区。右侧 120×2 风扇位就在这条通道上，两者争用同一空间"
+    },
+    {
+      "id": "clearance.eps_plug",
+      "name": "EPS 8-pin 插拔空间",
+      "c": [105, 18, 118],
+      "w": 34,
+      "h": 40,
+      "d": 44,
+      "sizeEvidence": "inferred",
+      "anchorEvidence": "inferred",
+      "dimsLabel": "插头 + 手指余量包络 · 推算",
+      "source": "装机顺序里 EPS 8-pin 是最紧的一步（后上置 ATX 时电源就在主板供电口上方）；厂商未给此处净空",
+      "note": "主板上 EPS 接口的确切位置不在我们的板卡数据里，此处按 mATX 常见的板缘位置取包络，只用于提醒先穿线。"
+    },
+    {
+      "id": "clearance.gpu_tail_power",
+      "name": "GPU 供电插头与线材弯折区",
+      "c": [-80, 76, 140],
+      "w": 24,
+      "h": 30,
+      "d": 44,
+      "sizeEvidence": "inferred",
+      "anchorEvidence": "inferred",
+      "dimsLabel": "12VHPWR / 8-pin 插头 + 弯折半径包络 · 推算",
+      "source": "N6 只发布 275–320mm 卡长范围，未说明该范围是否已含供电插头与线材弯折；此包络用于提示必须实测",
+      "onlyWithGpu": true
+    }
+  ]
+}

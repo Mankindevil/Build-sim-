@@ -139,9 +139,15 @@
           <option value="usbssd">外置 USB SSD · 9 HDD 模式</option>
         </select>
       </label>
+      <label>NVMe 数量
+        <select id="nvme-select" class="form-select">
+          <option value="2" selected>2 块 · M.2_1 + M.2_2（SlimSAS 留给 SATA）</option>
+          <option value="3">3 块 · 第三块占用 SlimSAS（主板 SATA 降到 4）</option>
+        </select>
+      </label>
       <label>存储控制
         <select id="hba-select" class="form-select">
-          <option value="auto">自动：≤8 个 SATA 设备用主板接口</option>
+          <option value="auto">自动：主板 SATA 口够用时不装卡</option>
           <option value="always">LSI 9300-8i IT Mode 常驻</option>
         </select>
       </label>
@@ -355,12 +361,25 @@
       </div>
       <section class="card thermal-field-card">
         <div class="lab-section-head"><div><p class="lab-kicker">THERMAL FIELD</p><h3>机箱规划温度场与相对气流</h3></div><span id="thermal-field-badge">规划估算 · 非 CFD</span></div>
+        <div class="thermal-field-modes">
+          <div class="thermal-mode-group" role="group" aria-label="着色取哪一端">
+            <button class="case-view-btn" type="button" data-heat-bound="hi" aria-pressed="true">保守 · 上限</button>
+            <button class="case-view-btn" type="button" data-heat-bound="lo" aria-pressed="false">乐观 · 下限</button>
+            <button class="case-view-btn" type="button" data-heat-bound="width" aria-pressed="false">区间宽度</button>
+          </div>
+          <div class="thermal-mode-group" role="group" aria-label="正交切片方向">
+            <button class="case-view-btn" type="button" data-heat-plane="xy" aria-pressed="true">前视 x–y</button>
+            <button class="case-view-btn" type="button" data-heat-plane="yz" aria-pressed="false">侧视 z–y</button>
+            <button class="case-view-btn" type="button" data-heat-plane="xz" aria-pressed="false">俯视 x–z</button>
+          </div>
+        </div>
         <div class="thermal-field-wrap">
-          <canvas id="thermal-field" width="720" height="360" role="img" aria-label="N6 规划温度场；非 CFD，非实测"></canvas>
-          <svg id="thermal-airflow" viewBox="0 0 720 360" aria-hidden="true"><defs><marker id="thermal-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10Z"></path></marker></defs><g id="thermal-flow-paths"></g><g id="thermal-field-labels"></g></svg>
+          <canvas id="thermal-field" width="720" height="420" role="img" aria-label="N6 规划温度场；非 CFD，非实测"></canvas>
+          <svg id="thermal-airflow" viewBox="0 0 720 420" aria-hidden="true"><defs><marker id="thermal-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10Z"></path></marker></defs><g id="thermal-flow-paths"></g><g id="thermal-field-labels"></g></svg>
         </div>
         <div class="thermal-scale"><div class="thermal-scale-ramp"><i></i><b id="thermal-ambient-marker" title="当前环境温度"></b></div><div class="thermal-scale-labels"><span>20°C</span><span>35</span><span>45</span><span>60</span><span>75</span><span>90</span><span>100°C</span></div></div>
-        <p class="lab-note">固定 20–100°C 工程温标便于跨配置比较：颜色由预测温度决定，扩散范围由部件功耗决定；箭头只表示相对风路，不表示 CFM。几何是结构示意，结果不是 CFD、风洞或传感器实测，不能据此确定局部风速、冷排压降或开孔尺寸。</p>
+        <p class="lab-note" id="thermal-field-scale-note">色标为固定 20–100°C 工程温标。上限不是预测值，而是“这个状态不可接受”的判据；下限是“一切顺利”的下界，真值在两者之间。</p>
+        <p class="lab-note">这是 0D 换热模型在毫米空间里的插值，不是 CFD、风洞或传感器实测：热源质心与结构轮廓取自同一份 geometry.json，因此轮廓与温度场在同一坐标系里；场内任一点不会热于最热的热源，也不会冷于环境；隔板按 0D 模型的两腔假设阻断扩散（无下置电源时跨腔贡献为零）。箭头由几何里的风扇件生成，只表示风路方向，不表示 CFM；轮廓上带 ○ 的风扇表示气流垂直于当前切片。据此不能确定局部风速、冷排压降或开孔尺寸。</p>
       </section>
       <section class="card" id="air-balance-card">
         <div class="lab-section-head">
@@ -534,6 +553,7 @@
   #n6-lab .spatial-chassis { fill: color-mix(in srgb,var(--muted-foreground) 26%,transparent); stroke: color-mix(in srgb,var(--foreground) 45%,transparent); }
   #n6-lab .spatial-pcb { fill: color-mix(in srgb,var(--ok) 14%,transparent); stroke: var(--ok); }
   #n6-lab .spatial-connector { fill: color-mix(in srgb,var(--viz-series-6) 62%,transparent); stroke: var(--viz-series-6); }
+  #n6-lab .spatial-clearance { fill: color-mix(in srgb,var(--warn) 7%,transparent); stroke: color-mix(in srgb,var(--warn) 60%,transparent); stroke-dasharray: 2 5; }
   #n6-lab .spatial-wire { fill: none; stroke: color-mix(in srgb,var(--foreground) 56%,transparent); stroke-width: 1.25; vector-effect: non-scaling-stroke; }
   #n6-lab .spatial-wire.inferred { stroke-dasharray: 5 4; }
   #n6-lab .spatial-outline { fill: none; stroke: color-mix(in srgb,var(--foreground) 72%,transparent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
@@ -639,13 +659,19 @@
   #n6-lab .product-card-body a { width: fit-content; color: var(--viz-series-1); font-size: 10px; text-decoration: none; }
   #n6-lab .lab-two-col, #n6-lab .lab-wiring-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
   #n6-lab .metric-bars { display: grid; gap: 12px; }
-  #n6-lab .metric-row { display: grid; grid-template-columns: 145px minmax(100px,1fr) 74px; align-items: center; gap: 10px; }
+  #n6-lab .metric-row { display: grid; grid-template-columns: minmax(120px,190px) minmax(90px,1fr) 92px; align-items: center; gap: 10px; }
   #n6-lab .metric-track { height: 10px; background: color-mix(in srgb,var(--muted) 70%,transparent); overflow: hidden; }
   #n6-lab .metric-fill { height: 100%; background: var(--viz-series-3); }
   #n6-lab .metric-fill[data-level="warn"] { background: var(--warn); } #n6-lab .metric-fill[data-level="bad"] { background: var(--bad); }
+  /* A band, not a bar: the model reports an interval, so the picture shows one. */
+  #n6-lab .metric-band { height: 100%; background: var(--viz-series-3); opacity: .85; border-left: 2px solid color-mix(in srgb,var(--foreground) 55%,transparent); border-right: 2px solid color-mix(in srgb,var(--foreground) 55%,transparent); }
+  #n6-lab .metric-band[data-level="warn"] { background: var(--warn); } #n6-lab .metric-band[data-level="bad"] { background: var(--bad); }
+  #n6-lab .metric-row strong { font-size: 11px; font-variant-numeric: tabular-nums; }
   #n6-lab .lab-note { color: var(--muted-foreground); font-size: 12px; margin: 14px 0 0; }
   #n6-lab .thermal-field-card { margin-bottom: 14px; }
-  #n6-lab .thermal-field-wrap { position: relative; aspect-ratio: 2 / 1; min-height: 280px; overflow: hidden; border: 1px solid var(--border); background: color-mix(in srgb,var(--card) 78%,#0b1020); }
+  #n6-lab .thermal-field-modes { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 9px; }
+  #n6-lab .thermal-mode-group { display: flex; gap: 6px; }
+  #n6-lab .thermal-field-wrap { position: relative; aspect-ratio: 12 / 7; min-height: 320px; overflow: hidden; border: 1px solid var(--border); background: color-mix(in srgb,var(--card) 78%,#0b1020); }
   #n6-lab #thermal-field, #n6-lab #thermal-airflow { position: absolute; inset: 0; width: 100%; height: 100%; }
   #n6-lab #thermal-field { image-rendering: auto; }
   #n6-lab #thermal-airflow { pointer-events: none; }
@@ -654,6 +680,14 @@
   #n6-lab .thermal-risk-flow { fill: none; stroke: #f59e0b; stroke-dasharray: 4 6; marker-end: url(#thermal-arrow); }
   #n6-lab .thermal-field-label { fill: #fff; font-size: 11px; font-weight: 650; paint-order: stroke; stroke: rgba(0,0,0,.65); stroke-width: 3px; }
   #n6-lab .thermal-field-note { fill: rgba(255,255,255,.76); font-size: 10px; paint-order: stroke; stroke: rgba(0,0,0,.6); stroke-width: 3px; }
+  #n6-lab .thermal-tick { stroke: rgba(255,255,255,.55); stroke-width: 1; }
+  #n6-lab .thermal-tick-label { fill: rgba(255,255,255,.7); font-size: 9px; paint-order: stroke; stroke: rgba(0,0,0,.55); stroke-width: 2.5px; }
+  #n6-lab .thermal-scalebar { stroke: #fff; stroke-width: 2.4; }
+  #n6-lab .thermal-source { stroke: #fff; stroke-width: 1.2; }
+  #n6-lab .thermal-source[data-evidence="inferred"] { stroke-dasharray: 2 2; }
+  #n6-lab .thermal-source[data-evidence="unknown"] { stroke: #f59e0b; stroke-dasharray: 1 2; }
+  #n6-lab .thermal-flow-through { fill: none; stroke: rgba(219,246,255,.85); stroke-width: 1.4; stroke-dasharray: 3 3; }
+  #n6-lab .thermal-flow-through-dot { fill: rgba(219,246,255,.9); }
   #n6-lab .thermal-scale { margin-top: 9px; color: var(--muted-foreground); font-size: 9px; }
   #n6-lab .thermal-scale-ramp { position: relative; height: 11px; background: linear-gradient(90deg,#1e40af 0%,#06b6d4 19%,#22c55e 31%,#facc15 50%,#f97316 69%,#ef4444 88%,#7f1d1d 100%); }
   #n6-lab .thermal-scale-ramp i { display: block; height: 100%; }
@@ -674,6 +708,7 @@
   #n6-lab .port-card[data-target="sata"] { border-left-color: var(--viz-series-3); }
   #n6-lab .port-card[data-target="slimsas"] { border-left-color: var(--warn); }
   #n6-lab .port-card[data-target="empty"] { opacity: .55; }
+  #n6-lab .port-card[data-target="none"] { border-left-color: var(--bad); }
   #n6-lab .lab-callout { border-left: 3px solid var(--viz-series-3); padding: 9px 11px; background: color-mix(in srgb,var(--muted) 30%,transparent); font-size: 12px; }
   #n6-lab .lab-callout[data-level="warn"] { border-left-color: var(--warn); }
   #n6-lab .lab-callout[data-level="bad"] { border-left-color: var(--bad); }
@@ -700,6 +735,17 @@
   #n6-lab .price-problem-list, #n6-lab .price-local-list { margin: 6px 0; padding-left: 18px; color: var(--muted-foreground); }
   #n6-lab .price-local-list li { margin-bottom: 4px; }
   #n6-lab .price-override { display: inline-flex; gap: 4px; align-items: center; margin-right: 6px; color: var(--muted-foreground); }
+  #n6-lab .price-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 8px 0; font-size: 12px; }
+  #n6-lab .price-filters label { display: inline-flex; gap: 4px; align-items: center; color: var(--muted-foreground); }
+  #n6-lab .price-group { border: 1px solid var(--border); margin-bottom: 6px; }
+  #n6-lab .price-group[open] { background: color-mix(in srgb, var(--card) 92%, transparent); }
+  #n6-lab .price-group-summary { cursor: pointer; padding: 7px 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  #n6-lab .price-group-meta { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 12px; color: var(--muted-foreground); }
+  #n6-lab .price-chip { border: 1px solid var(--border); padding: 1px 6px; font-size: 11px; color: var(--muted-foreground); }
+  #n6-lab .price-flag { color: var(--warning-foreground, #b45309); }
+  #n6-lab .price-group .table-responsive { padding: 0 10px 10px; }
+  #n6-lab .price-variant-btn { border: 1px solid var(--border); background: transparent; padding: 3px 8px; cursor: pointer; font-size: 12px; }
+  #n6-lab .price-variant-picker { max-width: 220px; font-size: 12px; }
   #n6-lab .price-search-links { display: block; margin-top: 4px; }
   #n6-lab .price-search-links a { margin-right: 6px; }
   #n6-lab .price-sku-details { margin-top: 9px; }

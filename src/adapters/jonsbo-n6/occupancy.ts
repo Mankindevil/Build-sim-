@@ -1,85 +1,139 @@
 import type { BuildConfig } from "../../config/types";
-import type { OccupancyModel, Occupant } from "../../core/occupancy";
+import type { ConflictHit, OccupancyModel, Occupant } from "../../core/occupancy";
 import type { EngineFinding } from "../../core/engine";
 import type { EvidenceLevel } from "../../core/evidence";
-import { needsHba } from "../../core/policy";
+import type { CenteredBox, PlacedPart, Vec3 } from "../../core/geometry";
+import { toBoxMm } from "../../core/geometry";
+import type { SkuCatalog } from "../../sku/types";
+import { loadRawCatalog } from "../../sku/catalog";
 import n6Profile from "../../../data/cases/jonsbo-n6/profile.json";
+import geo from "../../../data/cases/jonsbo-n6/geometry.json";
+import {
+  buildN6Geometry,
+  n6PsuPlacement,
+  trayCageBox,
+  unionBox,
+  type GeometryEnv,
+} from "./geometry";
 
 /** Official N6 published envelope (mm) from constraint registry / manual. */
 export const N6_ENVELOPE = {
-  widthMm: 305,
-  depthMm: 353,
-  heightMm: 318,
+  widthMm: geo.envelope.w,
+  depthMm: geo.envelope.d,
+  heightMm: geo.envelope.h,
 } as const;
 
 function looksLikeSfx(psuId: string): boolean {
   return /sfx|sf750|sf-750/i.test(psuId);
 }
 
+const box = (c: Vec3, w: number, h: number, d: number): CenteredBox => ({ c, w, h, d });
+
 /**
- * Slot graph for N6. Internal AABB anchors that are not in the manual
- * are marked `inferred` or `unknown` and must not be sold as CAD.
+ * Slot graph for N6, derived from `data/cases/jonsbo-n6/geometry.json` so the
+ * mount volumes and the drawn parts cannot drift apart. Internal anchors that
+ * are not in the manual stay `inferred` and must not be sold as CAD.
  */
 export function buildN6Slots(): OccupancyModel["slots"] {
+  const boardTop = geo.board.topY;
+  const atxMax = n6Profile.psuLimits.atxMaxLengthMm;
+  const sfxMax = n6Profile.psuLimits.sfxMaxLengthMm;
+  const atx = geo.psu.rearUpperAtx;
+  const front = geo.psu.frontSfx;
+  const bottom = geo.psu.bottomSfx;
+  const front140 = geo.fanMounts.front140;
+  const rad240 = geo.fanMounts.radiator240Front;
+
   return [
     {
       id: "psu.rear_upper",
       kind: "psu",
-      box: { x: 0, y: 220, z: 250, w: 150, h: 86, d: 140 },
+      box: toBoxMm(box([atx.c[0]!, atx.c[1]!, atx.zRear - atxMax / 2], atx.w, atx.h, atxMax)),
       evidence: "inferred",
-      note: "ATX rear-upper placement reconstructed from manual topology — not registered CAD",
+      note: "ATX 后上位：截面为 ATX 规范，深度用机箱 220mm 上限；机箱内锚点为按手册重建的推算值，不是注册 CAD",
     },
     {
       id: "psu.front_sfx",
       kind: "psu",
-      box: { x: 0, y: 0, z: 0, w: 125, h: 63, d: 100 },
+      box: toBoxMm(
+        box([front.c[0]!, front.c[1]!, front.zFront + sfxMax / 2], front.w, front.h, sfxMax),
+      ),
       exclusiveWith: ["fan.front", "radiator.front_240"],
       evidence: "inferred",
-      note: "Front SFX vs front fans / 240 rad coexistence is unknown in local registry",
+      note: "前置 SFX 与前风扇 / 240 冷排的共存关系手册未给出，按保守互斥处理",
     },
     {
       id: "psu.bottom_sfx",
       kind: "psu",
-      box: { x: 0, y: 0, z: 120, w: 125, h: 63, d: 100 },
+      box: toBoxMm(
+        box([bottom.c[0]!, bottom.c[1]!, bottom.zRear - sfxMax / 2], bottom.w, bottom.h, sfxMax),
+      ),
       evidence: "inferred",
     },
     {
       id: "fan.front",
       kind: "fan",
-      box: { x: 0, y: 0, z: 0, w: 140, h: 140, d: 25 },
+      box: toBoxMm(
+        unionBox(
+          front140.xOffsets.map((x) =>
+            box([x, front140.c[1]!, front140.c[2]!], front140.frameMm, front140.frameMm, front140.thicknessMm),
+          ),
+        ),
+      ),
       evidence: "official",
-      note: "Front fan mounts exist; purchased ¥629 SKU fan inclusion is unknown",
+      note: "手册 §14 证明前部有 120×2 / 140×2 安装位；¥629 SKU 是否随箱附送风扇未知",
     },
     {
       id: "radiator.front_240",
       kind: "radiator",
-      box: { x: 0, y: 0, z: 0, w: 140, h: 280, d: 30 },
+      box: toBoxMm(box(rad240.c as Vec3, rad240.w, rad240.h, rad240.d)),
       evidence: "official",
     },
     {
       id: "pcie.slot1",
       kind: "pcie",
-      box: { x: 40, y: 40, z: 40, w: 20, h: 120, d: 300 },
+      box: toBoxMm(
+        box(
+          [geo.gpu.x, boardTop + geo.gpu.heightConsumerMm / 2, geo.gpu.zRear - n6Profile.gpuLimits.publishedMaxMm / 2],
+          geo.gpu.slotPitchMm * 2,
+          geo.gpu.heightConsumerMm,
+          n6Profile.gpuLimits.publishedMaxMm,
+        ),
+      ),
       evidence: "inferred",
     },
     {
       id: "pcie.slot2",
       kind: "pcie",
-      box: { x: 60, y: 40, z: 40, w: 20, h: 120, d: 300 },
+      box: toBoxMm(box([geo.hba.c[0]!, boardTop + geo.hba.h / 2, geo.hba.c[1]!], geo.hba.w, geo.hba.h, geo.hba.d)),
       evidence: "inferred",
     },
     {
       id: "cooler.cpu",
       kind: "cooler",
-      box: { x: 90, y: 80, z: 80, w: 100, h: 65, d: 100 },
+      box: toBoxMm(
+        box(
+          [geo.socket.c[0]!, boardTop + n6Profile.coolerLimits.openTopMm / 2, geo.socket.c[1]!],
+          geo.socket.keepoutMm,
+          n6Profile.coolerLimits.openTopMm,
+          geo.socket.keepoutMm,
+        ),
+      ),
       evidence: "inferred",
     },
-    ...Array.from({ length: 9 }, (_, i) => ({
+    ...Array.from({ length: geo.trays.count }, (_, i) => ({
       id: `bay.${i + 1}`,
       kind: "drive_bay" as const,
-      box: { x: 180, y: 20 + i * 28, z: 20, w: 110, h: 26, d: 150 },
+      box: toBoxMm(
+        box(
+          [(i - 4) * geo.trays.pitchMm, geo.trays.c[1]!, geo.trays.c[2]!],
+          geo.trays.pitchMm,
+          geo.trays.drive35.h + 2,
+          geo.trays.drive35.d + 2,
+        ),
+      ),
       evidence: "inferred" as EvidenceLevel,
-      note: "Tray pitch reconstructed for planning — verify against manual photos",
+      note: "托架间距按手册 p.19 的九位横向单排反推；手册不给间距",
     })),
     // Lower-chamber structure. These are chassis parts, not purchases, but they own
     // real volume: leaving them out of the slot graph made the lower half read as
@@ -87,131 +141,157 @@ export function buildN6Slots(): OccupancyModel["slots"] {
     {
       id: "backplane.pcb",
       kind: "structure",
-      box: { x: 180, y: 20, z: 172, w: 250, h: 102, d: 8 },
+      box: toBoxMm(
+        box(geo.backplane.pcb.c as Vec3, geo.backplane.pcb.w, geo.backplane.pcb.h, geo.backplane.pcb.d),
+      ),
       evidence: "inferred",
-      note: "Backplane sits behind the tray stack with the four power inlets in a row (manual §13 p.14); exact PCB outline is a planning envelope",
+      note: geo.backplane.source,
     },
     {
       id: "tray.frame",
       kind: "structure",
-      box: { x: 175, y: 16, z: 18, w: 258, h: 110, d: 152 },
+      box: toBoxMm(trayCageBox()),
       evidence: "inferred",
-      note: "Steel cage around the nine trays — envelope reconstructed from the tray pitch, not CAD",
+      note: geo.trayFrame.source,
     },
     {
       id: "fan.left_bracket",
       kind: "structure",
-      box: { x: 2, y: 16, z: 40, w: 4, h: 124, d: 272 },
+      box: toBoxMm(
+        box(
+          geo.lowerLeftWall.fanBracket.c as Vec3,
+          geo.lowerLeftWall.fanBracket.w,
+          geo.lowerLeftWall.fanBracket.h,
+          geo.lowerLeftWall.fanBracket.d,
+        ),
+      ),
       exclusiveWith: ["psu.bottom_sfx"],
       evidence: "official",
-      note: "Removable 4-screw bracket carrying the left 120×2; must come off to reach the backplane inlets (§13.1) and stays off when the bottom PSU rack takes its place (§8.1)",
+      note: geo.lowerLeftWall.fanBracket.source,
     },
+    ...geo.clearances.map((c) => ({
+      id: c.id,
+      kind: "cable_clearance" as const,
+      box: toBoxMm(box(c.c as Vec3, c.w, c.h, c.d)),
+      evidence: "inferred" as EvidenceLevel,
+      note: c.source,
+    })),
   ];
 }
 
-export function occupantsFromConfig(config: BuildConfig): Occupant[] {
-  const occ: Occupant[] = [];
-  const topo = config.selection.psuTopology;
-  const psuFormHint = looksLikeSfx(config.selection.psuId);
-  const caseId = config.caseId || "case.jonsbo-n6";
+const occIdFor = (part: PlacedPart): string =>
+  `occ-${(part.slotId ?? part.id).replace(/\./g, "-")}`;
 
-  // Chassis structure is always in the box; the bracket is the one piece that comes
-  // and goes, and it leaves precisely when the bottom PSU rack takes its place.
-  occ.push({ id: "occ-backplane", skuId: caseId, slotIds: ["backplane.pcb"], evidence: "inferred" });
-  occ.push({ id: "occ-tray-frame", skuId: caseId, slotIds: ["tray.frame"], evidence: "inferred" });
-  if (topo !== "bottom" && topo !== "dual") {
-    occ.push({
-      id: "occ-left-fan-bracket",
-      skuId: caseId,
-      slotIds: ["fan.left_bracket"],
-      evidence: "official",
+/**
+ * Turn the geometry list into occupancy claims. Parts that share a slot become
+ * one occupant carrying the union of their envelopes (a fan wall is one claim on
+ * `fan.front`), and every occupant carries a real envelope so the AABB pass has
+ * something to work with instead of being dead code.
+ */
+export function occupantsFromGeometry(parts: PlacedPart[]): Occupant[] {
+  const byOccId = new Map<string, { occ: Occupant; boxes: CenteredBox[] }>();
+  const occIdByPartId = new Map<string, string>();
+
+  for (const part of parts) {
+    const id = occIdFor(part);
+    occIdByPartId.set(part.id, id);
+    const existing = byOccId.get(id);
+    if (existing) {
+      existing.boxes.push(part.box);
+      continue;
+    }
+    byOccId.set(id, {
+      boxes: [part.box],
+      occ: {
+        id,
+        skuId: part.skuId ?? part.id,
+        label: part.name,
+        slotIds: part.slotId ? [part.slotId] : [],
+        evidence: part.sizeEvidence,
+        anchorEvidence: part.anchorEvidence,
+        envelope: toBoxMm(part.box),
+        ...(part.group ? { group: part.group } : {}),
+        ...(part.kind === "clearance" ? { clearance: true } : {}),
+        ...(part.mountedOn ? { mountedOn: part.mountedOn } : {}),
+      },
     });
   }
 
-  if (topo === "dual") {
-    occ.push({
-      id: "occ-psu-primary",
-      skuId: config.selection.psuId,
-      slotIds: psuFormHint ? ["psu.front_sfx"] : ["psu.rear_upper"],
-      evidence: "inferred",
-    });
-    occ.push({
-      id: "occ-psu-secondary",
-      skuId: config.selection.secondaryPsuId ?? "psu.sfx-450-unlocked",
-      slotIds: ["psu.bottom_sfx"],
-      evidence: "inferred",
-    });
-  } else if (topo === "bottom") {
-    occ.push({
-      id: "occ-psu",
-      skuId: config.selection.psuId,
-      slotIds: ["psu.bottom_sfx"],
-      evidence: "inferred",
-    });
-  } else {
-    occ.push({
-      id: "occ-psu",
-      skuId: config.selection.psuId,
-      slotIds: psuFormHint ? ["psu.front_sfx"] : ["psu.rear_upper"],
-      evidence: "inferred",
-    });
+  const out: Occupant[] = [];
+  for (const { occ, boxes } of byOccId.values()) {
+    if (boxes.length > 1) occ.envelope = toBoxMm(unionBox(boxes));
+    // Re-point parent references at the parent's *occupant* id.
+    if (occ.mountedOn) {
+      const parent = occIdByPartId.get(occ.mountedOn);
+      if (parent && parent !== occ.id) occ.mountedOn = parent;
+      else delete occ.mountedOn;
+    }
+    out.push(occ);
+  }
+  return out;
+}
+
+/**
+ * Turn engine conflict hits back into boxes so the preview marks the volume the
+ * engine actually objected to, instead of carrying its own hardcoded red boxes
+ * that could disagree with the verdict list.
+ */
+export function conflictMarkerParts(parts: PlacedPart[], hits: ConflictHit[]): PlacedPart[] {
+  const boxesByOcc = new Map<string, CenteredBox[]>();
+  for (const part of parts) {
+    const id = occIdFor(part);
+    const list = boxesByOcc.get(id) ?? [];
+    list.push(part.box);
+    boxesByOcc.set(id, list);
   }
 
-  occ.push({
-    id: "occ-cooler",
-    skuId: config.selection.coolerId,
-    slotIds: ["cooler.cpu"],
-    evidence: "inferred",
-  });
-
-  if (config.selection.coolerId.includes("aio-240") || config.selection.coolerId.includes("aio240")) {
-    occ.push({
-      id: "occ-rad-240",
-      skuId: config.selection.coolerId,
-      slotIds: ["radiator.front_240", "fan.front"],
-      evidence: "official",
+  const out: PlacedPart[] = [];
+  for (const hit of hits) {
+    const a = boxesByOcc.get(hit.a);
+    const b = boxesByOcc.get(hit.b);
+    if (!a || !b) continue;
+    const overlap = intersectBox(unionBox(a), unionBox(b));
+    if (!overlap) continue;
+    out.push({
+      id: `conflict.${hit.id}`,
+      name: hit.verdict === "bad" ? "包络相交（判定不兼容）" : "包络相交（需实测）",
+      kind: "conflict",
+      box: overlap,
+      sizeEvidence: hit.evidence,
+      anchorEvidence: "inferred",
+      dimsLabel: `相交 ${hit.overlapMm ?? 0}mm · ${hit.verdict}`,
+      note: hit.message,
     });
   }
+  return out;
+}
 
-  if (config.selection.gpuId !== "gpu.none") {
-    occ.push({
-      id: "occ-gpu",
-      skuId: config.selection.gpuId,
-      slotIds: ["pcie.slot1"],
-      evidence: "unknown",
-    });
+function intersectBox(a: CenteredBox, b: CenteredBox): CenteredBox | null {
+  const lo: number[] = [];
+  const size: number[] = [];
+  const half = [a.w / 2, a.h / 2, a.d / 2];
+  const halfB = [b.w / 2, b.h / 2, b.d / 2];
+  for (let i = 0; i < 3; i++) {
+    const min = Math.max(a.c[i]! - half[i]!, b.c[i]! - halfB[i]!);
+    const max = Math.min(a.c[i]! + half[i]!, b.c[i]! + halfB[i]!);
+    if (max - min <= 0) return null;
+    lo.push(min);
+    size.push(max - min);
   }
+  return {
+    c: [lo[0]! + size[0]! / 2, lo[1]! + size[1]! / 2, lo[2]! + size[2]! / 2],
+    w: size[0]!,
+    h: size[1]!,
+    d: size[2]!,
+  };
+}
 
-  const hbaNeeded = needsHba(config.selection, n6Profile.hba);
-  if (hbaNeeded) {
-    occ.push({
-      id: "occ-hba",
-      skuId: config.selection.hbaSkuId ?? n6Profile.hba.defaultSkuId,
-      slotIds: ["pcie.slot2"],
-      evidence: "inferred",
-    });
-  }
-
-  for (let i = 1; i <= config.selection.diskCount; i++) {
-    if (config.selection.boot === "bay" && i === 9) break;
-    occ.push({
-      id: `occ-disk-${i}`,
-      skuId: config.selection.diskSkuId ?? n6Profile.defaults.diskSkuId,
-      slotIds: [`bay.${i}`],
-      evidence: "official",
-    });
-  }
-
-  if (config.selection.boot === "bay") {
-    occ.push({
-      id: "occ-boot-bay",
-      skuId: n6Profile.defaults.bootBaySkuId,
-      slotIds: ["bay.9"],
-      evidence: "inferred",
-    });
-  }
-
-  return occ;
+export function occupantsFromConfig(
+  config: BuildConfig,
+  catalog: SkuCatalog = loadRawCatalog(),
+  env: GeometryEnv = {},
+): Occupant[] {
+  return occupantsFromGeometry(buildN6Geometry(config, catalog, env));
 }
 
 export function n6DomainFindings(config: BuildConfig): EngineFinding[] {
@@ -264,10 +344,16 @@ export function n6DomainFindings(config: BuildConfig): EngineFinding[] {
   return findings;
 }
 
-export function buildN6Occupancy(config: BuildConfig): OccupancyModel {
+export function buildN6Occupancy(
+  config: BuildConfig,
+  catalog: SkuCatalog = loadRawCatalog(),
+  env: GeometryEnv = {},
+): OccupancyModel {
   return {
     caseId: config.caseId || "case.jonsbo-n6",
     slots: buildN6Slots(),
-    occupants: occupantsFromConfig(config),
+    occupants: occupantsFromConfig(config, catalog, env),
   };
 }
+
+export { n6PsuPlacement };

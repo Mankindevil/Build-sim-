@@ -126,14 +126,35 @@ lead would have to carry, and by `computeThermal` as the per-drive chamber load.
 ## Data path: HBA ports and which breakout fits what
 
 The board exposes 4 native SATA plus a SlimSAS port that can carry 4 more, so eight SATA
-devices is the native ceiling — hence `hba.autoWhenSataDevicesOver: 8`.
+devices is the native ceiling. Both counts live on the board SKU
+(`board.asus-w680m-ace-se` → `nativeSataPorts` / `slimsasSataPorts`, manual p.1-9), not on
+the case profile: the case has trays, the board has ports, and only the latter changes
+when you swap boards. `needsHba` adds them up instead of reading a stored threshold, so
+the trigger cannot drift away from the ports it describes. A board with no audited counts
+reports zero and forces an HBA rather than inheriting this one's ports.
 
-Two facts the planner now enforces, because getting either wrong buys the wrong part:
+Those four SlimSAS ports are conditional, and the condition is now modelled rather than
+assumed. `w680m.storage.slimSasModes` records `simultaneousModeUse: false`: the connector
+is four PCIe lanes that firmware gives either to one NVMe drive or to four SATA ports, never
+both. With only two M.2 slots on the board, a third NVMe has nowhere else to go — so
+`selection.nvmeCount > m2Slots` flips `slimsasMode` to `nvme`, zeroes `slimsasSata`, and the
+board ceiling drops 8 → 4. Previously the four were counted unconditionally, which was
+correct only because the UI offered no way to add a third NVMe.
+
+Neither the third drive nor the SlimSAS-to-NVMe adapter has an audited MPN, so both are
+raised as `unknown` checklist items instead of being invented into the BOM. Its physical
+position is not in the geometry model either, and the warning says so.
+
+Three facts the planner now enforces, because getting any of them wrong buys the wrong part:
 
 - **Port count is a ceiling.** `hba.lsi-9300-8i-it` has `ports: 8` across two SFF-8643
   connectors (4 lanes each). Nine data drives therefore cannot all land on the card; the
   ninth falls back to a board port and `planN6Wiring` emits a warning about running two
   controllers. Earlier the planner labelled it `HBA P8`, a port that does not exist.
+- **The board is a ceiling too.** Board fallback stops at `nativeSataPorts +
+  slimsasSataPorts`. A bay past both controllers is emitted as `target: "none"` with a
+  warning, because the alternative — printing a SlimSAS lane that does not exist — is a
+  plan you cannot build.
 - **SFF-8643 ≠ SFF-8654.** The HBA takes Mini-SAS HD (SFF-8643,
   `accessory.minisas-hd-4xsata`); the board's extra lanes take SlimSAS (SFF-8654,
   `accessory.slimsas-4xsata`). The plugs are not interchangeable, so they are separate

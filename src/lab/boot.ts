@@ -1,6 +1,8 @@
 import { loadBundledCatalog, requireSku, bundledPriceSummary } from "../sku/catalog";
-import { evaluateBuild, type ThermalEnv } from "../core/evaluate";
+import { evaluateBuild, type BuildEvaluation, type ThermalEnv } from "../core/evaluate";
 import { EVIDENCE_LABELS } from "../core/evidence";
+import { sampleSlice, type FieldBounds, type SlicePlane } from "../core/thermal-field";
+import { N6_DECK_Y, N6_ENVELOPE_BOX, N6_INTERIOR_BOX } from "../adapters/jonsbo-n6/geometry";
 import {
   downloadText,
   exportChecklist,
@@ -14,12 +16,15 @@ import { applyPriceSnapshot, snapshotSummary } from "../price/merge";
 import { buildSkuSearchLinks, pickOfficialUrl } from "../price/search";
 import { getLocalSnapshot, initPricePanel, updatePriceCatalog } from "./price-panel";
 import { planPanelWiring } from "../wiring/panel";
+import { boardSataPorts, boardStorage, nativeSataCeiling } from "../core/policy";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 import v1RuntimeUrl from "./v1-runtime.js?url";
 
 let catalog = loadBundledCatalog();
 const views = buildLabCatalogs(catalog);
 let priceStamp = bundledPriceSummary();
+
+const BOARD_ID = "board.asus-w680m-ace-se";
 
 function $(id: string): HTMLElement | null {
   return document.getElementById(id);
@@ -40,7 +45,7 @@ function configFromDom(): BuildConfig {
     name: "N6 Build Lab live",
     updatedAt: new Date().toISOString().slice(0, 10),
     caseId: "case.jonsbo-n6",
-    boardId: "board.asus-w680m-ace-se",
+    boardId: BOARD_ID,
     cpuId: "cpu.i5-14500",
     selection: {
       psuId: val("psu-select"),
@@ -50,6 +55,7 @@ function configFromDom(): BuildConfig {
       memoryId: val("ram-select"),
       diskCount: Number(val("disk-range") || "1"),
       diskSkuId: n6Profile.defaults.diskSkuId,
+      nvmeCount: Number(val("nvme-select") || String(n6Profile.defaults.ownedNvmeQty)),
       boot,
       hbaMode,
       hbaSkuId: hbaMode === "always" ? n6Profile.hba.defaultSkuId : null,
@@ -74,6 +80,7 @@ function applyConfigToDom(config: BuildConfig): void {
   set("gpu-select", config.selection.gpuId);
   set("ram-select", config.selection.memoryId);
   set("disk-range", String(config.selection.diskCount));
+  if (config.selection.nvmeCount) set("nvme-select", String(config.selection.nvmeCount));
   set("boot-select", config.selection.boot);
   set("hba-select", config.selection.hbaMode);
   if (config.selection.secondaryPsuId) set("secondary-psu-select", config.selection.secondaryPsuId);
@@ -117,10 +124,16 @@ function updateWiringFromEngine(result: ReturnType<typeof evaluateBuild>): void 
       sata: "主板 SATA",
     };
     portMap.innerHTML = result.wiring.bayPaths
-      .map(
-        (b) =>
-          `<div class="port-card" data-target="${b.portLabel === "—" ? "empty" : b.target}"><b>Bay ${b.bayIndex}</b><span>${b.portLabel === "—" ? "空托架" : `${targetZh[b.target] ?? b.target} · ${b.portLabel}`}</span><small>${evidenceLabel(b.evidence)}${b.note ? " — " + b.note : ""}</small></div>`,
-      )
+      .map((b) => {
+        const empty = b.portLabel === "—";
+        // `none` already reads as a sentence; prefixing it with a port kind would stutter.
+        const label = empty
+          ? "空托架"
+          : b.target === "none"
+            ? b.portLabel
+            : `${targetZh[b.target] ?? b.target} · ${b.portLabel}`;
+        return `<div class="port-card" data-target="${empty ? "empty" : b.target}"><b>Bay ${b.bayIndex}</b><span>${label}</span><small>${evidenceLabel(b.evidence)}${b.note ? " — " + b.note : ""}</small></div>`;
+      })
       .join("");
   }
   const notes = $("wiring-notes");
@@ -441,15 +454,23 @@ function reapplyLocalPrices(): void {
   window.__N6_LAB_API__?.render();
 }
 
-function afterRender(env?: ThermalEnv): void {
-  const config = configFromDom();
-  const result = evaluateBuild(config, catalog, env);
-  updateFitFromEngine(result);
-  updateWiringFromEngine(result);
-  updateBackplaneHarness(result.wiring);
-  updatePanelWiring(config);
-  updateAirBalance(result);
-  updateGalleryFromSkus(config);
+/**
+ * One evaluation per render. The legacy runtime calls this at the *top* of its
+ * render pass and passes the result back into `afterRender`, so the KPI strip and
+ * the air-balance card are reading the same numbers from the same run.
+ */
+function evaluate(env?: ThermalEnv): BuildEvaluation {
+  return evaluateBuild(configFromDom(), catalog, env);
+}
+
+function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
+  const evaluation = result ?? evaluate(env);
+  updateFitFromEngine(evaluation);
+  updateWiringFromEngine(evaluation);
+  updateBackplaneHarness(evaluation.wiring);
+  updatePanelWiring(evaluation.config);
+  updateAirBalance(evaluation);
+  updateGalleryFromSkus(evaluation.config);
   updatePriceStamp();
 }
 
@@ -482,8 +503,28 @@ declare global {
       rams: typeof views.rams;
       officialProducts: typeof views.officialProducts;
       profile: typeof n6Profile;
+      /** Board storage facts, so the runtime never restates a count the SKU owns. */
+      boardStorage: ReturnType<typeof boardStorage>;
+      /** SATA ceiling once NVMe drives have claimed their slots. */
+      sataCeiling: (nvmeCount: number) => number;
       priceSnapshot: ReturnType<typeof bundledPriceSummary>;
-      afterRender: (c?: unknown, env?: ThermalEnv) => void;
+      /** Runs the V2 engine for the current DOM config. Pure and synchronous. */
+      evaluate: (env?: ThermalEnv) => BuildEvaluation;
+      /** Millimetre-registered slice of the heat field, for the 2D canvas. */
+      thermalSlice: (
+        field: FieldBounds,
+        plane: SlicePlane,
+        offsetMm: number,
+        extentMm: [number, number, number, number],
+        gridMm: number,
+      ) => ReturnType<typeof sampleSlice>;
+      /** Case frame constants, so the runtime keeps no millimetre copies. */
+      caseGeometry: {
+        envelope: { w: number; h: number; d: number };
+        interior: { c: [number, number, number]; w: number; h: number; d: number };
+        deckY: number;
+      };
+      afterRender: (result?: BuildEvaluation, env?: ThermalEnv) => void;
     };
     __N6_LAB_API__?: {
       readConfig: () => unknown;
@@ -498,8 +539,23 @@ async function boot(): Promise<void> {
   window.__N6_LAB__ = {
     ...views,
     profile: n6Profile,
+    boardStorage: boardStorage(catalog, BOARD_ID),
+    sataCeiling: (nvmeCount: number) =>
+      nativeSataCeiling(boardSataPorts(catalog, BOARD_ID, nvmeCount)),
     priceSnapshot: bundledPriceSummary(),
-    afterRender: (_c, env) => afterRender(env),
+    evaluate,
+    thermalSlice: sampleSlice,
+    caseGeometry: {
+      envelope: { w: N6_ENVELOPE_BOX.w, h: N6_ENVELOPE_BOX.h, d: N6_ENVELOPE_BOX.d },
+      interior: {
+        c: N6_INTERIOR_BOX.c,
+        w: N6_INTERIOR_BOX.w,
+        h: N6_INTERIOR_BOX.h,
+        d: N6_INTERIOR_BOX.d,
+      },
+      deckY: N6_DECK_Y,
+    },
+    afterRender,
   };
   bindConfigChrome();
 

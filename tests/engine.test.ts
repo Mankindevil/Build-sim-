@@ -99,13 +99,15 @@ describe("wiring + config", () => {
     expect(parsed.selection.psuId).toContain("focus");
   });
 
-  it("needsHba follows case profile threshold", async () => {
-    const { needsHba } = await import("../src/core/policy");
+  it("needsHba triggers past the board's derived SATA ceiling", async () => {
+    const { needsHba, nativeSataCeiling } = await import("../src/core/policy");
+    const ports = { nativeSata: 4, slimsasSata: 4 };
+    expect(nativeSataCeiling(ports)).toBe(8);
+    expect(needsHba({ hbaMode: "auto", diskCount: 8, boot: "m2" }, ports)).toBe(false);
+    expect(needsHba({ hbaMode: "auto", diskCount: 8, boot: "bay" }, ports)).toBe(true);
+    // Fewer breakout lanes must move the trigger with them, not leave it at a stored 8.
     expect(
-      needsHba({ hbaMode: "auto", diskCount: 8, boot: "m2" }, { autoWhenSataDevicesOver: 8 }),
-    ).toBe(false);
-    expect(
-      needsHba({ hbaMode: "auto", diskCount: 8, boot: "bay" }, { autoWhenSataDevicesOver: 8 }),
+      needsHba({ hbaMode: "auto", diskCount: 6, boot: "m2" }, { nativeSata: 4, slimsasSata: 0 }),
     ).toBe(true);
   });
 

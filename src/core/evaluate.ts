@@ -4,16 +4,24 @@ import { requireSku } from "../sku/catalog";
 import { evaluateOccupancy, type EngineFinding, type EngineResult } from "./engine";
 import {
   buildN6Occupancy,
+  conflictMarkerParts,
   n6DomainFindings,
 } from "../adapters/jonsbo-n6/occupancy";
+import type { GeometryEnv } from "../adapters/jonsbo-n6/geometry";
+import { N6_DECK_Y, buildN6Geometry } from "../adapters/jonsbo-n6/geometry";
+import type { PlacedPart } from "./geometry";
+import { buildFieldBounds, type FieldBounds } from "./thermal-field";
 import { planN6Wiring } from "../wiring/plan";
 import type { WiringPlan } from "../wiring/types";
-import { needsHba } from "./policy";
+import { buildSataPorts, needsHba } from "./policy";
 import {
+  PLANNING_THETA,
   computeThermal,
   leftFanMountAvailable,
+  type ComponentInput,
   type FanGroupInput,
   type FanMode,
+  type Range,
   type ThermalResult,
 } from "./thermal";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
@@ -36,6 +44,31 @@ export interface ThermalEnv {
   /** DC load carried by the PSU that sits in the lower chamber. */
   psuDcWatts: number;
   workload?: "idle" | "work";
+  /**
+   * Per-part dissipation, so component temperatures rest on the same load split
+   * the power model already produced rather than a second estimate.
+   */
+  loads?: { cpuW: number; gpuW: number; hbaW: number; psuDcW: number };
+  /** Keep the chipset x4 envelope in the model before an HBA is bought. */
+  reserveHbaSlot?: boolean;
+  /** User-entered card envelope for the lab's "custom GPU" path (no SKU exists). */
+  gpuOverride?: GeometryEnv["gpuOverride"];
+}
+
+/**
+ * Which fan mounts are populated is already in `ThermalEnv.fans`, so the geometry
+ * model reads the same field rather than keeping a second copy that could drift.
+ */
+export function geometryEnvFrom(env?: ThermalEnv): GeometryEnv {
+  if (!env) return {};
+  return {
+    frontFans: env.fans.front ? (env.fans.front.size === 140 ? "140x2" : "120x2") : "none",
+    rearFan: Boolean(env.fans.rear?.count),
+    driveFans: Boolean(env.fans.left?.count),
+    sideFans: Boolean(env.fans.right?.count),
+    ...(env.reserveHbaSlot ? { reserveHbaSlot: true } : {}),
+    ...(env.gpuOverride ? { gpuOverride: env.gpuOverride } : {}),
+  };
 }
 
 export interface BuildEvaluation {
@@ -44,8 +77,12 @@ export interface BuildEvaluation {
   wiring: WiringPlan;
   findings: EngineFinding[];
   bom: BuildLineItem[];
+  /** The millimetre geometry every consumer shares — preview, collisions, heat field. */
+  geometry: PlacedPart[];
   /** Present only when the caller supplies airflow inputs. */
   thermal?: ThermalResult;
+  /** Heat sources placed at real centroids. Present whenever `thermal` is. */
+  heatField?: FieldBounds;
 }
 
 function isSfx(psuId: string, catalog: SkuCatalog): boolean {
@@ -81,7 +118,7 @@ export function deriveBom(config: BuildConfig, catalog: SkuCatalog): BuildLineIt
     items.push({ skuId: d.bootBaySkuId, qty: 1, bucket: "buy_now" });
   }
 
-  const hbaNeeded = needsHba(config.selection, n6Profile.hba);
+  const hbaNeeded = needsHba(config.selection, buildSataPorts(catalog, config));
   if (hbaNeeded) {
     items.push({
       skuId: config.selection.hbaSkuId ?? n6Profile.hba.defaultSkuId,
@@ -236,7 +273,7 @@ function gpuHbaFindings(config: BuildConfig, catalog: SkuCatalog): EngineFinding
     return findings;
   }
   const slots = gpu.dims.slots ?? 0;
-  const hbaNeeded = needsHba(config.selection, n6Profile.hba);
+  const hbaNeeded = needsHba(config.selection, buildSataPorts(catalog, config));
 
   if (hbaNeeded) {
     // With the x16 slot taken by the GPU, an x8 HBA has only the chipset x4 slot
@@ -281,6 +318,98 @@ function gpuHbaFindings(config: BuildConfig, catalog: SkuCatalog): EngineFinding
   return findings;
 }
 
+/** Reads a θ band off the catalog; falls back to a declared planning envelope. */
+function catalogTheta(
+  sku: { attrs?: Record<string, unknown> } | undefined,
+  fallback: Range,
+): { theta: Range; evidence: ThermalResult["evidence"] } {
+  const raw = sku?.attrs?.["thetaKPerW"] as { lo?: number; hi?: number } | undefined;
+  if (typeof raw?.lo === "number" && typeof raw?.hi === "number") {
+    return {
+      theta: { lo: raw.lo, hi: raw.hi },
+      evidence:
+        (sku?.attrs?.["thetaEvidence"] as ThermalResult["evidence"] | undefined) ?? "inferred",
+    };
+  }
+  return { theta: fallback, evidence: "unknown" };
+}
+
+/** Builds the part list the thermal model puts temperatures on. */
+function componentInputs(
+  config: BuildConfig,
+  catalog: SkuCatalog,
+  env: ThermalEnv,
+  /** True only when the *primary* unit is the one sitting under the deck. */
+  psuWasteInLowerChamber: boolean,
+): ComponentInput[] {
+  const loads = env.loads;
+  if (!loads) return [];
+  const out: ComponentInput[] = [];
+
+  const cooler = catalog.skus.find((s) => s.id === config.selection.coolerId);
+  const cpu = catalogTheta(cooler, { lo: 0.4, hi: 0.9 });
+  out.push({
+    id: "cpu",
+    label: `CPU（${cooler?.name ?? "散热器未知"}）`,
+    chamber: "upper",
+    watts: loads.cpuW,
+    thetaKPerW: cpu.theta,
+    evidence: cpu.evidence,
+    thetaNote:
+      (cooler?.attrs?.["thetaNote"] as string | undefined) ??
+      "散热器 θ 未知，按下压风冷通用包络取值。",
+  });
+
+  if (loads.gpuW > 0) {
+    const gpu = catalog.skus.find((s) => s.id === config.selection.gpuId);
+    const blower = (gpu?.tags ?? []).includes("workstation");
+    const band = blower ? PLANNING_THETA["gpu-blower"]! : PLANNING_THETA["gpu-axial"]!;
+    out.push({
+      id: "gpu",
+      label: `GPU（${gpu?.name ?? "自定义包络"}）`,
+      chamber: "upper",
+      watts: loads.gpuW,
+      thetaKPerW: band.theta,
+      evidence: "inferred",
+      thetaNote: band.note,
+    });
+  }
+
+  if (loads.hbaW > 0) {
+    const directed = (env.fans.right?.count ?? 0) > 0;
+    const band = directed
+      ? PLANNING_THETA["hba-passive-directed"]!
+      : PLANNING_THETA["hba-passive"]!;
+    out.push({
+      id: "hba",
+      label: "HBA（被动散热）",
+      chamber: "upper",
+      watts: loads.hbaW,
+      thetaKPerW: band.theta,
+      evidence: "inferred",
+      thetaNote: band.note,
+    });
+  }
+
+  const psu = catalog.skus.find((s) => s.id === config.selection.psuId);
+  const eff = Number(psu?.attrs?.["cybeneticsEfficiency"] ?? psu?.attrs?.["planningEfficiency"]);
+  const eta = Number.isFinite(eff) && eff > 0 ? eff : 0.9;
+  const wasteW = loads.psuDcW > 0 ? loads.psuDcW * (1 / eta - 1) : 0;
+  if (wasteW > 0) {
+    out.push({
+      id: "psu",
+      label: `电源（${psu?.name ?? "未知"}）`,
+      chamber: psuWasteInLowerChamber ? "lower" : "upper",
+      watts: wasteW,
+      thetaKPerW: PLANNING_THETA["psu"]!.theta,
+      evidence: "inferred",
+      thetaNote: PLANNING_THETA["psu"]!.note,
+    });
+  }
+
+  return out;
+}
+
 /** Pulls per-drive dissipation and PSU efficiency out of the catalog, then balances the air. */
 function runThermal(
   config: BuildConfig,
@@ -297,6 +426,12 @@ function runThermal(
   const eff = Number(psu?.attrs?.["cybeneticsEfficiency"]);
 
   return computeThermal({
+    components: componentInputs(
+      config,
+      catalog,
+      env,
+      config.selection.psuTopology === "bottom",
+    ),
     ambientC: env.ambientC,
     fanMode: env.fanMode,
     // A left-side fan cannot draw air through a bracket that is no longer there.
@@ -318,7 +453,9 @@ export function evaluateBuild(
   catalog: SkuCatalog,
   env?: ThermalEnv,
 ): BuildEvaluation {
-  const occupancyModel = buildN6Occupancy(config);
+  const geomEnv = geometryEnvFrom(env);
+  const geometry = buildN6Geometry(config, catalog, geomEnv);
+  const occupancyModel = buildN6Occupancy(config, catalog, geomEnv);
   const extra: EngineFinding[] = [
     ...n6DomainFindings(config),
     ...memoryCoolerFindings(config, catalog),
@@ -428,7 +565,12 @@ export function evaluateBuild(
     wiring,
     findings: dedupeFindings(findings),
     bom,
-    ...(thermal ? { thermal } : {}),
+    // Conflict markers ride along with the geometry so the preview can only ever
+    // draw the volume the engine actually objected to.
+    geometry: [...geometry, ...conflictMarkerParts(geometry, occupancy.conflicts)],
+    ...(thermal
+      ? { thermal, heatField: buildFieldBounds(geometry, thermal, N6_DECK_Y) }
+      : {}),
   };
 }
 

@@ -51,6 +51,75 @@ const PASSIVE_CFM: Range = { lo: 2, hi: 6 };
 /** Drive case-to-local-air resistance. No vendor θ is published for 3.5″ HDDs. */
 const HDD_THETA_K_PER_W: Range = { lo: 0.8, hi: 1.9 };
 
+/**
+ * Case-to-local-air resistance envelopes for the parts no vendor publishes a θ
+ * for. Every one of these is a planning band, not a datasheet number, and each
+ * gets its own line in `assumptions` so it can be argued with. The lower bound
+ * of a band is "directed airflow, clean heatsink"; the upper is "still air in a
+ * drive-dense box".
+ */
+export const PLANNING_THETA: Record<string, { theta: Range; note: string }> = {
+  "hba-passive": {
+    theta: { lo: 1.6, hi: 3.0 },
+    note: "被动散热 HBA 无厂商 θ；上界按无定向气流、下界按有侧吹取包络。",
+  },
+  "hba-passive-directed": {
+    theta: { lo: 0.8, hi: 1.8 },
+    note: "被动 HBA 加一组 120mm 定向侧吹后的规划 θ；仍非实测。",
+  },
+  "gpu-blower": {
+    theta: { lo: 0.22, hi: 0.42 },
+    note: "工作站涡轮卡自带风道，θ 相对稳定；厂商只给最高工作温度，不给 θ。",
+  },
+  "gpu-axial": {
+    theta: { lo: 0.18, hi: 0.35 },
+    note: "消费级轴流卡开放式散热，散热面积大但依赖机箱内空气；θ 为规划包络。",
+  },
+  psu: {
+    theta: { lo: 0.06, hi: 0.2 },
+    note: "电源废热主要由自身风扇与外壳带走；θ 按自身废热瓦数计，风扇停转时该 θ 无物理意义。",
+  },
+};
+
+/**
+ * Fraction of its chamber's air temperature rise a part actually breathes:
+ * `lo` is inlet-side (fresh air), `hi` is outlet-side (fully preheated). This is
+ * the same envelope the existing HDD number already used, named.
+ */
+const DEFAULT_AIR_FRACTION: Range = { lo: 0.5, hi: 1 };
+
+export type ThermalNodeId = "cpu" | "gpu" | "hba" | "psu" | "hdd";
+
+/** A part the caller wants a temperature for. */
+export interface ComponentInput {
+  id: ThermalNodeId;
+  label: string;
+  chamber: "lower" | "upper";
+  /** Dissipation attributed to this part at the modelled workload. */
+  watts: number;
+  thetaKPerW: Range;
+  evidence: EvidenceLevel;
+  /** Overrides how much of the chamber rise it breathes. */
+  airFraction?: Range;
+  /** Why this θ band, in one line. Surfaced as an assumption. */
+  thetaNote?: string;
+}
+
+/**
+ * `ambient + f·riseK + θ·W`, evaluated at both ends of every band. Identical in
+ * form to the drive temperature this model already produced, so component nodes
+ * are a generalisation of existing arithmetic rather than new physics.
+ */
+export interface ComponentNode {
+  id: ThermalNodeId;
+  label: string;
+  chamber: "lower" | "upper";
+  watts: number;
+  thetaKPerW: Range;
+  tempC: Range;
+  evidence: EvidenceLevel;
+}
+
 export interface ThermalAssumption {
   id: string;
   label: string;
@@ -88,6 +157,8 @@ export interface ThermalInput {
   /** 0–1. Efficiency of the lower-chamber PSU. */
   psuEfficiency: number;
   psuEfficiencyEvidence: EvidenceLevel;
+  /** Parts to put a temperature on. Drives are added automatically. */
+  components?: ComponentInput[];
 }
 
 export interface ChamberResult {
@@ -107,6 +178,8 @@ export interface ThermalResult {
   chambers: { lower: ChamberResult; upper: ChamberResult };
   /** Drive case temperature: inlet-side best case to outlet-side worst case. */
   hddC: Range;
+  /** Per-part temperatures. The `hdd` entry is the same number as `hddC`. */
+  components: ComponentNode[];
   /** Air the lower PSU has to breathe, when it sits down there. */
   psuInletC: Range | null;
   coupling: {
@@ -184,10 +257,41 @@ export function computeThermal(input: ThermalInput): ThermalResult {
     hi: airRiseK(input.upperWatts, upperCfm.lo),
   };
 
-  const hddC: Range = {
-    lo: ambientC + 0.5 * lowerRise.lo + HDD_THETA_K_PER_W.lo * input.diskWattsEach,
-    hi: ambientC + lowerRise.hi + HDD_THETA_K_PER_W.hi * input.diskWattsEach,
+  const riseOf = (chamber: "lower" | "upper"): Range =>
+    chamber === "lower" ? lowerRise : upperRise;
+
+  const nodeTemp = (input_: ComponentInput): Range => {
+    const rise = riseOf(input_.chamber);
+    const f = input_.airFraction ?? DEFAULT_AIR_FRACTION;
+    return {
+      lo: ambientC + f.lo * rise.lo + input_.thetaKPerW.lo * input_.watts,
+      hi: ambientC + f.hi * rise.hi + input_.thetaKPerW.hi * input_.watts,
+    };
   };
+
+  const hddInput: ComponentInput = {
+    id: "hdd",
+    label: "硬盘（最热一块）",
+    chamber: "lower",
+    watts: input.diskWattsEach,
+    thetaKPerW: HDD_THETA_K_PER_W,
+    evidence: input.diskEvidence,
+  };
+  const hddC = nodeTemp(hddInput);
+
+  const componentInputs: ComponentInput[] = [
+    ...(input.diskCount > 0 ? [hddInput] : []),
+    ...(input.components ?? []),
+  ];
+  const components: ComponentNode[] = componentInputs.map((ci) => ({
+    id: ci.id,
+    label: ci.label,
+    chamber: ci.chamber,
+    watts: ci.watts,
+    thetaKPerW: ci.thetaKPerW,
+    tempC: nodeTemp(ci),
+    evidence: ci.evidence,
+  }));
 
   const extraRiseK = psuWasteW > 0 ? lowerRise.hi - airRiseK(driveW, lowerCfm.lo) : 0;
 
@@ -235,6 +339,22 @@ export function computeThermal(input: ThermalInput): ThermalResult {
       evidence: "inferred",
       note: "Seagate 只给工作温度范围，不给 θ；此区间为规划包络，装机后可用 SMART 温度反算收窄。",
     },
+    // One line per part θ, so no component temperature rests on a number that has
+    // not been declared as a planning band.
+    ...(input.components ?? []).map((ci) => ({
+      id: `theta-${ci.id}`,
+      label: `${ci.label} 壳-气热阻`,
+      value: `${ci.thetaKPerW.lo}–${ci.thetaKPerW.hi} K/W × ${round1(ci.watts)}W`,
+      evidence: ci.evidence,
+      note: ci.thetaNote ?? "厂商未公布该件 θ；此区间为规划包络。",
+    })),
+    {
+      id: "air-fraction",
+      label: "部件所处气流位置",
+      value: `按腔体温升的 ${DEFAULT_AIR_FRACTION.lo}–${DEFAULT_AIR_FRACTION.hi} 倍取包络`,
+      evidence: "inferred",
+      note: "0D 模型没有位置信息：下界当作贴进风口的新鲜空气，上界当作已被完全预热的出风空气。真实位置要靠 CFD 或实测。",
+    },
     {
       id: "psu-airflow-direction",
       label: "下置电源风向",
@@ -267,6 +387,7 @@ export function computeThermal(input: ThermalInput): ThermalResult {
       },
     },
     hddC,
+    components,
     psuInletC: input.psuInLowerChamber
       ? { lo: ambientC + 0.5 * lowerRise.lo, hi: ambientC + lowerRise.hi }
       : null,
@@ -282,6 +403,7 @@ export function computeThermal(input: ThermalInput): ThermalResult {
       input.psuEfficiencyEvidence,
       "inferred",
       input.psuInLowerChamber ? "unknown" : "standard",
+      ...componentInputs.map((ci) => ci.evidence),
     ]),
     notes,
   };

@@ -1,7 +1,7 @@
 import type { BuildConfig } from "../config/types";
 import type { ModularPanelGroup, SkuCatalog, SkuRecord } from "../sku/types";
 import type { EvidenceLevel } from "../core/evidence";
-import { needsHba } from "../core/policy";
+import { buildSataPorts, needsHba } from "../core/policy";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 
 /**
@@ -228,7 +228,7 @@ export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): Panel
   }
 
   // Boot bay and HBA hang off spare SATA connectors, not extra cables.
-  const hba = needsHba(config.selection, n6Profile.hba);
+  const hba = needsHba(config.selection, buildSataPorts(catalog, config));
   if (config.selection.boot === "bay") {
     notes.push("启动盘位从背板取电，不额外占用外围线。");
   }

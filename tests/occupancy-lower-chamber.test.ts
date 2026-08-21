@@ -39,16 +39,16 @@ describe("lower-chamber structure", () => {
   it("keeps the backplane and tray cage present in every topology", () => {
     for (const topo of ["auto", "bottom", "dual"] as PsuTopology[]) {
       const model = buildN6Occupancy(config(topo));
-      expect(has(model, "occ-backplane")).toBe(true);
+      expect(has(model, "occ-backplane-pcb")).toBe(true);
       expect(has(model, "occ-tray-frame")).toBe(true);
     }
   });
 
   it("removes the left fan bracket exactly when a PSU takes the bottom bay", () => {
-    expect(has(buildN6Occupancy(config("auto")), "occ-left-fan-bracket")).toBe(true);
+    expect(has(buildN6Occupancy(config("auto")), "occ-fan-left_bracket")).toBe(true);
     // Manual §8.1: the bracket comes out and the PSU rack replaces it.
-    expect(has(buildN6Occupancy(config("bottom")), "occ-left-fan-bracket")).toBe(false);
-    expect(has(buildN6Occupancy(config("dual")), "occ-left-fan-bracket")).toBe(false);
+    expect(has(buildN6Occupancy(config("bottom")), "occ-fan-left_bracket")).toBe(false);
+    expect(has(buildN6Occupancy(config("dual")), "occ-fan-left_bracket")).toBe(false);
   });
 
   it("introduces no conflicts in either topology", () => {

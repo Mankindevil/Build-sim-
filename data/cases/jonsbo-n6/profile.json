@@ -1,8 +1,6 @@
 {
   "caseId": "case.jonsbo-n6",
   "trayCount": 9,
-  "nativeSata": 4,
-  "slimsasSata": 4,
   "backplanePowerInlets": 4,
   "backplanePower": {
     "inlets": 4,
@@ -59,7 +57,6 @@
   "coolerLimits": { "overheadAtxMm": 65, "openTopMm": 160 },
   "gpuLimits": { "planningMinMm": 275, "publishedMaxMm": 320 },
   "hba": {
-    "autoWhenSataDevicesOver": 8,
     "defaultSkuId": "hba.lsi-9300-8i-it"
   },
   "defaults": {
