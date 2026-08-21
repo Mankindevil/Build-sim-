@@ -13,10 +13,20 @@
 |---|---|
 | SKU | Catalog-driven selects (SKU ids); appearance gallery follows selection |
 | Engine | `evaluateBuild` feeds FIT chip + wiring panel |
+| Geometry | One mm source (`geometry.json`) in one case-local frame; volumetric AABB conflicts, graded by evidence |
+| Thermal field | Heatmap sampled from the 0D result at real part centroids; deck blocks diffusion; both bounds drawn |
 | Wiring | 9-bay paths + backplane + checklist in existing Wiring tab |
 | Config | JSON / checklist export-import in Configure header |
 | Maintainability | Case `profile.json` + shared `needsHba` policy |
-| Price | Auditable JD/TB/PDD **snapshots** (`data/prices/`; see `docs/PRICE_SNAPSHOTS.md`) |
+| Price | Auditable JD/TB/PDD **snapshots** (`data/prices/`); variant-level prices, opening prices marked non-auditable, amazon.com reference-only (see `docs/PRICE_SNAPSHOTS.md`) |
+
+## Next up
+
+| Track | State |
+|---|---|
+| Cable routing | Designed, not built — port anchors on part faces, waypoint graph, and four checks (insertion clearance, required length, connector orientation, blocked access). Spec: `docs/superpowers/specs/2026-08-22-cable-routing-design.md` |
+| Title matcher | An N6 query still accepts a C6 listing as a spec match; the model-token rule needs to reject sibling models rather than merely rank them lower |
+| Part rotation | Every geometry box is axis-aligned today. Angled cards and cable bend radius need θ before routing verdicts can be more than `warn` |
 
 ## V2.1 (explicitly later)
 

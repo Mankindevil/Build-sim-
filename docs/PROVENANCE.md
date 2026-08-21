@@ -190,6 +190,72 @@ While adding these, one drawing error surfaced and was corrected: the left drive
 were anchored at y = −77, which put a 120 mm frame through the y = −38 deck. The lower
 chamber is only ~119 mm tall, so they now sit centred at y = −99.
 
+## Geometry: one frame, and what its numbers are worth
+
+`data/cases/jonsbo-n6/geometry.json` is the only place a millimetre is written down. It used to
+be three places that disagreed: pixel constants in the V1 canvas, slot names in the occupancy
+engine, and a hand-tuned gradient in the heatmap. Whichever one you read, you could not tell
+whether the others agreed.
+
+**Frame.** Origin is the geometric centre of the case envelope; `x` is width (positive right),
+`y` height (positive up), `z` depth (positive rearward). For the N6's 305 × 353 × 318 that puts
+every envelope point inside `|x| ≤ 152.5`, `|y| ≤ 159`, `|z| ≤ 176.5`. Boxes are stored centred
+(`{ c, w, h, d }`) because an anchor is reasoned about that way — "the tray stack is centred
+96 mm forward of the middle" — and `toBoxMm` is the single conversion to the min-corner form the
+overlap test wants.
+
+**Two evidence tags per part, not one.** `sizeEvidence` and `anchorEvidence` are separate fields
+because they almost never match: a 3.5″ drive body is the standard `101.6 × 147 × 26.1`
+(`standard`) sitting at a tray pitch nobody published (`inferred`). Collapsing them into one
+label would either promote a guessed position to official or bury a measured dimension.
+
+| Layer | Status | Basis |
+|---|---|---|
+| Case outer envelope, interior height | `official` | JONSBO spec sheet + manual §1 |
+| mATX board outline, M.2 2280 length, LGA1700 keep-out, 3.5″ drive body | `standard` | Form-factor standards / vendor datasheets |
+| Drive tray pitch, backplane PCB outline, deck height, PSU rack plate | `inferred` | Reconstructed so the parts stack inside the published interior; the manual gives no outline, thickness or hole positions |
+| Absolute anchor of anything mounted on the board (M.2 slots, SATA cluster, DIMM row) | `inferred` | Board manual figures are schematic; no dimensioned drawing exists |
+| Part rotation | **not modelled** | Every box is axis-aligned. A card at an angle, a cable's bend radius and any tolerance stack are outside this model |
+
+**Collisions are measured, not bookkept.** Each part carries an AABB, and a conflict is the
+intersection volume of two of them — so the answer comes with a number and a drawable box
+(`kind: "conflict"`) instead of a slot-name coincidence. Pairs linked by `mountedOn` or sharing a
+`group` are exempt, because a cooler is *supposed* to interpenetrate its CPU.
+
+Verdicts are graded by evidence, not by depth. A `bad` requires both anchors to be `official` or
+`standard`: a box whose position is a planning reconstruction cannot prove incompatibility, however
+deep the overlap looks, so those come back as `warn` with the reason said out loud. Intrusions into
+a clearance volume are always `warn` — losing service space is a trade-off, not a failure to
+assemble.
+
+That exemption is why the cooler is three parts (`cooler.base`, `cooler.column`,
+`cooler.overhang`) rather than one block: as a single solid it reported a false hit against the
+M.2 heatsink it actually clears, and giving the column a `slotId` merged its envelope back into
+the base. Two conflicts the model found in its own data, both real and both previously invisible:
+M.2 #1 sat 1.8 mm inside the HBA envelope, and the deck was drawn below the drive cage.
+
+## Thermal field: an interpolation of the 0D result, and nothing more
+
+The heatmap is drawn by `src/core/thermal-field.ts`, which adds **no physics** to
+`computeThermal`. Every source temperature is a number that model already produced; the module
+places it at the part's real centroid and decays it with distance so a picture can exist.
+
+- σ per axis is the part's own half-extent plus a fixed 26 mm spreading length, so a 147 mm drive
+  reads as a bar and a CPU die as a point. That 26 mm is a drawing choice, not a measurement.
+- Sources superpose root-sum-square and clip to the hottest declared source: two independent hot
+  parts do not add their full rises, and nothing in a lumped model justifies a point hotter than
+  its own inputs.
+- The deck at `y = −38` blocks diffusion. The 0D model treats the case as two chambers coupled
+  only through a bottom-mounted PSU, so smearing CPU heat onto the drive cage would contradict
+  the model being drawn. With a bottom PSU fitted, one declared coefficient
+  (`BARRIER_LEAK_COUPLED = 0.35`) lets a bounded fraction across — the manual publishes no
+  opening geometry, so this is a stated number, not a derived one.
+- Both bounds are sampled and shown separately; the optimistic surface is never presented alone.
+
+What it therefore cannot show: velocities, pressure drop, recirculation, or a hot spot that is
+not already a component in the 0D result. The legend names the node behind each peak so a reading
+can be traced back rather than trusted. Invariants are pinned in `tests/thermal-field.test.ts`.
+
 ## Thermal model: what is physics and what is a guess
 
 `src/core/thermal.ts` is a lumped-parameter (0D) air balance, not CFD. It cannot produce local
