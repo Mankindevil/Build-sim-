@@ -1,0 +1,362 @@
+{
+  "caseId": "case.jonsbo-n6",
+  "frame": {
+    "note": "与 geometry.json 同一坐标系。这个文件只管连通性：接口挂在部件的面上（相对偏移，不写绝对坐标），航点与通行边描述线材能走的通路。所有条目 anchorEvidence 一律 inferred——手册与规格书都只有示意图，没有一个接口坐标或穿线孔尺寸。因此走线判决上限是 warn。",
+    "anchorEvidence": "inferred"
+  },
+  "ports": [
+    {
+      "id": "port.board.atx24",
+      "onPart": "board",
+      "face": "+y",
+      "offset": [108, -92],
+      "kind": "atx24",
+      "insertionMm": 34,
+      "sectionMm": [12, 52],
+      "source": "mATX 布局惯例：24pin 在板右缘前段。ASUS 手册 p.1-2 只有示意图，未标注位置"
+    },
+    {
+      "id": "port.board.eps",
+      "onPart": "board",
+      "face": "+y",
+      "offset": [105, 98],
+      "kind": "eps8",
+      "insertionMm": 30,
+      "sectionMm": [22, 12],
+      "source": "mATX 布局惯例：EPS 在板后缘靠右。与 geometry.json 的 clearance.eps_plug 同一处推算位置"
+    },
+    {
+      "id": "port.board.sata",
+      "onPart": "board",
+      "face": "+y",
+      "offset": [110, 40],
+      "kind": "sata_data",
+      "insertionMm": 22,
+      "sectionMm": [16, 40],
+      "source": "W680M-ACE SE 手册 p.1-9 列出 4 个原生 SATA 口成簇排列，位置为推算"
+    },
+    {
+      "id": "port.board.slimsas",
+      "onPart": "board",
+      "face": "+y",
+      "offset": [110, 16],
+      "kind": "slimsas",
+      "insertionMm": 26,
+      "sectionMm": [16, 26],
+      "source": "同上：SlimSAS（SFF-8654）口紧邻 SATA 簇，位置为推算"
+    },
+    {
+      "id": "port.board.fan_header",
+      "onPart": "board",
+      "face": "+y",
+      "offset": [70, -50],
+      "kind": "fan4",
+      "insertionMm": 16,
+      "sectionMm": [10, 10],
+      "source": "机箱风扇接到板上风扇针脚；具体针脚位置手册未标注，这里取 CPU 插座前方的常见位置"
+    },
+    {
+      "id": "port.psu.atx24",
+      "onPart": "psu",
+      "face": "-z",
+      "whenSlot": ["psu.rear_upper", "psu.bottom_sfx"],
+      "offset": [-40, 0],
+      "kind": "atx24",
+      "insertionMm": 30,
+      "sectionMm": [12, 52],
+      "source": "模组面朝机箱内侧（AC 插座在后面板）。面上各口的相对位置按 Corsair Type-5 面板照片 public/assets/reference/corsair-sf-modular-panel.png 排布推算"
+    },
+    {
+      "id": "port.psu.atx24",
+      "onPart": "psu",
+      "face": "+z",
+      "whenSlot": ["psu.front_sfx"],
+      "offset": [-40, 0],
+      "kind": "atx24",
+      "insertionMm": 30,
+      "sectionMm": [12, 52],
+      "source": "前置 SFX 时 AC 插座在前面板，模组面转向机箱后方"
+    },
+    {
+      "id": "port.psu.eps",
+      "onPart": "psu",
+      "face": "-z",
+      "whenSlot": ["psu.rear_upper", "psu.bottom_sfx"],
+      "offset": [22, 14],
+      "kind": "eps8",
+      "insertionMm": 26,
+      "sectionMm": [22, 12],
+      "source": "同上面板照片：CPU/PCIe 组在面板一侧"
+    },
+    {
+      "id": "port.psu.eps",
+      "onPart": "psu",
+      "face": "+z",
+      "whenSlot": ["psu.front_sfx"],
+      "offset": [22, 14],
+      "kind": "eps8",
+      "insertionMm": 26,
+      "sectionMm": [22, 12],
+      "source": "同上，前置安装时换面"
+    },
+    {
+      "id": "port.psu.pcie",
+      "onPart": "psu",
+      "face": "-z",
+      "whenSlot": ["psu.rear_upper", "psu.bottom_sfx"],
+      "offset": [22, -14],
+      "kind": "pcie8",
+      "insertionMm": 26,
+      "sectionMm": [22, 12],
+      "source": "同上面板照片：PCIe/CPU 共用一组插座"
+    },
+    {
+      "id": "port.psu.periph.1",
+      "onPart": "psu",
+      "face": "-z",
+      "whenSlot": ["psu.rear_upper", "psu.bottom_sfx"],
+      "offset": [-8, -20],
+      "kind": "periph5",
+      "insertionMm": 24,
+      "sectionMm": [18, 10],
+      "source": "面板照片计数：SATA/PATA 组 3 个插座（1 个中左 + 2 个下左），见 PROVENANCE「PSU 侧插座上限」"
+    },
+    {
+      "id": "port.psu.periph.2",
+      "onPart": "psu",
+      "face": "-z",
+      "whenSlot": ["psu.rear_upper", "psu.bottom_sfx"],
+      "offset": [-8, -6],
+      "kind": "periph5",
+      "insertionMm": 24,
+      "sectionMm": [18, 10],
+      "source": "同上"
+    },
+    {
+      "id": "port.psu.periph.3",
+      "onPart": "psu",
+      "face": "-z",
+      "whenSlot": ["psu.rear_upper", "psu.bottom_sfx"],
+      "offset": [-8, 8],
+      "kind": "periph5",
+      "insertionMm": 24,
+      "sectionMm": [18, 10],
+      "source": "同上"
+    },
+    {
+      "id": "port.psu.periph.1",
+      "onPart": "psu",
+      "face": "+z",
+      "whenSlot": ["psu.front_sfx"],
+      "offset": [-8, -20],
+      "kind": "periph5",
+      "insertionMm": 24,
+      "sectionMm": [18, 10],
+      "source": "同上，前置安装时换面"
+    },
+    {
+      "id": "port.psu.periph.2",
+      "onPart": "psu",
+      "face": "+z",
+      "whenSlot": ["psu.front_sfx"],
+      "offset": [-8, -6],
+      "kind": "periph5",
+      "insertionMm": 24,
+      "sectionMm": [18, 10],
+      "source": "同上"
+    },
+    {
+      "id": "port.psu.periph.3",
+      "onPart": "psu",
+      "face": "+z",
+      "whenSlot": ["psu.front_sfx"],
+      "offset": [-8, 8],
+      "kind": "periph5",
+      "insertionMm": 24,
+      "sectionMm": [18, 10],
+      "source": "同上"
+    },
+    {
+      "id": "port.backplane.power",
+      "onPart": "backplane.inlet",
+      "face": "+z",
+      "offset": [0, 0],
+      "kind": "periph5",
+      "insertionMm": 24,
+      "sectionMm": [18, 14],
+      "source": "手册 §13 p.14：四个进线口成一排，左二 SATA 供电、右二 PATA 供电。插入方向按图示自机箱后方推入，为推算"
+    },
+    {
+      "id": "port.backplane.data",
+      "onPart": "backplane.pcb",
+      "face": "+z",
+      "offsetsAlong": "x",
+      "offsetPitchMm": 27,
+      "offsetV": 30,
+      "kind": "sata_data",
+      "insertionMm": 22,
+      "sectionMm": [16, 8],
+      "source": "背板必然有九路数据出口（九个热插拔位），但手册未画出接口形式与位置；这里按托架间距 27mm 在 PCB 后面排成一排，是推算"
+    },
+    {
+      "id": "port.hba.p1",
+      "onPart": "hba",
+      "face": "+y",
+      "offset": [-40, 0],
+      "kind": "sff8643",
+      "insertionMm": 28,
+      "sectionMm": [20, 14],
+      "source": "LSI 9300-8i 的两个 SFF-8643 在 PCB 上缘；OEM 版本位置不一，目录未记录，故为推算"
+    },
+    {
+      "id": "port.hba.p2",
+      "onPart": "hba",
+      "face": "+y",
+      "offset": [-8, 0],
+      "kind": "sff8643",
+      "insertionMm": 28,
+      "sectionMm": [20, 14],
+      "source": "同上"
+    },
+    {
+      "id": "port.gpu.power",
+      "onPart": "gpu",
+      "face": "+y",
+      "offset": [-60, 0],
+      "kind": "pcie8",
+      "insertionMm": 30,
+      "sectionMm": [22, 12],
+      "source": "供电口在卡上缘靠尾端；与 geometry.json 的 clearance.gpu_tail_power 同一处推算位置"
+    }
+  ],
+  "waypoints": [
+    {
+      "id": "wp.a.upper_rear",
+      "c": [-141, 60, 150],
+      "kind": "channel",
+      "apertureMm": 22,
+      "source": "手册 §11 p.12 理线区 A（CPU 与硬盘供电）后段。区域见 geometry.json clearance.cable_area_a；断面为推算"
+    },
+    {
+      "id": "wp.a.upper_front",
+      "c": [-141, 40, 60],
+      "kind": "channel",
+      "apertureMm": 22,
+      "source": "理线区 A 前段"
+    },
+    {
+      "id": "wp.a.deck_opening",
+      "c": [-141, -23, 108],
+      "kind": "deck_opening",
+      "apertureMm": 22,
+      "source": "手册 §11 把硬盘供电画进 A 区，而硬盘在下腔，故 A 区在隔板处必有开口。开口尺寸与确切位置手册未标注，是本文件里最关键的一项推算"
+    },
+    {
+      "id": "wp.a.lower",
+      "c": [-141, -60, 108],
+      "kind": "channel",
+      "apertureMm": 22,
+      "source": "A 区下腔段，沿左侧壁向下"
+    },
+    {
+      "id": "wp.lower.left_rear",
+      "c": [-132, -120, 60],
+      "kind": "free",
+      "apertureMm": 40,
+      "source": "下腔左后角空间：装下置电源时被电源架占用，装左侧风扇架时是风扇背面的空隙"
+    },
+    {
+      "id": "wp.backplane.rear",
+      "c": [0, -132, 20],
+      "kind": "free",
+      "apertureMm": 60,
+      "source": "背板后方沿板面的横向走线空间；手册 §13.1 要求先拆左侧风扇架才能接线，说明这里只能从左侧进入"
+    },
+    {
+      "id": "wp.backplane.data_rear",
+      "c": [0, -80, 24],
+      "kind": "free",
+      "apertureMm": 60,
+      "source": "背板数据口一侧的横向空间，位于电源口上方"
+    },
+    {
+      "id": "wp.b.deck_opening",
+      "c": [141, -23, 30],
+      "kind": "deck_opening",
+      "apertureMm": 22,
+      "source": "手册 §11 把 SATA 数据线画进 B 区，数据线两端跨腔（背板在下、主板/HBA 在上），故 B 区同样必有开口。尺寸与位置为推算"
+    },
+    {
+      "id": "wp.b.lower",
+      "c": [141, -70, 30],
+      "kind": "channel",
+      "apertureMm": 22,
+      "source": "B 区下腔段"
+    },
+    {
+      "id": "wp.b.upper_front",
+      "c": [141, 30, -40],
+      "kind": "channel",
+      "apertureMm": 22,
+      "source": "理线区 B（风扇与 SATA 数据）前段。右侧 120×2 风扇位就在这条通道上，两者争用同一空间"
+    },
+    {
+      "id": "wp.b.upper_rear",
+      "c": [141, 30, 100],
+      "kind": "channel",
+      "apertureMm": 22,
+      "source": "理线区 B 后段"
+    },
+    {
+      "id": "wp.board.right_edge",
+      "c": [126, 6, 60],
+      "kind": "free",
+      "apertureMm": 30,
+      "source": "主板右缘与侧壁之间的间隙，24pin/SATA/SlimSAS 都从这里进板"
+    },
+    {
+      "id": "wp.board.rear_edge",
+      "c": [110, 20, 140],
+      "kind": "free",
+      "apertureMm": 30,
+      "source": "主板后缘与后面板之间的间隙，EPS 从这里进板"
+    },
+    {
+      "id": "wp.upper.rear_left",
+      "c": [-100, 40, 150],
+      "kind": "free",
+      "apertureMm": 40,
+      "source": "上腔后左区域：PCIe 卡上方到 A 区的过渡空间"
+    },
+    {
+      "id": "wp.upper.mid",
+      "c": [40, 60, -20],
+      "kind": "free",
+      "apertureMm": 40,
+      "source": "上腔主板正上方空间，风扇线在此汇合"
+    }
+  ],
+  "edges": [
+    { "from": "wp.a.upper_rear", "to": "wp.a.upper_front", "note": "A 区上腔内部" },
+    { "from": "wp.a.upper_rear", "to": "wp.a.deck_opening", "note": "A 区沿左壁下行至隔板开口" },
+    { "from": "wp.a.upper_front", "to": "wp.a.deck_opening", "note": "同上" },
+    { "from": "wp.a.deck_opening", "to": "wp.a.lower", "note": "跨腔：唯一声明过的 A 区开口" },
+    { "from": "wp.a.lower", "to": "wp.lower.left_rear", "note": "下腔左侧沿壁" },
+    { "from": "wp.lower.left_rear", "to": "wp.backplane.rear", "note": "手册 §13.1：拆掉左侧风扇架后从左侧接近背板供电口" },
+    { "from": "wp.backplane.rear", "to": "wp.backplane.data_rear", "note": "背板后方竖向" },
+    { "from": "wp.a.lower", "to": "wp.backplane.data_rear", "note": "A 区下腔到背板数据口一侧" },
+    { "from": "wp.b.deck_opening", "to": "wp.b.lower", "note": "跨腔：唯一声明过的 B 区开口" },
+    { "from": "wp.b.lower", "to": "wp.backplane.data_rear", "note": "B 区下腔到背板数据口一侧" },
+    { "from": "wp.b.deck_opening", "to": "wp.b.upper_front", "note": "B 区上腔向前" },
+    { "from": "wp.b.deck_opening", "to": "wp.b.upper_rear", "note": "B 区上腔向后" },
+    { "from": "wp.b.upper_front", "to": "wp.b.upper_rear", "note": "B 区上腔内部" },
+    { "from": "wp.b.upper_rear", "to": "wp.board.right_edge", "note": "B 区进主板右缘" },
+    { "from": "wp.b.upper_front", "to": "wp.board.right_edge", "note": "同上" },
+    { "from": "wp.board.right_edge", "to": "wp.board.rear_edge", "note": "沿主板右缘到后缘" },
+    { "from": "wp.board.rear_edge", "to": "wp.upper.rear_left", "note": "沿后面板横穿上腔" },
+    { "from": "wp.a.upper_rear", "to": "wp.upper.rear_left", "note": "A 区进上腔后部" },
+    { "from": "wp.upper.mid", "to": "wp.board.right_edge", "note": "主板上方到右缘" },
+    { "from": "wp.upper.mid", "to": "wp.b.upper_front", "note": "主板上方到 B 区前段" },
+    { "from": "wp.upper.mid", "to": "wp.upper.rear_left", "note": "主板上方到后左" }
+  ]
+}

@@ -234,6 +234,43 @@ M.2 heatsink it actually clears, and giving the column a `slotId` merged its env
 the base. Two conflicts the model found in its own data, both real and both previously invisible:
 M.2 #1 sat 1.8 mm inside the HBA envelope, and the deck was drawn below the drive cage.
 
+## Port anchors: reconstructed positions, and what follows from that
+
+`data/cases/jonsbo-n6/routing.json` adds connectivity on top of the geometry: where each
+connector sits, and which holes a cable may pass through. **Not one coordinate in it is
+published.** The W680M-ACE SE manual draws the SATA cluster, the 24-pin and the EPS socket
+schematically; the N6 manual §13 shows four backplane inlets in a row without positions; §11
+circles two cable areas (A and B) without an opening, an aperture or a section. So every entry
+carries `anchorEvidence: "inferred"` and its own `source` line, and three rules follow:
+
+- **No routing verdict may exceed `warn`,** and every message ends with "接口锚点为按手册图示重建的推算值，需实物核对". This matches the rule the envelope conflicts already use: a reconstruction cannot prove incompatibility.
+- **A port is a face plus an offset,** never an absolute point. Swap a 140 mm PSU for a 180 mm one and its sockets move 40 mm forward, because the rear panel is what stays put; move the unit from the rear shelf to the front bay and `whenSlot` turns the modular face around. Writing absolute coordinates would recreate the second source of truth the geometry round just deleted.
+- **A missing path is a gap in the manual, not a verdict.** When the graph has no route the finding says the path is undocumented and asks for a physical check; it never claims the cable cannot be fitted.
+
+The two deck openings are the most consequential guesses in the file. Manual §11 routes drive
+power through area A and SATA data through area B, and in both cases one end of the cable is in
+the other chamber — so an opening must exist in each. Its size and position are ours. Take those
+two waypoints out and no cable reaches the lower chamber without cutting through the deck, which
+is exactly how the model reports it.
+
+## Insertion clearance: the space a hand needs, not just the part
+
+Each port declares `insertionMm` and a plug section, and `insertionSweep` extrudes that section
+along the face normal. Anything solid inside that volume is reported, with the depth it reaches
+and the part named. The port's own part, its parent and its children are exempt — a socket is
+supposed to be inside the component carrying it.
+
+This is what turns "it fits on paper" into "it fits with the cable attached". A worked example
+from the baseline build: with a rear-upper ATX unit, the HBA's second SFF-8643 connector has the
+PSU 27.9 mm into its upward sweep. Where the obstruction stops short of the socket plane, the
+finding says an angled connector is the fix (`routing.needs-angled-connector`) rather than
+reporting a generic warning — the difference between a part to buy and a wall.
+
+Cable lengths are reported the same way: `requiredLengthMm` is the polyline plus a declared 15%
+assembly slack (`SERVICE_SLACK`, an allowance, not a physical quantity). A cable SKU with no
+`lengthMm` in the catalog yields `unknown` plus "at least X mm", because inventing a length is
+how a wrong cable gets bought.
+
 ## Thermal field: an interpolation of the 0D result, and nothing more
 
 The heatmap is drawn by `src/core/thermal-field.ts`, which adds **no physics** to
@@ -245,7 +282,7 @@ places it at the part's real centroid and decays it with distance so a picture c
 - Sources superpose root-sum-square and clip to the hottest declared source: two independent hot
   parts do not add their full rises, and nothing in a lumped model justifies a point hotter than
   its own inputs.
-- The deck at `y = −38` blocks diffusion. The 0D model treats the case as two chambers coupled
+- The deck blocks diffusion (`y = −23` in the N6 data). The 0D model treats the case as two chambers coupled
   only through a bottom-mounted PSU, so smearing CPU heat onto the drive cage would contradict
   the model being drawn. With a bottom PSU fitted, one declared coefficient
   (`BARRIER_LEAK_COUPLED = 0.35`) lets a bounded fraction across — the manual publishes no

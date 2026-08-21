@@ -24,7 +24,8 @@
 
 | Track | State |
 |---|---|
-| Cable routing | Designed, not built — port anchors on part faces, waypoint graph, and four checks (insertion clearance, required length, connector orientation, blocked access). Spec: `docs/superpowers/specs/2026-08-22-cable-routing-design.md` |
+| Cable routing | Phase 1 done — `routing.json` port anchors and waypoint graph, `src/core/routing.ts`, and the four checks (insertion clearance, required length, connector orientation, blocked access) in `evaluateBuild`. Phase 2 (routing table + isometric polylines) and phase 3 (`assembly.ts` ordering) still open. Spec: `docs/superpowers/specs/2026-08-22-cable-routing-design.md` |
+| Routing phase 2 | Wiring tab needs the per-cable table and the polyline overlay; the data is already on `BuildEvaluation.routing`, nothing draws it yet |
 | Title matcher | An N6 query still accepts a C6 listing as a spec match; the model-token rule needs to reject sibling models rather than merely rank them lower |
 | Part rotation | Every geometry box is axis-aligned today. Angled cards and cable bend radius need θ before routing verdicts can be more than `warn` |
 

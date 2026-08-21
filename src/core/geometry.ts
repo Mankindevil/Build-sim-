@@ -97,7 +97,7 @@ export interface PlacedPart {
    * a heat source at the part's real centroid instead of a hand-typed coordinate.
    */
   thermalId?: ThermalNodeId;
-  /** Chamber the part breathes in. The deck at y = -38 splits the case in two. */
+  /** Chamber the part breathes in; the deck splits the case at `N6_DECK_Y`. */
   chamber?: "lower" | "upper";
   /** Free-form note surfaced in the preview callout. */
   note?: string;
@@ -170,6 +170,48 @@ export function intersectionVolumeMm3(a: CenteredBox, b: CenteredBox): number {
 
 export function partVolumeMm3(box: CenteredBox): number {
   return box.w * box.h * box.d;
+}
+
+/**
+ * Whether the segment `a`→`b` passes through `box`, by the slab method. Cables
+ * are polylines, so "does this run cut through the drive cage" is a segment test
+ * rather than a box test; `tol` shrinks the box so a run that merely grazes a
+ * face is not reported.
+ */
+export function segmentHitsBox(a: Vec3, b: Vec3, box: CenteredBox, tol = 0): boolean {
+  let tMin = 0;
+  let tMax = 1;
+  for (const axis of AXES) {
+    const i = INDEX[axis];
+    // Clamp the tolerance per axis: a 4 mm deck would otherwise vanish entirely
+    // under a 2 mm shrink and stop blocking anything at all.
+    const t = Math.min(tol, box[SIZE[axis]] / 4);
+    const lo = minOn(box, axis) + t;
+    const hi = maxOn(box, axis) - t;
+    if (lo >= hi) return false;
+    const origin = a[i]!;
+    const delta = b[i]! - origin;
+    if (Math.abs(delta) < 1e-9) {
+      if (origin < lo || origin > hi) return false;
+      continue;
+    }
+    const t1 = (lo - origin) / delta;
+    const t2 = (hi - origin) / delta;
+    tMin = Math.max(tMin, Math.min(t1, t2));
+    tMax = Math.min(tMax, Math.max(t1, t2));
+    if (tMin > tMax) return false;
+  }
+  return true;
+}
+
+export function boxContainsPoint(box: CenteredBox, p: Vec3, tol = 0): boolean {
+  return AXES.every(
+    (a) => p[INDEX[a]]! >= minOn(box, a) - tol && p[INDEX[a]]! <= maxOn(box, a) + tol,
+  );
+}
+
+export function distanceMm(a: Vec3, b: Vec3): number {
+  return Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
 }
 
 /** Which side of a horizontal divider the box's centre falls on. */
