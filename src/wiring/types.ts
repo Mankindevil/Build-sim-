@@ -14,14 +14,68 @@ export interface BayDataPath {
   note?: string;
 }
 
+export type BackplaneConnector = "sata" | "molex";
+
 export interface BackplanePowerFeed {
   /** N6 official: 4 backplane power inputs */
   inletIndex: 1 | 2 | 3 | 4;
+  /** Manual p.14 figure: 2× SATA power + 2× PATA/Molex */
+  connector: BackplaneConnector;
   psuId: string;
   /** Which modular lead / split, when known */
   leadLabel: string;
   evidence: EvidenceLevel;
   note?: string;
+}
+
+/**
+ * Worst-case simultaneous spin-up on the 12V rail. This is what turns the
+ * manual's one-lead-per-inlet wording into a number: a lead forced to serve two
+ * inlets carries double the surge.
+ */
+export interface BackplaneSpinUpLoad {
+  diskCount: number;
+  /** Vendor typical 12V startup peak per drive. */
+  perDiskA: number | null;
+  /** All drives spinning up at once. */
+  totalA: number | null;
+  /** Even split across the inlets. */
+  perInletA: number | null;
+  /** What one lead carries when it has to feed two inlets. */
+  perSharedLeadA: number | null;
+  /** Published per-peripheral-lead ceiling, when the PSU vendor states one. */
+  leadLimitW: number | null;
+  evidence: EvidenceLevel;
+  notes: string[];
+}
+
+/**
+ * Standalone audit of the backplane harness. Kept separate from the data-path
+ * checklist because the case requirement is official while PSU lead inventory
+ * is per-SKU and usually unknown until the box is in hand.
+ */
+export interface BackplaneHarnessCheck {
+  /** PSU that must feed all four inlets on its own. */
+  feedPsuId: string;
+  feedRole: "main" | "backplane-dedicated";
+  inlets: number;
+  required: Record<BackplaneConnector, number>;
+  /** `null` when the SKU has no confirmed lead count for that connector. */
+  confirmed: Record<BackplaneConnector, number | null>;
+  /** Connector totals, which vendors publish far more often than cable counts. */
+  connectors: Record<BackplaneConnector, number | null>;
+  /** False when a single lead would have to be daisy-chained across inlets. */
+  oneLeadPerInlet: boolean;
+  /** True when there are enough connectors but too few cables to avoid a chain. */
+  daisyChainOnly: boolean;
+  /** SATA/PATA modular sockets on the feeding PSU — the hard ceiling on lead count. */
+  peripheralSockets: number | null;
+  /** True when the socket count alone makes one lead per inlet impossible. */
+  socketLimited: boolean;
+  spinUp: BackplaneSpinUpLoad;
+  verdict: "ok" | "warn" | "bad" | "unknown";
+  evidence: EvidenceLevel;
+  notes: string[];
 }
 
 export interface WiringChecklistItem {
@@ -38,6 +92,7 @@ export interface WiringPlan {
   caseId: string;
   bayPaths: BayDataPath[];
   backplanePower: BackplanePowerFeed[];
+  backplaneHarness: BackplaneHarnessCheck;
   checklist: WiringChecklistItem[];
   warnings: string[];
 }
