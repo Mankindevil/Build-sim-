@@ -2,25 +2,27 @@
 
 ## Done (V1 import)
 
-- Interactive N6 preview (legacy HTML under `legacy/v1/`)
-- Local manuals + appearance assets
+- Interactive N6 preview (primary UI at `index.html`)
+- Local manuals + appearance assets under `public/assets/`
 - Constraint registry with evidence levels
 - Scenario / assertion QA corpus (`tests/config-scenarios.json`)
 
-## V2.0 (in progress) — keep shippable
+## V2.0 (in progress) — extend V1 in place
 
-| Track | Goal |
+| Track | Status |
 |---|---|
-| SKU | Exact SKU records replace category pickers |
-| Engine | Unified occupancy model + honest evidence labels |
-| Wiring | Per-bay + backplane power maps + cable checklist |
-| Config | JSON save / load / compare / export |
+| SKU | Catalog-driven selects (SKU ids); appearance gallery follows selection |
+| Engine | `evaluateBuild` feeds FIT chip + wiring panel |
+| Wiring | 9-bay paths + backplane + checklist in existing Wiring tab |
+| Config | JSON / checklist export-import in Configure header |
+| Maintainability | Case `profile.json` + shared `needsHba` policy |
+| Price | Auditable JD/TB/PDD **snapshots** (`data/prices/`; see `docs/PRICE_SNAPSHOTS.md`) |
 
 ## V2.1 (explicitly later)
 
-- Auditable JD/PDD price snapshots and history (unknown stays unknown)
+- Price **history** series + optional SMZDM OpenAPI over the same snapshot schema
 - Post-build calibration (wall power, temps, SMART, noise)
-- Richer spatial views / product textures (manual pages remain evidence only)
+- Richer spatial views / product textures on 3D envelopes (manual pages remain evidence only)
 
 ## Future (not scheduled)
 

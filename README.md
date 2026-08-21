@@ -2,17 +2,25 @@
 
 Modular desktop / NAS build simulator.
 
+**UI rule:** V2 **extends** the V1 interactive Build Lab in place — same spatial preview, thermal field, wiring, and BOM panels. No separate workbench product UI.
+
 **Current focus (v0.2 / V2.0):** JONSBO N6 + ASUS Pro WS W680M-ACE SE + i5-14500  
 **Later:** pluggable cases and general desktop builds
 
 ## V2.0 scope
 
-1. **Exact SKU library** — concrete models with dimensions, power, harness, warranty, and price evidence (links + paid prices). No invented historical lows.
-2. **Unified occupancy / conflict engine** — bays, PCIe, fans, PSU, radiator slots as one placement model; verdicts labeled `official` / `standard` / `inferred` / `unknown`.
-3. **Full wiring plans** — per-bay data paths, backplane power feeds, port tables, cable BOM.
-4. **Config save / load** — JSON configs, switch ATX/SFX/GPU/disk scenarios, export checklist.
+1. **Exact SKU library** — concrete models; dropdown values are SKU ids from `data/skus/catalog.json`.
+2. **Unified occupancy / conflict engine** — drives the existing FIT chip and wiring panel via `evaluateBuild`.
+3. **Full wiring plans** — per-bay paths + backplane feeds + cable checklist (same Wiring tab), plus a socket-level **PSU panel diagram**: every modular socket of the selected PSU, which cable occupies it, and which backplane inlet ends up sharing a lead or getting none. Panels are drawn only from counted evidence; uncounted groups are left blank rather than implied. Data paths respect the HBA's real port count — the ninth drive falls back to a board port instead of a port the card does not have — and Mini-SAS HD (SFF-8643) breakouts are billed separately from the board's SlimSAS (SFF-8654) cable.
+   **Lower-chamber structure** (spatial preview) — tray cage, backplane PCB with its four inlets, and either the removable left fan bracket or the shipped bottom-PSU rack that replaces it, so the bottom half reads as occupied space rather than void. Shapes are planning envelopes; only the structural relationships are from the manual.
+   **Air balance** (Thermal tab) — `ΔT = Q /(ρ·cp·V̇)` per chamber, so airflow is a first-class input instead of a fudge offset. Fan CFM, case impedance and drive θ are labelled planning envelopes; the bottom-PSU / drive-bay coupling is bounded, not guessed. See `docs/PROVENANCE.md` for the physics-vs-guess split.
+4. **Config save / load** — export/import JSON and checklist from the Configure header.
+5. **Official appearance** — gallery switches with the selected SKU; missing art stays unknown (not V2.1 3D texture mapping).
 
-Deferred to **V2.1:** live price tracking, measured calibration, richer product textures / views.
+**Price:** auditable snapshots in `data/prices/` (see `docs/PRICE_SNAPSHOTS.md`).  
+`npm run price:serve` starts a local-only collector; the 价格与配件 tab then fetches 京东/淘宝/拼多多/亚马逊/官网 candidates and only writes a quote after you confirm the listing. Part numbers are used where they index (京东/亚马逊/官网) and spec keywords where they don't (淘宝/拼多多). `npm run price:search` emits the same links as a clickable cheat sheet; `npm run price:refresh` rebuilds `latest.json`. UI stamps `snapshot YYYY-MM-DD · platform` — never invents live market or history.
+
+Deferred to **V2.1:** price history series, measured calibration, product textures on 3D envelopes.
 
 ## Quick start
 
@@ -20,6 +28,8 @@ Deferred to **V2.1:** live price tracking, measured calibration, richer product 
 npm install
 npm run dev
 ```
+
+Opens the N6 Build Lab. Change PSU/cooler/GPU/etc.; FIT + wiring update from the engine; appearance gallery follows SKU.
 
 ```bash
 npm test
@@ -29,16 +39,21 @@ npm run build
 ## Layout
 
 ```
-data/           Case, board, SKU, constraint, and saved config JSON
-src/core/       Occupancy + conflict engine
-src/sku/        SKU loaders and validation
-src/wiring/     Port / harness planning
-src/config/     Build config schema, import/export
-src/adapters/   Case-specific adapters (jonsbo-n6 first)
-src/ui/         Preview UI
-legacy/v1/      Frozen N6 Build Lab HTML from Codex V1 (porting reference)
-docs/           Roadmap and provenance
-tests/          Engine + scenario tests
+index.html              V1 Build Lab (primary UI)
+src/lab/boot.ts         Boots catalog + engine into the lab
+src/lab/v1-runtime.js   V1 interactive renderer (SKU-keyed)
+src/lab/view-models.ts  SKU → display DTOs for the lab
+data/skus/catalog.json  Exact SKU library (+ appearance)
+data/prices/            Audited retail snapshots (latest + dated)
+scripts/price-refresh/  Snapshot rebuild + offline search cheat sheet
+scripts/price-server/   Local-only price collector (APIs + headed browser)
+data/cases/jonsbo-n6/   Case profile + assets
+scripts/shot.mjs        Screenshots lab panels from the dev server (local check)
+src/core/               Occupancy + evaluateBuild + policy + thermal air balance
+src/price/              Snapshot merge, search queries, title matching
+src/wiring/             Wiring plans + PSU panel socket plan
+src/adapters/jonsbo-n6/ Case occupancy adapter
+legacy/v1/              Frozen V1 reference HTML
 ```
 
 ## Evidence policy
@@ -46,9 +61,5 @@ tests/          Engine + scenario tests
 Never present inferred geometry, heatmaps, or planning prices as manufacturer CAD, CFD, or measured data. If evidence is missing, the UI must say `unknown`.
 
 ## Provenance
-
-V1 interactive lab and manuals were imported from:
-
-`~/.codex/visualizations/2026/08/19/01a018a5-d534-7be3-90cf-24ebf45ab620/`
 
 See `docs/PROVENANCE.md` and `docs/ROADMAP.md`.
