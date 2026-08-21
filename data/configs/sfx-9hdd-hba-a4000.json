@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "2.0.0",
+  "id": "sfx-9hdd-hba-a4000",
+  "name": "SFX route · 9×HDD · HBA · A4000",
+  "updatedAt": "2026-08-21",
+  "caseId": "case.jonsbo-n6",
+  "boardId": "board.asus-w680m-ace-se",
+  "cpuId": "cpu.i5-14500",
+  "selection": {
+    "psuId": "psu.corsair-sf750-atx31",
+    "psuTopology": "bottom",
+    "coolerId": "cooler.noctua-nh-u9s",
+    "gpuId": "gpu.rtx-a4000-16gb",
+    "memoryId": "memory.kingston-ksm48e40bd8km-32hm-x2",
+    "diskCount": 9,
+    "diskSkuId": "storage.seagate-exos-x24-24tb",
+    "boot": "m2",
+    "hbaMode": "always",
+    "hbaSkuId": "hba.lsi-9300-8i-it"
+  },
+  "bom": [],
+  "notes": [
+    "M.2 boot breaks 980 PRO mirror — intentional for 9 data HDDs",
+    "Front SFX vs fans not certified; this config uses bottom SFX"
+  ]
+}

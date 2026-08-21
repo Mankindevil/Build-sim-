@@ -1,0 +1,74 @@
+{
+  "caseId": "case.jonsbo-n6",
+  "trayCount": 9,
+  "nativeSata": 4,
+  "slimsasSata": 4,
+  "backplanePowerInlets": 4,
+  "backplanePower": {
+    "inlets": 4,
+    "connectors": { "sataPower": 2, "molex": 2 },
+    "oneLeadPerInlet": true,
+    "daisyChainAllowed": false,
+    "fillAllInlets": true,
+    "requiresFanBracketRemoval": true,
+    "independentPsuSupported": true,
+    "evidence": "official",
+    "source": "JONSBO N6 manual §13 p.14 硬盘背板供电连接 + §9 p.10 dual PSU / independent backplane power",
+    "note": "手册原文：建议 4 个供电头插满，电源单根线只接一个供电口，不建议一根线串联供电。图示为 SATA供电×2 + PATA供电×2。"
+  },
+  "bottomPsu": {
+    "form": "SFX",
+    "removesLeftFanBracket": true,
+    "evidence": "official",
+    "source": "JONSBO N6 manual §8 p.9 下置电源安装（8.1 取下左侧风扇架）"
+  },
+  "fanMounts": {
+    "front": { "size": 120, "count": 2, "altSize": 140, "altCount": 2, "radiator240": true },
+    "left": { "size": 120, "count": 2, "onRemovableBracket": true },
+    "right": { "size": 120, "count": 2 },
+    "rear": { "size": 120, "count": 1 },
+    "evidence": "official",
+    "source": "JONSBO N6 manual §14 p.15 风扇安装：前板 120×2 或 140×2（240 水排）/ 左侧 120×2 / 右侧 120×2 / 后 120×1",
+    "note": "手册只给安装位与尺寸，不给风量、静压或共存矩阵；随箱不含这些风扇。下置电源按 §8.1 取下左侧风扇架，因此左侧 120×2 与下置 SFX 互斥。"
+  },
+  "lowerChamber": {
+    "backplane": {
+      "inletRowOrder": ["sata", "sata", "molex", "molex"],
+      "reachRequiresBracketRemoval": true,
+      "evidence": "official",
+      "source": "JONSBO N6 manual §13 p.14 图示：拧下风扇架四颗螺丝取下风扇架后，背板下缘一排四个供电口，左二为 SATA供电、右二为 PATA供电",
+      "note": "手册只给接口种类与排列顺序，不给 PCB 轮廓、板厚或安装孔位；模型里的板形是规划包络。"
+    },
+    "leftFanBracket": {
+      "screws": 4,
+      "carriesFans": { "size": 120, "count": 2 },
+      "removedForBottomPsu": true,
+      "evidence": "official",
+      "source": "JONSBO N6 manual §8.1 p.9 + §13.1 p.14",
+      "note": "同一块架子：接背板供电时要临时取下，装下置电源时被电源架取代，不再装回。"
+    },
+    "bottomPsuRack": {
+      "shippedWithCase": true,
+      "installOrder": ["取下左侧风扇架", "SFX 电源装到电源架上", "电源架整体装回机箱"],
+      "evidence": "official",
+      "source": "JONSBO N6 manual §8.1–8.3 p.9",
+      "note": "电源不是直接拧在机箱上，而是先装到随箱电源架上再整体装回；架子的尺寸与孔位手册未标注。"
+    }
+  },
+  "psuLimits": { "atxMaxLengthMm": 220, "sfxMaxLengthMm": 100 },
+  "coolerLimits": { "overheadAtxMm": 65, "openTopMm": 160 },
+  "gpuLimits": { "planningMinMm": 275, "publishedMaxMm": 320 },
+  "hba": {
+    "autoWhenSataDevicesOver": 8,
+    "defaultSkuId": "hba.lsi-9300-8i-it"
+  },
+  "defaults": {
+    "diskSkuId": "storage.seagate-exos-x24-24tb",
+    "bootBaySkuId": "storage.boot-sata-25",
+    "ownedNvmeSkuId": "storage.samsung-980-pro",
+    "ownedNvmeQty": 2,
+    "slimsasCableSkuId": "accessory.slimsas-4xsata",
+    "dualSyncSkuId": "accessory.dual-psu-sync",
+    "secondaryPsuSkuId": "psu.sfx-450-unlocked"
+  }
+}

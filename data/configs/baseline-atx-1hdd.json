@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "2.0.0",
+  "id": "baseline-atx-1hdd-sata-boot",
+  "name": "Baseline ATX · 1×HDD · SATA boot",
+  "updatedAt": "2026-08-21",
+  "caseId": "case.jonsbo-n6",
+  "boardId": "board.asus-w680m-ace-se",
+  "cpuId": "cpu.i5-14500",
+  "selection": {
+    "psuId": "psu.seasonic-focus-gx-850-v5",
+    "psuTopology": "auto",
+    "coolerId": "cooler.thermalright-axp90-x53-full",
+    "gpuId": "gpu.none",
+    "memoryId": "memory.kingston-ksm48e40bd8km-32hm-x2",
+    "diskCount": 1,
+    "diskSkuId": "storage.seagate-exos-x24-24tb",
+    "boot": "bay",
+    "hbaMode": "auto"
+  },
+  "bom": [],
+  "notes": [
+    "Owned anchors: N6 ¥629, W680M ¥2799, i5-14500 ¥1380, 980 PRO ×2",
+    "Historical lows remain unknown unless evidenced"
+  ]
+}

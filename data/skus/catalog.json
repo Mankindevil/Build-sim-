@@ -1,0 +1,1678 @@
+{
+  "schemaVersion": "2.0.0",
+  "updatedAt": "2026-08-21",
+  "skus": [
+    {
+      "id": "case.jonsbo-n6",
+      "category": "case",
+      "brand": "JONSBO",
+      "model": "N6",
+      "name": "JONSBO N6",
+      "mpn": "N6",
+      "dims": {
+        "lengthMm": 353,
+        "widthMm": 305,
+        "heightMm": 318,
+        "evidence": "official",
+        "note": "External envelope; height includes 6 mm base"
+      },
+      "power": {
+        "evidence": "official"
+      },
+      "price": {
+        "currency": "CNY",
+        "paid": 629,
+        "asOf": "2026-08-19",
+        "listingUrl": "https://www.jonsbo.com/en/products/N6Black.html",
+        "note": "User transaction. MSRP / current JD-PDD / historical low: unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "owned",
+        "baseline"
+      ],
+      "appearance": {
+        "image": "assets/official/n6.webp",
+        "page": "https://www.jonsbo.com/en/products/N6Black.html",
+        "note": "机箱外观官方图"
+      }
+    },
+    {
+      "id": "board.asus-w680m-ace-se",
+      "category": "motherboard",
+      "brand": "ASUS",
+      "model": "Pro WS W680M-ACE SE",
+      "name": "ASUS Pro WS W680M-ACE SE",
+      "mpn": "Pro WS W680M-ACE SE",
+      "dims": {
+        "evidence": "official",
+        "note": "Micro-ATX"
+      },
+      "power": {
+        "evidence": "official"
+      },
+      "interfaceNotes": [
+        "4× native SATA",
+        "SlimSAS can expose up to 4 additional SATA",
+        "PCIe 5.0 x16 + PCIe 4.0 x4 + PCIe 3.0 x1",
+        "2× M.2 2242/2260/2280 PCIe 4.0 x4",
+        "4× DDR5 ECC/non-ECC UDIMM"
+      ],
+      "price": {
+        "currency": "CNY",
+        "paid": 2799,
+        "asOf": "2026-08-19",
+        "listingUrl": "https://www.asus.com/us/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/",
+        "note": "User transaction. MSRP / current / historical low: unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "owned",
+        "baseline"
+      ],
+      "attrs": {
+        "formFactor": "Micro-ATX",
+        "chipset": "W680"
+      },
+      "appearance": {
+        "image": "assets/official/w680m.png",
+        "page": "https://www.asus.com/us/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/",
+        "note": "主板正面官方图"
+      }
+    },
+    {
+      "id": "cpu.i5-14500",
+      "category": "cpu",
+      "brand": "Intel",
+      "model": "Core i5-14500",
+      "name": "Intel Core i5-14500",
+      "mpn": "i5-14500",
+      "dims": {
+        "evidence": "standard",
+        "note": "LGA1700"
+      },
+      "power": {
+        "tdpW": 65,
+        "evidence": "official",
+        "note": "Base TDP; PL1/PL2 configurable"
+      },
+      "price": {
+        "currency": "CNY",
+        "paid": 1380,
+        "asOf": "2026-08-19",
+        "msrp": null,
+        "listingUrl": "https://www.intel.co.jp/content/www/jp/ja/products/sku/236784/intel-core-i5-processor-14500-24m-cache-up-to-5-00-ghz/specifications.html",
+        "note": "User paid CNY. Intel tray/box USD list is not China retail MSRP. JD/PDD current & historical: unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "owned",
+        "baseline"
+      ],
+      "attrs": {
+        "socket": "LGA1700",
+        "ddr5OfficialMt": 4800,
+        "eccSupport": true
+      },
+      "appearance": {
+        "page": "https://www.intel.com/content/www/us/en/products/sku/236784/intel-core-i5-processor-14500-24m-cache-up-to-5-00-ghz/specifications.html",
+        "note": "Intel 未提供 i5-14500 型号专属实物图"
+      }
+    },
+    {
+      "id": "psu.seasonic-focus-gx-850-v5",
+      "category": "psu",
+      "brand": "Seasonic",
+      "model": "FOCUS GX-850 V5",
+      "name": "Seasonic FOCUS GX-850 V5",
+      "dims": {
+        "lengthMm": 140,
+        "widthMm": 150,
+        "heightMm": 86,
+        "evidence": "standard"
+      },
+      "power": {
+        "ratedW": 850,
+        "evidence": "official"
+      },
+      "harness": {
+        "modularCables": 10,
+        "sataLeads": 2,
+        "molexLeads": 1,
+        "sataConnectors": 8,
+        "molexConnectors": 3,
+        "pciePower": [
+          "3x PCIe 8-pin (6+2)",
+          "1x 12V-2x6"
+        ],
+        "evidence": "official",
+        "leadEvidence": "official",
+        "sourceUrl": "https://www.cybenetics.com/evaluations/psus/2573/en/",
+        "note": "Cybenetics（ATX v3.1 样品）线材表：2 根 SATA 线（各 4 头）+ 1 根 Molex 线（3 头）。TechPowerUp 的 ATX 3.0 样品另含 1 根 SATA 3.3 线（2 头）。两版都只有一根 Molex 线，因此背板两个 PATA 口无法各得一根独立线。"
+      },
+      "price": {
+        "currency": "CNY",
+        "current": null,
+        "historicalLow": null,
+        "asOf": "2026-08-20",
+        "listingUrl": "https://seasonic.com/focus-gx-atx-3/",
+        "note": "V1 planning band ¥899–999 from PDD multi-SKU screenshots — not locked as auditable current. historicalLow unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "atx",
+        "candidate"
+      ],
+      "attrs": {
+        "form": "ATX",
+        "fanOffLoadW": 255,
+        "fanOffLoadFraction": 0.3,
+        "cybeneticsNoiseDba": 28.4,
+        "cybeneticsEfficiency": 0.89,
+        "noiseEvidence": "cybenetics",
+        "efficiencyEvidence": "cybenetics",
+        "noiseSourceUrl": "https://www.cybenetics.com/evaluations/psus/2573/en/",
+        "noiseNote": "Cybenetics Focus GX-850 ATX 3.1 avg ~28.44 dBA @115V open bench; Hybrid fanless ≤~30% load per Seasonic S3FC. Not in-chassis N6 measurement.",
+        "certification": "80 PLUS Gold",
+        "certificationEvidence": "official",
+        "modular": "full",
+        "peripheralSockets": 4,
+        "peripheralSocketsEvidence": "inferred",
+        "peripheralSocketsNote": "推算，不是逐座点数：TechPowerUp 评测的 ATX 3.0 版原盒含 4 根外围类线（2×SATA + 1×SATA3.3 + 1×Molex），Seasonic 官方教程说明 SATA 与 Molex 共用同一种 6-pin 外围座，故面板外围座 ≥4。但 Cybenetics 的 ATX v3.1 样品只列 2×SATA + 1×Molex（无 SATA3.3），说明随版本变化——V5/3.1 是否仍有第 4 个空位需开箱点数。",
+        "peripheralSocketsSourceUrl": "https://www.techpowerup.com/review/seasonic-focus-gx-atx-3-0-850-w/2.html",
+        "peripheralSocketsCrossCheck": "https://www.cybenetics.com/evaluations/psus/2573/en/"
+      },
+      "appearance": {
+        "image": "assets/official/focus-gx.webp",
+        "page": "https://seasonic.com/focus-gx-atx-3/",
+        "note": "FOCUS GX 系列官方图；下单要核对 V5 / ATX 版本"
+      },
+      "modularPanel": {
+        "groups": [
+          {
+            "id": "peripheral",
+            "label": "Peripheral (SATA/Molex 通用)",
+            "pins": 6,
+            "sockets": 4
+          }
+        ],
+        "total": null,
+        "evidence": "inferred",
+        "source": "按原盒 4 根外围类线推算外围座 ≥4（Seasonic 官方教程：SATA 与 Molex 共用同一种 6-pin 外围座）。其余分组未逐座点数，故不填。",
+        "sourceUrl": "https://www.techpowerup.com/review/seasonic-focus-gx-atx-3-0-850-w/2.html"
+      }
+    },
+    {
+      "id": "psu.seasonic-focus-gx-750-v5",
+      "category": "psu",
+      "brand": "Seasonic",
+      "model": "FOCUS GX-750 V5",
+      "name": "Seasonic FOCUS GX-750 V5",
+      "dims": {
+        "lengthMm": 140,
+        "widthMm": 150,
+        "heightMm": 86,
+        "evidence": "standard"
+      },
+      "power": {
+        "ratedW": 750,
+        "evidence": "official"
+      },
+      "harness": {
+        "modularCables": 3,
+        "evidence": "inferred",
+        "note": "Planning count; verify before buy"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "V1 planning band ~¥849–949. Not locked. historicalLow unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "atx",
+        "candidate"
+      ],
+      "attrs": {
+        "form": "ATX",
+        "fanOffLoadW": 225,
+        "fanOffLoadFraction": 0.3,
+        "cybeneticsNoiseDba": 28,
+        "cybeneticsEfficiency": 0.89,
+        "noiseEvidence": "cybenetics",
+        "efficiencyEvidence": "inferred",
+        "noiseNote": "Same FOCUS GX ATX 3.x family Cybenetics A- / ~28 dBA class; 750W unit fanless ≤~30% (225W). Confirm exact evaluation page when locking SKU."
+      },
+      "appearance": {
+        "image": "assets/official/focus-gx.webp",
+        "page": "https://seasonic.com/focus-gx-atx-3/",
+        "note": "FOCUS GX 系列官方图；下单要核对 V5 / ATX 版本"
+      }
+    },
+    {
+      "id": "psu.greatwall-f8-850",
+      "category": "psu",
+      "brand": "Great Wall",
+      "model": "F8 850W",
+      "name": "长城 F8 850W",
+      "dims": {
+        "lengthMm": 140,
+        "widthMm": 150,
+        "heightMm": 86,
+        "evidence": "standard"
+      },
+      "power": {
+        "ratedW": 850,
+        "evidence": "standard"
+      },
+      "harness": {
+        "modularCables": 2,
+        "evidence": "inferred",
+        "note": "Backplane lead count must be confirmed before order"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "V1 planning band ¥459–599 from JD screenshots — confirm live listing. historicalLow unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "atx",
+        "candidate"
+      ],
+      "attrs": {
+        "form": "ATX",
+        "fanOffLoadW": 180,
+        "cybeneticsNoiseDba": null,
+        "planningNoiseDba": 30,
+        "cybeneticsEfficiency": null,
+        "planningEfficiency": 0.88,
+        "noiseEvidence": "unknown",
+        "efficiencyEvidence": "unknown",
+        "noiseNote": "No Cybenetics/official noise curve locked; hybrid threshold planning-only."
+      }
+    },
+    {
+      "id": "psu.corsair-sf750-atx31",
+      "category": "psu",
+      "brand": "Corsair",
+      "model": "SF750 ATX 3.1",
+      "name": "Corsair SF750 ATX 3.1",
+      "dims": {
+        "lengthMm": 100,
+        "widthMm": 125,
+        "heightMm": 63.5,
+        "evidence": "official"
+      },
+      "power": {
+        "ratedW": 750,
+        "evidence": "official"
+      },
+      "harness": {
+        "modularCables": 9,
+        "sataLeads": 2,
+        "molexLeads": 1,
+        "sataConnectors": 8,
+        "molexConnectors": 3,
+        "pciePower": [
+          "2x PCIe 8-pin (6+2)",
+          "1x 12V-2x6 (12+4)"
+        ],
+        "evidence": "official",
+        "leadEvidence": "official",
+        "sourceUrl": "https://www.corsair.com/ww/en/p/psu/cp-9020284-na/sf-series-sf750-fully-modular-80-plus-platinum-sfx-power-supply-cp-9020284-na",
+        "note": "官方线材表：1×SATA(4 直头) + 1×SATA(4 弯头) + 1×PATA(3 头)。SATA 两根独立线，Molex 只有一根。 用户 PDD 商品页规格图（SF 系列同一张）同样只画出 x1 Peripheral 4-pin。",
+        "crossCheck": "public/assets/reference/corsair-sf-cable-spec-pdd.png"
+      },
+      "price": {
+        "currency": "CNY",
+        "msrp": null,
+        "note": "US list seen on Corsair site; CNY JD band in V1 ~¥1349–1499 not locked as currentEvidence. historicalLow unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "sfx",
+        "candidate"
+      ],
+      "attrs": {
+        "form": "SFX",
+        "fanOffLoadW": 300,
+        "fanOffLoadFraction": 0.4,
+        "cybeneticsNoiseDba": 27,
+        "cybeneticsEfficiency": 0.92,
+        "noiseEvidence": "inferred",
+        "efficiencyEvidence": "inferred",
+        "noiseNote": "Zero-RPM / hybrid until ~40% common on SF series; noise/efficiency planning until Cybenetics page locked for this ATX 3.1 revision.",
+        "certification": "80 PLUS Platinum",
+        "cybeneticsEfficiencyClass": "Platinum",
+        "cybeneticsNoiseClass": "A-",
+        "certificationEvidence": "official",
+        "modular": "full",
+        "connectorType": "Corsair Type-5 Micro-Fit",
+        "cableCrossCompatible": false,
+        "rail12vA": 62.5,
+        "rail12vW": 750,
+        "combined33v5vW": 130,
+        "fanSizeMm": 92,
+        "fanBearing": "Fluid Dynamic",
+        "zeroRpmMode": true,
+        "atx12vVersion": "3.1",
+        "mtbfHours": 100000,
+        "specSourceUrl": "https://www.corsair.com/us/en/explorer/diy-builder/power-supply-units/sf750sf850sf1000-platinum-atx-31-everything-you-need-to-know/",
+        "modularSockets": 9,
+        "modularSocketsEvidence": "inferred",
+        "peripheralSockets": 3,
+        "peripheralSocketsEvidence": "inferred",
+        "peripheralSocketsNote": "官方面板图（同系列 Type-5 面板）SATA/PATA 组为 3 座；Hardware Busters 数出 SF750 面板共 9 座，减去 8-pin 组 4 座（2×EPS + 2×PCIe）与主板 2 座正好剩 3 座，两份证据一致。3 座已被原盒 2×SATA + 1×PATA 占满，没有空位可插第 4 根外围线。",
+        "peripheralSocketsSourceUrl": "https://hwbusters.com/psus/corsair-sf750-atx-v3-1-psu-review/2/",
+        "peripheralSocketsImage": "public/assets/reference/corsair-sf-modular-panel.png"
+      },
+      "mpn": "CP-9020284",
+      "warrantyMonths": 84,
+      "appearance": {
+        "page": "https://www.corsair.com/ww/en/p/psu/cp-9020284-na/sf-series-sf750-fully-modular-80-plus-platinum-sfx-power-supply-cp-9020284-na",
+        "note": "Corsair SF750 ATX 3.1 官方页；官方图未缓存到 public/assets"
+      },
+      "modularPanel": {
+        "groups": [
+          {
+            "id": "cpu-pcie",
+            "label": "PCIe / CPU",
+            "pins": 8,
+            "sockets": 4
+          },
+          {
+            "id": "peripheral",
+            "label": "SATA / PATA",
+            "pins": 6,
+            "sockets": 3
+          },
+          {
+            "id": "mb",
+            "label": "MOTHERBOARD",
+            "pins": "12+10",
+            "sockets": 2
+          }
+        ],
+        "total": 9,
+        "evidence": "inferred",
+        "source": "Hardware Busters 拆解数出共 9 座；减去主板 2 座与外围 3 座，8-pin 组为 4 座。12V-2x6 线占用两个 8-pin 座，不是独立座。",
+        "sourceUrl": "https://hwbusters.com/psus/corsair-sf750-atx-v3-1-psu-review/2/"
+      }
+    },
+    {
+      "id": "psu.corsair-sf1000-atx31",
+      "category": "psu",
+      "brand": "Corsair",
+      "model": "SF1000 ATX 3.1",
+      "name": "Corsair SF1000 ATX 3.1",
+      "dims": {
+        "lengthMm": 100,
+        "widthMm": 125,
+        "heightMm": 63.5,
+        "evidence": "official"
+      },
+      "power": {
+        "ratedW": 1000,
+        "evidence": "official"
+      },
+      "harness": {
+        "modularCables": 11,
+        "sataLeads": 2,
+        "molexLeads": 1,
+        "sataConnectors": 8,
+        "molexConnectors": 3,
+        "pciePower": [
+          "4x PCIe 8-pin (6+2)",
+          "1x 12V-2x6 (12+4)"
+        ],
+        "evidence": "official",
+        "leadEvidence": "official",
+        "sourceUrl": "https://www.corsair.com/us/en/explorer/diy-builder/power-supply-units/sf750sf850sf1000-platinum-atx-31-everything-you-need-to-know/",
+        "note": "官方线材表与 SF750 同源：1×SATA(4 直头) + 1×SATA(4 弯头) + 1×PATA(3 头)，PCIe 增至 4 根。Molex 仍只有一根线。用户 PDD 商品页规格图佐证。",
+        "crossCheck": "public/assets/reference/corsair-sf-cable-spec-pdd.png"
+      },
+      "price": {
+        "currency": "CNY",
+        "current": null,
+        "historicalLow": null,
+        "asOf": "2026-08-21",
+        "note": "用户 PDD 截图 2026-08-21 见「限量价 ¥1329 / 最后5件」，属拼团限时价且非常规成交价，未锁为 audited current。",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "sfx",
+        "candidate"
+      ],
+      "attrs": {
+        "form": "SFX",
+        "fanOffLoadW": 300,
+        "fanOffLoadFraction": 0.4,
+        "cybeneticsNoiseDba": 27,
+        "cybeneticsEfficiency": 0.92,
+        "noiseEvidence": "inferred",
+        "efficiencyEvidence": "inferred",
+        "noiseNote": "Zero-RPM / hybrid until ~40% common on SF series; noise/efficiency planning until Cybenetics page locked for this ATX 3.1 revision.",
+        "certification": "80 PLUS Platinum",
+        "cybeneticsEfficiencyClass": "Platinum",
+        "cybeneticsNoiseClass": "A-",
+        "certificationEvidence": "official",
+        "modular": "full",
+        "connectorType": "Corsair Type-5 Micro-Fit",
+        "cableCrossCompatible": false,
+        "rail12vA": null,
+        "rail12vW": 1000,
+        "combined33v5vW": 130,
+        "fanSizeMm": 92,
+        "fanBearing": "Fluid Dynamic",
+        "zeroRpmMode": true,
+        "atx12vVersion": "3.1",
+        "mtbfHours": 100000,
+        "specSourceUrl": "https://www.corsair.com/us/en/explorer/diy-builder/power-supply-units/sf750sf850sf1000-platinum-atx-31-everything-you-need-to-know/",
+        "modularSockets": 11,
+        "modularSocketsEvidence": "official",
+        "peripheralSockets": 3,
+        "peripheralSocketsEvidence": "official",
+        "peripheralSocketsNote": "官方面板图可直接数出：SATA/PATA 组 3 座（左 1 + 左下 2）、PCIe/CPU 组 6 座、主板 2 座宽座。3 座被原盒 2×SATA + 1×PATA 占满。",
+        "peripheralSocketsSourceUrl": "https://www.corsair.com/us/en/explorer/diy-builder/power-supply-units/sf750sf850sf1000-platinum-atx-31-everything-you-need-to-know/",
+        "peripheralSocketsImage": "public/assets/reference/corsair-sf-modular-panel.png"
+      },
+      "mpn": "CP-9020257",
+      "warrantyMonths": 84,
+      "appearance": {
+        "page": "https://www.corsair.com/us/en/explorer/diy-builder/power-supply-units/sf750sf850sf1000-platinum-atx-31-everything-you-need-to-know/",
+        "note": "Corsair SF750/850/1000 ATX 3.1 官方说明页"
+      },
+      "modularPanel": {
+        "groups": [
+          {
+            "id": "cpu-pcie",
+            "label": "PCIe / CPU",
+            "pins": 8,
+            "sockets": 6
+          },
+          {
+            "id": "peripheral",
+            "label": "SATA / PATA",
+            "pins": 6,
+            "sockets": 3
+          },
+          {
+            "id": "mb",
+            "label": "MOTHERBOARD",
+            "pins": "12+10",
+            "sockets": 2
+          }
+        ],
+        "total": 11,
+        "evidence": "official",
+        "source": "SF1000 商品页 Type-5 面板宣传图逐座点数",
+        "image": "public/assets/reference/corsair-sf-modular-panel.png"
+      }
+    },
+    {
+      "id": "psu.silverstone-sx750-g",
+      "category": "psu",
+      "brand": "SilverStone",
+      "model": "SX750-G",
+      "mpn": "SST-SX750-G",
+      "name": "SilverStone SX750 Gold",
+      "dims": {
+        "lengthMm": 100,
+        "widthMm": 125,
+        "heightMm": 63.5,
+        "evidence": "standard"
+      },
+      "power": {
+        "ratedW": 750,
+        "evidence": "official"
+      },
+      "harness": {
+        "sataConnectors": 8,
+        "molexConnectors": 3,
+        "sataLeads": null,
+        "molexLeads": null,
+        "pciePower": [
+          "4x PCIe 8/6-pin"
+        ],
+        "evidence": "official",
+        "leadEvidence": "unknown",
+        "sourceUrl": "https://www.silverstonetek.com/en/product/info/power-supplies/SX750Gold/",
+        "note": "官方页只给接头数（8 SATA / 3 Molex / 1 软驱），没有公布线材根数——背板一口一线要开箱数或问客服。官方手册另注明外围（Molex/SATA）单接头不应超过 60W。"
+      },
+      "price": {
+        "currency": "CNY",
+        "current": null,
+        "historicalLow": null,
+        "note": "尚未抓价",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "sfx",
+        "candidate"
+      ],
+      "attrs": {
+        "form": "SFX",
+        "certification": "80 PLUS Gold",
+        "certificationEvidence": "official",
+        "modular": "full",
+        "rail12vA": 62.5,
+        "fanSizeMm": 92,
+        "fanBearing": "HYB",
+        "peripheralLeadWLimit": 60,
+        "fanOffLoadW": null,
+        "planningNoiseDba": null,
+        "cybeneticsNoiseDba": null,
+        "cybeneticsEfficiency": null,
+        "noiseEvidence": "unknown",
+        "efficiencyEvidence": "unknown",
+        "noiseNote": "官方称 92mm HYB 静音风扇；未锁定 Cybenetics 页，风扇停转门槛与 dBA 未知。",
+        "specSourceUrl": "https://www.silverstonetek.com/en/product/info/power-supplies/SX750Gold/",
+        "peripheralSockets": 3,
+        "peripheralSocketsEvidence": "inferred",
+        "peripheralSocketsNote": "EnosTech 拆解同平台 SX750 Platinum：面板共 8 座 = 上排 1 外围 + 3 CPU/PCIe + 1 Sense，下排 2 外围 + 24-pin，外围合计 3 座。SX750 Gold 未逐一确认，按同面板推算。",
+        "peripheralSocketsSourceUrl": "https://www.enostech.com/silverstone-sx750-platinum-sfx-psu-overview/"
+      },
+      "appearance": {
+        "page": "https://www.silverstonetek.com/en/product/info/power-supplies/SX750Gold/",
+        "note": "银欣 SX750 Gold 官方页"
+      },
+      "modularPanel": {
+        "groups": [
+          {
+            "id": "cpu-pcie",
+            "label": "CPU / PCIe",
+            "pins": 8,
+            "sockets": 3
+          },
+          {
+            "id": "peripheral",
+            "label": "Peripheral (SATA/Molex)",
+            "pins": 6,
+            "sockets": 3
+          },
+          {
+            "id": "sense",
+            "label": "Sense",
+            "pins": 4,
+            "sockets": 1
+          },
+          {
+            "id": "mb",
+            "label": "Motherboard 24-pin",
+            "pins": 24,
+            "sockets": 1
+          }
+        ],
+        "total": 8,
+        "evidence": "inferred",
+        "source": "EnosTech 对同平台 SX750 Platinum 逐座描述：上排 1 外围 + 3 CPU/PCIe + 1 Sense，下排 2 外围 + 24-pin。Gold 版未单独确认。",
+        "sourceUrl": "https://www.enostech.com/silverstone-sx750-platinum-sfx-psu-overview/"
+      }
+    },
+    {
+      "id": "psu.fsp-dagger-pro-850-atx31",
+      "category": "psu",
+      "brand": "FSP",
+      "model": "DAGGER PRO 850W ATX 3.1",
+      "mpn": "SDA2-850 GEN5",
+      "name": "FSP DAGGER PRO 850W ATX 3.1",
+      "dims": {
+        "lengthMm": 100,
+        "widthMm": 125,
+        "heightMm": 63.5,
+        "evidence": "official"
+      },
+      "power": {
+        "ratedW": 850,
+        "evidence": "official"
+      },
+      "harness": {
+        "sataConnectors": 6,
+        "molexConnectors": 2,
+        "sataLeads": 2,
+        "molexLeads": 2,
+        "pciePower": [
+          "4x PCIe 6+2",
+          "1x 12V-2x6"
+        ],
+        "evidence": "official",
+        "leadEvidence": "official",
+        "sourceUrl": "https://www.fsplifestyle.com/us/product/DAGGERPRO850W_GEN5.html",
+        "note": "官方接头表 6 SATA / 2 Molex。LanOC 实拍：两根混合线，一根 2×SATA+1×Molex+FDD，另一根 3×SATA+1×Molex——SATA 与 Molex 共线，且面板只有 2 个外围座。"
+      },
+      "price": {
+        "currency": "CNY",
+        "current": null,
+        "historicalLow": null,
+        "note": "尚未抓价",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "sfx",
+        "candidate"
+      ],
+      "attrs": {
+        "form": "SFX",
+        "certification": "80 PLUS Gold",
+        "certificationEvidence": "official",
+        "modular": "full",
+        "fanSizeMm": 92,
+        "fanBearing": "ball",
+        "semiFanless": true,
+        "atx12vVersion": "3.1",
+        "fanOffLoadW": null,
+        "cybeneticsNoiseDba": null,
+        "cybeneticsEfficiency": null,
+        "planningEfficiency": 0.9,
+        "noiseEvidence": "unknown",
+        "efficiencyEvidence": "official",
+        "efficiencyNote": "官方口径 ≥90% typical load（非 Cybenetics 曲线）。",
+        "noiseNote": "官方称半被动（semi-fanless）+ 92mm 滚珠风扇，但没给停转门槛与 dBA。",
+        "specSourceUrl": "https://www.fsplifestyle.com/us/product/DAGGERPRO850W_GEN5.html",
+        "peripheralSockets": 2,
+        "peripheralSocketsEvidence": "official",
+        "peripheralSocketsNote": "LanOC / APH Networks / Guru3D 三家一致：面板右侧只有 2 个 5-pin 外围座。原盒两根外围线还是 SATA+Molex 混合线（2×SATA+1×Molex+FDD / 3×SATA+1×Molex），最多只能给 2 个背板口各一根线。",
+        "peripheralSocketsSourceUrl": "https://lanoc.org/review/power-supplies/fsp-dagger-pro-850w-psu?start=2"
+      },
+      "appearance": {
+        "page": "https://www.fsplifestyle.com/us/product/DAGGERPRO850W_GEN5.html",
+        "note": "FSP DAGGER PRO ATX 3.1 官方页"
+      },
+      "modularPanel": {
+        "groups": [
+          {
+            "id": "cpu-pcie",
+            "label": "CPU / PCIe",
+            "pins": 8,
+            "sockets": 3
+          },
+          {
+            "id": "peripheral",
+            "label": "Peripheral",
+            "pins": 5,
+            "sockets": 2
+          },
+          {
+            "id": "mb",
+            "label": "Motherboard",
+            "pins": "14+10",
+            "sockets": 2
+          }
+        ],
+        "total": 7,
+        "evidence": "official",
+        "source": "LanOC 与 APH Networks 一致描述：上排 1 CPU + 2 PCIe，下排 24-pin 两半，右侧竖排 2 个 5-pin 外围座。",
+        "sourceUrl": "https://aphnetworks.com/reports/fsp-dagger-pro-850w/2"
+      }
+    },
+    {
+      "id": "psu.sfx-450-unlocked",
+      "category": "psu",
+      "brand": "Unknown",
+      "model": "SFX 450W (unlocked)",
+      "name": "未锁定 SFX 450W",
+      "dims": {
+        "lengthMm": 100,
+        "widthMm": 125,
+        "heightMm": 63,
+        "evidence": "inferred"
+      },
+      "power": {
+        "ratedW": 450,
+        "evidence": "unknown"
+      },
+      "harness": {
+        "modularCables": 0,
+        "evidence": "unknown",
+        "note": "Harness/efficiency unknown until MPN locked"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Envelope-only placeholder — no comparable official price",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "sfx",
+        "placeholder",
+        "secondary"
+      ],
+      "attrs": {
+        "form": "SFX",
+        "fanOffLoadW": 0,
+        "planningNoiseDba": 32,
+        "planningEfficiency": 0.85,
+        "noiseEvidence": "unknown",
+        "efficiencyEvidence": "unknown",
+        "noiseNote": "Unlocked envelope — noise/heat unknown until concrete SFX SKU."
+      }
+    },
+    {
+      "id": "cooler.thermalright-axp90-x53-full",
+      "category": "cooler",
+      "brand": "Thermalright",
+      "model": "AXP90-X53 FULL",
+      "name": "Thermalright AXP90-X53 FULL",
+      "dims": {
+        "heightMm": 53,
+        "evidence": "official"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "V1 planning ¥240–350. historicalLow unknown",
+        "listingUrl": "https://www.thermalright.com/product/axp90-x53-full-black/",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "low-profile",
+        "candidate"
+      ],
+      "attrs": {
+        "type": "down-draft",
+        "maxRamHeightMm": 99,
+        "fitHint": "official"
+      },
+      "appearance": {
+        "image": "assets/official/axp90.png",
+        "page": "https://www.thermalright.com/product/axp90-x53-full-black/",
+        "note": "AXP90-X53 FULL BLACK 官方图"
+      }
+    },
+    {
+      "id": "cooler.id-cooling-is-55-black",
+      "category": "cooler",
+      "brand": "ID-COOLING",
+      "model": "IS-55 BLACK",
+      "name": "ID-COOLING IS-55 BLACK",
+      "dims": {
+        "heightMm": 57,
+        "evidence": "official"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "V1 planning ¥195–260. historicalLow unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "low-profile",
+        "candidate"
+      ],
+      "attrs": {
+        "type": "down-draft",
+        "maxRamHeightMm": 33,
+        "fitHint": "official"
+      }
+    },
+    {
+      "id": "cooler.noctua-nh-l9x65",
+      "category": "cooler",
+      "brand": "Noctua",
+      "model": "NH-L9x65",
+      "name": "Noctua NH-L9x65",
+      "dims": {
+        "heightMm": 65,
+        "evidence": "official"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "V1 planning ¥399–499. historicalLow unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "low-profile",
+        "candidate"
+      ],
+      "attrs": {
+        "type": "down-draft",
+        "maxRamHeightMm": 99,
+        "fitHint": "tight"
+      }
+    },
+    {
+      "id": "cooler.noctua-nh-u9s",
+      "category": "cooler",
+      "brand": "Noctua",
+      "model": "NH-U9S",
+      "name": "Noctua NH-U9S",
+      "dims": {
+        "heightMm": 125,
+        "evidence": "official"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "V1 planning ¥449–599. historicalLow unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "tower",
+        "sfx-route",
+        "candidate"
+      ],
+      "attrs": {
+        "type": "tower",
+        "maxRamHeightMm": 99,
+        "fitHint": "sfx"
+      }
+    },
+    {
+      "id": "cooler.aio-120-experimental",
+      "category": "cooler",
+      "brand": "Generic",
+      "model": "120mm AIO",
+      "name": "120mm 一体水冷（实验）",
+      "dims": {
+        "evidence": "unknown"
+      },
+      "power": {
+        "evidence": "unknown"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Category placeholder — lock radiator/fan MPN before buy",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "aio",
+        "experimental"
+      ],
+      "attrs": {
+        "type": "aio",
+        "radiatorMm": 120,
+        "fitHint": "experimental"
+      }
+    },
+    {
+      "id": "cooler.aio-240-front",
+      "category": "cooler",
+      "brand": "Generic",
+      "model": "240mm AIO",
+      "name": "240mm 一体水冷（前置官方位）",
+      "dims": {
+        "evidence": "official",
+        "note": "Front 240 mount listed in N6 manual; thickness/tubes unverified"
+      },
+      "power": {
+        "evidence": "unknown"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Category placeholder — lock concrete AIO SKU",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "aio",
+        "front240",
+        "candidate"
+      ],
+      "attrs": {
+        "type": "aio",
+        "radiatorMm": 240,
+        "fitHint": "front240"
+      }
+    },
+    {
+      "id": "gpu.none",
+      "category": "gpu",
+      "brand": "—",
+      "model": "none",
+      "name": "暂不安装 GPU",
+      "dims": {
+        "lengthMm": 0,
+        "slots": 0,
+        "evidence": "official"
+      },
+      "power": {
+        "tgpW": 0,
+        "idleW": 0,
+        "evidence": "official"
+      },
+      "price": {
+        "currency": "CNY",
+        "paid": 0,
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "baseline"
+      ]
+    },
+    {
+      "id": "gpu.rtx-a2000-12gb",
+      "category": "gpu",
+      "brand": "NVIDIA",
+      "model": "RTX A2000 12GB",
+      "name": "RTX A2000 12GB",
+      "dims": {
+        "lengthMm": 169,
+        "slots": 2,
+        "evidence": "standard"
+      },
+      "power": {
+        "tgpW": 70,
+        "idleW": 8,
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Reference geometry SKU; live CNY current/historical unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "workstation",
+        "candidate"
+      ],
+      "attrs": {
+        "vramGb": 12,
+        "cooling": "blower"
+      }
+    },
+    {
+      "id": "gpu.rtx-a4000-16gb",
+      "category": "gpu",
+      "brand": "NVIDIA",
+      "model": "RTX A4000 16GB",
+      "name": "RTX A4000 16GB",
+      "dims": {
+        "lengthMm": 241,
+        "slots": 1,
+        "evidence": "standard"
+      },
+      "power": {
+        "tgpW": 140,
+        "idleW": 12,
+        "evidence": "standard"
+      },
+      "harness": {
+        "pciePower": [
+          "1x8pin"
+        ],
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "listingUrl": "https://www.nvidia.com/en-au/products/workstations/rtx-a4000/",
+        "note": "Reference geometry; used/new bands in V1 are planning only. historicalLow unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "workstation",
+        "candidate",
+        "hba-friendly"
+      ],
+      "attrs": {
+        "vramGb": 16,
+        "cooling": "single-slot blower"
+      },
+      "appearance": {
+        "image": "assets/official/a4000.jpg",
+        "page": "https://www.nvidia.com/en-au/products/workstations/rtx-a4000/",
+        "note": "RTX A4000 官方产品图"
+      }
+    },
+    {
+      "id": "gpu.rtx-4000-sff-ada-20gb",
+      "category": "gpu",
+      "brand": "NVIDIA",
+      "model": "RTX 4000 SFF Ada 20GB",
+      "name": "RTX 4000 SFF Ada 20GB",
+      "dims": {
+        "lengthMm": 168,
+        "slots": 2,
+        "evidence": "standard"
+      },
+      "power": {
+        "tgpW": 70,
+        "idleW": 9,
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Launch list ~USD 1250; CNY current/historical unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "workstation",
+        "candidate"
+      ],
+      "attrs": {
+        "vramGb": 20,
+        "cooling": "dual-slot blower"
+      }
+    },
+    {
+      "id": "gpu.rtx-a4500-20gb",
+      "category": "gpu",
+      "brand": "NVIDIA",
+      "model": "RTX A4500 20GB",
+      "name": "RTX A4500 20GB",
+      "dims": {
+        "lengthMm": 267,
+        "slots": 2,
+        "evidence": "standard"
+      },
+      "power": {
+        "tgpW": 200,
+        "idleW": 16,
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Reference geometry; CNY current/historical unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "workstation",
+        "candidate"
+      ],
+      "attrs": {
+        "vramGb": 20
+      }
+    },
+    {
+      "id": "gpu.rtx-a5000-24gb",
+      "category": "gpu",
+      "brand": "NVIDIA",
+      "model": "RTX A5000 24GB",
+      "name": "RTX A5000 24GB",
+      "dims": {
+        "lengthMm": 267,
+        "slots": 2,
+        "evidence": "standard"
+      },
+      "power": {
+        "tgpW": 230,
+        "idleW": 18,
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Reference geometry; CNY current/historical unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "workstation",
+        "candidate"
+      ],
+      "attrs": {
+        "vramGb": 24
+      }
+    },
+    {
+      "id": "gpu.plan.rtx-5060ti-16",
+      "category": "gpu",
+      "brand": "NVIDIA",
+      "model": "RTX 5060 Ti 16GB (planning envelope)",
+      "name": "RTX 5060 Ti 16GB 规划包络",
+      "dims": {
+        "lengthMm": 250,
+        "slots": 3,
+        "evidence": "inferred",
+        "note": "Not a locked board partner SKU"
+      },
+      "power": {
+        "tgpW": 180,
+        "idleW": 14,
+        "evidence": "inferred"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Planning envelope only — geometry not SKU-specific",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "consumer",
+        "planning",
+        "blocks-hba-risk"
+      ],
+      "attrs": {
+        "vramGb": 16,
+        "specificGeometry": false
+      }
+    },
+    {
+      "id": "memory.corsair-cmk32gx5m2x6400c38",
+      "category": "memory",
+      "brand": "CORSAIR",
+      "model": "CMK32GX5M2X6400C38",
+      "name": "Corsair Vengeance CMK32GX5M2X6400C38 (2×16GB)",
+      "mpn": "CMK32GX5M2X6400C38 (Ver 5.43.13)",
+      "dims": {
+        "heightMm": 44,
+        "evidence": "inferred",
+        "note": "Typical Vengeance DDR5 heatspreader height; confirm kit photo before IS-55"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Search MPN CMK32GX5M2X6400C38; current/historical unknown until audited listing",
+        "listingUrl": "https://www.corsair.com/",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "qvl",
+        "xmp",
+        "candidate"
+      ],
+      "attrs": {
+        "modules": 2,
+        "capacityGb": 32,
+        "speedMt": 6400,
+        "jedecMt": 4800,
+        "ecc": false,
+        "xmp": true,
+        "qvl": true,
+        "qvlVersion": "5.43.13",
+        "qvlUrl": "https://www.asus.com/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/helpdesk_qvl_memory?model2Name=Pro-WS-W680M-ACE-SE",
+        "chip": "SK Hynix",
+        "timing": "38-40-40-84",
+        "voltageV": 1.35,
+        "slots": [
+          "A2",
+          "B2"
+        ],
+        "note": "On ASUS W680M-ACE SE QVL for 14th Gen (2 DIMMs). XMP vs i5-14500 JEDEC 4800 baseline."
+      }
+    },
+    {
+      "id": "memory.kingston-kf564c32rsk2-32",
+      "category": "memory",
+      "brand": "Kingston",
+      "model": "KF564C32RSK2-32",
+      "name": "Kingston FURY Renegade KF564C32RSK2-32 (2×16GB)",
+      "mpn": "KF564C32RSK2-32",
+      "dims": {
+        "heightMm": 44,
+        "evidence": "inferred",
+        "note": "Tall Renegade heatspreader; may exceed IS-55 33mm"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Search MPN KF564C32RSK2-32; price unknown until audited",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "qvl",
+        "xmp",
+        "candidate"
+      ],
+      "attrs": {
+        "modules": 2,
+        "capacityGb": 32,
+        "speedMt": 6400,
+        "jedecMt": 4800,
+        "ecc": false,
+        "xmp": true,
+        "qvl": true,
+        "qvlUrl": "https://www.asus.com/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/helpdesk_qvl_memory?model2Name=Pro-WS-W680M-ACE-SE",
+        "chip": "SK Hynix",
+        "timing": "32-39-39-80",
+        "voltageV": 1.4,
+        "slots": [
+          "A2",
+          "B2"
+        ],
+        "note": "On ASUS W680M-ACE SE QVL (2 DIMMs)."
+      }
+    },
+    {
+      "id": "memory.adata-ax5u6000c4016g-clarbk",
+      "category": "memory",
+      "brand": "ADATA",
+      "model": "AX5U6000C4016G-CLARBK",
+      "name": "ADATA XPG Lancer AX5U6000C4016G-CLARBK (2×16GB)",
+      "mpn": "AX5U6000C4016G-CLARBK",
+      "dims": {
+        "heightMm": 42,
+        "evidence": "inferred",
+        "note": "Heatspreaded Lancer kit; check height vs IS-55"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Search MPN AX5U6000C4016G-CLARBK (color variants also on QVL)",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "qvl",
+        "xmp",
+        "candidate"
+      ],
+      "attrs": {
+        "modules": 2,
+        "capacityGb": 32,
+        "speedMt": 6000,
+        "jedecMt": 4800,
+        "ecc": false,
+        "xmp": true,
+        "qvl": true,
+        "qvlUrl": "https://www.asus.com/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/helpdesk_qvl_memory?model2Name=Pro-WS-W680M-ACE-SE",
+        "chip": "SK Hynix",
+        "timing": "40-40-40-76",
+        "voltageV": 1.35,
+        "slots": [
+          "A2",
+          "B2"
+        ],
+        "note": "On ASUS W680M-ACE SE QVL (2 DIMMs). Sibling MPNs -DCLARBK/-CCARGY also listed."
+      }
+    },
+    {
+      "id": "memory.corsair-cmt32gx5m2x6400c38",
+      "category": "memory",
+      "brand": "CORSAIR",
+      "model": "CMT32GX5M2X6400C38",
+      "name": "Corsair Dominator Titanium CMT32GX5M2X6400C38 (2×16GB)",
+      "mpn": "CMT32GX5M2X6400C38 (Ver 5.43.13)",
+      "dims": {
+        "heightMm": 56,
+        "evidence": "inferred",
+        "note": "Tall Dominator; incompatible with low-profile coolers like IS-55"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Search MPN CMT32GX5M2X6400C38 Ver 5.43.13",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "qvl",
+        "xmp",
+        "candidate"
+      ],
+      "attrs": {
+        "modules": 2,
+        "capacityGb": 32,
+        "speedMt": 6400,
+        "jedecMt": 4800,
+        "ecc": false,
+        "xmp": true,
+        "qvl": true,
+        "qvlVersion": "5.43.13",
+        "qvlUrl": "https://www.asus.com/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/helpdesk_qvl_memory?model2Name=Pro-WS-W680M-ACE-SE",
+        "chip": "SK Hynix",
+        "timing": "38-40-40-84",
+        "voltageV": 1.35,
+        "slots": [
+          "A2",
+          "B2"
+        ],
+        "note": "On ASUS W680M-ACE SE QVL (2 DIMMs). Prefer CMK kit if using low-profile cooler."
+      }
+    },
+    {
+      "id": "memory.kingston-ksm48e40bd8km-32hm-x2",
+      "category": "memory",
+      "brand": "Kingston",
+      "model": "KSM48E40BD8KM-32HM ×2",
+      "name": "Kingston Server Premier KSM48E40BD8KM-32HM ×2 (64GB ECC)",
+      "mpn": "KSM48E40BD8KM-32HM",
+      "dims": {
+        "heightMm": 31.25,
+        "evidence": "official",
+        "note": "Kingston datasheet PCB height 1.23 in / 31.25 mm"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Buy two modules of KSM48E40BD8KM-32HM. ECC UDIMM not RDIMM. Price unknown until audited",
+        "listingUrl": "https://www.kingston.com/en/memory/search?partid=KSM48E40BD8KM-32HM",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "ecc",
+        "jedec",
+        "candidate",
+        "recommended"
+      ],
+      "attrs": {
+        "modules": 2,
+        "capacityGb": 64,
+        "speedMt": 4800,
+        "jedecMt": 4800,
+        "ecc": true,
+        "xmp": false,
+        "qvl": false,
+        "qvlUrl": "https://www.asus.com/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/helpdesk_qvl_memory?model2Name=Pro-WS-W680M-ACE-SE",
+        "chip": "Hynix M-die",
+        "timing": "40-39-39",
+        "voltageV": 1.1,
+        "slots": [
+          "A2",
+          "B2"
+        ],
+        "note": "JEDEC DDR5-4800 ECC UDIMM; type-correct for W680+i5-14500. Not on default ASUS QVL web filter — verify Type=ECC-UDIMM + 14th Gen or ask ASUS before purchase."
+      }
+    },
+    {
+      "id": "storage.samsung-980-pro",
+      "category": "storage",
+      "brand": "Samsung",
+      "model": "980 PRO",
+      "name": "Samsung 980 PRO (owned ×2)",
+      "dims": {
+        "evidence": "official",
+        "note": "M.2 2280"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "paid": 0,
+        "asOf": "2026-08-19",
+        "listingUrl": "https://www.samsung.com/us/memory-storage/nvme-ssd/980-pro-pcie-4-0-nvme-ssd-1tb-sku-mz-v8p1t0b-am/",
+        "note": "User already owns two sticks; capacity per stick per label. paid shown as 0 (sunk)",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "owned",
+        "nvme",
+        "m2"
+      ],
+      "attrs": {
+        "interface": "nvme",
+        "form": "m2-2280"
+      },
+      "appearance": {
+        "image": "assets/official/980-pro.jpg",
+        "page": "https://www.samsung.com/us/memory-storage/nvme-ssd/980-pro-pcie-4-0-nvme-ssd-1tb-sku-mz-v8p1t0b-am/",
+        "note": "官方容量示意；实际容量以盘体标签为准"
+      }
+    },
+    {
+      "id": "storage.seagate-exos-x24-24tb",
+      "category": "storage",
+      "brand": "Seagate",
+      "model": "Exos X24 24TB",
+      "name": "Seagate Exos X24 24TB",
+      "dims": {
+        "lengthMm": 147,
+        "widthMm": 101.85,
+        "heightMm": 26.1,
+        "evidence": "standard"
+      },
+      "power": {
+        "idleW": 6.3,
+        "maxOperatingW": 8.9,
+        "evidence": "official",
+        "note": "Seagate Exos X24 datasheet DS2080: idle avg 6.3W, max operating random R/W 4K/16Q 8.9W (SATA ISE)"
+      },
+      "price": {
+        "currency": "CNY",
+        "listingUrl": "https://www.seagate.com/ca/en/support/internal-hard-drives/enterprise-hard-drives/exos-x24/",
+        "note": "V1 used ~¥4500 median planning — not auditable current. historicalLow unknown",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "hdd",
+        "3.5",
+        "candidate"
+      ],
+      "attrs": {
+        "capacityTb": 24,
+        "interface": "sata",
+        "form": "3.5",
+        "startup12vPeakA": 2.6,
+        "startup12vReducedA": 2,
+        "startupEvidence": "official",
+        "powerOnToReadySec": 25,
+        "startupSourceUrl": "https://www.seagate.com/content/dam/seagate/assets/support/internal-hard-drive/enterprise-hard-drives/exos-x24/_shared/files/Seagate_EXOS24_CMR_ISE_SED(10-12-16-20-24TB)_Rev-C.pdf",
+        "startupNote": "产品手册 §2.5：启动瞬时 12V 峰值典型 2.6A，可经 Smart Command Transport 配置为 2.0A。"
+      },
+      "appearance": {
+        "image": "assets/official/exos-x24.png",
+        "page": "https://www.seagate.com/ca/en/support/internal-hard-drives/enterprise-hard-drives/exos-x24/",
+        "note": "Exos X24 官方产品图"
+      }
+    },
+    {
+      "id": "storage.boot-sata-25",
+      "category": "storage",
+      "brand": "Generic",
+      "model": "2.5 SATA boot SSD",
+      "name": "240–500GB SATA 启动 SSD",
+      "dims": {
+        "evidence": "standard",
+        "note": "2.5-inch tray"
+      },
+      "power": {
+        "evidence": "standard"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Category placeholder until MPN locked",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "boot",
+        "sata",
+        "2.5",
+        "candidate"
+      ],
+      "attrs": {
+        "interface": "sata",
+        "form": "2.5"
+      }
+    },
+    {
+      "id": "hba.lsi-9300-8i-it",
+      "category": "hba",
+      "brand": "Broadcom / LSI",
+      "model": "9300-8i IT Mode",
+      "name": "LSI 9300-8i IT Mode",
+      "dims": {
+        "evidence": "standard",
+        "note": "HH/HL PCIe card; exact PCB length varies by OEM"
+      },
+      "power": {
+        "tdpW": 12,
+        "evidence": "inferred",
+        "note": "Passive HBA; ~8–15W planning band"
+      },
+      "harness": {
+        "evidence": "inferred",
+        "note": "2× SFF-8643（Mini-SAS HD），每口分 4 路 SATA，共 8 路；分线不随卡附带。"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "V1 accessory band ¥380–650 for card+cables planning — not locked",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "candidate"
+      ],
+      "attrs": {
+        "ports": 8,
+        "pcieGen": 3,
+        "pcieWidth": 8,
+        "connectors": 2,
+        "connectorType": "SFF-8643",
+        "portsPerConnector": 4
+      }
+    },
+    {
+      "id": "accessory.corsair-type5-peripheral-cable",
+      "category": "accessory",
+      "brand": "Corsair",
+      "model": "Premium Individually Sleeved Peripheral Power (Molex) Type 5",
+      "mpn": "CP-8920315",
+      "name": "Corsair Type-5 外围(Molex) 线 · 4 头 750mm",
+      "dims": {
+        "lengthMm": 750,
+        "evidence": "official"
+      },
+      "power": {
+        "evidence": "official"
+      },
+      "price": {
+        "currency": "CNY",
+        "current": null,
+        "historicalLow": null,
+        "listingUrl": "https://www.corsair.com/us/en/p/pc-components-accessories/cp-8920315/premium-individually-sleeved-peripheral-power-molex-style-cable-4-connectors-type-5-gen-5-black",
+        "note": "官方美国站 US$19.99（Elite 版 CP-8920456 同价位）；国内渠道与现货情况未核实，官方页部分配色显示缺货。",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "cable",
+        "psu-harness",
+        "corsair-type5"
+      ],
+      "attrs": {
+        "kind": "psu-peripheral-cable",
+        "cableType": "Type 5",
+        "connector": "molex",
+        "connectors": 4,
+        "lengthMm": 750,
+        "evidence": "official",
+        "appliesTo": [],
+        "note": "官方包装：1x 750mm 4-head PATA connector cable。Type-5 针脚专有，不能混用 Type-3/4。注意：SF750 / SF1000 的 SATA/PATA 模组插座只有 3 个且已被原盒线占满，这根线在这两颗电源上无处可插——只有换用外围插座 ≥4 的电源时才有意义。",
+        "blockedOn": [
+          "psu.corsair-sf750-atx31",
+          "psu.corsair-sf1000-atx31"
+        ]
+      },
+      "appearance": {
+        "page": "https://www.corsair.com/us/en/p/pc-components-accessories/cp-8920315/premium-individually-sleeved-peripheral-power-molex-style-cable-4-connectors-type-5-gen-5-black",
+        "note": "Corsair Type-5 外围线官方页"
+      }
+    },
+    {
+      "id": "accessory.slimsas-4xsata",
+      "category": "accessory",
+      "brand": "Generic",
+      "model": "SlimSAS to 4×SATA",
+      "name": "SlimSAS → 4×SATA breakout",
+      "dims": {
+        "evidence": "unknown"
+      },
+      "power": {
+        "evidence": "official"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "MPN must match ASUS SlimSAS pinout before buy",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "cable",
+        "data"
+      ],
+      "attrs": {
+        "kind": "data-cable",
+        "connector": "SFF-8654",
+        "fanout": 4,
+        "note": "用于主板 SlimSAS 口扩展 4 路 SATA；与 HBA 的 SFF-8643 口不兼容。"
+      }
+    },
+    {
+      "id": "accessory.minisas-hd-4xsata",
+      "category": "accessory",
+      "brand": "Generic",
+      "model": "SFF-8643 to 4×SATA",
+      "name": "Mini-SAS HD (SFF-8643) → 4×SATA 分线",
+      "dims": {
+        "evidence": "unknown"
+      },
+      "power": {
+        "evidence": "official"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "未审计；每根 4 路，9300-8i 需 2 根。与主板 SlimSAS(SFF-8654) 线不可互换",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "cable",
+        "data"
+      ],
+      "attrs": {
+        "kind": "data-cable",
+        "connector": "SFF-8643",
+        "fanout": 4,
+        "note": "9300-8i 板载两个 SFF-8643 口，每口分 4 路 SATA，合计 8 路。"
+      }
+    },
+    {
+      "id": "accessory.dual-psu-sync",
+      "category": "accessory",
+      "brand": "Generic",
+      "model": "PS_ON sync module",
+      "name": "双电源 PS_ON 同步模块 / 继电器",
+      "dims": {
+        "evidence": "unknown"
+      },
+      "power": {
+        "evidence": "unknown"
+      },
+      "price": {
+        "currency": "CNY",
+        "note": "Required for purchase-ready dual PSU; ratings unverified",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "dual-psu",
+        "sync"
+      ],
+      "attrs": {
+        "kind": "sync"
+      }
+    }
+  ]
+}
