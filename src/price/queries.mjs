@@ -125,6 +125,9 @@ export function buildSearchQueries(sku) {
 /** JD and brand sites index part numbers; Taobao and PDD need spec words first. */
 export function channelQueries(channel, sku) {
   const { exact, spec } = buildSearchQueries(sku);
+  // amazon.com indexes part numbers, not Chinese spec wording, so sending the spec
+  // queries there only burns requests on unrelated results.
+  if (channel === "amazon") return exact ? [exact] : [];
   const order =
     channel === "taobao" || channel === "pdd" ? [...spec, exact] : [exact, ...spec];
   const seen = new Set();

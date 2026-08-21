@@ -2,5 +2,19 @@
   "schemaVersion": "1.0.0",
   "asOf": "2026-08-21",
   "note": "Derived from manual-quotes.json + local-quotes.json (audited rows only).",
-  "quotes": []
+  "quotes": [
+    {
+      "skuId": "case.jonsbo-n6",
+      "platform": "taobao",
+      "priceCny": 629,
+      "currency": "CNY",
+      "match": "mpn",
+      "evidence": "audited",
+      "listingUrl": "https://item.taobao.com/item.htm?id=1023366651771&ns=1&abbucket=7&xxc=taobaoSearch&mi_id=0000SQuEubh3VxdGM0DKHPTXnfCiU6UPOfnWOxhWXW-EQgU&skuId=6034524752950&priceTId=214784fe17873266723104457e0f00&utparam=%7B%22aplus_abtest%22%3A%2268e9e9af5f44271a94d4733cd90cf5ba%22%7D&spm=a21n57.1.item.2",
+      "note": "淘宝 抓取后人工确认；规格「n6 中型钢版机箱 9盘位热插拔」；规格 乔思伯 ✓",
+      "title": "Jonsbo乔思伯 n6机箱 NAS专用机箱 9盘位台式双电源水冷服务器Micro-ATX一年质保¥5797人付款广东广州24小时内发包邮JINM金马科技企业店",
+      "variantLabel": "n6 中型钢版机箱 9盘位热插拔",
+      "fetchedAt": "2026-08-21T15:37:56.173Z"
+    }
+  ]
 }

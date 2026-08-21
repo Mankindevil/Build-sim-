@@ -19,8 +19,16 @@ import {
   today,
   upsertLocalQuote,
   latestPath,
+  loadFx,
 } from "./store.mjs";
-import { CHANNELS, browser, channelAvailability, collectForSku } from "./adapters/index.mjs";
+import {
+  CHANNELS,
+  browser,
+  channelAvailability,
+  collectForSku,
+  resolveVariants,
+} from "./adapters/index.mjs";
+import { listingKey } from "./adapters/variant.mjs";
 import { buildSearchQueries, isPriceTrackable } from "../../src/price/queries.mjs";
 
 const HOST = "127.0.0.1";
@@ -48,19 +56,21 @@ async function readBody(req) {
 }
 
 async function handleState() {
-  const [catalog, latest, manual, local, availability, candidates] = await Promise.all([
+  const [catalog, latest, manual, local, availability, candidates, fx] = await Promise.all([
     loadCatalog(),
     readJson(latestPath, null),
     loadManualQuotes(),
     loadLocalQuotes(),
     channelAvailability(),
     loadCandidates(today()),
+    loadFx(),
   ]);
 
   return {
     asOf: latest?.asOf ?? null,
     channels: CHANNELS,
     availability,
+    fx,
     counts: { manual: manual.length, local: local.length, latest: latest?.quotes?.length ?? 0 },
     localQuotes: local,
     candidates: candidates?.candidates ?? [],
@@ -92,10 +102,11 @@ async function handleCollect(body) {
     };
   }
 
+  const fx = await loadFx();
   const results = [];
   const candidates = [];
   for (const sku of targets) {
-    const perChannel = await collectForSku(sku, { channels, limit });
+    const perChannel = await collectForSku(sku, { channels, limit, fx });
     for (const r of perChannel) {
       results.push({
         skuId: sku.id,
@@ -121,6 +132,31 @@ async function handleCollect(body) {
   return payload;
 }
 
+/**
+ * Resolve one listing's variant prices and remember them on the candidate row, so
+ * the answer survives a reload and the human can see which option was priced.
+ */
+async function handleVariants(body) {
+  const url = String(body.url ?? "");
+  const channel = String(body.channel ?? "");
+  if (!url || !channel) throw new Error("url 与 channel 必填");
+
+  const result = await resolveVariants({ channel, url, limit: 24 });
+  const file = await loadCandidates(today());
+  const key = listingKey(url);
+  if (file?.candidates) {
+    for (const row of file.candidates) {
+      if (listingKey(row.url) !== key) continue;
+      row.variants = result.variants ?? [];
+      row.variantSource = result.source ?? null;
+      row.variantNotes = result.notes ?? [];
+      row.variantStatus = result.status;
+    }
+    await saveCandidates(file);
+  }
+  return result;
+}
+
 async function handleAudit(body) {
   const row = await upsertLocalQuote({ ...body, evidence: "audited" });
   const snapshot = await buildAndWriteLatest(today());
@@ -143,6 +179,7 @@ const server = http.createServer(async (req, res) => {
     if (route === "GET /api/price/health") return send(res, 200, { ok: true, port: PORT });
     if (route === "GET /api/price/state") return send(res, 200, await handleState());
     if (route === "POST /api/price/collect") return send(res, 200, await handleCollect(await readBody(req)));
+    if (route === "POST /api/price/variants") return send(res, 200, await handleVariants(await readBody(req)));
     if (route === "POST /api/price/audit") return send(res, 200, await handleAudit(await readBody(req)));
     if (route === "DELETE /api/price/audit") return send(res, 200, await handleUnaudit(url));
     if (route === "POST /api/price/rebuild") {

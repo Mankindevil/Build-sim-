@@ -35,6 +35,75 @@ query per SKU with `attrs.searchTerms` in `data/skus/catalog.json`.
 A SKU is fetchable when it has an `mpn` or an explicit `attrs.searchTerms`, so "抓取全部"
 stays bounded.
 
+## A card price is not the SKU's price
+
+A search result shows one number for a listing that may sell several products. A real capture of
+`乔思伯 N6 机箱` returned ¥579 for a listing whose options are N6 nine-bay ¥629 / N3 eight-bay ¥679 /
+N5 twelve-bay ¥1109 / N2 five-bay ¥579 — the card was quoting the cheapest one, an N2. So the
+pipeline runs in two stages:
+
+1. **Search** gives the listing link and a headline number stamped `priceKind: "from"`, shown as
+   「起价 · 未定规格」. It can never be audited.
+2. **Variant resolution** (`POST /api/price/variants`) opens the detail page and reads the
+   per-option price table. Only such a row can be audited, and the option's own wording is stored
+   in `variantLabel` so the number can be re-checked later.
+
+Resolution tries three things in order and records which one answered:
+
+| Attempt | How | Notes |
+| --- | --- | --- |
+| the page's own JSON | intercept `mtop…pcdetail.data.get` (Taobao/Tmall), `window.rawData` (PDD), `p.3.cn/prices/mgets` (JD) | fastest, whole table at once; breaks when the site changes |
+| embedded JSON | `g_page_config` / `__INITIAL_DATA__` in the HTML | older Taobao pages |
+| clicking | click each option and read the price that appears | survives API changes; the path that actually worked on Taobao in testing |
+
+All three failing yields `unknown`. Nothing infers a variant price.
+
+After a capture the panel resolves up to five listings per SKU automatically (best title matches
+first); every row also has a 「解析规格价」 button. The option matching the part number is
+preselected and labelled 「按料号自动选中」; when none matches, nothing is selected.
+
+## Reading the price off a card
+
+`textContent` concatenates sibling nodes with no separator, so a card whose price and sales count
+sit in adjacent spans reads as `¥69948人付款` — the old greedy regex banked 69948 for a ¥699 case.
+Extraction (`scripts/price-server/adapters/extract-price.mjs`) therefore locates the price
+structurally: find the currency sign, then climb to the largest ancestor whose entire text is still
+nothing but a price. The sales count lives in a different subtree and cannot be reached.
+
+When there is no such boundary — one text node holding `¥16948人付款` — the reading is refused
+(`amount: null`, `glued: true`) rather than split on a hunch. Every row keeps `priceText`,
+`priceSource` and `salesText` so a wrong number can be diagnosed instead of guessed at.
+
+`npm run price:fixture -- --channel taobao --query "乔思伯 N6 机箱"` saves real cards to
+`tests/fixtures/price-cards/`; `tests/price-extract.test.ts` asserts the parser reads ¥699 where
+the old rule read ¥69948.
+
+## Plausibility gates
+
+`src/price/sanity.mjs` marks rows; it never repairs one. A row that fails is shown in yellow,
+sorted to the bottom of its group, and cannot be audited:
+
+| Code | Meaning |
+| --- | --- |
+| `glued` | price and sales count could not be separated |
+| `no-price` | no trustworthy price node on the card |
+| `magnitude` | more than 4× the median reading captured for that SKU |
+
+The magnitude check is one-sided: only rows far **above** the median are flagged, because
+concatenation can only inflate a number (`699` → `69948`, never `6`). Flagging cheap rows too meant
+flagging real prices — a search page always mixes the part with accessories, and one ¥680 listing
+was enough to make the genuine ¥2799–¥3609 boards look suspect. It is a backstop only; a
+concatenated reading is refused outright during extraction. Listings the matcher rejected are
+excluded from the median.
+
+## Foreign currency
+
+亚马逊 points at **amazon.com**, so its prices are USD. `data/prices/fx.json` holds hand-written
+rates with an `asOf` date and no rate source — it exists only to give a foreign listing a
+comparable CNY magnitude. Converted rows are labelled 「含汇率假设」 and **cannot be audited**: a
+recorded price has to be what was actually paid in CNY. Update that file by hand before trusting
+the converted figures.
+
 ## Local collector service
 
 ```bash
@@ -50,16 +119,22 @@ Channel order is official API first, headed browser second:
 | 京东 | `jd.union.open.goods.query` (`JD_APP_KEY`/`JD_APP_SECRET`) | yes |
 | 淘宝 | `taobao.tbk.dg.material.optional.upgrade` (`TAOBAO_APP_KEY`/`TAOBAO_APP_SECRET`/`TAOBAO_ADZONE_ID`) | yes, login required |
 | 拼多多 | `pdd.ddk.goods.search` (`PDD_CLIENT_ID`/`PDD_CLIENT_SECRET`) | yes, login required |
-| 亚马逊 | none — Creators API needs Associates qualifying sales | yes |
+| 亚马逊 | none — Creators API needs Associates qualifying sales | yes, amazon.com (USD) |
 | 官网 | schema.org JSON-LD on the brand page | n/a |
+
+On amazon.com only the part-number query is sent; Chinese spec wording returns noise there.
 
 Keys go in `.env.local` (git-ignored). Without keys the browser path is used; without
 Playwright the channel reports why it is unavailable instead of guessing a price.
 
-Endpoints: `GET /api/price/state`, `POST /api/price/collect`, `POST /api/price/audit`,
-`DELETE /api/price/audit`, `POST /api/price/rebuild`.
+Endpoints: `GET /api/price/state`, `POST /api/price/collect`, `POST /api/price/variants`,
+`POST /api/price/audit`, `DELETE /api/price/audit`, `POST /api/price/rebuild`.
 
 ## Confirming a candidate
+
+Candidates are grouped per SKU in collapsible sections; each header shows the cheapest
+variant-level price, the spread of plausible card prices and how many readings are suspect. Two
+filters narrow the list: 只看料号匹配 and 隐藏可疑价格.
 
 Fetched rows are always `evidence: "unknown"`. The panel scores each title against the SKU:
 
@@ -70,8 +145,11 @@ Fetched rows are always `evidence: "unknown"`. The panel scores each title again
 - **已排除** — 二手 / 拆机 / 散片 / 兼容品, or a spec that contradicts the SKU (wrong
   capacity, wrong speed, DDR4 vs DDR5, single stick for a kit part number).
 
-确认入账 writes `local-quotes.json`, rebuilds `latest.json` plus the dated snapshot, and
-re-merges prices in the open page without a reload.
+On top of the title score, a row must also clear the audit gates: a resolved variant price, in CNY,
+with no plausibility flag. The button's tooltip states which of those is missing.
+
+确认入账 writes `local-quotes.json` (including `variantLabel`), rebuilds `latest.json` plus the dated
+snapshot, and re-merges prices in the open page without a reload.
 
 ## Schema (`latest.json`)
 
@@ -88,6 +166,7 @@ re-merges prices in the open page without a reload.
       "listingUrl": "https://item.jd.com/...",
       "match": "mpn",
       "evidence": "audited",
+      "variantLabel": "n6 中型钢板机箱 9盘位热插拔",
       "note": "Title contains MPN; Ver checked manually"
     }
   ]
@@ -95,6 +174,8 @@ re-merges prices in the open page without a reload.
 ```
 
 - `evidence` must be `audited` to affect the UI.
+- `variantLabel` names the option the price belongs to; without it a price on a multi-variant
+  listing cannot be re-checked.
 - Never invent `historicalLow`.
 - UI stamp: `snapshot YYYY-MM-DD · jd` (never "live market").
 
@@ -119,3 +200,8 @@ No captcha or login bypass. When a marketplace shows a challenge the browser win
 open for you to sign in and the channel reports `needsLogin`; when it throttles, the channel
 is parked for 5 minutes and reports that instead of returning a price. Searches are spaced
 3 s apart per channel and capped at two keyword variants.
+
+Variant resolution opens one detail page per request through the same throttle and cooldown, and
+the click fallback interacts only with the option controls — no cart, no checkout, no account
+actions. Automatic resolution is limited to five listings per SKU; anything beyond that is a
+deliberate button press.

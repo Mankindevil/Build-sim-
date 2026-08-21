@@ -4,6 +4,7 @@
  */
 
 import { channelQueries, channelToPlatform, pickOfficialUrl } from "../../../src/price/queries.mjs";
+import { flagCandidates } from "../../../src/price/sanity.mjs";
 import * as apiJd from "./api-jd.mjs";
 import * as apiTaobao from "./api-taobao.mjs";
 import * as apiPdd from "./api-pdd.mjs";
@@ -30,12 +31,13 @@ function cooldownLeftMs(channel) {
 }
 
 /** Amazon has no usable official API here: Creators API needs an Associates account
- *  with recent qualifying sales, so the browser profile is the only route. */
+ *  with recent qualifying sales, so the browser profile is the only route.
+ *  It points at amazon.com, so its prices are USD and carry an FX assumption. */
 const PLAN = {
   jd: { api: apiJd, browserChannel: "jd" },
   taobao: { api: apiTaobao, browserChannel: "taobao" },
   pdd: { api: apiPdd, browserChannel: "pdd" },
-  amazon: { api: null, browserChannel: "amazon_cn", apiReason: "Amazon Creators API 需 Associates 资质，未接入" },
+  amazon: { api: null, browserChannel: "amazon", apiReason: "Amazon Creators API 需 Associates 资质，未接入" },
   official: { api: officialPage, browserChannel: null },
 };
 
@@ -54,26 +56,58 @@ export async function channelAvailability() {
   return out;
 }
 
-function decorate(rows, { channel, sku, query }) {
+/**
+ * Turn adapter rows into candidates. Two rules matter here:
+ *
+ * - A search-card number is the listing's headline price, so it is stamped
+ *   `priceKind: "from"` and cannot be audited until a variant is resolved.
+ * - A foreign-currency price is converted only to give a comparable magnitude,
+ *   and the assumption travels with the row so the UI can refuse to bank it.
+ */
+function decorate(rows, { channel, sku, query, fx }) {
   const fetchedAt = new Date().toISOString();
   return (rows ?? [])
     .filter((r) => r && r.title)
-    .map((r) => ({
-      skuId: sku.id,
-      mpn: sku.mpn ?? "",
-      query,
-      channel,
-      platform: channelToPlatform(channel),
-      title: r.title,
-      priceCny: typeof r.priceCny === "number" && r.priceCny > 0 ? r.priceCny : null,
-      url: r.url ?? "",
-      fetchedAt,
-      evidence: "unknown",
-      ...(r.note ? { note: r.note } : {}),
-    }));
+    .map((r) => {
+      // API adapters already speak CNY; browser rows carry their own symbol.
+      const amount = typeof r.amount === "number" ? r.amount : (r.priceCny ?? null);
+      const currency = r.currency ?? (typeof r.priceCny === "number" ? "CNY" : null);
+      const rate = currency && currency !== "CNY" ? (fx?.rates?.[currency] ?? null) : null;
+      const priceCny =
+        currency === "CNY" && typeof amount === "number" && amount > 0
+          ? amount
+          : rate && typeof amount === "number" && amount > 0
+            ? Math.round(amount * rate * 100) / 100
+            : null;
+
+      return {
+        skuId: sku.id,
+        mpn: sku.mpn ?? "",
+        query,
+        channel,
+        platform: channelToPlatform(channel),
+        title: r.title,
+        url: r.url ?? "",
+        fetchedAt,
+        evidence: "unknown",
+        priceCny,
+        priceAmount: typeof amount === "number" && amount > 0 ? amount : null,
+        priceCurrency: currency,
+        priceKind: "from",
+        priceText: r.priceText ?? "",
+        priceSource: r.priceSource ?? (r.priceCny != null ? "api" : "none"),
+        salesText: r.salesText ?? "",
+        glued: Boolean(r.glued),
+        gluedAmount: r.gluedAmount ?? null,
+        suspect: null,
+        ...(rate ? { fxAssumed: { rate, asOf: fx.asOf, source: fx.source } } : {}),
+        ...(r.reason ? { reason: r.reason } : {}),
+        ...(r.note ? { note: r.note } : {}),
+      };
+    });
 }
 
-async function runChannel(channel, sku, limit) {
+async function runChannel(channel, sku, limit, fx) {
   const plan = PLAN[channel];
   if (!plan) return { channel, status: "unavailable", reason: `未知渠道 ${channel}`, candidates: [] };
 
@@ -145,7 +179,7 @@ async function runChannel(channel, sku, limit) {
           status: "ok",
           via: attempt.via,
           query,
-          candidates: decorate(result.candidates, { channel, sku, query }),
+          candidates: decorate(result.candidates, { channel, sku, query, fx }),
           ...(result.searchUrl ? { searchUrl: result.searchUrl } : {}),
         };
       }
@@ -185,12 +219,35 @@ async function runChannel(channel, sku, limit) {
   };
 }
 
-export async function collectForSku(sku, { channels = CHANNELS, limit = 5 } = {}) {
+export async function collectForSku(sku, { channels = CHANNELS, limit = 5, fx = null } = {}) {
   const results = [];
   for (const channel of channels) {
-    results.push(await runChannel(channel, sku, limit));
+    results.push(await runChannel(channel, sku, limit, fx));
   }
+  // Cross-check the rows against each other before anyone sees them: a number that
+  // disagrees with every other capture for this SKU gets marked, not corrected.
+  flagCandidates(results.flatMap((r) => r.candidates ?? []));
   return results;
+}
+
+/**
+ * Resolve one listing's variant prices. The candidate this came from stays a
+ * `from` row; the caller decides which variant is ours and banks that one.
+ */
+export async function resolveVariants({ channel, url, limit = 24 }) {
+  const plan = PLAN[channel];
+  const browserChannel = plan?.browserChannel;
+  if (!browserChannel) {
+    return { status: "unavailable", reason: `渠道 ${channel} 没有可解析规格的详情页` };
+  }
+  const left = cooldownLeftMs(channel);
+  if (left > 0) {
+    return { status: "unavailable", reason: `该渠道限流冷却中，还需 ${Math.ceil(left / 1000)} 秒` };
+  }
+  await throttle(channel);
+  const result = await browser.resolveVariants({ channel: browserChannel, url, limit });
+  if (result.status === "rateLimited") cooldownUntil.set(channel, Date.now() + COOLDOWN_MS);
+  return result;
 }
 
 export { browser };

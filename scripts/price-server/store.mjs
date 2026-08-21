@@ -16,6 +16,16 @@ export const manualPath = path.join(pricesDir, "manual-quotes.json");
 export const localPath = path.join(pricesDir, "local-quotes.json");
 export const snapshotsDir = path.join(pricesDir, "snapshots");
 export const candidatesDir = path.join(pricesDir, "candidates");
+export const fxPath = path.join(pricesDir, "fx.json");
+
+/**
+ * Hand-maintained exchange rates. Only used to give a foreign listing a
+ * comparable CNY magnitude — rows carrying this assumption cannot be audited,
+ * so a stale rate can never become a recorded transaction price.
+ */
+export async function loadFx() {
+  return readJson(fxPath, { asOf: null, rates: {}, source: "缺少 data/prices/fx.json" });
+}
 
 export function today() {
   return new Date().toISOString().slice(0, 10);
@@ -57,6 +67,9 @@ function normalizeRow(q) {
     ...(q.listingUrl ? { listingUrl: q.listingUrl } : {}),
     ...(q.note ? { note: q.note } : {}),
     ...(q.title ? { title: q.title } : {}),
+    // Which option on the listing this price belongs to. Without it a recorded
+    // price cannot be re-checked, because the listing sells several products.
+    ...(q.variantLabel ? { variantLabel: q.variantLabel } : {}),
     ...(q.fetchedAt ? { fetchedAt: q.fetchedAt } : {}),
   };
 }

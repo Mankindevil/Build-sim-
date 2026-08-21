@@ -14,13 +14,15 @@
     "price:refresh": "node scripts/price-refresh/refresh.mjs",
     "price:search": "node scripts/price-refresh/search.mjs",
     "price:serve": "node scripts/price-server/server.mjs",
-    "price:login": "node scripts/price-server/login.mjs"
+    "price:login": "node scripts/price-server/login.mjs",
+    "price:fixture": "node scripts/price-server/fixture.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "happy-dom": "^20.11.6",
     "playwright": "^1.62.1",
     "typescript": "^5.9.2",
     "vite": "^7.1.3",
