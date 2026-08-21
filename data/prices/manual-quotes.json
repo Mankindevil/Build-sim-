@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "note": "Curated paste-in quotes. Each row becomes an audited snapshot entry after price:refresh. Prefer listingUrl that contains the MPN in the product title.",
+  "quotes": [
+    {
+      "skuId": "memory.corsair-cmk32gx5m2x6400c38",
+      "platform": "jd",
+      "priceCny": null,
+      "listingUrl": "",
+      "match": "mpn",
+      "evidence": "unknown",
+      "note": "Paste a real JD/TB/PDD price + URL; set evidence to audited and priceCny to a number before refresh."
+    }
+  ]
+}

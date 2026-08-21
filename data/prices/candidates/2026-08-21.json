@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0.0",
+  "asOf": "2026-08-21",
+  "note": "抓取候选，evidence 一律 unknown；需在页面核对料号后确认入账。",
+  "results": [
+    {
+      "skuId": "memory.kingston-kf564c32rsk2-32",
+      "channel": "jd",
+      "status": "needsLogin",
+      "via": "browser",
+      "reason": "已弹出浏览器窗口，请在其中登录 / 过验证后重试抓取",
+      "searchUrl": "https://search.jd.com/Search?keyword=KF564C32RSK2-32",
+      "count": 0
+    }
+  ],
+  "candidates": []
+}

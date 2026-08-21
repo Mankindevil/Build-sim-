@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "1.0.0",
+  "asOf": "2026-08-21",
+  "note": "Derived from manual-quotes.json + local-quotes.json (audited rows only).",
+  "quotes": []
+}
