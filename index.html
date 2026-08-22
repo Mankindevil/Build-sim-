@@ -218,6 +218,7 @@
             <button class="case-view-btn" data-case-view-target="side" aria-pressed="false">侧面剖切示意</button>
             <button class="case-view-btn" data-case-view-target="rear" aria-pressed="false">背板与走线示意</button>
             <button class="case-view-btn" data-case-view-target="evidence" aria-pressed="false">官方手册证据</button>
+            <button class="case-view-btn" id="spatial-routes" type="button" aria-pressed="false">走线折线</button>
             <button class="case-view-btn" id="spatial-reset" type="button">复位 3D</button>
           </div>
 
@@ -423,6 +424,15 @@
         <div id="panel-wiring-notes" class="lab-callout" data-level="warn"></div>
         <p class="lab-note">左侧为电源模组面板的逐个插座，右侧为负载。实线＝该负载有自己的独立线；橙色虚线＝同一根线串接两个背板口（手册第 13 节不建议）；红色虚框＝没有任何线可接。插座分组与数量来自厂商面板图或拆解点数，证据等级标在右上角；标注“未点数”时图形仅按原盒线材反推，不能当作实物布局。</p>
       </section>
+      <section class="card" id="routing-card">
+        <div class="lab-section-head">
+          <div><p class="lab-kicker">CABLE ROUTING</p><h3>线缆走线与插拔净空</h3></div>
+          <span id="routing-badge">走线未求解</span>
+        </div>
+        <div id="routing-table" class="routing-table"></div>
+        <div id="routing-notes" class="lab-callout" data-level="warn"></div>
+        <p class="lab-note">每行是一条求解出的线路：起止接口、途经的穿线孔、折线长度与含 15% 装配余量的所需长度。点一行可在“立体透视”里只高亮这条线。接口坐标与航点均按手册图示重建，因此这里的结论最高只能是“待实物核对”，任何“穿过”与“插不进”都不是厂商结论。</p>
+      </section>
       <section class="card">
         <p class="lab-kicker">1 → 9 DRIVES</p><h3>盘数变化时需要增加什么</h3>
         <div class="table-responsive"><table class="table table-sm"><thead><tr><th>数据盘</th><th>数据线</th><th>控制器</th><th>启动盘</th><th>建议</th></tr></thead><tbody id="drive-matrix"></tbody></table></div>
@@ -569,6 +579,14 @@
   #n6-lab .spatial-dim-label.inferred { fill: var(--viz-series-5); }
   #n6-lab .spatial-part-label { font-size: 10.5px; fill: var(--foreground); }
   #n6-lab .spatial-part-callout { stroke: color-mix(in srgb,var(--foreground) 50%,transparent); stroke-width: 1; stroke-dasharray: 3 3; }
+  #n6-lab .spatial-route { fill: none; stroke-width: 1.9; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  #n6-lab .spatial-route[data-kind="power"] { stroke: var(--viz-series-6); }
+  #n6-lab .spatial-route[data-kind="data"] { stroke: var(--viz-series-1); }
+  #n6-lab .spatial-route[data-state="warn"] { stroke: var(--warn); stroke-dasharray: 6 4; }
+  #n6-lab .spatial-route[data-state="none"] { stroke: var(--bad); stroke-dasharray: 2 4; }
+  #n6-lab .spatial-route-node { fill: var(--card); stroke: color-mix(in srgb,var(--foreground) 70%,transparent); stroke-width: 1.2; }
+  #n6-lab .spatial-route-sweep { fill: none; stroke: var(--bad); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+  #n6-lab .spatial-route-group[data-dim="true"] { opacity: .16; }
   #n6-lab .spatial-axis { stroke-width: 2; vector-effect: non-scaling-stroke; }
   #n6-lab .spatial-axis-label { font-size: 10px; font-weight: 700; }
   #n6-lab .spatial-help { position: absolute; top: 9px; right: 9px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; max-width: 70%; padding: 6px 8px; background: color-mix(in srgb,var(--card) 88%,transparent); border: 1px solid var(--border); color: var(--muted-foreground); font-size: 10px; pointer-events: none; }
@@ -798,6 +816,22 @@
   #n6-lab .pw-link { fill: none; stroke: var(--viz-series-2); stroke-width: 1.4; opacity: .85; }
   #n6-lab .pw-link[data-state="shared"] { stroke: #f59e0b; stroke-dasharray: 5 4; }
   #n6-lab .pw-badge { font-size: 8px; fill: #fff; font-weight: 650; }
+  #n6-lab .routing-rows tbody tr { cursor: pointer; border-left: 2px solid transparent; }
+  #n6-lab .routing-rows tbody tr[data-level="warn"] { border-left-color: #f59e0b; }
+  #n6-lab .routing-rows tbody tr[data-level="unknown"] { border-left-color: var(--muted-foreground); }
+  #n6-lab .routing-rows tbody tr[data-level="ok"] { border-left-color: var(--ok); }
+  #n6-lab .routing-rows tbody tr[aria-selected="true"] { background: color-mix(in srgb,var(--viz-series-1) 16%,transparent); }
+  #n6-lab .routing-rows tbody tr:focus-visible { outline: 2px solid var(--viz-series-1); outline-offset: -2px; }
+  #n6-lab .routing-rows td { vertical-align: top; font-size: 11px; }
+  #n6-lab .rt-muted { color: var(--muted-foreground); font-size: 10px; }
+  #n6-lab .rt-len { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #n6-lab .rt-arrow { color: var(--muted-foreground); margin: 0 3px; }
+  #n6-lab .rt-via { display: inline-block; padding: 0 3px; border: 1px solid var(--border); font-size: 10px; }
+  #n6-lab .rt-via[data-opening="true"] { border-color: #f59e0b; color: #f59e0b; }
+  #n6-lab .rt-chip { display: inline-block; margin: 0 4px 3px 0; padding: 1px 5px; border: 1px solid var(--border); font-size: 10px; }
+  #n6-lab .rt-chip[data-level="warn"] { border-color: #f59e0b; color: #f59e0b; }
+  #n6-lab .rt-chip[data-level="ok"] { border-color: var(--ok); color: var(--ok); }
+  #n6-lab .rt-chip[data-level="unknown"] { color: var(--muted-foreground); }
   @media (prefers-reduced-motion: reduce) { #n6-lab * { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
 </style>
 

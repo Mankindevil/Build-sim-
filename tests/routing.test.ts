@@ -92,6 +92,17 @@ describe("every real port lands inside the case", () => {
     }
   });
 
+  it("carries the sweep it tested, so the preview cannot draw a different volume", () => {
+    const { cables, ports } = routed();
+    for (const cable of cables) {
+      for (const ins of cable.insertion) {
+        const p = port(ins.portId, ports);
+        expect(ins.at).toEqual(p.at);
+        expect(ins.sweep).toEqual(insertionSweep(p));
+      }
+    }
+  });
+
   it("instantiates one data outlet per tray and one power port per inlet", () => {
     const { ports } = routed();
     const ids = ports.map((p) => p.id);

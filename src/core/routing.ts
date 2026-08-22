@@ -420,12 +420,20 @@ export interface CableRunSpec {
   kind: "power" | "data" | "fan" | "other";
 }
 
+export interface PortInsertion {
+  portId: string;
+  at: Vec3;
+  /** The volume a hand and plug need; drawn by the preview, not just tested. */
+  sweep: CenteredBox;
+  blocks: InsertionBlock[];
+}
+
 export interface RoutedCable extends CableRunSpec {
   from: Port;
   to: Port;
   route: Route | null;
   requiredMm: number | null;
-  insertion: { portId: string; blocks: InsertionBlock[] }[];
+  insertion: PortInsertion[];
   segmentHits: SegmentBlock[];
   evidence: EvidenceLevel;
 }
@@ -450,10 +458,12 @@ export function routeRun(
     to,
     route,
     requiredMm: route ? requiredLengthMm(route) : null,
-    insertion: [
-      { portId: from.id, blocks: insertionBlocks(from, parts) },
-      { portId: to.id, blocks: insertionBlocks(to, parts) },
-    ],
+    insertion: [from, to].map((port) => ({
+      portId: port.id,
+      at: port.at,
+      sweep: insertionSweep(port),
+      blocks: insertionBlocks(port, parts),
+    })),
     segmentHits: route ? segmentBlocks(route, parts, [from.partId, to.partId], openings) : [],
     // Every anchor in routing.json is reconstructed from schematic figures.
     evidence: "inferred",

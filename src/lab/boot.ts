@@ -18,6 +18,7 @@ import { getLocalSnapshot, initPricePanel, updatePriceCatalog } from "./price-pa
 import { planPanelWiring } from "../wiring/panel";
 import { boardSataPorts, boardStorage, nativeSataCeiling } from "../core/policy";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
+import n6Routing from "../../data/cases/jonsbo-n6/routing.json";
 import v1RuntimeUrl from "./v1-runtime.js?url";
 
 let catalog = loadBundledCatalog();
@@ -199,7 +200,6 @@ function updatePanelWiring(config: BuildConfig): void {
   const host = $("panel-wiring");
   if (!host) return;
   const plan = planPanelWiring(config, catalog);
-  const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
   const SOCKET_W = 30;
   const SOCKET_H = 20;
@@ -290,6 +290,172 @@ function updatePanelWiring(config: BuildConfig): void {
   if (notes) {
     notes.dataset.level = plan.unmet.length > 0 ? "bad" : plan.panelKnown ? "ok" : "warn";
     notes.textContent = [...plan.unmet, ...plan.notes].join(" · ");
+  }
+}
+
+const PORT_KIND_ZH: Record<string, string> = {
+  atx24: "24pin",
+  eps8: "EPS 8pin",
+  pcie8: "PCIe 8pin",
+  periph5: "外围 SATA/PATA",
+  sata_data: "SATA 数据",
+  slimsas: "SlimSAS",
+  sff8643: "SFF-8643",
+  fan4: "风扇 4pin",
+};
+
+const WAYPOINTS = new Map(
+  (n6Routing.waypoints as { id: string; kind: string; apertureMm: number; source: string }[]).map(
+    (w) => [w.id, w],
+  ),
+);
+
+const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+/**
+ * Routing table: one row per solved cable run.
+ *
+ * It shows the same polylines the isometric view draws, so a row and a line can
+ * never disagree. Every cell is a reconstruction — the manual publishes no
+ * connector coordinates — which is why the worst thing a row can say is
+ * "check it on the real thing", never "this will not fit".
+ */
+function updateRouting(result: BuildEvaluation): void {
+  const host = $("routing-table");
+  if (!host) return;
+  const cables = result.routing.cables;
+  const partName = new Map(result.geometry.map((p) => [p.id, p.name]));
+
+  const endLabel = (port: { partId: string; kind: string; id: string; source: string }): string => {
+    const name = partName.get(port.partId) ?? port.partId;
+    const kind = PORT_KIND_ZH[port.kind] ?? port.kind;
+    return `<span title="${esc(`${port.id} · ${port.source}`)}">${esc(name)} · ${esc(kind)}</span>`;
+  };
+
+  const viaLabel = (ids: string[]): string => {
+    if (ids.length === 0) return '<span class="rt-muted">直连，未经声明航点</span>';
+    return ids
+      .map((id) => {
+        const wp = WAYPOINTS.get(id);
+        const short = id.replace(/^wp\./, "");
+        const opening = wp?.kind === "deck_opening";
+        const title = wp ? `${id} · 通径约 ${wp.apertureMm}mm · ${wp.source}` : id;
+        return `<span class="rt-via" data-opening="${opening}" title="${esc(title)}">${esc(short)}</span>`;
+      })
+      .join('<span class="rt-arrow">→</span>');
+  };
+
+  type Chip = { text: string; level: "warn" | "ok" | "unknown" };
+  const chipsFor = (cable: BuildEvaluation["routing"]["cables"][number]): Chip[] => {
+    const chips: Chip[] = [];
+    if (!cable.route) chips.push({ text: "无声明过的通路", level: "warn" });
+    for (const ins of cable.insertion) {
+      if (ins.blocks.length === 0) continue;
+      const angled = ins.blocks.every((b) => b.sidewaysClear);
+      const worst = ins.blocks[0]!;
+      chips.push({
+        text: angled ? `需弯头 · ${worst.partName}` : `插拔受阻 · ${worst.partName} ${worst.depthMm}mm`,
+        level: "warn",
+      });
+    }
+    const through = [...new Set(cable.segmentHits.map((h) => h.partName))];
+    if (through.length > 0) chips.push({ text: `折线穿过 ${through.join(" / ")}`, level: "warn" });
+    if (cable.route) {
+      if (cable.availableLengthMm == null) {
+        chips.push({ text: "线材长度未公布", level: "unknown" });
+      } else if (cable.availableLengthMm < cable.requiredMm!) {
+        chips.push({
+          text: `线材短 ${cable.requiredMm! - cable.availableLengthMm}mm`,
+          level: "warn",
+        });
+      }
+    }
+    if (chips.length === 0) chips.push({ text: "无冲突（推算）", level: "ok" });
+    return chips;
+  };
+
+  const rows = cables
+    .map((cable) => {
+      const chips = chipsFor(cable);
+      const level = chips.some((c) => c.level === "warn")
+        ? "warn"
+        : chips.some((c) => c.level === "unknown")
+          ? "unknown"
+          : "ok";
+      const length = cable.route
+        ? `${Math.round(cable.route.lengthMm)} → <b>${cable.requiredMm}</b>mm` +
+          (cable.availableLengthMm == null ? "" : `<br><span class="rt-muted">选定线材 ${cable.availableLengthMm}mm</span>`)
+        : '<span class="rt-muted">—</span>';
+      return (
+        `<tr data-run-id="${esc(cable.id)}" data-level="${level}" tabindex="0" aria-selected="false">` +
+        `<td>${esc(cable.label)}<br><span class="rt-muted">${cable.kind === "power" ? "供电" : "数据"}</span></td>` +
+        `<td>${endLabel(cable.from)}<br><span class="rt-arrow">↓</span><br>${endLabel(cable.to)}</td>` +
+        `<td>${viaLabel(cable.route?.viaIds ?? [])}</td>` +
+        `<td class="rt-len">${length}</td>` +
+        `<td>${chips.map((c) => `<span class="rt-chip" data-level="${c.level}">${esc(c.text)}</span>`).join("")}</td>` +
+        "</tr>"
+      );
+    })
+    .join("");
+
+  host.innerHTML = cables.length
+    ? '<div class="table-responsive"><table class="table table-sm routing-rows"><thead><tr>' +
+      "<th>线缆</th><th>起点 → 终点</th><th>途经航点</th><th>折线 → 所需</th><th>状态</th>" +
+      `</tr></thead><tbody>${rows}</tbody></table></div>`
+    : '<p class="lab-note">当前选型没有需要求解的线路。</p>';
+
+  bindRoutingRows(host);
+
+  const flagged = cables.filter((c) => chipsFor(c).some((x) => x.level === "warn")).length;
+  const unknown = cables.filter((c) => c.route !== null && c.availableLengthMm == null).length;
+  const longest = cables.reduce((m, c) => Math.max(m, c.requiredMm ?? 0), 0);
+  const badge = $("routing-badge");
+  if (badge) {
+    badge.textContent = cables.length
+      ? `${cables.length} 条线路 · ${flagged} 处冲突 · ${unknown} 条长度未知 · 最长需 ${longest}mm`
+      : "无线路";
+  }
+  const notes = $("routing-notes");
+  if (notes) {
+    notes.dataset.level = flagged > 0 ? "warn" : unknown > 0 ? "warn" : "ok";
+    const openings = new Set(
+      cables.flatMap((c) => (c.route?.viaIds ?? []).filter((id) => WAYPOINTS.get(id)?.kind === "deck_opening")),
+    );
+    notes.textContent =
+      (flagged > 0
+        ? `${flagged} 条线路有插拔净空、穿越或长度问题，均为推算结论，需实物核对。`
+        : "按重建的接口锚点，所有线路都能走通。") +
+      (unknown > 0
+        ? `另有 ${unknown} 条线材目录里没有长度，无法判断够不够长。`
+        : "") +
+      (openings.size > 0
+        ? `跨腔线路依赖 ${openings.size} 处隔板开口（${[...openings].map((id) => id.replace(/^wp\./, "")).join(" / ")}），手册未标注其尺寸与位置。`
+        : "") +
+      "所需长度已含 15% 装配余量。";
+  }
+}
+
+/**
+ * Row selection drives the preview. The table owns which run is focused because
+ * that is where the run is named; the view only listens.
+ */
+function bindRoutingRows(host: HTMLElement): void {
+  let focused: string | null = null;
+  const focus = (id: string | null): void => {
+    focused = id;
+    for (const row of host.querySelectorAll<HTMLElement>("tr[data-run-id]")) {
+      row.setAttribute("aria-selected", String(row.dataset.runId === id));
+    }
+    document.dispatchEvent(new CustomEvent("n6:route-focus", { detail: { id } }));
+  };
+  for (const row of host.querySelectorAll<HTMLElement>("tr[data-run-id]")) {
+    const toggle = (): void => focus(focused === row.dataset.runId ? null : (row.dataset.runId ?? null));
+    row.addEventListener("click", toggle);
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggle();
+    });
   }
 }
 
@@ -469,6 +635,7 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   updateWiringFromEngine(evaluation);
   updateBackplaneHarness(evaluation.wiring);
   updatePanelWiring(evaluation.config);
+  updateRouting(evaluation);
   updateAirBalance(evaluation);
   updateGalleryFromSkus(evaluation.config);
   updatePriceStamp();

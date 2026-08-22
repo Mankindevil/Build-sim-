@@ -271,6 +271,14 @@ assembly slack (`SERVICE_SLACK`, an allowance, not a physical quantity). A cable
 `lengthMm` in the catalog yields `unknown` plus "at least X mm", because inventing a length is
 how a wrong cable gets bought.
 
+Both the routing table and the isometric overlay read the solved runs, never their own copy: each
+`insertion` entry carries the very sweep box the check tested, so a dashed box in the preview is
+the volume that produced the finding. The table's status column separates the three kinds of doubt
+it can report — an obstruction, a length that is too short, and a length nobody published — since
+"we found a problem" and "we cannot tell" are not the same answer. Waypoints of kind
+`deck_opening` are marked in the route, because a cross-chamber run is only as good as an opening
+whose size and position the manual never states.
+
 ## Thermal field: an interpolation of the 0D result, and nothing more
 
 The heatmap is drawn by `src/core/thermal-field.ts`, which adds **no physics** to

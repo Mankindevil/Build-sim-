@@ -470,7 +470,7 @@
   }
 
   const spatialNS = 'http://www.w3.org/2000/svg';
-  const spatialState = {yaw:-.72,pitch:-.46,zoom:.93,dragging:false,x:0,y:0,config:null,parts:[]};
+  const spatialState = {yaw:-.72,pitch:-.46,zoom:.93,dragging:false,x:0,y:0,config:null,parts:[],routing:null,showRoutes:false,routeFocus:null};
   function spatialEl(tag,attrs={},label=''){
     const el=document.createElementNS(spatialNS,tag);
     Object.entries(attrs).forEach(([key,value])=>el.setAttribute(key,value));
@@ -563,9 +563,52 @@
     }
     return {boxes,labels,boardTop:board?board.c[1]+board.h/2:0};
   }
-  function renderSpatial(c,parts){
+  /**
+   * Route drawing. Every millimetre here comes from `ev.routing`, so a polyline in
+   * the preview and a row in the routing table are the same solved path; the view
+   * adds nothing but the projection.
+   */
+  function routeState(cable){
+    if(!cable.route)return 'none';
+    if(cable.segmentHits.length||cable.insertion.some(i=>i.blocks.length))return 'warn';
+    if(cable.availableLengthMm!=null&&cable.requiredMm!=null&&cable.availableLengthMm<cable.requiredMm)return 'warn';
+    return 'ok';
+  }
+  function spatialBoxEdges(layer,box,className){
+    const v=spatialVertices(box);
+    [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]].forEach(([a,b])=>spatialEdge(layer,v[a],v[b],className));
+  }
+  function drawRoutes(layer){
+    const routing=spatialState.routing;
+    if(!routing||!routing.cables)return;
+    const focus=spatialState.routeFocus;
+    for(const cable of routing.cables){
+      const dim=focus&&focus!==cable.id?'true':'false',state=routeState(cable);
+      const group=spatialEl('g',{class:'spatial-route-group','data-dim':dim});
+      const lengths=cable.route?`${Math.round(cable.route.lengthMm)}mm 折线 · 需 ${cable.requiredMm}mm`:'无连通路径';
+      group.appendChild(spatialEl('title',{},`${cable.label} · ${lengths}`));
+      const pts=cable.route?cable.route.polyline:[];
+      for(let i=1;i<pts.length;i++){
+        const p=spatialProject(pts[i-1]),q=spatialProject(pts[i]);
+        group.appendChild(spatialEl('line',{x1:p.x.toFixed(2),y1:p.y.toFixed(2),x2:q.x.toFixed(2),y2:q.y.toFixed(2),class:'spatial-route','data-kind':cable.kind,'data-state':state}));
+      }
+      // Interior vertices are the declared openings the cable passes through.
+      for(let i=1;i<pts.length-1;i++){
+        const p=spatialProject(pts[i]);
+        group.appendChild(spatialEl('circle',{cx:p.x.toFixed(2),cy:p.y.toFixed(2),r:2.4,class:'spatial-route-node'}));
+      }
+      // Only sweeps that something sits inside are drawn: an empty sweep is not news.
+      for(const ins of cable.insertion){
+        if(!ins.blocks.length)continue;
+        spatialBoxEdges(group,ins.sweep,'spatial-route-sweep');
+      }
+      layer.appendChild(group);
+    }
+  }
+  function renderSpatial(c,parts,routing){
     spatialState.config=c;
     if(parts)spatialState.parts=parts;
+    if(routing)spatialState.routing=routing;
     const model=spatialModel(c,spatialState.parts||[]);
     const scene=$('#spatial-scene'),overlay=$('#spatial-screen-overlay');scene.textContent='';overlay.textContent='';
     const faceLayer=spatialEl('g'),lineLayer=spatialEl('g'),dimLayer=spatialEl('g'),labelLayer=spatialEl('g');
@@ -611,6 +654,7 @@
       spatialDimension(dimLayer,[x,y,z0],[x,y,z1],`${Math.round(gpuBox.d)}mm 包络 / N6 发布范围 ${limits.gpuMm.publishedMin}–${limits.gpuMm.publishedMax}mm`,'inferred',0,15);
     }
     model.labels.forEach(item=>spatialCallout(labelLayer,item.anchor,item.text,item.dx,item.dy));
+    if(spatialState.showRoutes)drawRoutes(lineLayer);
 
     const origin={x:680,y:560},axisData=[[[42,0,0],'W', 'var(--viz-series-6)'],[[0,42,0],'H','var(--viz-series-4)'],[[0,0,42],'D','var(--viz-series-1)']],base=spatialProject([0,0,0]);
     axisData.forEach(([point,label,color])=>{
@@ -621,6 +665,10 @@
     overlay.appendChild(spatialEl('text',{x:24,y:27,class:'svg-label'},'毫米比例模型 · 透明外壳 · 空间规划视图'));
     overlay.appendChild(spatialEl('text',{x:24,y:48,class:'svg-dim'},'内部安装点与间隙是依说明书的推算，不可作为开孔 / 定制线材尺寸'));
 
+    const routes=spatialState.routing&&spatialState.routing.cables?spatialState.routing.cables:[];
+    const routeStrip=spatialState.showRoutes&&routes.length
+      ? `<div data-source="inferred"><b>走线折线 · 重建推算</b><span>${routes.length} 条线路按 routing.json 的接口锚点与航点图求解；圆点是声明过的穿线孔，虚线框是被占住的插拔净空。手册未标注接口坐标，折线不可用于定制线材下单。</span></div>`
+      : '';
     const psuStandard=c.psu.form==='ATX'?`ATX 150×86×${c.psu.length}mm`:'SFX 125×63.5×100mm',coolerLimit=coolerPlanningLimit(c),ramCount=ramModuleCount(c);
     const bootVisual=c.boot==='bay'?'2.5″ SATA Boot ·1':c.boot==='usbssd'?'外置 USB Boot SSD ·1':'980 PRO #1 作 Boot';
     $('#spatial-data-strip').innerHTML=`
@@ -629,6 +677,7 @@
       <div data-source="standard"><b>已显示的板上与存储件</b><span>i5-14500 ·1；DDR5 ·${ramCount}；980 PRO M.2 ·2；${bootVisual}；3.5″ HDD ·${c.disks}。</span></div>
       <div data-source="standard"><b>厂商 / 标准零件包络</b><span>mATX 244×244mm（ASUS p11）；${psuStandard}；3.5\" HDD 101.6×147×26.1mm。</span></div>
       <div data-source="official"><b>下层结构关系 · N6 §8.1–8.3 / §13.1</b><span>左侧风扇架 4 螺丝可拆；接背板四路供电需先拆它；装下置电源时由随箱电源架取代，不再装回。背板供电口排列为 SATA×2 + PATA×2。</span></div>
+      ${routeStrip}
       <div data-source="inferred"><b>规划重建 · 不可量内部间隙</b><span>${topologyLabel(c)}；${c.cooler.name} ${c.cooler.height?c.cooler.height+'mm':'冷头 / 泵包络'} / 规划限高 ${coolerLimit}mm；托架钢框、背板 PCB 板形、风扇架 / 电源架板形与安装孔位手册均未标注，图中为包络；锚点、卡高、冷管与线材弯折非厂商 CAD。</span></div>`;
   }
   function resetSpatialView(){spatialState.yaw=-.72;spatialState.pitch=-.46;spatialState.zoom=.93;if(spatialState.config)renderSpatial(spatialState.config);}
@@ -696,7 +745,7 @@
     $('#rear-data-source').textContent=hasHba(c)?'LSI 9300-8i · 8 口':c.disks<=4?'4×SATA 原生':'4×SATA 原生';
     $('#rear-data-source-2').textContent=hasHba(c)?(c.boot==='bay'&&c.disks<9?'Boot → 主板 SATA 1':c.disks===9?'第 9 盘 → 主板 SATA':'2×SFF-8643 分线'):c.disks<=4?'SlimSAS 暂不用':'SlimSAS → 4×SATA';
     const harness=backplaneHarnessCount(c);$('#rear-harness-text').textContent=c.psuPosition==='dual'?`背板 SFX 约 ${harness} 条 · 不与主 PSU 相加`:harness>=4?'PSU 四条独立外围线':'预计 '+harness+' 条 · 需补 '+(4-harness)+' 条';
-    renderSpatial(c,ev.geometry);
+    renderSpatial(c,ev.geometry,ev.routing);
   }
   function renderOverview(c,p,a,fit,ev){
     $('#kpi-wall').textContent=Math.round(p.wall)+' W';$('#kpi-wall-note').textContent=$('#workload-select').selectedOptions[0].text+' · 估算 ±3–8W';
@@ -887,6 +936,26 @@
   bindFieldMode('heat-plane','plane');
   ['psu-select','psu-position','secondary-psu-select','dual-start-select','cooler-select','gpu-select','gpu-custom-name','gpu-custom-length','gpu-custom-slots','gpu-custom-tgp','gpu-custom-vram','gpu-custom-price','ram-select','disk-range','boot-select','nvme-select','hba-select','fan-select','ambient-range','workload-select','pl-select','front-fans','rear-fan','drive-fans','side-fans','preserve-hba'].forEach(id=>$('#'+id).addEventListener('input',()=>render()));
   $('#reference-select').addEventListener('input',renderReference);$('#spatial-reset').addEventListener('click',resetSpatialView);renderReference();
+
+  // Routes are off by default: they cross the whole case, and the mechanical view
+  // has to stay readable for someone checking clearances instead of cables.
+  const routeToggle=$('#spatial-routes');
+  if(routeToggle)routeToggle.addEventListener('click',()=>{
+    spatialState.showRoutes=!spatialState.showRoutes;
+    routeToggle.setAttribute('aria-pressed',String(spatialState.showRoutes));
+    if(!spatialState.showRoutes)spatialState.routeFocus=null;
+    if(spatialState.config)renderSpatial(spatialState.config);
+  });
+  // The routing table owns selection; the view only follows it, and turns routes on
+  // so a click there never looks like it did nothing.
+  document.addEventListener('n6:route-focus',event=>{
+    spatialState.routeFocus=(event.detail&&event.detail.id)||null;
+    if(spatialState.routeFocus&&!spatialState.showRoutes){
+      spatialState.showRoutes=true;
+      if(routeToggle)routeToggle.setAttribute('aria-pressed','true');
+    }
+    if(spatialState.config)renderSpatial(spatialState.config);
+  });
 
   /**
    * Airflow inputs for the V2 air-balance model. The left-side 120×2 mounts are the
