@@ -433,6 +433,15 @@
         <div id="routing-notes" class="lab-callout" data-level="warn"></div>
         <p class="lab-note">每行是一条求解出的线路：起止接口、途经的穿线孔、折线长度与含 15% 装配余量的所需长度。点一行可在“立体透视”里只高亮这条线。接口坐标与航点均按手册图示重建，因此这里的结论最高只能是“待实物核对”，任何“穿过”与“插不进”都不是厂商结论。</p>
       </section>
+      <section class="card" id="assembly-card">
+        <div class="lab-section-head">
+          <div><p class="lab-kicker">ASSEMBLY ORDER</p><h3>装机顺序</h3></div>
+          <span id="assembly-badge">顺序未推导</span>
+        </div>
+        <ol id="assembly-steps" class="assembly-steps"></ol>
+        <div id="assembly-notes" class="lab-callout" data-level="ok"></div>
+        <p class="lab-note">顺序不是写死的清单，是从三处推出来的：几何里的安装嵌套关系、每个件装入时要走的行程（谁站在这条行程上就得后装）、以及走线求解出的插拔净空。手册明确写出的规则（如 §13.1 接背板供电前先拆左侧风扇架）以官方证据单独标注，因为它比任何重建都可靠。行程值本身是推算，所以“先装谁”是建议而非厂商结论。</p>
+      </section>
       <section class="card">
         <p class="lab-kicker">1 → 9 DRIVES</p><h3>盘数变化时需要增加什么</h3>
         <div class="table-responsive"><table class="table table-sm"><thead><tr><th>数据盘</th><th>数据线</th><th>控制器</th><th>启动盘</th><th>建议</th></tr></thead><tbody id="drive-matrix"></tbody></table></div>
@@ -832,6 +841,15 @@
   #n6-lab .rt-chip[data-level="warn"] { border-color: #f59e0b; color: #f59e0b; }
   #n6-lab .rt-chip[data-level="ok"] { border-color: var(--ok); color: var(--ok); }
   #n6-lab .rt-chip[data-level="unknown"] { color: var(--muted-foreground); }
+  #n6-lab .assembly-steps { margin: 0 0 10px; padding-left: 26px; display: grid; gap: 4px; font-size: 11.5px; }
+  #n6-lab .assembly-steps li { border-left: 2px solid var(--border); padding-left: 8px; }
+  #n6-lab .assembly-steps li[data-kind="plug"] { border-left-color: var(--viz-series-1); }
+  #n6-lab .assembly-steps li[data-kind="remove"] { border-left-color: #f59e0b; }
+  #n6-lab .assembly-steps li[data-kind="refit"] { border-left-color: #f59e0b; }
+  #n6-lab .assembly-steps li[data-deadlocked="true"] { border-left-color: #ef4444; }
+  #n6-lab .assembly-steps b { font-weight: 600; }
+  #n6-lab .as-count { margin-left: 6px; padding: 0 4px; border: 1px solid var(--border); color: var(--muted-foreground); font-size: 10px; }
+  #n6-lab .as-why { display: block; color: var(--muted-foreground); font-size: 10.5px; }
   @media (prefers-reduced-motion: reduce) { #n6-lab * { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
 </style>
 

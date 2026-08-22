@@ -132,8 +132,9 @@
     if(c.cooler.type==='水冷') { if(c.cooler.fit==='front240'){warnings.push('手册列出前置 240mm 冷排安装位，但没有给冷排总厚度、接头、冷管和 GPU 尾部的共存尺寸；必须按具体冷排与显卡实测。');level=level==='bad'?'bad':'warn';if(['frontSFX','frontSFX_plus_bottomSFX'].includes(placement)){issues.push('前置 SFX 与前置 240 冷排在手册示意中共享前部安装面；在厂商没有给出共存尺寸前，按保守互斥。');level='bad';}} else {if(overheadPsu(c)){issues.push('后上置 ATX 电源占用后部支架，不能同时规划后置 120 冷排。');level='bad';}else{warnings.push('后置 120mm 是风扇位，手册没有明确承诺 120mm 冷排；冷排、冷管与主板的真实干涉需拿到手比对。');level=level==='bad'?'bad':'warn';}} }
     else if(c.cooler.height>maxCooler){issues.push(`${topologyLabel(c)} 的规划散热限高 ${maxCooler}mm，${c.cooler.name} 高 ${c.cooler.height}mm。`);level='bad';}
     else {const gap=maxCooler-c.cooler.height; if(gap<=2){warnings.push(`散热器只剩 ${gap}mm 规划余量，进风与装配公差不足。`);level=level==='bad'?'bad':'warn';} else oks.push(`散热器高度 ${c.cooler.height}mm；按当前拓扑映射的规划包络 ${maxCooler}mm，余 ${gap}mm。`);warnings.push('N6 只发布 65–160mm 散热范围，没有说明两个端点分别对应哪种电源拓扑；当前限高映射属于结构推算。');level=level==='bad'?'bad':'warn';}
+    // The "swap the memory later and the cooler comes off again" caveat is no
+    // longer typed here: src/core/assembly.ts derives it from the fin overhang.
     if(c.cooler.ram<c.ram.height){issues.push(`${c.cooler.name} 内存限高 ${c.cooler.ram}mm，当前内存约 ${c.ram.height}mm。`);level='bad';}
-    else if(c.cooler.ram<99){warnings.push(`IS-55 覆盖 DIMM 区；换内存大概率要先拆散热器。`);level=level==='bad'?'bad':'warn';}
     if(c.gpu.length>limits.gpuMm.publishedMax){issues.push(`${c.gpu.name} 规划长度 ${c.gpu.length}mm，超过 N6 发布范围的最大端点 ${limits.gpuMm.publishedMax}mm。`);level='bad';}
     else if(c.gpu.length>limits.gpuMm.publishedMin){warnings.push(`${c.gpu.name} 长 ${c.gpu.length}mm，位于 N6 发布的 275–320mm 条件区；厂商未说明端点对应拓扑，必须用具体 SKU 实测前部件与供电插头余量。`);level=level==='bad'?'bad':'warn';}
     else if(c.gpu.tgp){oks.push(`GPU 长 ${c.gpu.length}mm，不超过 N6 发布范围的较小端点 275mm；这仍不等于已验证卡高、供电插头和冷管余量。`);}

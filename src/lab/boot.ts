@@ -435,6 +435,93 @@ function updateRouting(result: BuildEvaluation): void {
   }
 }
 
+const STEP_VERB: Record<string, string> = {
+  part: "装上",
+  plug: "接上",
+  remove: "拆下",
+  refit: "装回",
+};
+
+/**
+ * Derived assembly order.
+ *
+ * Consecutive cable connections are collapsed into one line: nine bay data
+ * cables are one job, and listing them as nine steps buries the two lines that
+ * actually matter — the bracket coming off and going back on.
+ */
+function updateAssembly(result: BuildEvaluation): void {
+  const host = $("assembly-steps");
+  if (!host) return;
+  const steps = result.assembly.steps;
+
+  type Row = {
+    kind: string;
+    label: string;
+    family: string;
+    count: number;
+    reasons: string[];
+    deadlocked: boolean;
+  };
+  const rows: Row[] = [];
+  for (const step of steps) {
+    // Cables of one family share their first word ("背板供电", "盘位"), which is
+    // what makes them one job rather than a pile of individual plugs.
+    const family = step.label.split(" ")[0] ?? step.label;
+    const last = rows[rows.length - 1];
+    if (
+      step.kind === "plug" &&
+      last?.kind === "plug" &&
+      last.family === family &&
+      last.deadlocked === Boolean(step.deadlocked)
+    ) {
+      last.count += 1;
+      for (const r of step.reasons) if (!last.reasons.includes(r)) last.reasons.push(r);
+      continue;
+    }
+    rows.push({
+      kind: step.kind,
+      label: step.label,
+      family,
+      count: 1,
+      reasons: [...step.reasons],
+      deadlocked: Boolean(step.deadlocked),
+    });
+  }
+
+  host.innerHTML = rows
+    .map((row) => {
+      const reason = row.reasons[0];
+      // A folded row names the family, never the first member: "背板供电 1" as the
+      // heading of seven plugs would describe the group wrongly.
+      const head = row.count > 1 ? `${row.family}线束` : row.label;
+      return (
+        `<li data-kind="${row.kind}"${row.deadlocked ? ' data-deadlocked="true"' : ""}>` +
+        `<b>${STEP_VERB[row.kind] ?? ""}${esc(head)}</b>` +
+        (row.count > 1 ? `<span class="as-count">${row.count} 个接头</span>` : "") +
+        (reason ? `<span class="as-why">${esc(reason)}</span>` : "") +
+        "</li>"
+      );
+    })
+    .join("");
+
+  const badge = $("assembly-badge");
+  if (badge) {
+    const derived = result.assembly.constraints.filter(
+      (c) => c.kind === "clearance" || c.kind === "access",
+    ).length;
+    const declared = result.assembly.constraints.filter((c) => c.kind === "declared").length;
+    badge.textContent = `${rows.length} 步 · 推导 ${derived} 条 · 手册明写 ${declared} 条`;
+  }
+  const notes = $("assembly-notes");
+  if (notes) {
+    const warn = result.assembly.findings.filter((f) => f.verdict !== "ok");
+    notes.dataset.level = warn.length > 0 ? "warn" : "ok";
+    notes.textContent =
+      result.assembly.findings.map((f) => f.message).join(" · ") ||
+      "没有交叉遮挡：各件的装入行程互不占用。";
+  }
+}
+
 /**
  * Row selection drives the preview. The table owns which run is focused because
  * that is where the run is named; the view only listens.
@@ -636,6 +723,7 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   updateBackplaneHarness(evaluation.wiring);
   updatePanelWiring(evaluation.config);
   updateRouting(evaluation);
+  updateAssembly(evaluation);
   updateAirBalance(evaluation);
   updateGalleryFromSkus(evaluation.config);
   updatePriceStamp();

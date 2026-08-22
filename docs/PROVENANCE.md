@@ -279,6 +279,41 @@ it can report — an obstruction, a length that is too short, and a length nobod
 `deck_opening` are marked in the route, because a cross-chamber run is only as good as an opening
 whose size and position the manual never states.
 
+## Assembly order: derived from corridors, except where the manual says it outright
+
+`src/core/assembly.ts` produces the order; nothing in this repo stores a list of steps. Three
+things decide it:
+
+- **The mounting tree.** `mountedOn` already says a cooler bolts to the CPU and the bottom PSU
+  bolts to the shipped rack, so it also says which of the two goes in first.
+- **Install corridors.** Each family in `data/cases/jonsbo-n6/assembly.json` declares the travel a
+  part makes on its way to its seat (`+y`, `"self"` for a DIMM: it has to clear the slot by its own
+  height). `installSweep` extrudes that corridor from the entry face **excluding** the seat — a
+  part in the seat is a collision, which the occupancy engine owns; a part in the corridor is an
+  ordering question, which this module owns. Whatever stands in A's corridor goes in after A.
+- **Plug access.** A connector something will later cover has to be plugged first, which comes
+  straight from the insertion sweeps the routing module already computed.
+
+Every travel value is a reconstruction: no manual and no vendor sheet publishes an insertion
+travel. So a derived edge is `inferred`, and the finding it produces is phrased as later servicing
+("swap the memory afterwards and this cooler comes off again") rather than as a defect.
+
+What the manual states outright stays a **declared** rule in that same file, with its section
+number and `official` evidence — §13.1 takes the left fan bracket off before the backplane inlets
+are wired. That rule is not derivable here: the bracket panel we reconstructed does not intersect
+those inlets' sweeps, so the geometry would never have found it. A declared rule addresses steps by
+pattern, so it names the backplane end of the power runs and nothing else. It also disappears on
+its own once a bottom PSU replaces the bracket, because the bracket is then absent from the
+geometry — the §8 behaviour falls out of the data rather than a second hand-written branch.
+
+A removable part that has to come off produces a pair of steps around the work it blocks, which is
+what "take it off, wire it, put it back" actually is. Where the obstruction is structure the manual
+never shows removing, no order can help, and that is reported as a finding instead of being
+quietly reordered. Same for a loop: if two steps each demand to be first, the loop is named. Two
+rules that used to be typed into the UI — the fan bracket note in `wiring/plan.ts` and the
+"swapping memory means pulling the IS-55" warning in `v1-runtime.js` — are now this module's
+output, one declared and one derived.
+
 ## Thermal field: an interpolation of the 0D result, and nothing more
 
 The heatmap is drawn by `src/core/thermal-field.ts`, which adds **no physics** to

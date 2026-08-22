@@ -10,6 +10,8 @@ import {
 import type { GeometryEnv } from "../adapters/jonsbo-n6/geometry";
 import { N6_DECK_Y, buildN6Geometry } from "../adapters/jonsbo-n6/geometry";
 import { buildN6Routing, type N6Routing } from "../adapters/jonsbo-n6/routing";
+import { buildN6Assembly } from "../adapters/jonsbo-n6/assembly";
+import type { AssemblyPlan } from "./assembly";
 import type { PlacedPart } from "./geometry";
 import { buildFieldBounds, type FieldBounds } from "./thermal-field";
 import { planN6Wiring } from "../wiring/plan";
@@ -82,6 +84,8 @@ export interface BuildEvaluation {
   geometry: PlacedPart[];
   /** Cable runs resolved over that geometry: ports, polylines, required lengths. */
   routing: N6Routing;
+  /** Assembly order derived from the mounting tree, install corridors and cables. */
+  assembly: AssemblyPlan;
   /** Present only when the caller supplies airflow inputs. */
   thermal?: ThermalResult;
   /** Heat sources placed at real centroids. Present whenever `thermal` is. */
@@ -549,6 +553,9 @@ export function evaluateBuild(
   // Routing runs after wiring and geometry because it needs both: the electrical
   // plan says which cables exist, the geometry says where their ends are.
   const routing = buildN6Routing(geometry, wiring, catalog);
+  // Order comes last: it is a statement about the geometry and the cables, and
+  // it cannot be derived before both of them exist.
+  const assembly = buildN6Assembly(geometry, routing.cables);
 
   const findings = [
     ...occupancy.findings,
@@ -557,6 +564,7 @@ export function evaluateBuild(
     ...bottomPsuFindings,
     ...thermalFindings,
     ...routing.findings,
+    ...assembly.findings,
     ...wiring.warnings.map(
       (w, i): EngineFinding => ({
         id: `wiring.warn.${i}`,
@@ -577,6 +585,7 @@ export function evaluateBuild(
     // draw the volume the engine actually objected to.
     geometry: [...geometry, ...conflictMarkerParts(geometry, occupancy.conflicts)],
     routing,
+    assembly,
     ...(thermal
       ? { thermal, heatField: buildFieldBounds(geometry, thermal, N6_DECK_Y) }
       : {}),

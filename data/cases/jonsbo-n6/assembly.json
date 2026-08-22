@@ -1,0 +1,75 @@
+{
+  "caseId": "case.jonsbo-n6",
+  "frame": {
+    "note": "装机顺序的声明层。这里只写三件事：哪些件是随箱已装的（因此不是一道工序）、每个件装入时要走多长的行程（因此会挡住谁）、以及手册明确写出的顺序规则。顺序本身不在这里，由 src/core/assembly.ts 从 geometry.json 的嵌套关系、这些行程扫掠体与 routing.json 的插拔净空推导。行程值全部是推算：手册与厂商规格书都没有给任何一个装入行程。",
+    "anchorEvidence": "inferred"
+  },
+  "preinstalled": [
+    {
+      "match": "chassis.deck",
+      "removable": false,
+      "source": "分层隔板是箱体结构件，手册全篇没有拆它的步骤"
+    },
+    {
+      "match": "fan.left_bracket",
+      "removable": true,
+      "source": "手册 §8.1 p.9：左侧风扇架四颗螺丝取下；§13.1 p.14 要求接背板供电前先拆它"
+    },
+    {
+      "match": "tray.frame",
+      "removable": false,
+      "source": "托架钢框随箱已装。手册 §9 只讲抽取单个托架，没有拆钢框的步骤，所以本文件不假设它可拆"
+    },
+    {
+      "match": "backplane.pcb",
+      "removable": false,
+      "source": "硬盘背板随箱已装在盘笼后方。手册 §13 只讲往它上面接线，没有拆它的步骤"
+    },
+    {
+      "match": "backplane.inlet",
+      "removable": false,
+      "source": "背板上的进线口是背板的一部分，不是单独一道工序"
+    }
+  ],
+  "install": [
+    {
+      "match": "ram.",
+      "axis": "+y",
+      "travelMm": "self",
+      "source": "DDR5 UDIMM 竖直插入插槽：装入前必须抬到槽口以上，行程按模块自身高度取。手册未给装入行程，此值为推算"
+    },
+    {
+      "match": "m2.",
+      "axis": "+y",
+      "travelMm": 10,
+      "source": "M.2 斜插入槽后压平上螺丝，抬起量按 10mm 估。未见任何厂商标注，纯推算"
+    },
+    {
+      "match": "cooler.",
+      "axis": "+y",
+      "travelMm": "self",
+      "source": "散热器整体自上而下落到 CPU 上，行程按其自身高度取（先要能从上方越过它自己的高度）。推算"
+    },
+    {
+      "match": "gpu",
+      "axis": "+y",
+      "travelMm": "self",
+      "source": "PCIe 卡自上而下插入插槽，行程按卡高取。推算；实际可斜插，故这是保守值"
+    },
+    {
+      "match": "hba",
+      "axis": "+y",
+      "travelMm": "self",
+      "source": "同上：底部 PCIe 槽的 HBA 也是自上而下插入。推算"
+    }
+  ],
+  "declared": [
+    {
+      "id": "manual.13-1.backplane-power-behind-bracket",
+      "before": "off:fan.left_bracket",
+      "after": "plug:run.backplane.power.*@port.backplane.power.*",
+      "evidence": "official",
+      "source": "手册 §13.1 p.14：接背板四路供电必须先拆下左侧风扇架。这一条不是几何推导出来的——重建出的风扇架板面并不挡住进线口的插拔净空，是手册直接这么写的"
+    }
+  ]
+}

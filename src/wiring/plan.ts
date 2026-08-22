@@ -142,10 +142,6 @@ export function checkBackplaneHarness(
   if (dual) {
     notes.push("双电源时四口只能由专供背板的第二颗电源提供，主电源线束不参与计数。");
   }
-  if (config.selection.psuTopology === "bottom" || dual) {
-    notes.push("下置电源与背板供电连接都需要先拆风扇架（手册 §8 / §13.1）。");
-  }
-
   // A socket ceiling settles the audit on its own: no cable purchase can add a plug point.
   if (socketLimited) {
     notes.push(
