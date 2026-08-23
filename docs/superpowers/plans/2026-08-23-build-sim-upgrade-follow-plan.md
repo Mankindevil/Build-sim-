@@ -223,14 +223,14 @@ git diff --check
 
 ### 任务清单
 
-- [ ] 新增 `src/catalog-search/normalize.ts`，保留 raw、brand、model、MPN、category、capacity、interface 和 locale。
-- [ ] 新增 candidate、provenance、draft、field schema 类型。
-- [ ] 在现有 `scripts/price-server/` 中加入 `/api/catalog/search`、`/api/catalog/search/:jobId`、`/api/catalog/inspect`。
-- [ ] 增加官方域名 allowlist、canonical/redirect/私网校验、响应大小、超时、域名限流和幂等 job key。
-- [ ] 按 JSON-LD → meta → 规格表 → 内嵌 JSON → 官方 PDF → Playwright fallback 提取。
-- [ ] 保存 retrievedAt、httpStatus、extractor、locator、snippet、content hash 和字段冲突。
-- [ ] 搜索候选和价格候选分开存储，第三方标题不得变成官方参数。
-- [ ] 增加离线 HTML/PDF fixture，不以实时网络作为单元测试前置条件。
+- [x] 新增 `src/catalog-search/normalize.ts`，保留 raw、brand、model、MPN、category、capacity、interface 和 locale。
+- [x] 新增 candidate、provenance、draft、field schema 类型。
+- [x] 在现有 `scripts/price-server/` 中加入 `/api/catalog/search`、`/api/catalog/search/:jobId`、`/api/catalog/inspect`。
+- [x] 增加官方域名 allowlist、canonical/redirect/私网校验、响应大小、超时、域名限流和幂等 job key。
+- [x] 按 JSON-LD → meta → 规格表 → 内嵌 JSON → 官方 PDF → Playwright fallback 提取。
+- [x] 保存 retrievedAt、httpStatus、extractor、locator、snippet、content hash 和字段冲突。
+- [x] 搜索候选和价格候选分开存储，第三方标题不得变成官方参数。
+- [x] 增加离线 HTML/PDF fixture，不以实时网络作为单元测试前置条件。
 
 ### 主要文件
 
@@ -247,6 +247,14 @@ git diff --check
 - SSRF、redirect、私网 IP、响应大小和协议测试通过。
 - 官网失败只返回 partial/unknown，不伪造字段。
 - 重复点击不会创建重复 job。
+
+### G3 执行记录（2026-08-23）
+
+- 状态：已实现，门禁通过，待提交/推送后确认。
+- 修改：新增输入规范化、候选/provenance/draft/字段类型、官方 allowlist 与 SSRF 防护、受限抓取、通用 HTML/PDF 文本提取、可选 Playwright fallback、幂等 catalog job API 和候选原子落盘/rollback manifest；catalog 参数与价格候选保持分离。
+- 测试：`npx vitest run tests/catalog-search.test.ts`（10 tests）、`npm test`（18 files / 208 tests）、`npm run typecheck`、`npm run build`、`npm run test:g1:browser`、`node tests/legacy-run-static-tests.js`、`node tests/legacy-run-model-tests.js`、本地 API job/SSRF smoke、`git diff --check` 和敏感信息扫描均通过。
+- 未解决 unknown：未配置厂商适配器时只返回官方站内搜索候选；扫描型/非文本 PDF、登录墙/验证码和动态页面失败时保持 partial/unknown；本阶段不写入正式 catalog。
+- 回滚：回退本阶段独立提交；候选文件通过 `data/audit/rollback/catalog-search-manifest.json` 恢复，不删除原始 catalog 或价格数据。
 
 ## 8. G4：厂商适配器、官方直通与草稿确认（原 S2/S3）
 

@@ -131,6 +131,8 @@ export interface SkuRecord {
   tags?: string[];
   /** Official product appearance (not CAD). Missing => unknown in UI. */
   appearance?: AppearanceRef;
+  /** Field-level sources from official/catalog inspection; absent on legacy rows. */
+  provenance?: import("../catalog-search/types").FieldProvenance[];
   /** Category-specific payload */
   attrs?: Record<string, unknown>;
 }

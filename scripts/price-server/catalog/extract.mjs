@@ -1,0 +1,127 @@
+const FIELD_ALIASES = [
+  ["mpn", /^(mpn|sku|part\s*(number|no\.?))$/i],
+  ["brand", /^brand$/i],
+  ["model", /^(model|product\s*name)$/i],
+  ["dims.lengthMm", /^(length|depth|长度|深度)$/i],
+  ["dims.widthMm", /^(width|宽度)$/i],
+  ["dims.heightMm", /^(height|高度)$/i],
+  ["dims.slots", /^(slot|slots|槽位)$/i],
+  ["power.tdpW", /^(tdp|tdp\s*power|热设计功耗)$/i],
+  ["power.tgpW", /^(tgp|graphics\s*power|显卡功耗)$/i],
+  ["attrs.capacity", /^(capacity|容量)$/i],
+  ["attrs.interface", /^(interface|接口)$/i],
+];
+
+function strip(value) { return String(value ?? "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim(); }
+function esc(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function numberWithUnit(value) {
+  const match = String(value).replace(/,/g, "").match(/(-?\d+(?:\.\d+)?)\s*(mm|cm|w|kw|tb|gb|mb|slot|slots|槽)?/i);
+  if (!match) return undefined;
+  const number = Number(match[1]);
+  if (!Number.isFinite(number)) return undefined;
+  const unit = (match[2] ?? "").toLocaleLowerCase();
+  if (unit === "cm") return number * 10;
+  if (unit === "kw") return number * 1000;
+  return number;
+}
+function fieldValue(field, value) {
+  if (field === "dims.lengthMm" || field === "dims.widthMm" || field === "dims.heightMm" || field === "dims.slots" || field === "power.tdpW" || field === "power.tgpW") return numberWithUnit(value);
+  return strip(value);
+}
+function addField(fields, conflicts, fetch, field, value, locator, snippet, sourceKind = "official-page") {
+  if (value === undefined || value === "") return;
+  const prior = fields.find((entry) => entry.field === field);
+  if (prior && JSON.stringify(prior.value) !== JSON.stringify(value)) {
+    const conflict = conflicts.find((entry) => entry.field === field);
+    if (conflict) conflict.values.push(value); else conflicts.push({ field, values: [prior.value, value], reason: "同一来源字段值冲突" });
+    return;
+  }
+  if (prior) return;
+  fields.push({
+    provenanceId: `prov-${fetch.contentHash.slice(0, 12)}-${fields.length + 1}`,
+    field,
+    value,
+    evidence: "official",
+    sourceUrl: fetch.finalUrl,
+    sourceKind,
+    retrievedAt: fetch.retrievedAt,
+    extractor: "generic-official-html-v1",
+    locator,
+    snippet: String(snippet ?? "").slice(0, 240),
+    confidence: 1,
+  });
+}
+
+function parseJsonLd(html, fetch, fields, conflicts) {
+  const scripts = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const match of scripts) {
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      const products = Array.isArray(parsed) ? parsed : parsed?.["@graph"] ? parsed["@graph"] : [parsed];
+      for (const product of products) {
+        if (!product || (product["@type"] && !String(product["@type"]).toLocaleLowerCase().includes("product"))) continue;
+        addField(fields, conflicts, fetch, "brand", typeof product.brand === "string" ? product.brand : product.brand?.name, "JSON-LD Product.brand", match[1]);
+        addField(fields, conflicts, fetch, "model", product.model ?? product.name, "JSON-LD Product.model/name", match[1]);
+        addField(fields, conflicts, fetch, "mpn", product.mpn ?? product.sku, "JSON-LD Product.mpn/sku", match[1]);
+      }
+    } catch { /* invalid JSON-LD is a warning, not a guessed field */ }
+  }
+}
+
+export function extractOfficialHtml(fetch, { sourceKind = "official-page" } = {}) {
+  const html = fetch.body;
+  const fields = [];
+  const conflicts = [];
+  const warnings = [];
+  parseJsonLd(html, fetch, fields, conflicts);
+  const title = strip(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)?.[1]);
+  if (title) addField(fields, conflicts, fetch, "model", title, "HTML title", title, sourceKind);
+  for (const row of html.matchAll(/<(?:tr|div|li)[^>]*>[\s\S]*?<(?:(?:th|dt)|span)[^>]*>([^<]{1,100})<\/(?:th|dt|span)>[\s\S]*?<(?:(?:td|dd)|span)[^>]*>([^<]{1,240})<\/(?:td|dd|span)>[\s\S]*?<\/(?:tr|div|li)>/gi)) {
+    const label = strip(row[1]);
+    const alias = FIELD_ALIASES.find(([, pattern]) => pattern.test(label));
+    if (!alias) continue;
+    const value = fieldValue(alias[0], row[2]);
+    addField(fields, conflicts, fetch, alias[0], value, `spec label: ${label}`, `${label}: ${strip(row[2])}`, sourceKind);
+  }
+  if (fetch.status >= 400) warnings.push(`official page returned HTTP ${fetch.status}`);
+  if (fetch.contentType.includes("pdf")) warnings.push("PDF content requires a PDF extractor; HTML field extraction skipped");
+  const expected = ["brand", "model", "mpn", "dims.lengthMm", "power.tdpW", "power.tgpW"];
+  const missing = expected.filter((field) => !fields.some((entry) => entry.field === field));
+  if (missing.length) warnings.push(`missing official fields: ${missing.join(", ")}`);
+  return { title: title || undefined, fields, conflicts, warnings, adapter: "generic-official-html-v1" };
+}
+
+/**
+ * Conservative text-PDF extraction hook. The fetch layer keeps the response
+ * hash and source URL; this parser only accepts explicit labelled rows from
+ * text-bearing PDFs and never infers values from prose or neighbouring models.
+ * Binary/scanned PDFs therefore remain partial/unknown until a dedicated
+ * vendor adapter or browser fallback supplies text.
+ */
+export function extractOfficialPdf(fetch, { sourceKind = "official-pdf" } = {}) {
+  const fields = [];
+  const conflicts = [];
+  const warnings = [];
+  const text = String(fetch.body ?? "").replace(/\u0000/g, " ");
+  const lines = text.split(/\r?\n/).map((line) => line.replace(/[^\x20-\x7E\u4E00-\u9FFF]+/g, " ").trim()).filter(Boolean);
+  for (const line of lines) {
+    const match = line.match(/^([^:：]{1,80})\s*[:：]\s*(.{1,160})$/);
+    if (!match) continue;
+    const alias = FIELD_ALIASES.find(([, pattern]) => pattern.test(strip(match[1])));
+    if (!alias) continue;
+    const value = fieldValue(alias[0], match[2]);
+    addField(fields, conflicts, fetch, alias[0], value, `PDF text label: ${strip(match[1])}`, `${strip(match[1])}: ${strip(match[2])}`, sourceKind);
+  }
+  if (!fields.length) warnings.push("PDF text extractor found no explicit labelled fields");
+  const expected = ["brand", "model", "mpn", "dims.lengthMm", "power.tdpW", "power.tgpW"];
+  const missing = expected.filter((field) => !fields.some((entry) => entry.field === field));
+  if (missing.length) warnings.push(`missing official PDF fields: ${missing.join(", ")}`);
+  return { fields, conflicts, warnings, adapter: "generic-official-pdf-text-v1" };
+}
+
+export const genericOfficialAdapter = {
+  id: "generic-official",
+  domains: [],
+  canHandle: () => true,
+  extract: extractOfficialHtml,
+};

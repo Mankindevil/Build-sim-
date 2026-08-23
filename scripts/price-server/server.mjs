@@ -30,6 +30,8 @@ import {
 } from "./adapters/index.mjs";
 import { listingKey } from "./adapters/variant.mjs";
 import { buildSearchQueries, isPriceTrackable } from "../../src/price/queries.mjs";
+import { getJob, inspectUrl, queueSearch } from "./catalog/service.mjs";
+import { renderOfficialFallback } from "./catalog/browser-fallback.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PRICE_SERVER_PORT ?? 5174);
@@ -177,6 +179,19 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (route === "GET /api/price/health") return send(res, 200, { ok: true, port: PORT });
+    if (route === "POST /api/catalog/search") {
+      const body = await readBody(req);
+      return send(res, 202, queueSearch(body, { persistRoot: process.env.CATALOG_CANDIDATES_ROOT ?? process.cwd() }));
+    }
+    if (req.method === "GET" && url.pathname.startsWith("/api/catalog/search/")) {
+      const id = decodeURIComponent(url.pathname.slice("/api/catalog/search/".length));
+      const job = getJob(id);
+      return job ? send(res, 200, job) : send(res, 404, { error: "catalog search job not found" });
+    }
+    if (route === "POST /api/catalog/inspect") {
+      const result = await inspectUrl(await readBody(req), { browserFallback: renderOfficialFallback });
+      return send(res, 200, result);
+    }
     if (route === "GET /api/price/state") return send(res, 200, await handleState());
     if (route === "POST /api/price/collect") return send(res, 200, await handleCollect(await readBody(req)));
     if (route === "POST /api/price/variants") return send(res, 200, await handleVariants(await readBody(req)));
