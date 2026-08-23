@@ -83,6 +83,8 @@ git switch -c codex/build-sim-upgrade
 
 如果某阶段需要多个提交，最后必须 squash 成一个可独立回滚的阶段提交。
 
+每个阶段提交完成后必须立即推送：首次使用 `git push -u origin <branch>`，后续使用 `git push`。push 成功并通过 `git ls-remote origin <branch>` 核对远程 commit 后，才能开始下一阶段或报告该阶段完成；没有 push 权限时必须明确报告阻塞。
+
 ## 4. G0：基线冻结与迁移护栏（P0 前置）
 
 ### 目标
@@ -332,13 +334,16 @@ git diff --check
 工作规则：
 1. 先读取该 follow plan 和对应设计 spec，核对当前仓库实际状态；不能把计划内容当成已实现功能。
 2. 严格按 G0 → G1 → G2 → G3 → G4 → G5 → G6 → G7 执行。每个阶段完成后先运行该阶段测试和 npm test/typecheck/build，再停下来报告门禁结果。
-3. 每个阶段一个独立提交；提交前执行 git diff --check，检查敏感信息、未预期文件、数据迁移和回滚文件。
+3. 每个阶段一个独立提交；提交前执行 git diff --check，检查敏感信息、未预期文件、数据迁移和回滚文件。阶段门禁通过后必须立即 commit 并 push 到当前远程分支，不能只在本地提交。
 4. 保留现有用户未相关的修改，不使用 git reset --hard、git checkout -- 或破坏性删除。
 5. 所有页面 KPI、FIT、温度、BOM、接线和 AI 输入必须来自唯一的 BuildEvaluation；DeepSeek 不能修改 ok/warn/bad、补造 unknown 或生成输入中不存在的数字。
 6. 官网 exact MPN 且 allowlist、canonical、抓取、关键字段、冲突和 provenance 全部通过时才允许官方直通；其他候选必须进入草稿确认。
 7. DeepSeek key/url/model/timeout 等只从 .env.local 读取，禁止 VITE_ 前缀、浏览器读取、日志回显或提交到 Git。
 8. 官网、价格、catalog、BuildEvaluation、UI、导出和建议之间必须保留 provenance、hash、版本和审计记录；任何写入都要幂等、可回滚。
 9. AI、官网或价格服务失败时，必须保留确定性装机评估和结构化 unknown，不得恢复旧 runtime 的写死评价文案。
+10. 开始执行前确认当前分支和远程：`git branch --show-current`、`git remote -v`；没有远程或没有 push 权限时立即报告阻塞，不得声称阶段完成。
+11. 每个阶段提交后执行 `git status --short`、`git log -1 --oneline` 和 `git push -u origin <branch>`（首次）或 `git push`（后续）；push 返回成功后再进入下一阶段。
+12. 最终完成前确认 `git status --short` 为空、`git log -1` 与远程分支一致，并用 `git ls-remote origin <branch>` 核对远程 commit；commit 或 push 任一步失败都必须保留错误信息并停止推进。
 
 每个阶段的报告格式：
 - 阶段：Gx
