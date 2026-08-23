@@ -32,6 +32,15 @@ npm install
 npm run dev
 ```
 
+DeepSeek 建议层使用服务端环境变量管理。需要启用时，先复制模板并只在本机填写 key：
+
+```bash
+cp .env.example .env.local
+# 编辑 .env.local：设置 DEEPSEEK_ENABLED=true 和 DEEPSEEK_API_KEY
+```
+
+`DEEPSEEK_API_KEY`、`DEEPSEEK_API_URL`、模型、超时、token 上限和温度都由 `.env.local` 管理。不要使用 `VITE_` 前缀，也不要把 `.env.local` 提交到 Git；浏览器只接收结构化建议结果，不会读取 key。
+
 Opens the N6 Build Lab. Change PSU/cooler/GPU/etc.; FIT + wiring update from the engine; appearance gallery follows SKU.
 
 ```bash
