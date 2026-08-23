@@ -299,6 +299,7 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
       bayId: `bay-${bayIndex}`,
       bayIndex,
       target: "none",
+      assignment: { controller: "none", connector: "none", portIndex: null },
       portLabel: "无可用端口",
       evidence: "inferred",
       note:
@@ -327,6 +328,7 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
         bayId: `bay-${i}`,
         bayIndex: i,
         target: slot.viaSlim ? "slimsas" : "sata",
+        assignment: { controller: "board", connector: slot.viaSlim ? "slimsas" : "sata", portIndex: slot.slot + 1 },
         portLabel: slot.viaSlim
           ? `SlimSAS lane plan #${slot.slot - boardPorts.nativeSata + 1}（启动盘）`
           : `MB SATA_${slot.slot + 1}（启动盘）`,
@@ -341,6 +343,7 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
         bayId: `bay-${i}`,
         bayIndex: i,
         target: "sata",
+        assignment: { controller: "none", connector: "none", portIndex: null },
         portLabel: "—",
         evidence: "official",
         note: "Empty tray",
@@ -354,6 +357,7 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
         bayId: `bay-${i}`,
         bayIndex: i,
         target: "hba",
+        assignment: { controller: "hba", connector: "sff-8643", portIndex: port + 1 },
         portLabel: `HBA C${Math.floor(port / fanout) + 1}·P${(port % fanout) + 1} (plan)`,
         evidence: "inferred",
         note: "Exact Mini-SAS breakout orientation not verified against a locked cable SKU",
@@ -372,6 +376,7 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
       bayId: `bay-${i}`,
       bayIndex: i,
       target: slot.viaSlim ? "slimsas" : "sata",
+      assignment: { controller: "board", connector: slot.viaSlim ? "slimsas" : "sata", portIndex: slot.slot + 1 },
       portLabel: slot.viaSlim
         ? `SlimSAS lane plan #${slot.slot - boardPorts.nativeSata + 1}`
         : `MB SATA_${slot.slot + 1}`,

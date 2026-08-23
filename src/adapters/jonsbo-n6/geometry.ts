@@ -173,6 +173,8 @@ export function buildN6Geometry(
   const boardTop = geo.board.topY;
   const placement = n6PsuPlacement(config, catalog);
   const lowerPsu = psuInLowerChamber(placement);
+  const boardSku = sku(catalog, config.boardId);
+  const cpuSku = sku(catalog, config.cpuId);
 
   // ---- chassis shell ----------------------------------------------------
   b.push(
@@ -188,7 +190,7 @@ export function buildN6Geometry(
   // ---- board and everything bolted to it -------------------------------
   b.push({
     id: "board",
-    name: "W680M-ACE SE",
+    name: boardSku?.name ?? config.boardId,
     kind: "board",
     box: centered(geo.board.c as Vec3, geo.board.w, geo.board.h, geo.board.d),
     sizeEvidence: "standard",
@@ -201,7 +203,7 @@ export function buildN6Geometry(
   const socketC: Vec3 = [geo.socket.c[0]!, boardTop + geo.socket.h / 2, geo.socket.c[1]!];
   b.push({
     id: "cpu",
-    name: "Intel i5-14500",
+    name: cpuSku?.name ?? config.cpuId,
     kind: "cpu",
     box: centered(socketC, geo.socket.w, geo.socket.h, geo.socket.d),
     sizeEvidence: "standard",
@@ -214,10 +216,10 @@ export function buildN6Geometry(
   });
 
   const memory = sku(catalog, config.selection.memoryId);
-  const ramModules = (memory?.attrs?.["modules"] as number | undefined) ?? 1;
-  const ramHeight = memory?.dims.heightMm ?? 31;
-  const ramXs = ramModules >= 2 ? geo.memory.xTwoModules : geo.memory.xOneModule;
-  ramXs.forEach((x, i) => {
+  const ramModules = memory?.attrs?.["modules"] as number | undefined;
+  const ramHeight = memory?.dims.heightMm;
+  const ramXs = typeof ramModules === "number" && ramModules >= 2 ? geo.memory.xTwoModules : geo.memory.xOneModule;
+  if (typeof ramHeight === "number" && Number.isFinite(ramHeight) && typeof ramModules === "number" && ramModules > 0) ramXs.slice(0, ramModules).forEach((x, i) => {
     b.push({
       id: `ram.${i + 1}`,
       name: `DDR5 DIMM ${i + 1}`,
@@ -237,10 +239,11 @@ export function buildN6Geometry(
     });
   });
 
+  const nvme = sku(catalog, n6Profile.defaults.ownedNvmeSkuId);
   const m2Names =
     config.selection.boot === "m2"
-      ? ["980 PRO #1 · TrueNAS Boot", "980 PRO #2 · 单盘 / 待用"]
-      : ["980 PRO #1 · fast pool", "980 PRO #2 · fast pool"];
+      ? [`${nvme?.name ?? n6Profile.defaults.ownedNvmeSkuId} #1 · TrueNAS Boot`, `${nvme?.name ?? n6Profile.defaults.ownedNvmeSkuId} #2 · 单盘 / 待用`]
+      : [`${nvme?.name ?? n6Profile.defaults.ownedNvmeSkuId} #1 · fast pool`, `${nvme?.name ?? n6Profile.defaults.ownedNvmeSkuId} #2 · fast pool`];
   geo.m2.slots.forEach((slot, i) => {
     b.push({
       id: `m2.${i + 1}`,
@@ -264,11 +267,7 @@ export function buildN6Geometry(
 
   // ---- PSU -------------------------------------------------------------
   const primary = sku(catalog, config.selection.psuId);
-  const primaryLen =
-    primary?.dims.lengthMm ??
-    (psuForm(catalog, config.selection.psuId) === "ATX"
-      ? n6Profile.psuLimits.atxMaxLengthMm
-      : n6Profile.psuLimits.sfxMaxLengthMm);
+  const primaryLen = primary?.dims.lengthMm;
 
   const pushPsu = (
     id: string,
@@ -298,7 +297,7 @@ export function buildN6Geometry(
     });
   };
 
-  if (placement === "rearUpperAtx" || placement === "rearUpperAtx+bottomSfx" || placement === "invalidAtxBottom") {
+  if (primaryLen !== undefined && (placement === "rearUpperAtx" || placement === "rearUpperAtx+bottomSfx" || placement === "invalidAtxBottom")) {
     pushPsu(
       "psu.primary",
       primary?.name ?? "ATX 电源",
@@ -308,7 +307,7 @@ export function buildN6Geometry(
       "psu.rear_upper",
     );
   }
-  if (placement === "frontSfx" || placement === "frontSfx+bottomSfx") {
+  if (primaryLen !== undefined && (placement === "frontSfx" || placement === "frontSfx+bottomSfx")) {
     pushPsu(
       "psu.primary",
       primary?.name ?? "SFX 电源",
@@ -344,17 +343,19 @@ export function buildN6Geometry(
         ? (config.selection.secondaryPsuId ?? n6Profile.defaults.secondaryPsuSkuId)
         : config.selection.psuId;
     const secondary = sku(catalog, secondaryId);
-    pushPsu(
-      config.selection.psuTopology === "dual" ? "psu.secondary" : "psu.primary",
-      config.selection.psuTopology === "dual"
-        ? `${secondary?.name ?? "第二颗 SFX"} · 背板电源`
-        : `${primary?.name ?? "SFX 电源"} · 下置`,
-      geo.psu.bottomSfx,
-      secondary?.dims.lengthMm ?? n6Profile.psuLimits.sfxMaxLengthMm,
-      secondaryId,
-      "psu.bottom_sfx",
-      "chassis.psu_rack_plate",
-    );
+    if (typeof secondary?.dims.lengthMm === "number") {
+      pushPsu(
+        config.selection.psuTopology === "dual" ? "psu.secondary" : "psu.primary",
+        config.selection.psuTopology === "dual"
+          ? `${secondary?.name ?? "第二颗 SFX"} · 背板电源`
+          : `${primary?.name ?? "SFX 电源"} · 下置`,
+        geo.psu.bottomSfx,
+        secondary.dims.lengthMm,
+        secondaryId,
+        "psu.bottom_sfx",
+        "chassis.psu_rack_plate",
+      );
+    }
   } else {
     b.push(
       chassis(
@@ -371,14 +372,14 @@ export function buildN6Geometry(
       name: "下置 SFX 电源位 · 空置",
       kind: "reserve",
       box: centered(
-        [geo.psu.bottomSfx.c[0]!, geo.psu.bottomSfx.c[1]!, geo.psu.bottomSfx.zRear - 50],
+        [geo.psu.bottomSfx.c[0]!, geo.psu.bottomSfx.c[1]!, geo.psu.bottomSfx.zRear - n6Profile.psuLimits.sfxMaxLengthMm / 2],
         geo.psu.bottomSfx.w,
         geo.psu.bottomSfx.h,
-        100,
+        n6Profile.psuLimits.sfxMaxLengthMm,
       ),
       sizeEvidence: "standard",
       anchorEvidence: INFERRED,
-      dimsLabel: "125×63.5×100mm · 要用得先拆左侧风扇架",
+      dimsLabel: `125×63.5×${n6Profile.psuLimits.sfxMaxLengthMm}mm · 要用得先拆左侧风扇架`,
       group: "chassis",
       chamber: "lower",
     });
@@ -387,11 +388,13 @@ export function buildN6Geometry(
   // ---- cooler ----------------------------------------------------------
   const cooler = sku(catalog, config.selection.coolerId);
   const coolerType = (cooler?.attrs?.["type"] as string | undefined) ?? "down-draft";
-  const coolerHeight = cooler?.dims.heightMm ?? 0;
+  const coolerHeight = typeof cooler?.dims.heightMm === "number" ? cooler.dims.heightMm : null;
   const maxRam = cooler?.attrs?.["maxRamHeightMm"] as number | undefined;
   const radiatorMm = cooler?.attrs?.["radiatorMm"] as number | undefined;
 
-  if (coolerType === "aio") {
+  if (coolerHeight === null) {
+    // No vendor height means no geometry claim; the evaluator/UI must surface unknown.
+  } else if (coolerType === "aio") {
     const pump = geo.cooler.aioPump;
     b.push({
       id: "cooler.pump",
@@ -526,14 +529,14 @@ export function buildN6Geometry(
     : gpuSku
       ? {
           name: gpuSku.name,
-          lengthMm: gpuSku.dims.lengthMm ?? 0,
-          slots: gpuSku.dims.slots ?? 1,
+          lengthMm: gpuSku.dims.lengthMm ?? null,
+          slots: gpuSku.dims.slots ?? null,
           workstation: (gpuSku.tags ?? []).includes("workstation"),
           skuId: gpuSku.id,
         }
       : null;
 
-  if (gpuEnvelope && gpuEnvelope.lengthMm > 0) {
+  if (gpuEnvelope && gpuEnvelope.lengthMm !== null && gpuEnvelope.slots !== null && gpuEnvelope.lengthMm > 0) {
     const height = gpuHeightMm(gpuEnvelope.workstation, gpuEnvelope.lengthMm);
     const thickness = Math.max(geo.gpu.slotPitchMm, gpuEnvelope.slots * geo.gpu.slotPitchMm);
     // The PCB sits in slot 1; extra slots are consumed toward the chipset x4,

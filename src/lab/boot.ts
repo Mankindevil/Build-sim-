@@ -627,11 +627,11 @@ function updateGalleryFromSkus(config: BuildConfig): void {
   if (!gallery) return;
 
   const cards: { name: string; status: string; skuId: string; note?: string }[] = [
-    { name: "JONSBO N6", status: "已购", skuId: config.caseId },
-    { name: "ASUS W680M-ACE SE", status: "已购", skuId: config.boardId },
-    { name: "Intel Core i5-14500", status: "已购", skuId: config.cpuId },
+    { name: requireSku(catalog, config.caseId).name, status: "已购", skuId: config.caseId },
+    { name: requireSku(catalog, config.boardId).name, status: "已购", skuId: config.boardId },
+    { name: requireSku(catalog, config.cpuId).name, status: "已购", skuId: config.cpuId },
     { name: requireSku(catalog, config.selection.memoryId).name, status: "待购", skuId: config.selection.memoryId },
-    { name: "Samsung 980 PRO ×2", status: "已有", skuId: "storage.samsung-980-pro" },
+    { name: `${requireSku(catalog, n6Profile.defaults.ownedNvmeSkuId).name} ×${n6Profile.defaults.ownedNvmeQty}`, status: "已有", skuId: n6Profile.defaults.ownedNvmeSkuId },
     { name: requireSku(catalog, config.selection.psuId).name, status: "待购", skuId: config.selection.psuId },
     { name: requireSku(catalog, config.selection.coolerId).name, status: "待购", skuId: config.selection.coolerId },
     {
@@ -783,6 +783,8 @@ declare global {
       gpus: typeof views.gpus;
       rams: typeof views.rams;
       officialProducts: typeof views.officialProducts;
+      skuName: (id: string) => string;
+      ids: { caseId: string; boardId: string; cpuId: string; nvmeId: string; hbaId: string; diskId: string };
       profile: typeof n6Profile;
       /** Board storage facts, so the runtime never restates a count the SKU owns. */
       boardStorage: ReturnType<typeof boardStorage>;
@@ -819,6 +821,15 @@ declare global {
 async function boot(): Promise<void> {
   window.__N6_LAB__ = {
     ...views,
+    skuName: (id: string) => requireSku(catalog, id).name,
+    ids: {
+      caseId: "case.jonsbo-n6",
+      boardId: BOARD_ID,
+      cpuId: "cpu.i5-14500",
+      nvmeId: n6Profile.defaults.ownedNvmeSkuId,
+      hbaId: n6Profile.hba.defaultSkuId,
+      diskId: n6Profile.defaults.diskSkuId,
+    },
     profile: n6Profile,
     boardStorage: boardStorage(catalog, BOARD_ID),
     sataCeiling: (nvmeCount: number) =>

@@ -84,6 +84,30 @@ export async function atomicWriteJson(file, data, { operation = "write", rollbac
   }, manifestPath);
 }
 
+/** Restore the most recent immutable backup for a target through the same atomic path. */
+export async function restoreLatestRollback(file, { manifestPath = rollbackManifestPath } = {}) {
+  const manifest = await readJson(manifestPath, { entries: [] });
+  const target = path.relative(root, file);
+  const entry = [...(manifest?.entries ?? [])].reverse().find((candidate) => candidate.target === target && candidate.backup);
+  if (!entry?.backup) throw new Error(`No rollback backup for ${target}`);
+  const backup = path.resolve(root, entry.backup);
+  const text = await readFile(backup, "utf8");
+  const previous = await readFile(file, "utf8").catch(() => null);
+  const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await writeFile(temp, text, "utf8");
+  await rename(temp, file);
+  await appendRollbackManifest({
+    eventId: crypto.randomUUID(),
+    operation: "rollback",
+    target,
+    backup: entry.backup,
+    previousHash: previous === null ? null : sha256(previous),
+    nextHash: sha256(text),
+    createdAt: new Date().toISOString(),
+  }, manifestPath);
+  return { target, backup: entry.backup };
+}
+
 export function isAuditedRow(q) {
   return (
     q &&

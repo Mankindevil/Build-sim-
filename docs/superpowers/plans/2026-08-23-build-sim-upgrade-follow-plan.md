@@ -190,15 +190,15 @@ git diff --check
 
 ### 任务清单
 
-- [ ] 定义 `CaseCapabilities`、`BoardCapabilities`、`PowerProfile`、`WorkloadProfile`、`ThermalProfile`。
-- [ ] 将盘位、背板口、风扇 mount、PCIe/SATA/SlimSAS/M.2 数量统一到 capability 来源。
-- [ ] 将 CPU PL1/PL2、GPU/HBA/硬盘/风扇/PSU 输入功耗和效率规则移出 V1 runtime。
-- [ ] 清理 7W、0.9、0.88、24dBA、99mm、31mm 等静默 fallback；改为 unknown 或显式 planning range + finding。
-- [ ] 删除 `fixedCost`、固定已购价和 `4500 * diskCount`；区分 MSRP、当前报价、已购价、历史 snapshot、from price 和汇率参考价。
-- [ ] 几何和展示名称从所选 SKU 读取，删除 W680M、i5-14500、980 PRO 等基线字符串。
-- [ ] 将 HBA 端口改为 `controller/connector/portIndex` 结构化映射，删除 `P4-P7` 文案正则推导。
-- [ ] 在 `parseConfig` 后增加 schema migration、类型/范围、SKU 类别、拓扑、BOM 和 capability 校验。
-- [ ] 为每个关键数字补 `official/standard/planning/manual/unknown` 证据状态。
+- [x] 定义 `CaseCapabilities`、`BoardCapabilities`、`PowerProfile`、`WorkloadProfile`、`ThermalProfile`。
+- [x] 将盘位、背板口、风扇 mount、PCIe/SATA/SlimSAS/M.2 数量统一到 capability 来源。
+- [x] 将 CPU PL1/PL2、GPU/HBA/硬盘/风扇/PSU 输入功耗和效率规则移出 V1 runtime。
+- [x] 清理 7W、0.9、0.88、24dBA、99mm、31mm 等静默 fallback；改为 unknown 或显式 planning range + finding。
+- [x] 删除 `fixedCost`、固定已购价和 `4500 * diskCount`；区分 MSRP、当前报价、已购价、历史 snapshot、from price 和汇率参考价。
+- [x] 几何和展示名称从所选 SKU 读取，删除 W680M、i5-14500、980 PRO 等基线字符串。
+- [x] 将 HBA 端口改为 `controller/connector/portIndex` 结构化映射，删除 `P4-P7` 文案正则推导。
+- [x] 在 `parseConfig` 后增加 schema migration、类型/范围、SKU 类别、拓扑、BOM 和 capability 校验。
+- [x] 为每个关键数字补 `official/standard/planning/manual/unknown` 证据状态。
 
 ### 退出门禁
 
@@ -206,6 +206,14 @@ git diff --check
 - 所有无来源数字显示 unknown 或明确 planning range。
 - 旧配置可迁移；非法配置不会部分写入；迁移失败可恢复旧文件。
 - G1 回归场景在新 profile 下仍通过。
+
+### G2 执行记录（2026-08-23）
+
+- 状态：已实现，门禁待提交/推送后确认。
+- 修改：新增 `src/core/capabilities.ts` 和 `src/config/validate.ts`；N6 profile 增加 thermal profile；功耗/温度/价格保留 null unknown 和 price provenance；几何/UI 名称读取选定 SKU；HBA data path 使用结构化 assignment；旧 schema 迁移、配置校验和 rollback manifest 恢复路径落地。
+- 测试：`npx vitest run tests/capability-config.test.ts tests/upgrade-guardrails.test.ts`（9 tests）、`npm test`（17 files / 198 tests）、`npm run typecheck`、`npm run build`、`npm run test:g1:browser`、两个 legacy runners、`git diff --check` 均通过。浏览器 smoke 需本地 Vite 服务运行，Chromium 使用批准的 GUI 权限启动；价格 API 未启动的 proxy error 不影响页面 smoke 断言。
+- 未解决 unknown：catalog 未提供的实际线束独立根数、冷却器 θ/噪音、未审计价格和缺失关键尺寸仍保持 unknown；planning profile 尚未替换为实测快照。
+- 回滚：回退本阶段独立提交；配置迁移可用 `scripts/price-server/store.mjs` 的 rollback manifest 恢复旧 JSON，不恢复 V1 的旁路结论。
 
 ## 7. G3：型号搜索与官网通用采集（原 S0/S1）
 

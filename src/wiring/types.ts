@@ -3,11 +3,19 @@ import type { EvidenceLevel } from "../core/evidence";
 /** `none` marks a bay the controllers cannot reach — a shortfall, not a spare tray. */
 export type DataPortKind = "sata" | "slimsas" | "hba" | "nvme" | "usb" | "none";
 
+export interface PortAssignment {
+  controller: "board" | "hba" | "none";
+  connector: "sata" | "slimsas" | "sff-8643" | "none";
+  portIndex: number | null;
+}
+
 export interface BayDataPath {
   bayId: string;
   /** 1–9 for N6 trays */
   bayIndex: number;
   target: DataPortKind;
+  /** Structured controller/connector mapping; labels are presentation only. */
+  assignment: PortAssignment;
   /** Human-readable port label, e.g. MB SATA_1 or HBA P0 */
   portLabel: string;
   cableSkuId?: string;

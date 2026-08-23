@@ -28,6 +28,7 @@ import {
   type ThermalResult,
 } from "./thermal";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
+import { n6PowerProfile } from "./capabilities";
 
 /**
  * User-side knobs the SKU catalog cannot supply: ambient, fan policy, which fan
@@ -54,7 +55,7 @@ export interface ThermalEnv {
    * Per-part dissipation, so component temperatures rest on the same load split
    * the power model already produced rather than a second estimate.
    */
-  loads?: { cpuW: number; gpuW: number; hbaW: number; psuDcW: number };
+  loads?: { cpuW: number | null; gpuW: number | null; hbaW: number | null; psuDcW: number | null };
   /** Keep the chipset x4 envelope in the model before an HBA is bought. */
   reserveHbaSlot?: boolean;
   /** User-entered card envelope for the lab's "custom GPU" path (no SKU exists). */
@@ -93,7 +94,7 @@ export interface PowerEvaluation {
   psuWasteW: number | null;
   upperDcW: number | null;
   lowerDcW: number | null;
-  loads: { cpuW: number; gpuW: number; hbaW: number; psuDcW: number };
+  loads: { cpuW: number | null; gpuW: number | null; hbaW: number | null; psuDcW: number | null };
   psus: PsuLoad[];
   scenarios: { label: string; wallW: number | null }[];
   unknown: string[];
@@ -103,7 +104,14 @@ export interface PriceLine {
   skuId: string;
   qty: number;
   priceCny: number | null;
+  msrpCny: number | null;
+  currentCny: number | null;
+  paidCny: number | null;
+  historicalLowCny: number | null;
+  priceKind: "msrp" | "current" | "paid" | "unknown";
   evidence: string;
+  asOf?: string;
+  snapshot?: { platform: string; asOf: string; listingUrl?: string; match?: string };
   source?: string;
 }
 
@@ -111,6 +119,7 @@ export interface PriceEvaluation {
   knownCny: number;
   unknownSkuIds: string[];
   items: PriceLine[];
+  catalogUpdatedAt: string;
 }
 
 export interface NoiseEvaluation {
@@ -195,18 +204,20 @@ export function derivePower(
   catalog: SkuCatalog,
   env: Partial<Pick<ThermalEnv, "workload" | "cpuPl1W" | "cpuPl2W" | "fans">> = {},
 ): PowerEvaluation {
-  const profile = n6Profile.powerProfile;
+  const profile = n6PowerProfile();
   const workload: Workload = env.workload ?? "idle";
   const unknown: string[] = [];
-  const base = typeof profile?.boardBaseW === "number" ? profile.boardBaseW : null;
-  const fanBase = typeof profile?.fanBaseW === "number" ? profile.fanBaseW : null;
+  const base = profile.boardBaseW;
+  const fanBase = profile.fanBaseW;
   const fanGroups = [env.fans?.front, env.fans?.rear, env.fans?.left, env.fans?.right].filter(Boolean);
   const fanW =
-    fanBase === null || fanGroups.some((fan) => typeof fan?.count !== "number")
+    fanBase === null ||
+    fanGroups.some((fan) => typeof fan?.count !== "number") ||
+    fanGroups.some((fan) => (fan?.size === 140 ? profile.fan140W : profile.fan120W) === null)
       ? null
       : fanBase +
         fanGroups.reduce(
-          (sum, fan) => sum + (fan?.count ?? 0) * (fan?.size === 140 ? (profile.fan140W ?? 0) : (profile.fan120W ?? 0)),
+          (sum, fan) => sum + (fan?.count ?? 0) * (fan?.size === 140 ? profile.fan140W! : profile.fan120W!),
           0,
         );
   if (base === null) unknown.push("power.boardBaseW");
@@ -217,23 +228,28 @@ export function derivePower(
   const disk = catalog.skus.find((sku) => sku.id === (config.selection.diskSkuId ?? n6Profile.defaults.diskSkuId));
   const hbaId = config.selection.hbaSkuId ?? n6Profile.hba.defaultSkuId;
   const hba = catalog.skus.find((sku) => sku.id === hbaId);
-  const cpuIdle = typeof profile?.cpuIdleW === "number" ? profile.cpuIdleW : null;
-  const cpuRead = typeof profile?.cpuReadW === "number" ? profile.cpuReadW : null;
-  const cpuQuickSync = typeof profile?.cpuQuickSyncW === "number" ? profile.cpuQuickSyncW : null;
+  const cpuIdle = profile.cpuIdleW;
+  const cpuRead = profile.cpuReadW;
+  const cpuQuickSync = profile.cpuQuickSyncW;
   const cpuPl1 = env.cpuPl1W ?? cpu?.power.tdpW ?? null;
   const cpuPl2 = env.cpuPl2W ?? (cpuPl1 === null ? null : Math.max(cpuPl1, cpuPl1 * 1.35));
   const cpuW =
     workload === "idle" ? cpuIdle : workload === "read" ? cpuRead : workload === "quicksync" ? cpuQuickSync : workload === "cpu" ? cpuPl1 : workload === "ai" || workload === "combined" ? cpuPl2 : cpuPl1;
-  const gpuW = workload === "idle" || workload === "read" || workload === "quicksync" || workload === "cpu" ? gpu?.power.idleW ?? 0 : gpu?.power.tgpW ?? 0;
-  const hbaW = needsHba(config.selection, buildSataPorts(catalog, config)) || config.selection.hbaMode === "always" ? numericAttr(hba, "tdpW") ?? hba?.power.tdpW ?? profile?.hbaW ?? null : 0;
+  const gpuW = gpu
+    ? workload === "idle" || workload === "read" || workload === "quicksync" || workload === "cpu"
+      ? gpu.power.idleW ?? null
+      : gpu.power.tgpW ?? null
+    : null;
+  const hbaW = needsHba(config.selection, buildSataPorts(catalog, config)) || config.selection.hbaMode === "always" ? numericAttr(hba, "tdpW") ?? hba?.power.tdpW ?? profile.hbaW : 0;
   const diskEach = workload === "idle" ? disk?.power.idleW ?? null : disk?.power.maxOperatingW ?? null;
   const hddW = diskEach === null ? null : diskEach * config.selection.diskCount;
   if (cpuW === null) unknown.push("cpu.power");
+  if (gpuW === null) unknown.push("gpu.power");
   if (diskEach === null && config.selection.diskCount > 0) unknown.push("storage.power");
   if (hbaW === null && (needsHba(config.selection, buildSataPorts(catalog, config)) || config.selection.hbaMode === "always")) unknown.push("hba.power");
 
   const dual = config.selection.psuTopology === "dual";
-  const syncW = dual && config.selection.dualStart === "sync" ? profile?.dualSyncW ?? null : 0;
+  const syncW = dual && config.selection.dualStart === "sync" ? profile.dualSyncW ?? null : 0;
   if (dual && config.selection.dualStart === "sync" && syncW === null) unknown.push("power.dualSyncW");
   const mainDcW = sumNullable([base, fanW, syncW, cpuW, gpuW, hbaW, dual ? 0 : hddW]);
   const driveDcW = dual ? sumNullable([hddW, 2]) : 0;
@@ -258,7 +274,8 @@ export function derivePower(
   const wallW = sumNullable(psus.map((load) => load.wallW));
   const psuWasteW = sumNullable(psus.map((load) => load.wasteHeatW));
   const pathologicalDiskW = disk?.attrs?.startup12vPeakA && typeof disk.attrs.startup12vPeakA === "number" ? disk.attrs.startup12vPeakA * 12 * config.selection.diskCount : null;
-  const pathologicalDcW = sumNullable([base, fanW, cpuPl2, gpu?.power.tgpW ?? 0, hbaW, dual ? 0 : pathologicalDiskW]);
+  const pathologicalGpuW = gpu?.power.tgpW ?? null;
+  const pathologicalDcW = sumNullable([base, fanW, cpuPl2, pathologicalGpuW, hbaW, dual ? 0 : pathologicalDiskW]);
   const pathologicalDriveW = dual ? sumNullable([pathologicalDiskW, 2]) : 0;
   const pathologicalTotalW = sumNullable([pathologicalDcW, pathologicalDriveW]);
   const pathologicalWallW = pathologicalTotalW === null ? null : dual ? sumNullable([pathologicalDcW === null ? null : psuLoad(mainPsu, "primary", "upper", pathologicalDcW).wallW, psuLoad(secondaryPsu, "secondary", "lower", pathologicalDriveW).wallW]) : psuLoad(mainPsu, "primary", "upper", pathologicalTotalW).wallW;
@@ -267,7 +284,7 @@ export function derivePower(
     : null;
   const upperDcW = sumNullable([base, fanW, cpuW, gpuW, hbaW]);
   const lowerDcW = dual ? driveDcW : 0;
-  const loads = { cpuW: cpuW ?? 0, gpuW: gpuW ?? 0, hbaW: hbaW ?? 0, psuDcW: mainDcW ?? 0 };
+  const loads = { cpuW, gpuW, hbaW, psuDcW: mainDcW };
   const scenarios = [
     { label: "当前负载", wallW },
     { label: "病态同时峰值", wallW: pathologicalWallW },
@@ -300,10 +317,28 @@ export function derivePower(
 function derivePrice(bom: BuildLineItem[], catalog: SkuCatalog): PriceEvaluation {
   const items = bom.map((line) => {
     const sku = catalog.skus.find((entry) => entry.id === line.skuId);
-    const value = typeof sku?.price.current === "number" ? sku.price.current : typeof sku?.price.paid === "number" ? sku.price.paid : null;
-    return { skuId: line.skuId, qty: line.qty, priceCny: value, evidence: value === null ? "unknown" : sku?.price.snapshot ? "snapshot" : sku?.price.paid !== undefined ? "paid" : "current", ...(sku?.price.listingUrl ? { source: sku.price.listingUrl } : {}) };
+    const currentCny = typeof sku?.price.current === "number" ? sku.price.current : null;
+    const paidCny = typeof sku?.price.paid === "number" ? sku.price.paid : null;
+    const msrpCny = typeof sku?.price.msrp === "number" ? sku.price.msrp : null;
+    const historicalLowCny = typeof sku?.price.historicalLow === "number" ? sku.price.historicalLow : null;
+    const priceKind: PriceLine["priceKind"] = currentCny !== null ? "current" : paidCny !== null ? "paid" : msrpCny !== null ? "msrp" : "unknown";
+    const value = priceKind === "current" ? currentCny : priceKind === "paid" ? paidCny : priceKind === "msrp" ? msrpCny : null;
+    return {
+      skuId: line.skuId,
+      qty: line.qty,
+      priceCny: value,
+      msrpCny,
+      currentCny,
+      paidCny,
+      historicalLowCny,
+      priceKind,
+      evidence: value === null ? "unknown" : sku?.price.snapshot ? "snapshot" : priceKind,
+      ...(sku?.price.asOf ? { asOf: sku.price.asOf } : {}),
+      ...(sku?.price.snapshot ? { snapshot: sku.price.snapshot } : {}),
+      ...(sku?.price.listingUrl ? { source: sku.price.listingUrl } : {}),
+    };
   });
-  return { knownCny: items.reduce((sum, item) => sum + (item.priceCny ?? 0) * item.qty, 0), unknownSkuIds: items.filter((item) => item.priceCny === null).map((item) => item.skuId), items };
+  return { knownCny: items.reduce((sum, item) => sum + (item.priceCny ?? 0) * item.qty, 0), unknownSkuIds: items.filter((item) => item.priceCny === null).map((item) => item.skuId), items, catalogUpdatedAt: catalog.updatedAt };
 }
 
 function deriveNoise(): NoiseEvaluation {
@@ -489,7 +524,7 @@ function gpuHbaFindings(config: BuildConfig, catalog: SkuCatalog): EngineFinding
   } catch {
     return findings;
   }
-  const slots = gpu.dims.slots ?? 0;
+  const slots = gpu.dims.slots ?? null;
   const hbaNeeded = needsHba(config.selection, buildSataPorts(catalog, config));
 
   if (hbaNeeded) {
@@ -511,7 +546,7 @@ function gpuHbaFindings(config: BuildConfig, catalog: SkuCatalog): EngineFinding
     }
   }
 
-  if (hbaNeeded && slots >= 2.5) {
+  if (hbaNeeded && slots !== null && slots >= 2.5) {
     findings.push({
       id: "gpu.hba-slot-intrusion",
       verdict: "warn",
@@ -521,8 +556,8 @@ function gpuHbaFindings(config: BuildConfig, catalog: SkuCatalog): EngineFinding
     });
   }
 
-  const len = gpu.dims.lengthMm ?? 0;
-  if (len > n6Profile.gpuLimits.planningMinMm) {
+  const len = gpu.dims.lengthMm ?? null;
+  if (len !== null && len > n6Profile.gpuLimits.planningMinMm) {
     findings.push({
       id: "gpu.length-band",
       verdict: "warn",
@@ -560,7 +595,11 @@ function componentInputs(
   psuWasteInLowerChamber: boolean,
 ): ComponentInput[] {
   const loads = env.loads;
-  if (!loads) return [];
+  if (!loads || Object.values(loads).some((value) => value === null)) return [];
+  const cpuW = loads.cpuW!;
+  const gpuW = loads.gpuW!;
+  const hbaW = loads.hbaW!;
+  const psuDcW = loads.psuDcW!;
   const out: ComponentInput[] = [];
 
   const cooler = catalog.skus.find((s) => s.id === config.selection.coolerId);
@@ -569,7 +608,7 @@ function componentInputs(
     id: "cpu",
     label: `CPU（${cooler?.name ?? "散热器未知"}）`,
     chamber: "upper",
-    watts: loads.cpuW,
+    watts: cpuW,
     thetaKPerW: cpu.theta,
     evidence: cpu.evidence,
     thetaNote:
@@ -577,7 +616,7 @@ function componentInputs(
       "散热器 θ 未知，按下压风冷通用包络取值。",
   });
 
-  if (loads.gpuW > 0) {
+  if (gpuW > 0) {
     const gpu = catalog.skus.find((s) => s.id === config.selection.gpuId);
     const blower = (gpu?.tags ?? []).includes("workstation");
     const band = blower ? PLANNING_THETA["gpu-blower"]! : PLANNING_THETA["gpu-axial"]!;
@@ -585,14 +624,14 @@ function componentInputs(
       id: "gpu",
       label: `GPU（${gpu?.name ?? "自定义包络"}）`,
       chamber: "upper",
-      watts: loads.gpuW,
+      watts: gpuW,
       thetaKPerW: band.theta,
       evidence: "inferred",
       thetaNote: band.note,
     });
   }
 
-  if (loads.hbaW > 0) {
+  if (hbaW > 0) {
     const directed = (env.fans.right?.count ?? 0) > 0;
     const band = directed
       ? PLANNING_THETA["hba-passive-directed"]!
@@ -601,7 +640,7 @@ function componentInputs(
       id: "hba",
       label: "HBA（被动散热）",
       chamber: "upper",
-      watts: loads.hbaW,
+      watts: hbaW,
       thetaKPerW: band.theta,
       evidence: "inferred",
       thetaNote: band.note,
@@ -610,8 +649,8 @@ function componentInputs(
 
   const psu = catalog.skus.find((s) => s.id === config.selection.psuId);
   const eff = Number(psu?.attrs?.["cybeneticsEfficiency"] ?? psu?.attrs?.["planningEfficiency"]);
-  const eta = Number.isFinite(eff) && eff > 0 ? eff : 0.9;
-  const wasteW = loads.psuDcW > 0 ? loads.psuDcW * (1 / eta - 1) : 0;
+  const eta = Number.isFinite(eff) && eff > 0 ? eff : null;
+  const wasteW = eta !== null && psuDcW > 0 ? psuDcW * (1 / eta - 1) : 0;
   if (wasteW > 0) {
     out.push({
       id: "psu",
@@ -654,14 +693,14 @@ function runThermal(
     // A left-side fan cannot draw air through a bracket that is no longer there.
     fans: leftFanMountAvailable(psuInLowerChamber) ? env.fans : { ...env.fans, left: null },
     diskCount: config.selection.diskCount,
-    diskWattsEach: diskW ?? 7,
-    diskEvidence: diskW === undefined ? "inferred" : (disk?.power?.evidence ?? "inferred"),
+    diskWattsEach: diskW!,
+    diskEvidence: disk?.power?.evidence ?? "unknown",
     upperWatts: env.upperWatts,
     psuInLowerChamber,
     psuDcWatts: env.psuDcWatts,
-    psuEfficiency: Number.isFinite(eff) && eff > 0 ? eff : 0.9,
+    psuEfficiency: eff,
     psuEfficiencyEvidence:
-      (psu?.attrs?.["efficiencyEvidence"] as ThermalResult["evidence"] | undefined) ?? "inferred",
+      (psu?.attrs?.["efficiencyEvidence"] as ThermalResult["evidence"] | undefined) ?? "unknown",
   });
 }
 

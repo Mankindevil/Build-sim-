@@ -86,8 +86,8 @@ function cableLengthMm(catalog: SkuCatalog, skuId?: string): number | null {
 }
 
 /** Which port a bay's data path terminates on, given the plan's target. */
-function dataTargetPort(target: string, portLabel: string): string | null {
-  if (target === "hba") return /P[4-7]/i.test(portLabel) ? "port.hba.p2" : "port.hba.p1";
+function dataTargetPort(target: string, assignment: { connector: string; portIndex: number | null }): string | null {
+  if (target === "hba" && assignment.portIndex !== null) return assignment.portIndex <= 4 ? "port.hba.p1" : "port.hba.p2";
   if (target === "sata") return "port.board.sata";
   if (target === "slimsas") return "port.board.slimsas";
   return null;
@@ -121,7 +121,7 @@ function runSpecs(plan: WiringPlan, ports: Map<string, Port>, catalog: SkuCatalo
   }
 
   for (const bay of plan.bayPaths) {
-    const toId = dataTargetPort(bay.target, bay.portLabel);
+    const toId = dataTargetPort(bay.target, bay.assignment);
     const from = ports.get(`port.backplane.data.${bay.bayIndex}`);
     if (!toId || !from || !ports.has(toId)) continue;
     specs.push({
