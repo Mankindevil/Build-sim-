@@ -1,6 +1,5 @@
 (() => {
   const root = document.getElementById('n6-lab');
-  const fixedCost = 4808;
   const LAB = window.__N6_LAB__;
   if (!LAB) throw new Error('N6 lab boot data missing — load /src/lab/boot.ts first');
   const PROFILE = LAB.profile;
@@ -49,16 +48,6 @@
   const $$ = s => [...root.querySelectorAll(s)];
   const fmt = n => '¥'+Math.round(n).toLocaleString('zh-CN');
   const range = p => p[0]===p[1] ? fmt(p[0]) : `${fmt(p[0])}–${fmt(p[1])}`;
-  const logSum = vals => vals.length ? 10*Math.log10(vals.reduce((a,v)=>a+Math.pow(10,v/10),0)) : 0;
-  const interp = (points, x) => {
-    if (x <= points[0][0]) return points[0][1] * x / points[0][0];
-    for (let i=1;i<points.length;i++) if (x <= points[i][0]) { const [x0,y0]=points[i-1],[x1,y1]=points[i]; return y0+(y1-y0)*(x-x0)/(x1-x0); }
-    return x/.92;
-  };
-  const curves = {
-    'psu.seasonic-focus-gx-850-v5':[[17,25.174],[20.013,28.474],[40.009,49.235],[60.008,70.04],[79.979,90.806],[169.987,185.519],[255.004,275.096],[340.103,365.397],[425.169,457.058]],
-    'psu.seasonic-focus-gx-750-v5':[[15,24.395],[20.016,29.572],[40.009,50.197],[60.005,70.796],[79.971,91.428],[149.969,164.651],[224.978,243.026],[300.07,322.379],[374.684,402.208]]
-  };
 
   function readConfig(){
     const psuKey=$('#psu-select').value,secondaryPsuKey=$('#secondary-psu-select').value,coolerKey=$('#cooler-select').value,gpuKey=$('#gpu-select').value,ramKey=$('#ram-select').value;
@@ -69,6 +58,13 @@
     const customGpuPrice=num('gpu-custom-price',0,0,100000),gpu=gpuKey==='custom'?{name:$('#gpu-custom-name').value.trim()||'自定义 GPU 包络',kind:'用户包络',vram:num('gpu-custom-vram',16,0,96),tgp:num('gpu-custom-tgp',180,0,600),idle:Math.max(5,Math.round(num('gpu-custom-tgp',180,0,600)*.07)),length:num('gpu-custom-length',250,120,340),slots:num('gpu-custom-slots',2,1,4),noise:40,price:[customGpuPrice,customGpuPrice],mid:customGpuPrice,official:'用户输入尺寸/预算；官方价与历史价仍需按具体 SKU 核验',cooling:'按具体 SKU 核对',ai:'自定义包络只用于尺寸、功耗与插槽规划',specificGeometry:true,userEnvelope:true}:gpus[gpuKey];
     return {psuKey,secondaryPsuKey,coolerKey,gpuKey,ramKey,psuPosition,psu:psus[psuKey],secondaryPsu:psus[secondaryPsuKey],dualStart:$('#dual-start-select').value,cooler,gpu,ram:rams[ramKey],disks,ambient,pl1,pl2,boot:$('#boot-select').value,nvme:+$('#nvme-select').value,hbaMode:$('#hba-select').value,fan:$('#fan-select').value,workload:$('#workload-select').value,frontRequested,front,rear:$('#rear-fan').checked,drive:$('#drive-fans').checked,side:$('#side-fans').checked,preserve:$('#preserve-hba').checked};
   }
+  // The renderer receives these adapters from one BuildEvaluation. They contain
+  // no independent rules; null stays null so unknown power/noise cannot become a
+  // plausible-looking number in a KPI.
+  function powerView(power){return {base:power.baseW??0,cpu:power.cpuW??0,hdd:power.hddW??0,gpu:power.gpuW??0,hba:power.hbaW??0,dc:power.dcW,wall:power.wallW,mainDc:power.mainDcW,driveDc:power.driveDcW,mainPeak:power.pathologicalDcW,drivePeak:null,pathological:power.pathologicalDcW,pathologicalWall:power.pathologicalWallW,headroom:power.headroomRatio,psuWaste:power.psuWasteW,dual:power.psus.length>1};}
+  function fitView(ev){const level=ev.occupancy.verdict,issues=ev.findings.filter(f=>f.verdict==='bad').map(f=>f.message),warnings=ev.findings.filter(f=>f.verdict==='warn').map(f=>f.message),oks=ev.findings.filter(f=>f.verdict==='ok').map(f=>f.message);return {level,issues,warnings,oks};}
+  function noiseView(ev){return {noise:ev.noise.totalDba,parts:ev.noise.parts};}
+  function priceText(price){return price.unknownSkuIds.length?`已知 ¥${Math.round(price.knownCny).toLocaleString('zh-CN')} + ${price.unknownSkuIds.length} 项 unknown`:`¥${Math.round(price.knownCny).toLocaleString('zh-CN')}`;}
   function frontSfxSelected(){
     const psu=psus[$('#psu-select').value],position=$('#psu-position').value;
     return psu.form==='SFX'&&position!=='bottom';
@@ -90,108 +86,6 @@
   function gpuPlanningLimit(){ return limits.gpuMm.publishedMax; }
   function caseFanGroupCount(c){return (c.front?1:0)+(c.rear?1:0)+(c.drive?1:0)+(c.side?1:0);}
   function topologyLabel(c){return ({rearUpperATX:'ATX 后上置',frontSFX:'SFX 前置',bottomSFX:'SFX 后下置',rearUpperATX_plus_bottomSFX:'ATX 后上 + SFX 后下',frontSFX_plus_bottomSFX:'SFX 前置 + SFX 后下',invalidATXBottom:'无效：ATX 不能下置'})[psuPlacement(c)];}
-  function wallForPsu(psuKey,dc){
-    if(dc<=0)return 0;
-    if(curves[psuKey])return interp(curves[psuKey],dc);
-    const eff=psuKey==='psu.corsair-sf750-atx31'?(dc<40?.77:dc<80?.84:.92):psuKey==='psu.sfx-450-unlocked'?(dc<40?.72:dc<80?.80:.87):(dc<40?.74:dc<80?.81:.89);
-    return dc/eff;
-  }
-  function wallForLoads(c,mainDc,driveDc=0){return wallForPsu(c.psuKey,mainDc)+(c.psuPosition==='dual'?wallForPsu(c.secondaryPsuKey,driveDc):0);}
-  function wallFor(c,dc){return wallForPsu(c.psuKey,dc);}
-  function powerModel(c){
-    const dual=c.psuPosition==='dual',hba=hasHba(c)?12:0,hddIdle=c.disks*6.22,hddWork=c.disks*8.5,fanW=5+(c.front?4:0)+(c.rear?2:0)+(c.drive?4:0)+(c.side?4:0),base=23+fanW+(dual&&c.dualStart==='sync'?1:0);
-    let cpu=12,hdd=hddIdle,gpu=c.gpu.idle;
-    if(c.workload==='read'){cpu=22;hdd=hddWork;}
-    if(c.workload==='quicksync'){cpu=45;hdd=hddWork;}
-    if(c.workload==='cpu'){cpu=c.pl1;hdd=hddWork;}
-    if(c.workload==='ai'){cpu=c.gpu.tgp?25:c.pl1;gpu=c.gpu.tgp;hdd=hddWork;}
-    if(c.workload==='combined'){cpu=c.pl2;gpu=c.gpu.tgp;hdd=hddWork;}
-    const mainDc=base+cpu+gpu+hba+(dual?0:hdd),driveDc=dual?hdd+2:0,dc=mainDc+driveDc;
-    const mainWall=wallForPsu(c.psuKey,mainDc),driveWall=dual?wallForPsu(c.secondaryPsuKey,driveDc):0,wall=mainWall+driveWall;
-    const mainPeak=35+c.pl2+c.gpu.tgp+hba,drivePeak=15+c.disks*33.1,pathological=mainPeak+drivePeak;
-    const pathologicalWall=dual?wallForLoads(c,mainPeak,drivePeak):wallForPsu(c.psuKey,pathological);
-    const headroom=dual?Math.min((c.psu.watts-mainPeak)/c.psu.watts,(c.secondaryPsu.watts-drivePeak)/c.secondaryPsu.watts):(c.psu.watts-pathological)/c.psu.watts;
-    const psuWaste=psuWasteHeatW(c.psu,mainDc)+(dual?psuWasteHeatW(c.secondaryPsu,driveDc):0);
-    return {base,cpu,hdd,gpu,hba,dc,mainDc,driveDc,mainWall,driveWall,wall,pathological,pathologicalWall,headroom,mainPeak,drivePeak,dual,psuWaste};
-  }
-  function fitModel(c){
-    const issues=[],warnings=[],oks=[]; let level='ok';
-    const placement=psuPlacement(c),maxCooler=coolerPlanningLimit(c);
-    if(placement==='invalidATXBottom'){issues.push('N6 的下置电源位只支持 SFX；当前选择的 ATX 电源不能下置。');level='bad';}
-    if(c.psuPosition==='dual'){
-      warnings.push('双电源只是在主机与硬盘背板之间分担负载，不是可无缝切换的冗余热备；模型已把两颗 PSU 的转换损耗分别计算。');level=level==='bad'?'bad':'warn';
-      if(c.secondaryPsu.confidence==='unknown'){issues.push('第二颗 SFX 尚未锁定具体型号：外围线束数量、低负载效率与模组针脚未知，当前双电源方案不可直接下单。');level='bad';}
-      if(c.dualStart!=='sync'){issues.push('尚未规划 PS_ON 同步启动，第二颗背板电源不能保证随主机自动启停。');level='bad';}
-      else {warnings.push('PS_ON 同步模块只按功能占位；购买前仍要核对额定值、接线与掉电故障模式。');level=level==='bad'?'bad':'warn';}
-    }
-    if(['frontSFX','frontSFX_plus_bottomSFX'].includes(placement)){
-      warnings.push(c.frontRequested?'你同时选择了前置 SFX 与完整前部风扇/冷排：手册展示的安装面重叠，但没有共存尺寸；模拟器按保守互斥处理，前部风扇不计入有效风量。':'前置 SFX 占用前部安装区；手册没有给出它与单个前风扇的共存矩阵，若需要完整前进风请改用 SFX 后下置或 ATX 后上置。');
-      level=level==='bad'?'bad':'warn';
-    }
-    if(['bottomSFX','rearUpperATX_plus_bottomSFX','frontSFX_plus_bottomSFX'].includes(placement)&&c.side){warnings.push('下置 SFX 按官方步骤会拆除左侧风扇支架；侧风扇只能按右侧位置规划并实测。');level=level==='bad'?'bad':'warn';}
-    if(c.cooler.type==='水冷') { if(c.cooler.fit==='front240'){warnings.push('手册列出前置 240mm 冷排安装位，但没有给冷排总厚度、接头、冷管和 GPU 尾部的共存尺寸；必须按具体冷排与显卡实测。');level=level==='bad'?'bad':'warn';if(['frontSFX','frontSFX_plus_bottomSFX'].includes(placement)){issues.push('前置 SFX 与前置 240 冷排在手册示意中共享前部安装面；在厂商没有给出共存尺寸前，按保守互斥。');level='bad';}} else {if(overheadPsu(c)){issues.push('后上置 ATX 电源占用后部支架，不能同时规划后置 120 冷排。');level='bad';}else{warnings.push('后置 120mm 是风扇位，手册没有明确承诺 120mm 冷排；冷排、冷管与主板的真实干涉需拿到手比对。');level=level==='bad'?'bad':'warn';}} }
-    else if(c.cooler.height>maxCooler){issues.push(`${topologyLabel(c)} 的规划散热限高 ${maxCooler}mm，${c.cooler.name} 高 ${c.cooler.height}mm。`);level='bad';}
-    else {const gap=maxCooler-c.cooler.height; if(gap<=2){warnings.push(`散热器只剩 ${gap}mm 规划余量，进风与装配公差不足。`);level=level==='bad'?'bad':'warn';} else oks.push(`散热器高度 ${c.cooler.height}mm；按当前拓扑映射的规划包络 ${maxCooler}mm，余 ${gap}mm。`);warnings.push('N6 只发布 65–160mm 散热范围，没有说明两个端点分别对应哪种电源拓扑；当前限高映射属于结构推算。');level=level==='bad'?'bad':'warn';}
-    // The "swap the memory later and the cooler comes off again" caveat is no
-    // longer typed here: src/core/assembly.ts derives it from the fin overhang.
-    if(c.cooler.ram<c.ram.height){issues.push(`${c.cooler.name} 内存限高 ${c.cooler.ram}mm，当前内存约 ${c.ram.height}mm。`);level='bad';}
-    if(c.gpu.length>limits.gpuMm.publishedMax){issues.push(`${c.gpu.name} 规划长度 ${c.gpu.length}mm，超过 N6 发布范围的最大端点 ${limits.gpuMm.publishedMax}mm。`);level='bad';}
-    else if(c.gpu.length>limits.gpuMm.publishedMin){warnings.push(`${c.gpu.name} 长 ${c.gpu.length}mm，位于 N6 发布的 275–320mm 条件区；厂商未说明端点对应拓扑，必须用具体 SKU 实测前部件与供电插头余量。`);level=level==='bad'?'bad':'warn';}
-    else if(c.gpu.tgp){oks.push(`GPU 长 ${c.gpu.length}mm，不超过 N6 发布范围的较小端点 275mm；这仍不等于已验证卡高、供电插头和冷管余量。`);}
-    if(c.gpu.tgp&&!c.gpu.specificGeometry){warnings.push('当前消费级 GPU 只是芯片级规划包络，不是具体厂商 SKU；请选择“自定义具体显卡包络”录入实卡尺寸后再做购买判断。');level=level==='bad'?'bad':'warn';}
-    if((hasHba(c)||c.preserve) && c.gpu.slots>2){issues.push(`${c.gpu.slots} 槽显卡会遮挡底部 PCIe ×4，无法与${hasHba(c)?'当前必需的':'预留的'} HBA 共存。`);level='bad';}
-    if(c.gpu.tgp>=230&&!c.side){warnings.push('230W 以上 GPU 建议增加侧面 2×120mm 风扇。');level=level==='bad'?'bad':'warn';}
-    if(!c.drive){warnings.push('当前未勾选盘区 2×120mm 风扇；N6 手册只列安装位，不能假定机箱随附。企业盘投入使用前建议补装并按盘温调速。');level=level==='bad'?'bad':'warn';}
-    if(hasHba(c)&&!c.side){warnings.push('LSI 9300-8i 为被动散热 HBA；没有侧向定向气流时芯片可能积热，建议至少一组 120mm 风扇直吹。');level=level==='bad'?'bad':'warn';}
-    if(c.boot==='bay'&&c.disks>=limits.trays){issues.push('9 块数据 HDD 已占满全部托架，2.5″ SATA 启动 SSD 无盘位可放。');level='bad';}
-    if(c.boot==='m2')warnings.push('TrueNAS 会独占整块 980 PRO，剩余一块无法组成 fast pool 镜像。');
-    if(c.boot==='usbssd')warnings.push('外置 USB SSD 可以腾出第 9 盘位，但要固定线材并接受外接链路风险。');
-    if(powerModel(c).headroom<.2){issues.push('病态同时峰值下 PSU 余量低于 20%。');level='bad';} else if(powerModel(c).headroom<.35){warnings.push('同时起盘 + CPU/GPU 满载时 PSU 余量低于 35%，应限制功耗或升级电源。');level=level==='bad'?'bad':'warn';}
-    const harness=backplaneHarnessCount(c);
-    if(c.psuPosition==='dual'&&harness<4){warnings.push(`双电源只计算专供背板的 ${c.secondaryPsu.name}：当前已确认/录入 ${harness} 条独立外围线，少于背板四口，不能把主电源线束相加。需锁定原生提供四路或有同型号授权线的具体 PSU。`);level=level==='bad'?'bad':'warn';}
-    else if(harness<4){warnings.push(`按原盒清单保守估计只有 ${harness} 条独立外围线束，少于 N6 背板建议的 4 条。`);level=level==='bad'?'bad':'warn';}
-    if(!c.front&&overheadPsu(c)){warnings.push('后上置 ATX + 下压散热器需要前置进风；关闭前风扇会显著抬高 CPU 温度。');level=level==='bad'?'bad':'warn';}
-    if(c.rear&&!rearFanAvailable(c)){issues.push('后上 ATX 电源与后置 120mm 风扇位互斥。');level='bad';}
-    if(caseFanGroupCount(c)>limits.chassisFanHeaders){warnings.push(`当前有 ${caseFanGroupCount(c)} 组机箱风扇，超过主板 ${limits.chassisFanHeaders} 个 CHA_FAN 口；需要 SATA 供电 PWM 集线器或经核对后复用其他风扇口。`);level=level==='bad'?'bad':'warn';}
-    if(['frontSFX','frontSFX_plus_bottomSFX'].includes(placement)&&c.cooler.type==='塔式风冷'&&!c.rear){warnings.push('SFX 前置 + 塔式风冷可规划共存，但建议增加后置 120mm 排风形成稳定气流。');level=level==='bad'?'bad':'warn';}
-    if(c.ram.modules===1){warnings.push('当前只装一条内存，系统会以单通道运行；过渡可用，长期建议补同料号组成 A2+B2 双通道。');level=level==='bad'?'bad':'warn';}
-    if(c.ram.ecc){warnings.push('ECC 路线要求 DDR5 ECC UDIMM、i5-14500、W680 与 BIOS 同时正确识别；具体料号仍需核 ASUS QVL，RDIMM/LRDIMM 不兼容。');level=level==='bad'?'bad':'warn';}
-    if(c.ram.xmp){warnings.push(`${c.ram.mpn||c.ram.name} 为 XMP 超频套条；ASUS QVL ${c.ram.qvl?'有本料号记录':'未确认本料号'}，但 i5-14500 官方 DDR5 基线是 4800，不能保证标称频率。`);level=level==='bad'?'bad':'warn';}
-    return {level,issues,warnings,oks,maxCooler};
-  }
-  function psuWasteHeatW(psu,dc){const eta=Math.max(.5,Math.min(.98,psu.efficiency||.88));return dc<=0?0:dc*(1/eta-1);}
-  function psuNoiseDb(psu,dc){
-    if(psu.fanOff>0&&dc<psu.fanOff)return 0;
-    if(psu.fanOff<=0&&!(psu.noiseDba>0))return 0;
-    return psu.noiseDba||24;
-  }
-  /**
-   * Sound only. Every temperature in the UI now comes from the V2 air-balance model
-   * (`LAB.evaluate().thermal`), which reports ranges with its assumptions attached;
-   * the single-point ΔT tables that used to live here could not be reconciled with
-   * it and are gone.
-   */
-  function acousticModel(c,p){
-    const activeHddNoise=(c.workload==='idle'?28:32)+10*Math.log10(c.disks);
-    const loadRatio=Math.min(1,p.cpu/Math.max(1,c.pl1));
-    const coolerNoise=c.cooler.idleNoise+(c.cooler.maxNoise-c.cooler.idleNoise)*loadRatio+({quiet:-2,balanced:0,performance:2}[c.fan]);
-    const gpuNoise=p.gpu>c.gpu.idle+5?c.gpu.noise:(c.gpu.tgp?18:0);
-    const fanSource={quiet:17,balanced:20,performance:25}[c.fan],caseSources=[];
-    if(c.front)caseSources.push(fanSource+3);if(c.rear)caseSources.push(fanSource);if(c.drive)caseSources.push(fanSource+3);if(c.side)caseSources.push(fanSource+3);
-    const caseNoise=logSum(caseSources),mainPsuNoise=psuNoiseDb(c.psu,p.mainDc),drivePsuNoise=p.dual?psuNoiseDb(c.secondaryPsu,p.driveDc):0,psuNoise=logSum([mainPsuNoise,drivePsuNoise].filter(v=>v>0));
-    const noise=Math.round(logSum([activeHddNoise,coolerNoise,gpuNoise,caseNoise,psuNoise].filter(v=>v>0)));
-    return {noise,parts:{'硬盘':activeHddNoise,'CPU 风扇':coolerNoise,'GPU':gpuNoise,'机箱风扇':caseNoise,'PSU':psuNoise}};
-  }
-  function gpuVerdict(g,c){
-    if(!g.tgp)return {level:'ok',text:'暂不安装',reason:'不占 PCIe 与散热空间'};
-    if(g.length>limits.gpuMm.publishedMax)return {level:'bad',text:'超出发布范围',reason:`卡长 ${g.length}mm > 320mm 最大端点`};
-    if((hasHba(c)||c.preserve)&&g.slots>2)return {level:'bad',text:'不兼容 HBA',reason:'超过 2 槽会挡 PCIe ×4'};
-    if(g.tgp>=300)return {level:'bad',text:'热密度过高',reason:'N6 不适合 300W+ 消费卡'};
-    if(!g.specificGeometry)return {level:'warn',text:'仅供规划',reason:'不是具体 SKU；需录入实卡长/厚/TGP'};
-    if(g.length>limits.gpuMm.publishedMin)return {level:'warn',text:'条件区',reason:'位于 275–320mm 发布范围，端点与拓扑关系未知'};
-    if(g.tgp>=200)return {level:'warn',text:'有条件',reason:'需侧风扇、功耗限制与实卡尺寸复核'};
-    return {level:'ok',text:'包络可规划',reason:g.kind==='工作站'?'参考卡较窄、低功耗，可保留扩展':'已录入具体包络；仍需实物核对插头/线材'};
-  }
   function accessoryActive(c,key){
     if(key==='slim')return sataDeviceCount(c)>4&&!hasHba(c);
     if(key==='hba')return hasHba(c);
@@ -205,12 +99,6 @@
     // Only offer extra leads when the PSU still has a free SATA/PATA socket to plug one into.
     if(key==='psucable')return c.psuPosition!=='dual'&&c.psu.harness<4&&(c.psu.peripheralSockets===0||c.psu.peripheralSockets>=4);
     return state.selectedAccessories.has(key);
-  }
-  function priceModel(c,includeGpu=false,diskCount=c.disks){
-    let total=c.psu.mid+c.cooler.mid+c.ram.mid+4500*diskCount;
-    Object.keys(accessories).forEach(k=>{if(accessoryActive(c,k))total+=k==='dualsfx'?c.secondaryPsu.mid:accessories[k].mid;});
-    if(includeGpu)total+=c.gpu.mid;
-    return total;
   }
 
   const thermalStops=[[20,[30,64,175]],[35,[0,174,239]],[45,[34,197,94]],[60,[250,204,21]],[75,[249,115,22]],[90,[239,68,68]],[100,[127,29,29]]];
@@ -720,7 +608,7 @@
     $('#cooler-svg-name').textContent=`${c.cooler.name.split(' ')[0]} · ${c.cooler.type}${c.cooler.height?' '+c.cooler.height+'mm':''}`;
     $('#gpu-shape').classList.toggle('is-hidden',!c.gpu.tgp);$('#gpu-svg-name').textContent=`${c.gpu.name} · ${c.gpu.length}mm · ${c.gpu.slots} 槽`;
     const gw=Math.min(430,Math.max(120,c.gpu.length/275*390));$('#gpu-box').setAttribute('width',gw);
-    const hbaVisible=hasHba(c)||c.preserve,frontConflict=frontSfx&&c.frontRequested,frontVisual=c.frontRequested;$('#hba-shape').classList.toggle('is-hidden',!hbaVisible);$('#hba-shape').dataset.installed=String(hasHba(c));$('#hba-svg-name').textContent=hasHba(c)?'LSI 9300-8i · IT Mode':'底部 PCIe ×4 · HBA 预留';$('#front-fan-shape').classList.toggle('is-hidden',!frontVisual);$('#front-fan-shape').dataset.conflict=String(frontConflict);$('#rear-fan-shape').classList.toggle('is-hidden',!c.rear);$('#air-arrows').classList.toggle('is-hidden',!c.front);$('#front-fan-svg-label').textContent=frontConflict?(c.cooler.fit==='front240'?'保守冲突：240 冷排 × 前置 SFX':'待实测：完整前风扇 × 前置 SFX'):c.cooler.fit==='front240'?'240 冷排 + 2×120':'2×140 进风';
+    const hbaInstalled=ev.bom.some(line=>line.skuId==='hba.lsi-9300-8i-it'),hbaVisible=hbaInstalled||c.preserve,frontConflict=frontSfx&&c.frontRequested,frontVisual=c.frontRequested;$('#hba-shape').classList.toggle('is-hidden',!hbaVisible);$('#hba-shape').dataset.installed=String(hbaInstalled);$('#hba-svg-name').textContent=hbaInstalled?'LSI 9300-8i · IT Mode':'底部 PCIe ×4 · HBA 预留';$('#front-fan-shape').classList.toggle('is-hidden',!frontVisual);$('#front-fan-shape').dataset.conflict=String(frontConflict);$('#rear-fan-shape').classList.toggle('is-hidden',!c.rear);$('#air-arrows').classList.toggle('is-hidden',!c.front);$('#front-fan-svg-label').textContent=frontConflict?(c.cooler.fit==='front240'?'保守冲突：240 冷排 × 前置 SFX':'待实测：完整前风扇 × 前置 SFX'):c.cooler.fit==='front240'?'240 冷排 + 2×120':'2×140 进风';
     $('#top-usb-boot').classList.toggle('is-hidden',c.boot!=='usbssd');$('#side-usb-boot').classList.toggle('is-hidden',c.boot!=='usbssd');
     $('#hdd-fans-shape').dataset.installed=String(c.drive);$('#side-hdd-fans').dataset.installed=String(c.drive);$('#hdd-fans-label').textContent=c.drive?'盘区 2×120 · 已装':'盘区 2×120 · 另购';$('#side-hdd-fans-label').textContent=c.drive?'盘区 2×120 · 已装':'盘区 2×120 · 未装';
     updateTopThermalMap(c,p,ev);
@@ -733,7 +621,7 @@
     const freeOverhead=!overheadPsu(c);$('#side-sfx-clearance').classList.toggle('is-hidden',!freeOverhead);$('#side-sfx-clearance-text').classList.toggle('is-hidden',!freeOverhead);
     $('#side-psu-extra').innerHTML=c.psuPosition==='dual'?'<rect x="165" y="422" width="112" height="70"></rect><text x="178" y="454">第二颗 SFX</text><text x="178" y="476">背板供电</text>':'';
     $('#side-cooler-low').classList.toggle('is-hidden',isTower||isAio);$('#side-cooler-tower').classList.toggle('is-hidden',!isTower);$('#side-cooler-aio').classList.toggle('is-hidden',!isAio);
-    $('#side-gpu').classList.toggle('is-hidden',!c.gpu.tgp);$('#side-hba').classList.toggle('is-hidden',!hbaVisible);$('#side-hba').dataset.installed=String(hasHba(c));$('#side-hba-name').textContent=hasHba(c)?'底部 HBA':'底部 HBA 预留';
+    $('#side-gpu').classList.toggle('is-hidden',!c.gpu.tgp);$('#side-hba').classList.toggle('is-hidden',!hbaVisible);$('#side-hba').dataset.installed=String(hbaInstalled);$('#side-hba-name').textContent=hbaInstalled?'底部 HBA':'底部 HBA 预留';
     $('#side-air').classList.toggle('is-hidden',!c.front);$('#side-gpu-name').textContent=c.gpu.tgp?`${c.gpu.name} · ${c.gpu.length}mm`:'GPU';
 
     let sideCells='',rearCells='';
@@ -743,34 +631,27 @@
       const rx=90+i*64,ry=95;rearCells+=`<g class="rear-drive" data-active="${active}" data-boot="${boot}"><rect x="${rx}" y="${ry}" width="54" height="150"></rect><text x="${rx+27}" y="${ry+80}" text-anchor="middle">${label}</text></g>`;
     }
     $('#side-drive-slots').innerHTML=sideCells;$('#rear-drive-slots').innerHTML=rearCells;
-    $('#rear-data-source').textContent=hasHba(c)?'LSI 9300-8i · 8 口':c.disks<=4?'4×SATA 原生':'4×SATA 原生';
-    $('#rear-data-source-2').textContent=hasHba(c)?(c.boot==='bay'&&c.disks<9?'Boot → 主板 SATA 1':c.disks===9?'第 9 盘 → 主板 SATA':'2×SFF-8643 分线'):c.disks<=4?'SlimSAS 暂不用':'SlimSAS → 4×SATA';
-    const harness=backplaneHarnessCount(c);$('#rear-harness-text').textContent=c.psuPosition==='dual'?`背板 SFX 约 ${harness} 条 · 不与主 PSU 相加`:harness>=4?'PSU 四条独立外围线':'预计 '+harness+' 条 · 需补 '+(4-harness)+' 条';
+    $('#rear-data-source').textContent=hbaInstalled?'LSI 9300-8i · 8 口':'BuildEvaluation.wiring';
+    $('#rear-data-source-2').textContent=hbaInstalled?'HBA / 主板混合路径':'BuildEvaluation.wiring';
+    const harness=ev.wiring.backplaneHarness,confirmed=(harness.confirmed.sata??0)+(harness.confirmed.molex??0);$('#rear-harness-text').textContent=`${harness.feedRole} · ${confirmed}/${harness.inlets} 条独立线`;
     renderSpatial(c,ev.geometry,ev.routing);
   }
   function renderOverview(c,p,a,fit,ev){
-    $('#kpi-wall').textContent=Math.round(p.wall)+' W';$('#kpi-wall-note').textContent=$('#workload-select').selectedOptions[0].text+' · 估算 ±3–8W';
-    $('#kpi-heat').textContent=Math.round(p.dc)+' W';$('#kpi-btu').textContent=`约 ${Math.round(p.wall*3.412)} BTU/h 室内热负载`;
-    $('#kpi-noise').textContent=a.noise+' dBA';$('#kpi-noise-note').textContent=`${c.disks>3?'多盘寻道/共振':'硬盘与风扇'}主导 · 实际 ±5dB`;
+    $('#kpi-wall').textContent=p.wall===null?'unknown':Math.round(p.wall)+' W';$('#kpi-wall-note').textContent=$('#workload-select').selectedOptions[0].text+' · 来自 BuildEvaluation.power';
+    $('#kpi-heat').textContent=p.dc===null?'unknown':Math.round(p.dc)+' W';$('#kpi-btu').textContent=p.wall===null?'墙上热负载 unknown':`约 ${Math.round(p.wall*3.412)} BTU/h 室内热负载`;
+    $('#kpi-noise').textContent=a.noise===null?'unknown':a.noise+' dBA';$('#kpi-noise-note').textContent='噪音证据由 BuildEvaluation.noise 提供；未测则保持 unknown';
     // Same ranges as the air-balance card, from the same evaluation — the KPI can no
     // longer show a confident single number the model never produced.
     const cpuT=nodeTemp(ev,'cpu'),hddT=nodeTemp(ev,'hdd'),gpuT=nodeTemp(ev,'gpu');
     $('#kpi-temp').textContent=`CPU ${rangeC(cpuT)}`;
     $('#kpi-temp-note').textContent=`HDD ${rangeC(hddT)} · GPU ${gpuT?rangeC(gpuT):'—'} · 区间非误差棒`;
-    $('#kpi-headroom').textContent=Math.round(p.headroom*100)+'%';$('#kpi-headroom-note').textContent=p.dual?`双路中较紧一路的余量 · 主机 ${Math.round(p.mainPeak)}W / 盘路 ${Math.round(p.drivePeak)}W`:`病态峰值 ${Math.round(p.pathological)}W DC / ${c.psu.watts}W`;
-    const remain=priceModel(c,false);$('#kpi-price').textContent=fmt(remain);
+    $('#kpi-headroom').textContent=p.headroom===null?'unknown':Math.round(p.headroom*100)+'%';$('#kpi-headroom-note').textContent=p.headroom===null?'PSU 容量或负载证据缺失':`来自 BuildEvaluation.power · 病态峰值 ${p.pathological===null?'unknown':Math.round(p.pathological)+'W DC'}`;
+    $('#kpi-price').textContent=priceText(ev.price);
     const levelText={ok:'兼容：推荐组合',warn:'有条件：需处理警告',bad:'不兼容 / 不建议'};$('#fit-chip').dataset.level=fit.level;$('#fit-chip').textContent=levelText[fit.level];
     $('#verdict-title').textContent=fit.level==='ok'?'推荐：可直接装':fit.level==='warn'?'可装，但先解决条件':'当前组合不应下单';
     const items=[...fit.issues.map(x=>`<li class="status-bad">${x}</li>`),...fit.warnings.map(x=>`<li class="status-warn">${x}</li>`),...fit.oks.map(x=>`<li class="status-ok">${x}</li>`)];$('#verdict-list').innerHTML=items.join('');
-    let routeTitle='ATX 850W + AXP90-X53 FULL',routeCopy='这是机械风险最低的主路线：140mm ATX 电源满足长度，53mm 下压散热器余约 12mm，未来 A4000 单槽可与底部 HBA 共存。';
-    if(c.psu.form==='SFX') {routeTitle='SFX + NH-U9S 空间路线';routeCopy=`SFX 的价值是释放 CPU 上方，让 125mm 塔式风冷工作；它不是为了省电，价格更高。当前 ${c.psu.name}：${c.psu.certification} · ${c.psu.modular} · 背板可用独立外围线 ${c.psu.harness} 根（需 4 根）${c.psu.peripheralSockets?` · SATA/PATA 插座 ${c.psu.peripheralSockets} 个${c.psu.peripheralSockets<4?'（插座已是上限，加线无处可插）':''}`:''}。`;}
-    if(c.psuPosition==='dual'){routeTitle='双电源实验路线';routeCopy='N6 手册展示了双电源机械位置，但没有提供冗余切换或 PS_ON 同步电路。它只适合分担硬盘背板负载；除非未来 GPU + 九盘同时高负载，否则单颗优质电源更安静、更省线、更容易维护。';}
-    if(c.cooler.type==='水冷'){routeTitle='水冷作为有条件分支';routeCopy=c.cooler.fit==='front240'?'N6 手册明确列出前置 240mm 冷排位；但厚度、冷管与 GPU 尾部余量没有标数，仍需实物复核。对 90W i5-14500 并非必要。':'后置 120mm 只有风扇位标注，冷排兼容未获明确承诺；泵、冷管、搬家与老化风险高于风冷。';}
-    $('#route-title').textContent=routeTitle;$('#route-copy').textContent=routeCopy;
-    const bootPurchase=c.boot==='bay'?'240–500GB SATA 启动 SSD':c.boot==='usbssd'?'外置 USB 3.x 启动 SSD + 固定短线':'980 PRO #1 作 TrueNAS Boot；#2 只能单盘 / 待用（无需另购启动盘）';
-    const frontPurchase=['frontSFX','frontSFX_plus_bottomSFX'].includes(psuPlacement(c))?'前置 SFX 已占风扇区；不购买前置 2×140':c.cooler.fit==='front240'?'240 冷排自带 2×120 风扇；不要再买 2×140':'前置 2×140mm PWM + 风扇分线';
-    const rearPurchase=c.rear&&c.coolerKey!=='cooler.aio-120-experimental'?'后置 1×120mm PWM 排风':(['frontSFX','frontSFX_plus_bottomSFX'].includes(psuPlacement(c))&&c.cooler.type==='塔式风冷'?'建议增加后置 1×120mm PWM 排风':null);
-    const next=[`${c.psu.name}（${range(c.psu.price)}）`,...(c.psuPosition==='dual'?[`${c.secondaryPsu.name}（${range(c.secondaryPsu.price)}）`,`PS_ON 同步模块 / 继电器（型号与接线待核）`]:[]),`${c.cooler.name}（${range(c.cooler.price)}）`,`${c.ram.name}（${range(c.ram.price)}）`,bootPurchase,`24TB CMR HDD ×${c.disks}：每块约 ¥4,200–4,950`,frontPurchase,...(rearPurchase?[rearPurchase]:[]),c.drive?'盘区 2×120mm 已计入':'盘区 2×120mm PWM（N6 仅列安装位，按需另购）',...(c.psuPosition==='dual'?['背板专用 SFX 必须独自提供四条独立外围线']:backplaneHarnessCount(c)<4?['补同型号 PSU 外围线（先向厂商核对针脚）']:[])];$('#next-buy-list').innerHTML=next.map(x=>`<li>${x}</li>`).join('');
+    const topFinding=ev.findings.find(f=>f.verdict!=='ok');$('#route-title').textContent=fit.level==='bad'?'确定性引擎：当前组合不可直接安装':fit.level==='warn'?'确定性引擎：条件安装':'确定性引擎：未发现阻断';$('#route-copy').textContent=topFinding?topFinding.message:'当前页面只展示 BuildEvaluation 事实，不生成第二套自然语言结论。';
+    const next=ev.bom.map(line=>`${line.qty}× ${line.skuId} · ${line.bucket}`);$('#next-buy-list').innerHTML=next.map(x=>`<li>${x}</li>`).join('');
     renderCase(c,p,ev);
   }
   function metricRows(data,max){return Object.entries(data).map(([name,v])=>{const val=typeof v==='object'?v.value:v,level=typeof v==='object'?v.level:'ok';return `<div class="metric-row"><span>${name}</span><div class="metric-track"><div class="metric-fill" data-level="${level}" style="width:${Math.min(100,val/max*100)}%"></div></div><strong>${Math.round(val)}${name.includes('噪音')?' dBA':'°C'}</strong></div>`;}).join('');}
@@ -792,45 +673,31 @@
       return {name:`${node.label} · ${Math.round(node.watts)}W × θ ${node.thetaKPerW.lo}–${node.thetaKPerW.hi}`,temp:node.tempC,level:tempLevel(node.tempC,warn,bad)};
     });
     $('#temperature-bars').innerHTML=rows.length?rangeRows(rows,100):'<p class="lab-note">当前配置没有可定温的部件。</p>';
-    const colors=['var(--viz-series-2)','var(--viz-series-5)','var(--viz-series-6)','var(--viz-series-4)','var(--viz-series-1)','var(--viz-series-3)'],parts=[['CPU',p.cpu],['HDD',p.hdd],['GPU',p.gpu],['主板/风扇',p.base],['HBA',p.hba],['PSU 废热',p.psuWaste]].filter(x=>x[1]>0);const heatDenom=Math.max(1,p.dc+p.psuWaste);$('#heat-split').innerHTML=parts.map((x,i)=>`<div class="heat-segment" style="width:${x[1]/heatDenom*100}%;background:${colors[i%colors.length]}">${x[0]} ${Math.round(x[1])}W</div>`).join('');
-    $('#noise-total').textContent=a.noise+' dBA';const noiseData={};Object.entries(a.parts).filter(x=>x[1]>0).forEach(([k,v])=>noiseData[k+'噪音']={value:v,level:v>45?'warn':'ok'});$('#noise-bars').innerHTML=metricRows(noiseData,55);
-    const fanAdvice=[];fanAdvice.push(['frontSFX','frontSFX_plus_bottomSFX'].includes(psuPlacement(c))?'前置 SFX 与完整 2×120/140 或 240 冷排按保守互斥规划；这是由手册安装面重叠推断，不是厂商公布的共存矩阵。':c.cooler.fit==='front240'?'前置 240 冷排配 2×120mm 风扇；不能再叠加 2×140。':c.front?'前置 2×140mm：400–700rpm 持续低转，给下压散热器和主板送冷风。':'后上置 ATX 路线应恢复前置 2×140mm。');fanAdvice.push(c.rear?(c.coolerKey==='cooler.aio-120-experimental'?'后置 120 位已由实验性冷排占用。':'后置 1×120mm 排风已启用；对 SFX + 塔式风冷路线有益。'):rearFanAvailable(c)?'后置 120mm 位可用但尚未安装。':'后上位被 ATX 电源占用，不规划后置 120mm 风扇。');fanAdvice.push(c.drive?'盘区 2×120mm 已启用：按最高 HDD 温度控制，目标 30–45°C。':'盘区 2×120mm 未安装：N6 手册只列安装位，企业盘投入使用前建议另购低速 PWM 风扇。');fanAdvice.push(c.gpu.tgp||hasHba(c)?(c.side?'侧面 2×120mm 已启用：对 GPU/HBA 横向送风；下置 SFX 时只按未拆的一侧规划。':hasHba(c)?'已装被动散热 HBA，应增加至少一组 120mm 定向侧吹。':'后续装 GPU 时增加侧面 2×120mm；先不买也可以。'):'无 GPU、无 HBA 时可暂不装侧风扇。');fanAdvice.push(c.psuPosition==='dual'?`双电源按两颗效率分别估算废热约 ${p.psuWaste.toFixed(0)}W；噪音用各 PSU 的 Cybenetics/规划 dBA（低于 fan-off 按停转）。`:`主 PSU ${Math.round(p.mainDc)}W / fan-off ${c.psu.fanOff||0}W；噪音 ${c.psu.noiseEvidence||'unknown'} ${c.psu.noiseDba??'—'} dBA（开放台架，非机箱内）。废热约 ${p.psuWaste.toFixed(0)}W。`);$('#fan-advice').innerHTML='<ul class="compact-list">'+fanAdvice.map(x=>`<li>${x}</li>`).join('')+'</ul>';
-    const idleMain=23+5+12+c.gpu.idle+(hasHba(c)?12:0)+(c.psuPosition==='dual'&&c.dualStart==='sync'?1:0),idleDrive=6.22+(c.psuPosition==='dual'?2:0),idleWall=c.psuPosition==='dual'?wallForLoads(c,idleMain,idleDrive):wallForPsu(c.psuKey,idleMain+idleDrive);
-    const plMain=35+c.pl1+c.gpu.idle+(hasHba(c)?12:0),plDrive=c.disks*8.5+(c.psuPosition==='dual'?2:0),plWall=c.psuPosition==='dual'?wallForLoads(c,plMain,plDrive):wallForPsu(c.psuKey,plMain+plDrive);
-    const scenarios=[['当前负载',p.wall],['1盘旋转待机',idleWall],['CPU PL1',plWall],['同时起盘峰值',p.pathologicalWall]];$('#power-scenarios').innerHTML=scenarios.map(([n,w])=>`<div><span>${n}</span><strong>${Math.round(w)} W</strong><small>墙上估算 · ${Math.round(w*3.412)} BTU/h</small></div>`).join('');renderThermalField(c,ev);
+    const colors=['var(--viz-series-2)','var(--viz-series-5)','var(--viz-series-6)','var(--viz-series-4)','var(--viz-series-1)','var(--viz-series-3)'],parts=[['CPU',p.cpu],['HDD',p.hdd],['GPU',p.gpu],['主板/风扇',p.base],['HBA',p.hba],['PSU 废热',p.psuWaste]].filter(x=>x[1]>0);const heatDenom=Math.max(1,p.dc??1);$('#heat-split').innerHTML=parts.map((x,i)=>`<div class="heat-segment" style="width:${x[1]/heatDenom*100}%;background:${colors[i%colors.length]}">${x[0]} ${Math.round(x[1])}W</div>`).join('');
+    $('#noise-total').textContent=a.noise===null?'unknown':a.noise+' dBA';const noiseData={};Object.entries(a.parts).filter(x=>x[1]!==null&&x[1]>0).forEach(([k,v])=>noiseData[k+'噪音']={value:v,level:v>45?'warn':'ok'});$('#noise-bars').innerHTML=Object.keys(noiseData).length?metricRows(noiseData,55):'<p class="lab-note">噪音未测，保持 unknown。</p>';
+    const deterministicAdvice=ev.findings.filter(f=>f.id.startsWith('thermal.')||f.id.startsWith('psu.')||f.id.startsWith('wiring.')).map(f=>`${f.verdict} · ${f.message}`);$('#fan-advice').innerHTML='<ul class="compact-list">'+(deterministicAdvice.length?deterministicAdvice:['当前没有额外热/电源建议；详情以 BuildEvaluation findings 为准。']).map(x=>`<li>${x}</li>`).join('')+'</ul>';
+    const scenarios=ev.power.scenarios;$('#power-scenarios').innerHTML=scenarios.map(s=>`<div><span>${s.label}</span><strong>${s.wallW===null?'unknown':Math.round(s.wallW)+' W'}</strong><small>${s.wallW===null?'证据不足':'墙上估算 · '+Math.round(s.wallW*3.412)+' BTU/h'}</small></div>`).join('');renderThermalField(c,ev);
   }
-  function portPlan(c){
-    const hba=hasHba(c),ports=[];
-    for(let i=1;i<=c.disks;i++){let controller,cable;if(hba){controller=i<=8?'LSI 9300-8i':'主板 SATA 1';cable=i<=4?'HBA SFF-8643 A':i<=8?'HBA SFF-8643 B':'SATA 单线';}else if(i<=4){controller=`主板 SATA ${i}`;cable='SATA 数据线';}else{controller=`SlimSAS SATA ${i-4}`;cable='SlimSAS → 4×SATA';}ports.push({name:`HDD ${i}`,controller,cable});}
-    if(c.boot==='bay'&&c.disks<9){const controller=hba?'主板 SATA 1':c.disks<4?`主板 SATA ${c.disks+1}`:`SlimSAS SATA ${c.disks-3}`,cable=hba||c.disks<4?'SATA 数据线':'SlimSAS → 4×SATA';ports.push({name:'Boot SSD',controller,cable});}
-    if(c.boot==='m2')ports.push({name:'Boot SSD',controller:'主板 M.2_1 · PCIe 4.0 ×4',cable:'板载连接 · 无数据线'});
-    if(c.boot==='usbssd')ports.push({name:'Boot SSD',controller:'后置 USB 3.x',cable:'外置短线 · 建议固定防误拔'});
-    return ports;
+  function renderWiring(c,ev){
+    const wiring=ev.wiring,bootLabel=c.boot==='bay'?' + SATA Boot':c.boot==='m2'?' + M.2 Boot':' + USB Boot';
+    $('#wiring-title').textContent=`${c.disks} HDD${bootLabel} 接线方案`;
+    const hba=wiring.bayPaths.some(path=>path.target==='hba');
+    $('#controller-badge').textContent=hba?'需要 HBA':'无需 HBA';
+    $('#port-map').innerHTML=wiring.bayPaths.map(path=>`<div class="port-card"><b>Bay ${path.bayIndex}</b><span>${path.target==='none'?'空托架':path.portLabel}</span><small>${path.note||path.evidence}</small></div>`).join('');
+    $('#wiring-notes').textContent=[...wiring.warnings,...wiring.checklist.filter(item=>item.requiredQty>0).map(item=>`${item.requiredQty}× ${item.label}`)].join(' · ')||'接线清单已按 BuildEvaluation 生成';
+    const harness=wiring.backplaneHarness,confirmed=(harness.confirmed.sata??0)+(harness.confirmed.molex??0),required=(harness.required.sata??0)+(harness.required.molex??0);
+    $('#harness-count').textContent=`${harness.feedRole==='backplane-dedicated'?'背板专供':'主电源'} · ${confirmed}/${required} 条独立外围线`;
+    $('.wire-4').dataset.missing=String(harness.verdict!=='ok');
+    const hw=$('#harness-warning');hw.dataset.level=harness.verdict==='bad'?'bad':harness.verdict==='ok'?'ok':'warn';hw.textContent=harness.notes.join(' ');
+    let rows='';for(let n=1;n<=limits.trays;n++){const selected=n===c.disks;rows+=`<tr data-selected="${selected}"><td>${n}</td><td>${selected?'当前 BuildEvaluation':'—'}</td><td>${hba?'LSI 9300-8i':'主板路径'}</td><td>${c.boot==='m2'?'980 PRO #1 · M.2':c.boot==='usbssd'?'外置 USB SSD':n===limits.trays?'第 9 托架 SATA SSD':'数据盘托架'}</td><td>${selected?wiring.warnings[0]||'按当前接线计划':'选择该盘数后重新评估'}</td></tr>`;}$('#drive-matrix').innerHTML=rows;
   }
-  function renderWiring(c){
-    const hba=hasHba(c),ports=portPlan(c),bootLabel=c.boot==='bay'?' + SATA Boot':c.boot==='m2'?' + M.2 Boot':' + USB Boot';$('#wiring-title').textContent=`${c.disks} HDD${bootLabel} 接线方案`;$('#controller-badge').textContent=hba?'需要 HBA':'无需 HBA';
-    $('#port-map').innerHTML=ports.map(p=>`<div class="port-card"><b>${p.name}</b><span>${p.controller}</span><small>${p.cable}</small></div>`).join('');
-    const devices=sataDeviceCount(c);let note=hba?'主板底部插槽是 PCIe 4.0 ×4 电气；LSI 9300-8i 为 PCIe 3.0 ×8 卡，装入后通常按 Gen3 ×4 协商（理论约 3.9GB/s），带 8 块机械盘通常足够。两条 SFF-8643→4×SATA 可接 8 块 HDD；额外第 9 HDD 或 SATA Boot 走主板 SATA。':devices<=4?'全部 SATA 设备使用主板 4 个原生 SATA；不需要 SlimSAS，也不需要 HBA。':'前 4 个 SATA 设备用原生 SATA，其余用主板 SlimSAS 转 4×SATA；GPU ×16 与底部 ×4 均保留。';
-    if(c.boot==='bay')note+=' 第 9 盘位保留给 SATA 启动 SSD，因此最多 8 块数据 HDD。';
-    if(c.boot==='m2')note+=' 980 PRO #1 被 TrueNAS 独占；#2 不能单独构成 ZFS 镜像。';
-    if(c.boot==='usbssd')note+=' 外置 USB SSD 不占 SATA 口和盘位；需固定短线并避免误拔。';
-    $('#wiring-notes').textContent=note;
-    const harness=backplaneHarnessCount(c);$('#harness-count').textContent=c.psuPosition==='dual'?`${c.secondaryPsu.name} · ${harness} 条已确认`:`${harness} 条外围线束`;$('.wire-4').dataset.missing=String(harness<4);const hw=$('#harness-warning');hw.dataset.level=harness<4?'warn':'ok';hw.textContent=c.psuPosition==='dual'?`双电源时，四个背板供电口应全部由专供背板的 ${c.secondaryPsu.name} 提供，不能把主电源与第二电源的线束相加。当前模型只有 ${harness} 条已确认独立外围线；锁定具体型号并补齐同型号原厂/授权线束前不可下单。还需要 PS_ON 同步件，且这不是冗余热备。`:(harness<4?`N6 手册建议 2×SATA Power + 2×Molex 四口全插，且每口使用独立 PSU 线。${c.psu.name} 原盒线束按公开清单保守估计只有 ${harness} 条：少盘阶段先向 JONSBO 确认，满盘前补与该型号针脚明确兼容的原厂/授权线。禁止混用不同品牌或代际模组线。`:'四条独立外围线可覆盖背板四口；仍要逐一核对实际包装与模组针脚，不要用同一根菊链接两个背板口。');
-    let rows='';for(let n=1;n<=limits.trays;n++){
-      const bayBootValid=c.boot!=='bay'||n<limits.trays,devices=n+(c.boot==='bay'&&bayBootValid?1:0),needHba=c.hbaMode==='always'||devices>sataCeiling(c);
-      const boot=c.boot==='bay'?(bayBootValid?'第 9 托架 SATA SSD':'不可用：托架已占满'):c.boot==='m2'?'980 PRO #1 · M.2':'外置 USB SSD';
-      const data=needHba?'HBA 8口 + 主板 SATA':devices<=limits.onboardSata?'原生 SATA':`${Math.min(limits.onboardSata,devices)}×SATA + SlimSAS 分线`;
-      const advice=!bayBootValid?'请改用 M.2 / USB 启动，或降为 8 HDD':n===1?'单盘无冗余，必须另备份':n===2?'可做 2盘镜像':n<=4?'按镜像对扩容':n<=8?'建议镜像对；8 HDD + SATA Boot 需 HBA':'占满9盘位，维护与散热压力最高';
-      rows+=`<tr data-selected="${n===c.disks}"${!bayBootValid?' class="matrix-invalid"':''}><td>${n}</td><td>${data}</td><td>${needHba?'LSI 9300-8i':'主板 W680'}</td><td>${boot}</td><td>${advice}</td></tr>`;
-    }$('#drive-matrix').innerHTML=rows;
-  }
-  function renderGpu(c){
-    const g=c.gpu,v=gpuVerdict(g,c);$('#gpu-title').textContent=g.name;$('#gpu-detail').innerHTML=`<p>${g.ai}</p><ul class="compact-list"><li>${g.vram?g.vram+'GB VRAM':'无独显'} · ${g.tgp}W TGP · ${g.cooling}</li><li>${g.length?g.length+'mm / '+g.slots+' 槽':'不占空间'}</li><li>参考价 ${range(g.price)}${g.newPrice?'；全新库存约 '+range(g.newPrice):''}</li><li class="status-${v.level}">${v.text}：${v.reason}</li></ul>`;
+  function renderGpu(c,ev){
+    const g=c.gpu,related=ev.findings.filter(f=>f.related?.includes(c.gpuKey)),worst=related.find(f=>f.verdict==='bad')||related.find(f=>f.verdict==='warn'),v=g.tgp?(worst?{level:worst.verdict,text:worst.verdict==='bad'?'引擎阻断':'条件规划',reason:worst.message}:{level:'ok',text:'包络可规划',reason:'当前 BuildEvaluation 未发现 GPU 相关阻断'}):{level:'ok',text:'暂不安装',reason:'不占 PCIe 与散热空间'};$('#gpu-title').textContent=g.name;$('#gpu-detail').innerHTML=`<p>${g.ai}</p><ul class="compact-list"><li>${g.vram?g.vram+'GB VRAM':'无独显'} · ${g.tgp}W TGP · ${g.cooling}</li><li>${g.length?g.length+'mm / '+g.slots+' 槽':'不占空间'}</li><li>参考价 ${range(g.price)}${g.newPrice?'；全新库存约 '+range(g.newPrice):''}</li><li class="status-${v.level}">${v.text}：${v.reason}</li></ul>`;
     $('#gpu-safe-basis').textContent='N6 只发布 275–320mm 范围，未给端点拓扑；>275mm 一律标条件区，保留 HBA 时 ≤2 槽';
     const scores=[['显存余量',g.vram?Math.min(100,g.vram/24*100):0,(g.vram||0)+'GB'],['能效',g.tgp?Math.min(100,(g.vram/g.tgp)*450):100,g.tgp?g.tgp+'W':'最高'],['扩展友好',g.slots<=2&&g.length<=275?100:g.length<=275?55:20,g.slots?g.slots+' 槽':'满分']];$('#gpu-score').innerHTML=scores.map(([n,s,val])=>`<div><span>${n}</span><b>${val}</b><div class="metric-track"><div class="metric-fill" style="width:${s}%"></div></div></div>`).join('');
-    let rows='';Object.entries(gpus).forEach(([k,x])=>{if(k==='gpu.none')return;const vv=gpuVerdict(x,c);rows+=`<tr data-selected="${k===c.gpuKey}"><td>${x.name}</td><td>${x.vram}GB</td><td>${x.tgp}W</td><td>${x.length}mm / ${x.slots}槽</td><td>${x.cooling}<br><span class="text-muted">满载约 ${x.noise}dBA</span></td><td>${range(x.price)}${x.newPrice?'<br>全新 '+range(x.newPrice):''}<br><small>${x.official}</small></td><td class="status-${vv.level}">${vv.text}<br><small>${vv.reason}</small></td></tr>`;});$('#gpu-table').innerHTML=rows;
+    let rows='';Object.entries(gpus).forEach(([k,x])=>{if(k==='gpu.none')return;const vv=k===c.gpuKey?v:{level:'unknown',text:'需重新评估',reason:'切换型号后 BuildEvaluation 会重新计算'};rows+=`<tr data-selected="${k===c.gpuKey}"><td>${x.name}</td><td>${x.vram}GB</td><td>${x.tgp}W</td><td>${x.length}mm / ${x.slots}槽</td><td>${x.cooling}<br><span class="text-muted">噪音 ${x.noise===0?'unknown':x.noise+'dBA'}</span></td><td>${range(x.price)}${x.newPrice?'<br>全新 '+range(x.newPrice):''}<br><small>${x.official}</small></td><td class="status-${vv.level}">${vv.text}<br><small>${vv.reason}</small></td></tr>`;});$('#gpu-table').innerHTML=rows;
   }
-  function renderProducts(c){
+  function renderProducts(c,ev){
     const psuRef=['psu.seasonic-focus-gx-850-v5','psu.seasonic-focus-gx-750-v5'].includes(c.psuKey)?officialProducts.focus:null;
     const coolerRef=c.coolerKey==='cooler.thermalright-axp90-x53-full'?officialProducts.axp90:null;
     const gpuRef=c.gpuKey==='gpu.rtx-a4000-16gb'?officialProducts.a4000:null;
@@ -843,7 +710,7 @@
       {name:c.psu.name,status:'待购 · '+range(c.psu.price),ref:psuRef,note:psuRef?'':'当前备选型号官方图尚未缓存；不用其他型号冒充'},
       ...(c.psuPosition==='dual'?[{name:c.secondaryPsu.name,status:'双电源分支 · '+range(c.secondaryPsu.price),ref:null,note:c.secondaryPsu.confidence==='unknown'?'仅有 SFX 尺寸/功率包络，线束与效率未知':'第二颗 PSU 需独立核对四条背板线与 PS_ON 同步；当前未缓存对应官方图'}]:[]),
       {name:c.cooler.name,status:'待购 · '+range(c.cooler.price),ref:coolerRef,note:coolerRef?'':'当前备选型号官方图尚未缓存；3D 仅画尺寸包络'},
-      {name:`24TB Exos X24 / 同级 ×${c.disks}`,status:'待购 · '+fmt(4500*c.disks)+' 中位数',ref:officialProducts.hdd},
+      {name:`24TB Exos X24 / 同级 ×${c.disks}`,status:'待购 · '+priceText({knownCny:ev.price.items.find(item=>item.skuId===('storage.seagate-exos-x24-24tb'))?.priceCny??0,unknownSkuIds:ev.price.unknownSkuIds.includes('storage.seagate-exos-x24-24tb')?['storage.seagate-exos-x24-24tb']:[],items:[]}),ref:officialProducts.hdd},
       {name:c.gpu.name,status:c.gpu.tgp?'未来 · '+range(c.gpu.price):'暂不安装',ref:gpuRef,note:gpuRef?'':c.gpu.tgp?'当前 GPU 型号官方图尚未缓存；不用 A4000 图冒充':'不占 PCIe 与散热空间'}
     ];
     $('#product-gallery').innerHTML=cards.map(card=>{
@@ -857,22 +724,10 @@
     $('#accessory-grid').innerHTML=Object.entries(accessories).map(([k,a])=>{const checked=accessoryActive(c,k),forced=['boot','usbboot','front','rearfan','sidefans','drivefans','slim','hba','psucable','dualsfx','dualsync','dualcables'].includes(k),price=k==='dualsfx'?c.secondaryPsu.price:a.price,name=k==='dualsfx'?`第二颗背板电源：${c.secondaryPsu.name}`:a.name;return `<label class="accessory-item"><input type="checkbox" data-accessory="${k}" ${checked?'checked':''} ${forced?'disabled':''}><b>${name}</b><strong>${range(price)}</strong><p>${a.why}</p><small>${forced?'由当前配置自动决定':'可选配件'}</small></label>`;}).join('');
     $$('[data-accessory]').forEach(el=>el.addEventListener('change',()=>{el.checked?state.selectedAccessories.add(el.dataset.accessory):state.selectedAccessories.delete(el.dataset.accessory);render();}));
   }
-  function renderPrice(c){
-    const m2Role=c.boot==='m2'?'#1 = TrueNAS Boot；#2 = 单盘 / 待用':'两槽同时使用，建议作 ZFS 镜像 fast pool';
-    const rows=[
-      ['机箱','JONSBO N6','已购','你的成交 ¥629','官方产品页未列 MSRP','未知','¥629','成交平台未注明；不得冒充京东/拼多多现价'],
-      ['主板','ASUS W680M-ACE SE','已购','你的成交 ¥2,799','ASUS 官方页未列 MSRP','未知','¥2,799','精确 SKU、附件、BMC 与保修状态以订单/实物为准'],
-      ['CPU','Intel i5-14500','已购','你的成交 ¥1,380','Intel 建议客户价：Tray US$232 / Box US$242','未知','¥1,380','建议客户价不是中国零售 MSRP；散片/盒装与保修需区分'],
-      ['电源',c.psu.name,'待购',range(c.psu.price),c.psu.official,'未知',fmt(c.psu.mid),c.psu.source],
-      ['CPU 散热',c.cooler.name,'待购',range(c.cooler.price),'厂商中国区页面未取得统一 MSRP','未知',fmt(c.cooler.mid),c.cooler.note],
-      ['内存',c.ram.name,'待购',`${range(c.ram.price)} · ${c.ram.priceQuality}`,'同容量/规格因品牌与颗粒不同，无统一 MSRP','未知',fmt(c.ram.mid),c.ram.note],
-      ['M.2 SSD','Samsung 980 PRO ×2','已有','购入价未提供','历史型号；现行官网价不可直接比较','未知','¥0',m2Role],
-      ['数据盘',`24TB Exos X24 / 同级 CMR ×${c.disks}`,'待购',`每块 ¥4,200–¥4,950`,'企业盘因地区、接口与保修无统一官网零售价','未知',fmt(4500*c.disks),'滑杆盘数已计入完整配置；当前阶段 1 盘预算另列'],
-      ['未来 GPU',c.gpu.name,c.gpu.tgp?'未来':'暂缓',range(c.gpu.price),c.gpu.official,'未知',c.gpu.tgp?fmt(c.gpu.mid):'¥0',c.gpu.tgp?'不计入当前待购总价；消费卡价格必须按具体 SKU 重查':'按需后装']
-    ];
-    Object.entries(accessories).forEach(([k,a])=>{if(accessoryActive(c,k)){const price=k==='dualsfx'?c.secondaryPsu.price:a.price,mid=k==='dualsfx'?c.secondaryPsu.mid:a.mid,name=k==='dualsfx'?`第二颗背板电源：${c.secondaryPsu.name}`:a.name,status=k==='hardware'?'随箱核对':'待购';rows.push(['配件',name,status,range(price),k==='hardware'?'N6 手册配件清单':'未发现统一官方价','未知',fmt(mid),a.why]);}});
-    $('#price-table').innerHTML=rows.map(r=>`<tr>${r.map(x=>`<td>${x}</td>`).join('')}</tr>`).join('');
-    const stageConfig={...c,disks:1,hbaMode:c.hbaMode==='always'?'always':'auto'},stage=priceModel(stageConfig,false,1),remain=priceModel(c,false,c.disks),future=priceModel(c,true,c.disks);$('#stage-total').textContent=fmt(stage);$('#selected-total-label').textContent=`所选 ${c.disks} 盘待购（不含未来 GPU）`;$('#remaining-total').textContent=fmt(remain);$('#grand-total-label').textContent='所选配置整机（不含未来 GPU）';$('#grand-total').textContent=fmt(fixedCost+remain);$('#future-total').textContent=fmt(fixedCost+future);renderAccessories(c);
+  function renderPrice(c,ev){
+    const rows=ev.price.items.map(item=>['BOM',item.skuId,item.qty+'×',item.priceCny===null?'unknown':fmt(item.priceCny*item.qty),item.evidence,item.source||'无来源',item.priceCny===null?'unknown':fmt(item.priceCny*item.qty),'来自 BuildEvaluation.price']);
+    $('#price-table').innerHTML=rows.map(row=>`<tr>${row.map(x=>`<td>${x}</td>`).join('')}</tr>`).join('');
+    $('#stage-total').textContent=priceText(ev.price);$('#selected-total-label').textContent=`所选 ${c.disks} 盘待购（不含未来 GPU）`;$('#remaining-total').textContent=priceText(ev.price);$('#grand-total-label').textContent='所选配置整机（不含未来 GPU）';$('#grand-total').textContent=priceText(ev.price);$('#future-total').textContent=priceText(ev.price);renderAccessories(c);
   }
   function renderChecklist(c){
     const bootInstall=c.boot==='bay'?'把 2.5″ SATA 启动 SSD 装入第 9 托架，再装数据 HDD。':c.boot==='m2'?'确认 980 PRO #1 已指定为 TrueNAS Boot；#2 暂作单盘或留待后续。':'把外置 USB 启动 SSD 固定在机箱后方，整理短线并加防误拔标记。';
@@ -887,7 +742,7 @@
     const dual=$('#psu-position').value==='dual',customGpu=$('#gpu-select').value==='custom';
     $('#secondary-psu-field').classList.toggle('is-hidden',!dual);$('#dual-start-field').classList.toggle('is-hidden',!dual);$('#gpu-custom-fields').classList.toggle('is-hidden',!customGpu);
     if(coolers[$('#cooler-select').value].fit==='front240'){frontToggle.checked=true;frontToggle.disabled=true;}else frontToggle.disabled=false;
-    const c=readConfig(),preserve=$('#preserve-hba'),rearToggle=$('#rear-fan'),rearAvailable=rearFanAvailable(c);if(hasHba(c)){preserve.checked=true;preserve.disabled=true;c.preserve=true;}else preserve.disabled=false;
+    const c=readConfig(),preserve=$('#preserve-hba'),rearToggle=$('#rear-fan'),rearAvailable=rearFanAvailable(c);if(c.hbaMode==='always'){preserve.checked=true;preserve.disabled=true;c.preserve=true;}else preserve.disabled=false;
     if(!rearAvailable){rearToggle.checked=false;rearToggle.disabled=true;c.rear=false;}
     else if(c.coolerKey==='cooler.aio-120-experimental'){rearToggle.checked=true;rearToggle.disabled=true;c.rear=true;}
     else rearToggle.disabled=false;
@@ -900,15 +755,14 @@
     $('#rear-fan-label').textContent=!rearAvailable?'后上 ATX 占位 · 后 120 不可装':c.coolerKey==='cooler.aio-120-experimental'?'后置 120 冷排风扇占位':'1×120mm 后排风';
     $('#disk-output').textContent=c.disks+' 块'+(c.boot==='bay'?' + 第9托架启动盘':'');diskInput.title=c.boot==='bay'?'第 9 托架已给 SATA 启动 SSD，数据盘最多 8 块':'启动盘不占托架，数据盘最多 9 块';$('#ambient-output').textContent=c.ambient+'°C';
     const ramNote=$('#ram-compat-note'),ramFlags=[];if(c.ram.modules===1)ramFlags.push('单通道');if(c.ram.ecc)ramFlags.push('ECC UDIMM');if(c.ram.qvl)ramFlags.push('板上 QVL 有本料号');else if(c.ram.ecc)ramFlags.push('ECC 料号需再核 QVL');if(c.ram.xmp)ramFlags.push('XMP 超频 · 不保证标称频率');ramNote.dataset.level=ramFlags.length?'warn':'ok';ramNote.textContent=`${c.ram.name}${c.ram.mpn?`（${c.ram.mpn}）`:''}：${c.ram.capacity}GB，${c.ram.modules} 条，约 ${c.ram.height}mm 高。W680M-ACE SE 仅支持 DDR5 Unbuffered DIMM（ECC / Non-ECC），不兼容 DDR4、RDIMM、LRDIMM；i5-14500 官方 DDR5 基线 4800 MT/s，平台容量上限 192GB。${ramFlags.length?' 当前注意：'+ramFlags.join('；')+'。':''}`;
-    const p=powerModel(c),a=acousticModel(c,p),fit=fitModel(c);
-    // Evaluate first, then draw. The V2 engine used to run in `LAB.afterRender`,
-    // i.e. after the KPI strip had already been written from V1 heuristics; now the
-    // geometry, the collisions and the temperatures all come from this one call.
-    const env=thermalEnv(c,p);
-    const ev=LAB.evaluate(env);
+    // Evaluate once, then render every fact-bearing panel from this immutable
+    // snapshot. The legacy runtime no longer computes power, fit, price, wiring,
+    // or temperature conclusions of its own.
+    const ev=LAB.evaluate({ambientC:c.ambient,fanMode:c.fan,fans:{front:c.front?{size:140,count:2}:null,rear:c.rear?{size:120,count:1}:null,left:c.drive?{size:120,count:2}:null,right:c.side?{size:120,count:2}:null},workload:c.workload,cpuPl1W:c.pl1,cpuPl2W:c.pl2,reserveHbaSlot:c.preserve,gpuOverride:c.gpuKey==='custom'?{name:c.gpu.name,lengthMm:c.gpu.length,slots:c.gpu.slots,workstation:false}:null});
+    const p=powerView(ev.power),a=noiseView(ev),fit=fitView(ev);
     lastEval=ev;lastConfig=c;
-    renderOverview(c,p,a,fit,ev);renderThermal(c,p,a,ev);renderWiring(c);renderGpu(c);renderPrice(c);renderProducts(c);renderChecklist(c);
-    LAB.afterRender(ev,env);
+    renderOverview(c,p,a,fit,ev);renderThermal(c,p,a,ev);renderWiring(c,ev);renderGpu(c,ev);renderPrice(c,ev);renderProducts(c,ev);renderChecklist(c);
+    LAB.afterRender(ev);
   }
   const referencePages={
     spec:{src:'assets/reference/n6-p2.jpg',alt:'JONSBO N6 官方手册第2页规格表',caption:'证明 305×353×318mm 外形、ATX/SFX 长度上限，以及 65–160mm / 275–320mm 发布范围；不提供两个端点对应的内部拓扑。'},
@@ -958,33 +812,6 @@
     if(spatialState.config)renderSpatial(spatialState.config);
   });
 
-  /**
-   * Airflow inputs for the V2 air-balance model. The left-side 120×2 mounts are the
-   * drive-area pair, so they ride on the bracket the bottom PSU rack removes.
-   */
-  function thermalEnv(c,p){
-    const lower=c.psuPosition==='bottom'||c.psuPosition==='dual';
-    return {
-      ambientC:c.ambient,
-      fanMode:c.fan,
-      fans:{
-        front:c.front?{size:140,count:2}:null,
-        rear:c.rear?{size:120,count:1}:null,
-        left:c.drive?{size:120,count:2}:null,
-        right:c.side?{size:120,count:2}:null
-      },
-      upperWatts:p.base+p.cpu+p.gpu+p.hba,
-      psuDcWatts:lower?(c.psuPosition==='dual'?p.driveDc:p.mainDc):0,
-      workload:c.workload==='idle'?'idle':'work',
-      // Per-part dissipation, so component temperatures rest on this same split
-      // instead of a second guess made inside the thermal model.
-      loads:{cpuW:p.cpu,gpuW:p.gpu,hbaW:p.hba,psuDcW:p.mainDc},
-      reserveHbaSlot:Boolean(c.preserve),
-      gpuOverride:c.gpuKey==='custom'
-        ? {name:c.gpu.name,lengthMm:c.gpu.length,slots:c.gpu.slots,workstation:false}
-        : null
-    };
-  }
   window.__N6_LAB_API__ = { readConfig, render, root, $ };
   installSpatialInteraction();
   render();

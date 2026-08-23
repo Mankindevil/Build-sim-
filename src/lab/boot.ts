@@ -1,5 +1,5 @@
 import { loadBundledCatalog, requireSku, bundledPriceSummary } from "../sku/catalog";
-import { evaluateBuild, type BuildEvaluation, type ThermalEnv } from "../core/evaluate";
+import { derivePower, evaluateBuild, type BuildEvaluation, type PowerEvaluation, type ThermalEnv } from "../core/evaluate";
 import { EVIDENCE_LABELS } from "../core/evidence";
 import { sampleSlice, type FieldBounds, type SlicePlane } from "../core/thermal-field";
 import { N6_DECK_Y, N6_ENVELOPE_BOX, N6_INTERIOR_BOX } from "../adapters/jonsbo-n6/geometry";
@@ -10,6 +10,7 @@ import {
   serializeConfig,
 } from "../config/io";
 import type { BuildConfig, BootMode, HbaMode, PsuTopology } from "../config/types";
+import type { FanMode, FanGroupInput } from "../core/thermal";
 import { buildLabCatalogs } from "./view-models";
 import { formatSnapshotStamp } from "../price/types";
 import { applyPriceSnapshot, snapshotSummary } from "../price/merge";
@@ -26,6 +27,17 @@ const views = buildLabCatalogs(catalog);
 let priceStamp = bundledPriceSummary();
 
 const BOARD_ID = "board.asus-w680m-ace-se";
+
+export interface LabEvaluationOptions {
+  ambientC: number;
+  fanMode: FanMode;
+  fans: { front?: FanGroupInput | null; rear?: FanGroupInput | null; left?: FanGroupInput | null; right?: FanGroupInput | null };
+  workload?: NonNullable<ThermalEnv["workload"]>;
+  cpuPl1W?: number;
+  cpuPl2W?: number;
+  reserveHbaSlot?: boolean;
+  gpuOverride?: ThermalEnv["gpuOverride"];
+}
 
 function $(id: string): HTMLElement | null {
   return document.getElementById(id);
@@ -712,8 +724,22 @@ function reapplyLocalPrices(): void {
  * render pass and passes the result back into `afterRender`, so the KPI strip and
  * the air-balance card are reading the same numbers from the same run.
  */
-function evaluate(env?: ThermalEnv): BuildEvaluation {
-  return evaluateBuild(configFromDom(), catalog, env);
+function evaluate(options?: LabEvaluationOptions): BuildEvaluation {
+  const config = configFromDom();
+  if (!options) return evaluateBuild(config, catalog);
+  const power: PowerEvaluation = derivePower(config, catalog, options);
+  const lower = config.selection.psuTopology === "bottom" || config.selection.psuTopology === "dual";
+  if (power.upperDcW === null || (lower && power.lowerDcW === null)) {
+    return evaluateBuild(config, catalog);
+  }
+  const thermal: ThermalEnv = {
+    ...options,
+    upperWatts: power.upperDcW,
+    psuDcWatts: lower ? power.lowerDcW! : 0,
+    loads: power.loads,
+    power,
+  };
+  return evaluateBuild(config, catalog, thermal);
 }
 
 function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
@@ -764,7 +790,7 @@ declare global {
       sataCeiling: (nvmeCount: number) => number;
       priceSnapshot: ReturnType<typeof bundledPriceSummary>;
       /** Runs the V2 engine for the current DOM config. Pure and synchronous. */
-      evaluate: (env?: ThermalEnv) => BuildEvaluation;
+      evaluate: (options?: LabEvaluationOptions) => BuildEvaluation;
       /** Millimetre-registered slice of the heat field, for the 2D canvas. */
       thermalSlice: (
         field: FieldBounds,

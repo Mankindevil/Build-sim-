@@ -144,14 +144,14 @@ git diff --check
 
 ### 任务清单
 
-- [ ] 梳理 `src/lab/v1-runtime.js` 中独立的功耗、价格、噪音、FIT 和自然语言评价计算。
-- [ ] 将页面 KPI、FIT、温度、BOM、接线、热场和价格摘要改为读取 `BuildEvaluation`。
-- [ ] 旧 runtime 只保留渲染、事件绑定和 UI 状态，不再计算第二套结论。
-- [ ] 为 primary/secondary PSU 建立显式 `PsuLoad`，分别计算效率、DC load、waste heat 和 chamber。
-- [ ] 将风扇 `count/size/mount/radiatorFanProfile` 从配置贯穿到 geometry、thermal 和 UI。
-- [ ] 统一概览 SVG、等轴图、热场和冲突图使用的 `PlacedPart[]` 和 projection。
-- [ ] 对 dual PSU、240 radiator、1/2/4/9 fan、0/1/2 GPU/HBA 等场景增加回归测试。
-- [ ] 修复 legacy 测试入口，加入最小 Playwright smoke。
+- [x] 梳理 `src/lab/v1-runtime.js` 中独立的功耗、价格、噪音、FIT 和自然语言评价计算。
+- [x] 将页面 KPI、FIT、温度、BOM、接线、热场和价格摘要改为读取 `BuildEvaluation`。
+- [x] 旧 runtime 只保留渲染、事件绑定和 UI 状态，不再计算第二套结论。
+- [x] 为 primary/secondary PSU 建立显式 `PsuLoad`，分别计算效率、DC load、waste heat 和 chamber。
+- [x] 将风扇 `count/size/mount/radiatorFanProfile` 从配置贯穿到 geometry、thermal 和 UI。
+- [x] 统一概览 SVG、等轴图、热场和冲突图使用的 `PlacedPart[]` 和 projection。
+- [x] 对 dual PSU、240 radiator、1/2/4/9 fan、0/1/2 GPU/HBA 等场景增加回归测试。
+- [x] 修复 legacy 测试入口，加入最小 Playwright smoke。
 
 ### 主要文件
 
@@ -173,6 +173,14 @@ git diff --check
 ### 回滚
 
 保留旧 renderer 的只读 fallback，通过 feature flag 切换；不得恢复旧的功耗/FIT/风险结论。
+
+### G1 执行记录（2026-08-23）
+
+- 状态：已实现，门禁通过，已提交并推送。
+- 修改：`src/core/evaluate.ts` 增加 `BuildEvaluation.power/price/noise` 与显式 primary/secondary `PsuLoad`；`src/lab/boot.ts` 将一次评估快照传给 runtime；`src/lab/v1-runtime.js` 的 KPI、FIT、温度、接线、BOM/价格摘要和建议均读取该快照并移除旧结论函数；N6 profile 增加可追溯功耗 profile。
+- 测试：`npm test` 16 files / 191 tests、`npm run typecheck`、`npm run build`、`npm run test:g1:browser`、`node tests/legacy-run-static-tests.js`、`node tests/legacy-run-model-tests.js` 均通过。
+- 浏览器 smoke 覆盖基础面板、dual PSU、240 radiator、价格表旧硬编码检查；Playwright Chromium 使用项目依赖安装后运行。
+- 回滚：回退本阶段独立提交 `refactor(engine): converge BuildEvaluation as the single fact source`；不恢复 V1 的功耗/FIT/价格旁路。
 
 ## 6. G2：Capability、功耗、价格、配置和 unknown 数据化（P1）
 
