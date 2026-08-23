@@ -96,7 +96,11 @@ function planningBand(sku: SkuRecord): PriceBand {
 }
 
 function priceQualityFor(sku: SkuRecord, fallback: string): string {
-  if (sku.price.snapshot) return formatSnapshotStamp(sku.price.snapshot);
+  if (sku.price.snapshot) {
+    const variant = sku.price.snapshot.variantLabel ? ` · ${sku.price.snapshot.variantLabel}` : "";
+    const source = sku.price.snapshot.provenanceId ? ` · prov ${sku.price.snapshot.provenanceId.slice(0, 12)}` : "";
+    return `${formatSnapshotStamp(sku.price.snapshot)}${variant}${source}`;
+  }
   if (typeof sku.price.current === "number" && sku.price.currentEvidence !== "unknown") {
     return `current · ${sku.price.asOf ?? "undated"}`;
   }

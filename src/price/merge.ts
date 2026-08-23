@@ -42,6 +42,12 @@ export function applyPriceSnapshot(
       asOf: snapshot.asOf,
       match: best.match,
       ...(best.listingUrl ? { listingUrl: best.listingUrl } : {}),
+      ...(best.variantLabel ? { variantLabel: best.variantLabel } : {}),
+      ...(snapshot.snapshotId ? { snapshotId: snapshot.snapshotId } : {}),
+      ...(snapshot.inputHash ? { inputHash: snapshot.inputHash } : {}),
+      ...(snapshot.contentHash ? { contentHash: snapshot.contentHash } : {}),
+      ...(snapshot.catalogVersion ? { catalogVersion: snapshot.catalogVersion } : {}),
+      ...(best.provenanceId ? { provenanceId: best.provenanceId } : {}),
     };
 
     const next: SkuRecord = structuredClone(sku);
@@ -55,6 +61,7 @@ export function applyPriceSnapshot(
       ...(listingUrl ? { listingUrl } : {}),
       note: [formatSnapshotStamp(meta), best.note, next.price.note].filter(Boolean).join(" · "),
       snapshot: meta,
+      ...(best.provenance ? { provenance: best.provenance } : {}),
     };
     return next;
   });

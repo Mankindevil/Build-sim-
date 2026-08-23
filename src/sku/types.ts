@@ -1,5 +1,5 @@
 import type { EvidenceLevel } from "../core/evidence";
-import type { SkuPriceSnapshotMeta } from "../price/types";
+import type { PriceProvenance, SkuPriceSnapshotMeta } from "../price/types";
 
 export type SkuCategory =
   | "case"
@@ -36,6 +36,16 @@ export interface PriceEvidence {
   currentEvidence: EvidenceLevel;
   /** Present when `current` came from data/prices snapshot merge. */
   snapshot?: SkuPriceSnapshotMeta;
+  /** A listing headline/`from` value is visible context, never part of totals. */
+  from?: {
+    amount: number | null;
+    currency: string | null;
+    listingUrl?: string;
+    fetchedAt?: string;
+    evidence: "unknown";
+    note?: string;
+  };
+  provenance?: PriceProvenance;
 }
 
 export interface DimMm {

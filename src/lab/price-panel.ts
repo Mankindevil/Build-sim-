@@ -5,7 +5,7 @@
  */
 
 import type { SkuCatalog, SkuRecord } from "../sku/types";
-import type { PriceQuote, PriceSnapshotFile } from "../price/types";
+import type { PriceProvenance, PriceQuote, PriceSnapshotFile } from "../price/types";
 import { buildSkuSearchLinks, pickOfficialUrl } from "../price/search";
 import {
   canAuditWithoutOverride,
@@ -62,7 +62,8 @@ interface ServiceState {
   channels: string[];
   availability: Record<string, { available: boolean; api: { available: boolean; reason?: string }; browser: { available: boolean; reason?: string } }>;
   counts: { manual: number; local: number; latest: number };
-  localQuotes: { skuId: string; platform: string; priceCny: number; title?: string; variantLabel?: string }[];
+  localQuotes: { skuId: string; platform: string; priceCny: number; match?: PriceQuote["match"]; title?: string; variantLabel?: string; fetchedAt?: string; listingUrl?: string; provenanceId?: string; sourceHash?: string; priceAmount?: number; priceCurrency?: string; provenance?: PriceProvenance }[];
+  snapshotMeta?: { schemaVersion?: string; snapshotId?: string | null; inputHash?: string | null; contentHash?: string | null; catalogVersion?: string | null; priceVersion?: string | null; generatedAt?: string | null } | null;
   candidates: Candidate[];
   fx?: FxFile;
   trackableSkus: { id: string; name: string; mpn: string; category?: string }[];
@@ -540,11 +541,16 @@ function bindCandidateActions(): void {
             skuId: candidate.skuId,
             platform: candidate.platform,
             priceCny: candidate.priceCny,
+            priceAmount: candidate.priceAmount,
+            priceCurrency: candidate.priceCurrency,
+            priceKind: candidate.priceKind,
             listingUrl: candidate.url,
             title: candidate.title,
             variantLabel: candidate.variantLabel ?? "",
-            match: match.kind === "mpn" ? "mpn" : "manual",
             fetchedAt: candidate.fetchedAt,
+            sourceHash: candidate.sourceHash ?? null,
+            sourceKind: "marketplace-listing",
+            match: match.kind === "mpn" ? "mpn" : "manual",
             note: [
               `${CHANNEL_LABELS[candidate.channel] ?? candidate.channel} 抓取后人工确认`,
               candidate.variantLabel ? `规格「${candidate.variantLabel}」` : "",
@@ -580,8 +586,10 @@ function renderLocalQuotes(): void {
       (q) =>
         `<li><b>${esc(skuById(q.skuId)?.name ?? q.skuId)}</b> · ${esc(CHANNEL_LABELS[q.platform] ?? q.platform)} · ¥${q.priceCny}${
           q.variantLabel ? ` · <small>规格「${esc(q.variantLabel)}」</small>` : ""
-        }
-         <button type="button" class="price-unaudit-btn" data-price-unaudit="${esc(q.skuId)}" data-price-platform="${esc(q.platform)}">撤销</button></li>`,
+        }${q.fetchedAt ? ` · <small>snapshot ${esc(q.fetchedAt.slice(0, 10))}</small>` : ""}${
+          q.listingUrl ? ` · <a href="${esc(q.listingUrl)}" target="_blank" rel="noreferrer">来源</a>` : ""
+        }${q.provenanceId ? ` · <small>prov ${esc(q.provenanceId.slice(0, 12))}</small>` : ""}
+         <button type="button" class="price-unaudit-btn" data-price-unaudit="${esc(q.skuId)}" data-price-platform="${esc(q.platform)}" data-price-variant-label="${esc(q.variantLabel ?? "")}">撤销</button></li>`,
     )
     .join("")}</ul>`;
 
@@ -593,6 +601,7 @@ function renderLocalQuotes(): void {
           skuId: btn.dataset.priceUnaudit ?? "",
           platform: btn.dataset.pricePlatform ?? "",
         });
+        if (btn.dataset.priceVariantLabel) params.set("variantLabel", btn.dataset.priceVariantLabel);
         await api(`/audit?${params.toString()}`, { method: "DELETE" });
         await refreshState();
         await onAudited?.();
@@ -696,15 +705,29 @@ async function collect(skuIds: string[] | null): Promise<void> {
 export function getLocalSnapshot(): PriceSnapshotFile | null {
   if (!state || state.localQuotes.length === 0) return null;
   return {
-    schemaVersion: "1.0.0",
+    schemaVersion: state.snapshotMeta?.schemaVersion === "1.1.0" ? "1.1.0" : "1.0.0",
     asOf: state.asOf ?? new Date().toISOString().slice(0, 10),
+    ...(state.snapshotMeta?.snapshotId ? { snapshotId: state.snapshotMeta.snapshotId } : {}),
+    ...(state.snapshotMeta?.inputHash ? { inputHash: state.snapshotMeta.inputHash } : {}),
+    ...(state.snapshotMeta?.contentHash ? { contentHash: state.snapshotMeta.contentHash } : {}),
+    ...(state.snapshotMeta?.catalogVersion ? { catalogVersion: state.snapshotMeta.catalogVersion } : {}),
+    ...(state.snapshotMeta?.priceVersion ? { priceVersion: state.snapshotMeta.priceVersion } : {}),
     quotes: state.localQuotes.map((q) => ({
       skuId: q.skuId,
       platform: q.platform as PriceQuote["platform"],
       priceCny: q.priceCny,
       currency: "CNY",
-      match: "manual",
+      match: q.match ?? "manual",
       evidence: "audited",
+      priceKind: "variant",
+      ...(q.variantLabel ? { variantLabel: q.variantLabel } : {}),
+      ...(q.priceCurrency ? { priceCurrency: q.priceCurrency } : {}),
+      ...(q.priceAmount ? { priceAmount: q.priceAmount } : {}),
+      ...(q.fetchedAt ? { fetchedAt: q.fetchedAt } : {}),
+      ...(q.provenanceId ? { provenanceId: q.provenanceId } : {}),
+      ...(q.sourceHash ? { sourceHash: q.sourceHash } : {}),
+      ...(q.provenance ? { provenance: q.provenance } : {}),
+      ...(q.listingUrl ? { listingUrl: q.listingUrl } : {}),
     })),
   };
 }

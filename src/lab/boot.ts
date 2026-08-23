@@ -652,7 +652,7 @@ function updateGalleryFromSkus(config: BuildConfig): void {
       const ref = sku?.appearance;
       const snap = sku?.price.snapshot;
       const priceBit = snap
-        ? ` · ¥${sku?.price.current} (${formatSnapshotStamp(snap)})`
+        ? ` · ¥${sku?.price.current} (${formatSnapshotStamp(snap)}${snap.variantLabel ? ` · 规格 ${snap.variantLabel}` : ""}${snap.provenanceId ? ` · prov ${snap.provenanceId.slice(0, 12)}` : ""})`
         : typeof sku?.price.current === "number"
           ? ` · ¥${sku.price.current}`
           : typeof sku?.price.paid === "number"

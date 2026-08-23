@@ -293,18 +293,27 @@ git diff --check
 
 ### 任务清单
 
-- [ ] 从已确认 SKU 生成现有 price-server 查询。
-- [ ] 参数 provenance 与价格 provenance 分离。
-- [ ] 明确 MSRP、当前报价、已购价、历史 snapshot、from price 和汇率参考价。
-- [ ] 价格候选仍需人工确认 variant 后才能进入 snapshot。
-- [ ] catalog 写入和 snapshot 写入分别审计、分别回滚。
-- [ ] 购买清单展示 snapshot 日期、平台、variantLabel 和来源。
+- [x] 从已确认 SKU 生成现有 price-server 查询。
+- [x] 参数 provenance 与价格 provenance 分离。
+- [x] 明确 MSRP、当前报价、已购价、历史 snapshot、from price 和汇率参考价。
+- [x] 价格候选仍需人工确认 variant 后才能进入 snapshot。
+- [x] catalog 写入和 snapshot 写入分别审计、分别回滚。
+- [x] 购买清单展示 snapshot 日期、平台、variantLabel 和来源。
 
 ### 退出门禁
 
 - 价格更新不会覆盖参数字段。
 - 非 CNY、未审计或仅搜索卡片的报价不会进入正式总价。
 - 同一 SKU 的参数和价格可通过版本/hash 独立复现。
+
+### G5 执行记录（2026-08-23）
+
+- 状态：已实现，门禁通过，待提交/推送后确认。
+- 修改：统一 `PriceQuote`/`PriceSnapshotFile` 的 CNY variant 与价格 provenance 契约；price-server 仅接受人工确认的 `skuId+platform+variantLabel` 审计报价；snapshot、价格事件和 rollback manifest 独立写入并以 input/content/provenance hash 幂等；购买清单展示 snapshot 日期、平台、variantLabel、来源和 provenance；参数 provenance 保持独立。
+- 测试：服务端 `.mjs` 语法检查、G5 价格定向测试（28 tests）、`npm test -- --run`（19 files / 213 tests）、`npm run typecheck`、`npm run build`、两个 legacy runners、`npm run test:g1:browser`、无效 from/USD/缺时间 API smoke、浏览器价格 provenance 展示 smoke、`git diff --check` 和敏感信息扫描均通过。
+- 回滚演练：临时 local quote/snapshot/audit 目录验证同 variant 幂等替换、不同 variant 并存、重复 snapshot 不重复审计事件，并通过 snapshot rollback manifest 恢复旧 latest；本阶段未写入正式 `data/`。
+- 未解决 unknown：真实平台价格、汇率参考和“已购价”仍需后续接入；历史/搜索卡片报价只保留为 `from` 或候选，不能进入 CNY 总价；上游页面/接口字段变化继续按 unknown 降级。
+- 回滚：回退本阶段独立提交；使用 snapshot/price-event rollback manifest 恢复 latest、日期 snapshot 和本地审计报价，不删除原始 catalog 参数 provenance。
 
 ## 10. G6：DeepSeek 建议层与环境配置（原 S5）
 

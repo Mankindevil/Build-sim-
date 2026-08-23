@@ -34,6 +34,7 @@ import { getJob, inspectUrl, queueSearch } from "./catalog/service.mjs";
 import { renderOfficialFallback } from "./catalog/browser-fallback.mjs";
 import { acceptOfficial, confirmDraft, createDraft, rejectDraft } from "./catalog/write.mjs";
 import { loadRuntimeFlags } from "../runtime/flags.mjs";
+import { buildAuditedQuote } from "./price-audit.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PRICE_SERVER_PORT ?? 5174);
@@ -72,6 +73,15 @@ async function handleState() {
 
   return {
     asOf: latest?.asOf ?? null,
+    snapshotMeta: latest ? {
+      schemaVersion: latest.schemaVersion,
+      snapshotId: latest.snapshotId ?? null,
+      inputHash: latest.inputHash ?? null,
+      contentHash: latest.contentHash ?? null,
+      catalogVersion: latest.catalogVersion ?? null,
+      priceVersion: latest.priceVersion ?? null,
+      generatedAt: latest.generatedAt ?? null,
+    } : null,
     channels: CHANNELS,
     availability,
     fx,
@@ -162,7 +172,8 @@ async function handleVariants(body) {
 }
 
 async function handleAudit(body) {
-  const row = await upsertLocalQuote({ ...body, evidence: "audited" });
+  const catalog = await loadCatalog();
+  const row = await upsertLocalQuote(buildAuditedQuote(body, catalog));
   const snapshot = await buildAndWriteLatest(today());
   return { saved: row, asOf: snapshot.asOf, quoteCount: snapshot.quotes.length };
 }
@@ -170,7 +181,8 @@ async function handleAudit(body) {
 async function handleUnaudit(url) {
   const skuId = url.searchParams.get("skuId");
   if (!skuId) throw new Error("skuId is required");
-  const removed = await removeLocalQuote(skuId, url.searchParams.get("platform") ?? undefined);
+  const variantLabel = url.searchParams.has("variantLabel") ? url.searchParams.get("variantLabel") ?? "" : undefined;
+  const removed = await removeLocalQuote(skuId, url.searchParams.get("platform") ?? undefined, variantLabel);
   const snapshot = await buildAndWriteLatest(today());
   return { removed, asOf: snapshot.asOf, quoteCount: snapshot.quotes.length };
 }
