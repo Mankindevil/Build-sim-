@@ -21,10 +21,13 @@ import { boardSataPorts, boardStorage, nativeSataCeiling } from "../core/policy"
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 import n6Routing from "../../data/cases/jonsbo-n6/routing.json";
 import v1RuntimeUrl from "./v1-runtime.js?url";
+import { initAdvicePanel } from "./advice-panel";
+import { buildAdviceInput } from "../advice/validate";
 
 let catalog = loadBundledCatalog();
 const views = buildLabCatalogs(catalog);
 let priceStamp = bundledPriceSummary();
+let latestEvaluation: BuildEvaluation | null = null;
 
 const BOARD_ID = "board.asus-w680m-ace-se";
 
@@ -80,6 +83,47 @@ function configFromDom(): BuildConfig {
     config.selection.dualStart = val("dual-start-select") === "sync" ? "sync" : "none";
   }
   return config;
+}
+
+function adviceInput() {
+  const evaluation = latestEvaluation ?? evaluate();
+  const ids = new Set([
+    evaluation.config.caseId,
+    evaluation.config.boardId,
+    evaluation.config.cpuId,
+    evaluation.config.selection.psuId,
+    evaluation.config.selection.secondaryPsuId ?? "",
+    evaluation.config.selection.coolerId,
+    evaluation.config.selection.gpuId,
+    evaluation.config.selection.memoryId,
+    evaluation.config.selection.diskSkuId ?? "",
+    evaluation.config.selection.hbaSkuId ?? "",
+  ]);
+  const selectedSkuFacts = catalog.skus
+    .filter((sku) => ids.has(sku.id))
+    .map((sku) => ({
+      skuId: sku.id,
+      name: sku.name,
+      fields: {
+        brand: sku.brand,
+        model: sku.model,
+        mpn: sku.mpn,
+        category: sku.category,
+        dims: sku.dims,
+        power: sku.power,
+        harness: sku.harness,
+        modularPanel: sku.modularPanel,
+        price: sku.price,
+        attrs: sku.attrs,
+      },
+      provenance: sku.provenance ?? [],
+    }));
+  return buildAdviceInput({
+    requestId: "advice-client",
+    buildConfig: evaluation.config,
+    evaluation,
+    selectedSkuFacts,
+  });
 }
 
 function applyConfigToDom(config: BuildConfig): void {
@@ -744,6 +788,7 @@ function evaluate(options?: LabEvaluationOptions): BuildEvaluation {
 
 function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   const evaluation = result ?? evaluate(env);
+  latestEvaluation = evaluation;
   updateFitFromEngine(evaluation);
   updateWiringFromEngine(evaluation);
   updateBackplaneHarness(evaluation.wiring);
@@ -862,6 +907,7 @@ async function boot(): Promise<void> {
   });
 
   await initPricePanel({ catalog, onAudited: () => reapplyLocalPrices() });
+  initAdvicePanel({ getInput: adviceInput });
 }
 
 void boot();

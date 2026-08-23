@@ -35,6 +35,7 @@ import { renderOfficialFallback } from "./catalog/browser-fallback.mjs";
 import { acceptOfficial, confirmDraft, createDraft, rejectDraft } from "./catalog/write.mjs";
 import { loadRuntimeFlags } from "../runtime/flags.mjs";
 import { buildAuditedQuote } from "./price-audit.mjs";
+import { createAdviceJob, getAdviceJob } from "../deepseek/advice.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PRICE_SERVER_PORT ?? 5174);
@@ -196,6 +197,16 @@ const server = http.createServer(async (req, res) => {
     if (route === "POST /api/catalog/search") {
       const body = await readBody(req);
       return send(res, 202, queueSearch(body, { persistRoot: process.env.CATALOG_CANDIDATES_ROOT ?? process.cwd() }));
+    }
+    if (route === "POST /api/advice/build") {
+      const flags = await loadRuntimeFlags();
+      const job = await createAdviceJob(await readBody(req), { flags });
+      return send(res, job.status === "advice-unavailable" ? 503 : job.status === "disabled" ? 200 : 202, job);
+    }
+    if (req.method === "GET" && url.pathname.startsWith("/api/advice/build/")) {
+      const requestId = decodeURIComponent(url.pathname.slice("/api/advice/build/".length));
+      const job = await getAdviceJob(requestId);
+      return job ? send(res, 200, job) : send(res, 404, { error: "advice job not found" });
     }
     if (req.method === "GET" && url.pathname.startsWith("/api/catalog/search/")) {
       const id = decodeURIComponent(url.pathname.slice("/api/catalog/search/".length));

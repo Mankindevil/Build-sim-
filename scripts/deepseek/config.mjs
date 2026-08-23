@@ -1,4 +1,6 @@
-import { loadEnv } from "../price-server/env.mjs";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const DEFAULTS = Object.freeze({
   apiUrl: "https://api.deepseek.com",
@@ -43,8 +45,9 @@ function httpUrl(value) {
  * Server-only DeepSeek configuration. The key is intentionally never read by
  * Vite client code and is not included in logs or serialized API responses.
  */
-export async function loadDeepSeekConfig() {
-  const env = await loadEnv();
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+export function parseDeepSeekConfig(env) {
   const enabled = boolEnv(env, "DEEPSEEK_ENABLED", false);
   const apiKey = env.DEEPSEEK_API_KEY?.trim() || "";
   if (enabled && !apiKey) {
@@ -71,4 +74,24 @@ export async function loadDeepSeekConfig() {
       max: 2,
     }),
   };
+}
+
+/** DeepSeek values are intentionally isolated from the generic process loader. */
+export async function loadDeepSeekConfig() {
+  const env = {};
+  try {
+    const raw = await readFile(path.join(ROOT, ".env.local"), "utf8");
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+      env[key] = value;
+    }
+  } catch {
+    /* Missing .env.local means the feature stays disabled. */
+  }
+  return parseDeepSeekConfig(env);
 }

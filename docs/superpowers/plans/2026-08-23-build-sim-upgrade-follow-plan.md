@@ -319,22 +319,31 @@ git diff --check
 
 ### 任务清单
 
-- [ ] 使用 `.env.example` → `.env.local` 管理 `DEEPSEEK_API_KEY`、URL、model、timeout、max tokens、temperature 和 enabled。
-- [ ] 服务端通过 `scripts/deepseek/config.mjs` 校验；禁止前端 `import.meta.env` 读取 key。
-- [ ] 新增 `/api/advice/build` 和 `/api/advice/build/:requestId` job。
-- [ ] 将 `BuildEvaluation`、SKU provenance、BOM、用户目标、unknown 和 engine hash 组装为 `BuildAdviceInput`。
-- [ ] 对 DeepSeek 输出执行 JSON schema、refs 存在性、数字回溯和 `bad` 不可降低校验。
-- [ ] 使用 prompt version + input hash + engine hash + model 作为缓存键。
-- [ ] 保存脱敏的请求/响应 hash、延迟、重试、schema 结果和失败阶段。
-- [ ] UI 分开渲染确定性 findings 与 DeepSeek 建议。
-- [ ] 停用 `fitModel`、`routeTitle`、`routeCopy`、`fanAdvice`、`next-buy-list` 的写死自然语言评价。
-- [ ] AI 失败时保留结构化 findings/BOM/热/接线结果，不恢复旧文案。
+- [x] 使用 `.env.example` → `.env.local` 管理 `DEEPSEEK_API_KEY`、URL、model、timeout、max tokens、temperature 和 enabled。
+- [x] 服务端通过 `scripts/deepseek/config.mjs` 校验；禁止前端 `import.meta.env` 读取 key。
+- [x] 新增 `/api/advice/build` 和 `/api/advice/build/:requestId` job。
+- [x] 将 `BuildEvaluation`、SKU provenance、BOM、用户目标、unknown 和 engine hash 组装为 `BuildAdviceInput`。
+- [x] 对 DeepSeek 输出执行 JSON schema、refs 存在性、数字回溯和 `bad` 不可降低校验。
+- [x] 使用 prompt version + input hash + engine hash + model 作为缓存键。
+- [x] 保存脱敏的请求/响应 hash、延迟、重试、schema 结果和失败阶段。
+- [x] UI 分开渲染确定性 findings 与 DeepSeek 建议。
+- [x] 停用 `fitModel`、`routeTitle`、`routeCopy`、`fanAdvice`、`next-buy-list` 的写死自然语言评价。
+- [x] AI 失败时保留结构化 findings/BOM/热/接线结果，不恢复旧文案。
 
 ### 退出门禁
 
 - 缺 key、错误 URL、超时、限流、非法 JSON 和无效 refs 都能安全失败或降级。
 - AI 不能把 `bad` 变成 recommended，也不能从输入事实找不到的数字生成 claim。
 - 关闭 `BUILD_SIM_ADVICE_ENABLED` 时基础装机评估不受影响。
+
+### G6 执行记录（2026-08-23）
+
+- 状态：已实现，阶段门禁通过，待提交/推送后确认。
+- 修改：新增仅读取 `.env.local` 的 DeepSeek 配置解析与服务端 client；新增结构化 `BuildAdviceInput`、JSON/ref/数字回溯校验、`bad` 不可降级门禁、prompt/input/engine/model 缓存键、异步 advice job、脱敏审计事件和独立 rollback manifest；接入 `/api/advice/build` 与 GET job；UI 将确定性 facts 与 DeepSeek 建议分区，失败只显示 AI 暂不可用；补齐 Vite `/api/advice` 代理。
+- 测试：DeepSeek 定向测试（7 tests：缺 key、错误 URL、超时范围、disabled、成功缓存、非法 JSON 重试、推荐覆盖 bad 拒绝）、`npm test -- --run`（20 files / 220 tests）、`npm run typecheck`、`npm run build`、两个 legacy runners、服务端 `.mjs` 语法检查、实际 API disabled/invalid smoke、Vite proxy smoke、Playwright 基线 `npm run test:g1:browser`、构建产物敏感信息扫描、`git diff --check` 均通过。
+- 回滚演练：临时 advice job/audit 目录验证完成/失败事件只保存 hash、重复输入命中缓存，并用 advice rollback manifest 恢复 job 文件；G3 catalog 持久化等待竞态一并修复并由全量测试覆盖。
+- 未解决 unknown：当前没有真实 DeepSeek 请求凭据和线上模型响应；真实模型的延迟、限流、内容安全拒绝仍需部署环境验证。由于本轮 in-app Browser 在 Vite 重载后触发 URL policy，advice 按钮专用 IAB smoke 未能重新执行；API proxy、disabled 降级、Playwright 基线和服务端/契约测试均有证据，最终 G7 仍需重新完成真实浏览器建议链路。
+- 回滚：回退本阶段独立提交；使用 advice job/audit rollback manifest 恢复审计和 job 文件；删除/回退 advice client、UI、proxy 和 server route 不影响既有 BuildEvaluation 或价格服务。
 
 ## 11. G7：物理扩展、实测校准与全链路 QA（P2）
 

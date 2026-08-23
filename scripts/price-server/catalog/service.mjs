@@ -171,6 +171,7 @@ async function processJob(job, options) {
   job.status = job.candidates.some((candidate) => candidate.extraction.status === "partial" || candidate.extraction.status === "failed") ? "partial" : "completed";
   if (job.candidates.length === 0) job.warnings.push("未找到官方候选；第三方价格发现请使用 /api/price/collect，不混入官方参数");
   await persistJob(job, options.persistRoot);
+  job.persisted = true;
   return job;
 }
 
@@ -183,7 +184,7 @@ export function queueSearch(body, options = {}) {
   if (existing) return existing;
   const job = { jobId: id, idempotencyKey: sha256(key), status: "queued", stage: "normalize", query, limit, candidates: [], warnings: [], errors: [], createdAt: now(), updatedAt: now() };
   jobs.set(id, job);
-  void processJob(job, options).catch(async (error) => { job.status = "failed"; job.stage = "score"; job.errors.push(error?.message ?? String(error)); job.updatedAt = now(); await persistJob(job, options.persistRoot); });
+  void processJob(job, options).catch(async (error) => { job.status = "failed"; job.stage = "score"; job.errors.push(error?.message ?? String(error)); job.updatedAt = now(); await persistJob(job, options.persistRoot); job.persisted = true; });
   return job;
 }
 
@@ -191,7 +192,7 @@ export async function waitForJob(jobId, timeoutMs = 5_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const job = jobs.get(jobId);
-    if (!job || ["completed", "partial", "failed"].includes(job.status)) return job;
+    if (!job || (["completed", "partial", "failed"].includes(job.status) && job.persisted === true)) return job;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   return jobs.get(jobId);
