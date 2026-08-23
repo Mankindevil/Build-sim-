@@ -349,16 +349,25 @@ git diff --check
 
 ### 任务清单
 
-- [ ] 加入 GPU OBB/旋转、插头扫掠体、线材弯折半径、HBA/NIC 槽宽、电气 lane 和服务空间约束。
-- [ ] 引入墙上功耗、SMART 温度、CPU/GPU 温度、噪音和风扇曲线 calibration snapshot。
-- [ ] 校准只收窄 planning range，不覆盖原始官方证据。
-- [ ] 参数化覆盖 9 HDD、NVMe 数、GPU 厚度、dual PSU、风扇 count、缺失字段、官方冲突、导入迁移和 DeepSeek 降级。
-- [ ] 完成真实浏览器、导出配置、购买清单和 AI 建议的跨层一致性验证。
+- [x] 加入 GPU OBB/旋转、插头扫掠体、线材弯折半径、HBA/NIC 槽宽、电气 lane 和服务空间约束。
+- [x] 引入墙上功耗、SMART 温度、CPU/GPU 温度、噪音和风扇曲线 calibration snapshot。
+- [x] 校准只收窄 planning range，不覆盖原始官方证据。
+- [x] 参数化覆盖 9 HDD、NVMe 数、GPU 厚度、dual PSU、风扇 count、缺失字段、官方冲突、导入迁移和 DeepSeek 降级。
+- [x] 完成真实浏览器、导出配置、购买清单和 AI 建议的跨层一致性验证。
 
 ### 退出门禁
 
 - 官方、标准、规划、手工、冲突、未知证据在 UI、导出、价格和 AI 建议中一致。
 - 预览、engine、AI 和配置清单不存在未解释分叉。
+
+### G7 执行记录（2026-08-23）
+
+- 状态：已实现，阶段门禁通过，待提交/推送后确认。
+- 修改：新增 `physical-rules-1.0.0`，从同一几何、routing、wiring 事实计算 GPU OBB/旋转投影、插头 insertion sweep、弯折半径、槽宽、SlimSAS lane 和服务空间，并将 ruleset/provenance/hash 合并进 `BuildEvaluation`；新增 `n6-calibration-1.0.0` snapshot 与只收窄 planning range 的校准函数，未知测量不覆盖原始证据；导出清单、UI 确定性建议面板和 `BuildAdviceInput` 均携带同一 physical/calibration hash/provenance。
+- 测试：G7 定向测试（12 tests）、`npm test -- --run`（21 files / 232 tests）、`npm run typecheck`、`npm run build`、两个 legacy runners、`.mjs` 语法检查、catalog/draft/conflict/missing-field/duplicate-job/snapshot/advice 回滚定向测试、Playwright G7 跨层 smoke（9 HDD + 3 NVMe + dual PSU → BuildEvaluation → 导出 → AI disabled）和既有 G1 浏览器 smoke 均通过；`git diff --check`、源代码/构建产物敏感信息扫描通过。
+- 回滚演练：G3 catalog/draft rollback、G5 snapshot/audit rollback、G6 advice job/audit rollback 和 G7 schema-1.0 导入迁移测试均在临时目录完成；本阶段未写入正式 catalog/price/advice 数据。
+- 未解决 unknown：`calibration.json` 当前明确没有实机测量，墙上功耗、SMART/CPU/GPU 温度、噪音和风扇曲线保持结构化 unknown；GPU 厚度、弯折半径和服务空间仍是 inferred/planning，需要实机复核；没有真实 DeepSeek key/线上模型响应，真实延迟、限流和内容安全拒绝仍需部署环境验证。
+- 回滚：回退本阶段独立提交；physical/calibration 为 BuildEvaluation 可选事实层，回退后既有确定性 fit/thermal/wiring/price 逻辑继续可用；导出/AI 输入随同一提交回退，不删除原始 catalog、价格或审计数据。
 
 ## 12. 总体发布前检查
 

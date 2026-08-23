@@ -5,6 +5,8 @@ import type { N6Routing } from "../adapters/jonsbo-n6/routing";
 import type { ThermalResult } from "../core/thermal";
 import type { WiringPlan } from "../wiring/types";
 import type { FieldProvenance } from "../catalog-search/types";
+import type { PhysicalEvaluation } from "../core/physical";
+import type { CalibrationEvaluation } from "../core/calibration";
 
 export const ADVICE_SCHEMA_VERSION = "1.0.0" as const;
 export const ADVICE_PROMPT_VERSION = "build-advice-1.0.0" as const;
@@ -22,6 +24,8 @@ export interface BuildAdviceInput {
     thermal?: ThermalResult;
     bom: BuildLineItem[];
     unknown: string[];
+    physical: PhysicalEvaluation;
+    calibration: CalibrationEvaluation;
     engineHash?: string;
   };
   selectedSkuFacts: {

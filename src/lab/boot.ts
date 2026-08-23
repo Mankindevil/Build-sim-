@@ -666,6 +666,16 @@ function updateAirBalance(result: ReturnType<typeof evaluateBuild>): void {
   }
 }
 
+function updateCalibration(result: BuildEvaluation): void {
+  const el = $("calibration-status");
+  if (!el) return;
+  const unknown = result.calibration.unknown;
+  el.dataset.level = unknown.length ? "warn" : "ok";
+  el.textContent = unknown.length
+    ? `校准 ${result.calibration.snapshot.calibrationVersion} · unknown ${unknown.length} · hash ${result.calibration.hash.slice(-8)}`
+    : `校准 ${result.calibration.snapshot.calibrationVersion} · 已收窄规划区间 · hash ${result.calibration.hash.slice(-8)}`;
+}
+
 function updateGalleryFromSkus(config: BuildConfig): void {
   const gallery = $("product-gallery");
   if (!gallery) return;
@@ -796,6 +806,7 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   updateRouting(evaluation);
   updateAssembly(evaluation);
   updateAirBalance(evaluation);
+  updateCalibration(evaluation);
   updateGalleryFromSkus(evaluation.config);
   updatePriceStamp();
 }
@@ -808,7 +819,7 @@ function bindConfigChrome(): void {
   $("cfg-export-checklist")?.addEventListener("click", () => {
     const config = configFromDom();
     const result = evaluateBuild(config, catalog);
-    downloadText(`${config.id}-checklist.md`, exportChecklist(config, result.bom));
+    downloadText(`${config.id}-checklist.md`, exportChecklist(config, result.bom, result));
   });
   $("cfg-import-json")?.addEventListener("change", async (ev) => {
     const file = (ev.target as HTMLInputElement).files?.[0];

@@ -30,6 +30,8 @@ function input(): BuildAdviceInput {
       routing: {} as BuildAdviceInput["evaluation"]["routing"],
       bom: [{ skuId: "memory.fixture", qty: 1, bucket: "buy_now" }],
       unknown: ["thermal.evidence"],
+      physical: { schemaVersion: "1.0.0", rulesetVersion: "physical-rules-1.0.0", hash: "physical-fixture", provenance: ["fixture"], plugSweeps: [], bendRadius: [], slotWidth: { gpuSlots: null, hbaSlots: 0, totalSlots: 0, evidence: "unknown" }, lane: { nvmeCount: 0, m2Slots: 2, slimSasClaimed: false, hbaPresent: false, evidence: "standard" }, serviceSpace: { minimumInsertionMm: null, blockedPorts: [], evidence: "unknown" }, findings: [] },
+      calibration: { snapshot: {} as BuildAdviceInput["evaluation"]["calibration"]["snapshot"], unknown: ["wallPowerW"], provenance: [], narrowedRanges: {}, hash: "calibration-fixture" },
     },
     selectedSkuFacts: [{ skuId: "memory.fixture", name: "Fixture Memory", fields: { capacityGb: 32 }, provenance: [{ provenanceId: "sku-prov-1", field: "capacityGb", value: 32, evidence: "official", sourceUrl: "https://example.com/memory", sourceKind: "official-page", retrievedAt: "2026-08-23T00:00:00.000Z", extractor: "fixture" }] }],
     constraints: { cannotDowngradeBad: true, unknownMustStayUnknown: true, citeSourceFields: true },

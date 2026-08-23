@@ -54,6 +54,8 @@ export function buildAdviceInput(args: {
       ...(args.evaluation.thermal ? { thermal: args.evaluation.thermal } : {}),
       bom: args.evaluation.bom,
       unknown: [...new Set(unknown)],
+      physical: args.evaluation.physical,
+      calibration: args.evaluation.calibration,
     },
     selectedSkuFacts: args.selectedSkuFacts.map((fact) => ({
       skuId: fact.skuId,

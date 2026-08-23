@@ -29,6 +29,8 @@ import {
 } from "./thermal";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 import { n6PowerProfile } from "./capabilities";
+import { evaluatePhysicalConstraints, type PhysicalEvaluation } from "./physical";
+import { evaluateCalibration, type CalibrationEvaluation } from "./calibration";
 
 /**
  * User-side knobs the SKU catalog cannot supply: ambient, fan policy, which fan
@@ -167,6 +169,10 @@ export interface BuildEvaluation {
   price: PriceEvaluation;
   /** Noise is explicit unknown until fan/noise evidence is available. */
   noise: NoiseEvaluation;
+  /** Physical expansion checks share the same geometry, routing and wiring facts. */
+  physical: PhysicalEvaluation;
+  /** Raw calibration snapshot plus optional narrowed planning ranges. */
+  calibration: CalibrationEvaluation;
 }
 
 function isSfx(psuId: string, catalog: SkuCatalog): boolean {
@@ -827,6 +833,8 @@ export function evaluateBuild(
   // Order comes last: it is a statement about the geometry and the cables, and
   // it cannot be derived before both of them exist.
   const assembly = buildN6Assembly(geometry, routing.cables);
+  const physical = evaluatePhysicalConstraints(config, catalog, geometry, routing, wiring);
+  const calibration = evaluateCalibration();
 
   const findings = [
     ...occupancy.findings,
@@ -836,6 +844,7 @@ export function evaluateBuild(
     ...thermalFindings,
     ...routing.findings,
     ...assembly.findings,
+    ...physical.findings,
     ...wiring.warnings.map(
       (w, i): EngineFinding => ({
         id: `wiring.warn.${i}`,
@@ -869,6 +878,8 @@ export function evaluateBuild(
     power,
     price: derivePrice(bom, catalog),
     noise: deriveNoise(),
+    physical,
+    calibration,
     ...(thermal
       ? { thermal, heatField: buildFieldBounds(geometry, thermal, N6_DECK_Y) }
       : {}),

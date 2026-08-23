@@ -15,7 +15,7 @@ function deterministicHtml(input: BuildAdviceInput): string {
     ? `<ul class="compact-list">${findings.slice(0, 12).map((finding) => `<li class="status-${esc(finding.verdict)}"><b>${esc(finding.verdict)}</b> · ${esc(finding.message)} <small>[${esc(finding.id)}]</small></li>`).join("")}</ul>`
     : `<p class="text-muted">没有确定性 finding。</p>`;
   const unknownHtml = unknown.length ? `<p>unknown：${unknown.map(esc).join("、")}</p>` : `<p>当前没有额外 unknown。</p>`;
-  return `<p>确定性引擎判定：<b>${findings.some((f) => f.verdict === "bad") ? "bad" : findings.some((f) => f.verdict === "warn") ? "warn" : "ok"}</b> · BOM ${input.evaluation.bom.length} 项</p>${findingHtml}${unknownHtml}`;
+  return `<p>确定性引擎判定：<b>${findings.some((f) => f.verdict === "bad") ? "bad" : findings.some((f) => f.verdict === "warn") ? "warn" : "ok"}</b> · BOM ${input.evaluation.bom.length} 项</p><p><small>physical ${esc(input.evaluation.physical.rulesetVersion)} · hash ${esc(input.evaluation.physical.hash)} · provenance ${esc(input.evaluation.physical.provenance.join(","))} · calibration ${esc(input.evaluation.calibration.snapshot.calibrationVersion)} · hash ${esc(input.evaluation.calibration.hash)}</small></p>${findingHtml}${unknownHtml}`;
 }
 
 function adviceHtml(advice: BuildAdviceResult): string {

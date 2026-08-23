@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:g1:browser": "node scripts/g1-browser-smoke.mjs",
+    "test:g7:browser": "node scripts/g7-browser-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "price:refresh": "node scripts/price-refresh/refresh.mjs",
     "price:search": "node scripts/price-refresh/search.mjs",

@@ -137,6 +137,8 @@ function validateInput(input) {
     if (!Array.isArray(evaluation.findings) || evaluation.findings.length > MAX_ARRAY) errors.push("evaluation.findings invalid");
     if (!Array.isArray(evaluation.bom) || evaluation.bom.length > MAX_ARRAY) errors.push("evaluation.bom invalid");
     if (!Array.isArray(evaluation.unknown) || evaluation.unknown.length > MAX_ARRAY) errors.push("evaluation.unknown invalid");
+    if (!evaluation.physical || typeof evaluation.physical !== "object" || typeof evaluation.physical.hash !== "string") errors.push("evaluation.physical invalid");
+    if (!evaluation.calibration || typeof evaluation.calibration !== "object" || typeof evaluation.calibration.hash !== "string") errors.push("evaluation.calibration invalid");
     for (const finding of evaluation.findings ?? []) if (!finding || typeof finding.id !== "string" || !["ok", "warn", "bad"].includes(finding.verdict) || !text(finding.message)) errors.push("finding invalid");
   }
   if (!Array.isArray(input.selectedSkuFacts) || input.selectedSkuFacts.length > MAX_ARRAY) errors.push("selectedSkuFacts invalid");

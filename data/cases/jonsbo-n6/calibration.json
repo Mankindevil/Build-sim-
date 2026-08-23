@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0.0",
+  "calibrationVersion": "n6-calibration-1.0.0",
+  "caseId": "case.jonsbo-n6",
+  "capturedAt": null,
+  "source": "尚未接入实机测量；字段保留为结构化 unknown",
+  "provenance": [],
+  "wallPowerW": { "value": null, "evidence": "unknown", "unit": "W", "source": null },
+  "smartTemperatureC": { "min": null, "max": null, "evidence": "unknown", "unit": "°C", "source": null },
+  "cpuTemperatureC": { "min": null, "max": null, "evidence": "unknown", "unit": "°C", "source": null },
+  "gpuTemperatureC": { "min": null, "max": null, "evidence": "unknown", "unit": "°C", "source": null },
+  "noiseDba": { "value": null, "evidence": "unknown", "unit": "dBA", "source": null },
+  "fanCurve": { "mode": null, "rpm": null, "cfm": null, "evidence": "unknown", "source": null }
+}
