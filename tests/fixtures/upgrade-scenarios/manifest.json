@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0.0",
+  "purpose": "G0 deterministic, offline upgrade scenarios",
+  "scenarios": [
+    "baseline.json",
+    "dual-psu.json",
+    "front-240-radiator.json",
+    "nine-hdd-hba.json",
+    "missing-fields.json",
+    "duplicate-mpn.json",
+    "price-snapshot.json",
+    "deepseek-disabled.json"
+  ]
+}

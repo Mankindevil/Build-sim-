@@ -1,0 +1,5 @@
+{
+  "extends": "baseline.json",
+  "id": "fixture-dual-psu",
+  "selection": { "psuTopology": "dual", "secondaryPsuId": "psu.silverstone-sx750-g", "dualStart": "sync", "diskCount": 8 }
+}

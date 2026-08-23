@@ -1,0 +1,5 @@
+{
+  "extends": "baseline.json",
+  "id": "fixture-nine-hdd-hba",
+  "selection": { "diskCount": 9, "boot": "m2", "hbaMode": "auto", "gpuId": "gpu.nvidia-rtx-a4000" }
+}

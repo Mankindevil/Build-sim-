@@ -4,7 +4,8 @@
  * browser bundle keeps reading a single committed file.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +18,8 @@ export const localPath = path.join(pricesDir, "local-quotes.json");
 export const snapshotsDir = path.join(pricesDir, "snapshots");
 export const candidatesDir = path.join(pricesDir, "candidates");
 export const fxPath = path.join(pricesDir, "fx.json");
+export const rollbackDir = path.join(root, "data/audit/rollback");
+export const rollbackManifestPath = path.join(rollbackDir, "manifest.json");
 
 /**
  * Hand-maintained exchange rates. Only used to give a foreign listing a
@@ -39,9 +42,46 @@ export async function readJson(file, fallback = null) {
   }
 }
 
-async function writeJson(file, data) {
+function sha256(text) {
+  return crypto.createHash("sha256").update(text).digest("hex");
+}
+
+async function appendRollbackManifest(entry, manifestPath = rollbackManifestPath) {
+  const current = (await readJson(manifestPath, { schemaVersion: "1.0.0", entries: [] })) ?? {
+    schemaVersion: "1.0.0",
+    entries: [],
+  };
+  const next = { ...current, entries: [...(current.entries ?? []), entry] };
+  const text = `${JSON.stringify(next, null, 2)}\n`;
+  const temp = `${manifestPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await mkdir(path.dirname(manifestPath), { recursive: true });
+  await writeFile(temp, text, "utf8");
+  await rename(temp, manifestPath);
+}
+
+/** Atomic JSON write with an immutable old-value backup and rollback manifest. */
+export async function atomicWriteJson(file, data, { operation = "write", rollbackRoot = rollbackDir, manifestPath = rollbackManifestPath } = {}) {
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  const text = `${JSON.stringify(data, null, 2)}\n`;
+  const existed = await readFile(file, "utf8").catch(() => null);
+  let backupPath = null;
+  if (existed !== null) {
+    await mkdir(rollbackRoot, { recursive: true });
+    backupPath = path.join(rollbackRoot, `${new Date().toISOString().replace(/[:.]/g, "-")}-${path.basename(file)}.bak`);
+    await copyFile(file, backupPath);
+  }
+  const temp = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await writeFile(temp, text, "utf8");
+  await rename(temp, file);
+  await appendRollbackManifest({
+    eventId: crypto.randomUUID(),
+    operation,
+    target: path.relative(root, file),
+    backup: backupPath ? path.relative(root, backupPath) : null,
+    previousHash: existed === null ? null : sha256(existed),
+    nextHash: sha256(text),
+    createdAt: new Date().toISOString(),
+  }, manifestPath);
 }
 
 export function isAuditedRow(q) {
@@ -89,7 +129,7 @@ export async function loadLocalQuotes() {
 }
 
 export async function saveLocalQuotes(quotes) {
-  await writeJson(localPath, {
+  await atomicWriteJson(localPath, {
     schemaVersion: "1.0.0",
     note: "Audited quotes captured from the price panel. Commit this file; latest.json is derived.",
     updatedAt: today(),
@@ -113,8 +153,8 @@ export async function buildAndWriteLatest(asOf = today(), note) {
     note: note ?? "Derived from manual-quotes.json + local-quotes.json (audited rows only).",
     quotes,
   };
-  await writeJson(latestPath, snapshot);
-  await writeJson(path.join(snapshotsDir, `${asOf}.json`), snapshot);
+  await atomicWriteJson(latestPath, snapshot, { operation: "price-snapshot-latest" });
+  await atomicWriteJson(path.join(snapshotsDir, `${asOf}.json`), snapshot, { operation: "price-snapshot" });
   return snapshot;
 }
 
@@ -139,7 +179,7 @@ export async function removeLocalQuote(skuId, platform) {
 }
 
 export async function saveCandidates(payload, asOf = today()) {
-  await writeJson(path.join(candidatesDir, `${asOf}.json`), payload);
+  await atomicWriteJson(path.join(candidatesDir, `${asOf}.json`), payload, { operation: "price-candidates" });
 }
 
 export async function loadCandidates(asOf = today()) {

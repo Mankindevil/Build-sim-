@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "catalog-record",
+  "id": "fixture-missing-fields",
+  "category": "gpu",
+  "brand": "Fixture",
+  "model": "Unknown GPU",
+  "mpn": null,
+  "fields": { "lengthMm": "unknown", "tdpW": "unknown" }
+}

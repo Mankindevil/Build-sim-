@@ -93,13 +93,13 @@ git switch -c codex/build-sim-upgrade
 
 ### 任务清单
 
-- [ ] 记录 `npm test`、`npm run typecheck`、`npm run build` 当前结果。
-- [ ] 修复 `tests/legacy-run-*.js` 的 ESM/CJS 入口，或在本计划中记录明确的暂时豁免。
-- [ ] 建立固定场景 fixture：baseline、dual PSU、240 radiator、9 HDD + HBA、缺字段、重复 MPN、价格 snapshot、DeepSeek disabled。
-- [ ] 增加 `BUILD_SIM_CATALOG_WRITE_ENABLED=false`、`BUILD_SIM_ADVICE_ENABLED=false` 等服务端开关。
-- [ ] 所有 catalog、draft、snapshot、audit 写入统一使用临时文件和原子 rename。
-- [ ] 为 catalog 写入建立旧值备份目录和 rollback manifest。
-- [ ] 检查 `.env.local` 是否被忽略，运行构建后确认 bundle 没有 key 名称和值。
+- [x] 记录 `npm test`、`npm run typecheck`、`npm run build` 当前结果。
+- [x] 修复 `tests/legacy-run-*.js` 的 ESM/CJS 入口，或在本计划中记录明确的暂时豁免。
+- [x] 建立固定场景 fixture：baseline、dual PSU、240 radiator、9 HDD + HBA、缺字段、重复 MPN、价格 snapshot、DeepSeek disabled。
+- [x] 增加 `BUILD_SIM_CATALOG_WRITE_ENABLED=false`、`BUILD_SIM_ADVICE_ENABLED=false` 等服务端开关。
+- [x] 所有 catalog、draft、snapshot、audit 写入统一使用临时文件和原子 rename。
+- [x] 为 catalog 写入建立旧值备份目录和 rollback manifest 约定。
+- [x] 检查 `.env.local` 是否被忽略，运行构建后确认 bundle 没有 key 名称和值。
 
 ### 主要文件
 
@@ -128,6 +128,13 @@ git diff --check
 ### 回滚
 
 关闭新 feature flag；如果涉及数据迁移，使用 rollback manifest 恢复对应 catalog/snapshot 文件，不删除原始文件。
+
+### G0 执行记录（2026-08-23）
+
+- 状态：已实现，门禁待提交/推送后确认。
+- 证据：`docs/superpowers/reports/2026-08-23-g0-baseline.md`。
+- 修改：`scripts/runtime/flags.mjs`、`scripts/price-server/env.mjs`、`scripts/price-server/store.mjs`、legacy runners、离线 fixtures 和 `tests/upgrade-guardrails.test.ts`。
+- 验证：`npm test` 16 files / 188 tests、`npm run typecheck`、`npm run build`、两个 legacy runner、`git diff --check` 和 dist 敏感名称扫描均通过。
 
 ## 5. G1：统一 `BuildEvaluation` 与页面事实源（P0）
 

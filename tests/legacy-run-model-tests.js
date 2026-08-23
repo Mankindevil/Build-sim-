@@ -1,9 +1,12 @@
-const fs = require('fs');
-const vm = require('vm');
-const path = require('path');
+import fs from 'node:fs';
+import vm from 'node:vm';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
-const html = fs.readFileSync(path.join(root, 'n6-build-preview.html'), 'utf8');
+const legacyRoot = path.join(root, 'legacy', 'v1');
+const html = fs.readFileSync(path.join(legacyRoot, 'n6-build-preview.html'), 'utf8');
 const source = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0]?.[1];
 if (!source) throw new Error('No inline script found');
 

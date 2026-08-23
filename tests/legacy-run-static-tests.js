@@ -1,9 +1,12 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
-const html = fs.readFileSync(path.join(root, 'n6-build-preview.html'), 'utf8');
-const standalonePath = path.join(root, 'n6-build-preview-standalone.html');
+const legacyRoot = path.join(root, 'legacy', 'v1');
+const html = fs.readFileSync(path.join(legacyRoot, 'n6-build-preview.html'), 'utf8');
+const standalonePath = path.join(legacyRoot, 'n6-build-preview-standalone.html');
 const standalone = fs.existsSync(standalonePath) ? fs.readFileSync(standalonePath, 'utf8') : '';
 const failures = [];
 let assertions = 0;
@@ -26,7 +29,8 @@ const missingQueriedIds = [...new Set(queriedIds.filter(id => !idSet.has(id)))];
 expect('all literal #id queries resolve', missingQueriedIds.length === 0, missingQueriedIds);
 
 const localPaths = [...html.matchAll(/['"]((?:assets|references)\/[A-Za-z0-9_./-]+)['"]/g)].map(m => m[1]);
-const missingLocalPaths = [...new Set(localPaths.filter(rel => !fs.existsSync(path.join(root, rel))))];
+const assetRoots = [legacyRoot, root, path.join(root, 'public'), path.join(root, 'data', 'cases', 'jonsbo-n6')];
+const missingLocalPaths = [...new Set(localPaths.filter(rel => !assetRoots.some(assetRoot => fs.existsSync(path.join(assetRoot, rel)))) )];
 expect('all local assets and references exist', missingLocalPaths.length === 0, missingLocalPaths);
 
 expect('no false official blueprint overlay claim', !html.includes('官方图纸叠加'));

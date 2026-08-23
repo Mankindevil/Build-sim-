@@ -8,6 +8,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
 let cache = null;
 
+export function resetEnvCache() {
+  cache = null;
+}
+
 export async function loadEnv() {
   if (cache) return cache;
   cache = {};
