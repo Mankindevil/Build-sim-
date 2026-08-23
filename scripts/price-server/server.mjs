@@ -32,6 +32,8 @@ import { listingKey } from "./adapters/variant.mjs";
 import { buildSearchQueries, isPriceTrackable } from "../../src/price/queries.mjs";
 import { getJob, inspectUrl, queueSearch } from "./catalog/service.mjs";
 import { renderOfficialFallback } from "./catalog/browser-fallback.mjs";
+import { acceptOfficial, confirmDraft, createDraft, rejectDraft } from "./catalog/write.mjs";
+import { loadRuntimeFlags } from "../runtime/flags.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PRICE_SERVER_PORT ?? 5174);
@@ -191,6 +193,25 @@ const server = http.createServer(async (req, res) => {
     if (route === "POST /api/catalog/inspect") {
       const result = await inspectUrl(await readBody(req), { browserFallback: renderOfficialFallback });
       return send(res, 200, result);
+    }
+    if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/accept-official")) {
+      const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/accept-official".length));
+      const flags = await loadRuntimeFlags();
+      const result = await acceptOfficial(candidateId, { ...(await readBody(req)), catalogWriteEnabled: flags.catalogWriteEnabled });
+      return send(res, result.status === "accepted" ? 200 : 409, result);
+    }
+    if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/draft")) {
+      const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/draft".length));
+      return send(res, 200, await createDraft(candidateId, (await readBody(req)).selections ?? {}));
+    }
+    if (req.method === "POST" && url.pathname.startsWith("/api/catalog/drafts/") && url.pathname.endsWith("/confirm")) {
+      const draftId = decodeURIComponent(url.pathname.slice("/api/catalog/drafts/".length, -"/confirm".length));
+      const flags = await loadRuntimeFlags();
+      return send(res, 200, await confirmDraft(draftId, { catalogWriteEnabled: flags.catalogWriteEnabled }));
+    }
+    if (req.method === "POST" && url.pathname.startsWith("/api/catalog/drafts/") && url.pathname.endsWith("/reject")) {
+      const draftId = decodeURIComponent(url.pathname.slice("/api/catalog/drafts/".length, -"/reject".length));
+      return send(res, 200, await rejectDraft(draftId));
     }
     if (route === "GET /api/price/state") return send(res, 200, await handleState());
     if (route === "POST /api/price/collect") return send(res, 200, await handleCollect(await readBody(req)));

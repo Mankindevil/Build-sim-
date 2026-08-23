@@ -56,6 +56,7 @@ export interface ModelCandidate {
     platform?: string;
     retrievedAt: string;
     httpStatus?: number;
+    finalUrl?: string;
     etag?: string;
     lastModified?: string;
   };
@@ -97,6 +98,8 @@ export interface SkuDraft {
   draftId: string;
   baseSkuId?: string;
   candidateId: string;
+  /** Immutable candidate snapshot used to revalidate a confirmation after a job reload. */
+  candidateSnapshot?: ModelCandidate;
   proposed: Record<string, unknown>;
   fields: FieldProvenance[];
   conflicts: { field: string; existing?: unknown; proposed?: unknown; reason: string }[];

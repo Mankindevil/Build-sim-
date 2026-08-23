@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +8,8 @@ import { extractOfficialHtml, extractOfficialPdf } from "../scripts/price-server
 import { fetchOfficial } from "../scripts/price-server/catalog/fetch.mjs";
 import { validateOfficialUrl, validateRedirect } from "../scripts/price-server/catalog/security.mjs";
 import { getJob, queueSearch, waitForJob } from "../scripts/price-server/catalog/service.mjs";
+import { OFFICIAL_ADAPTERS, adapterForUrl } from "../scripts/price-server/catalog/adapters.mjs";
+import { acceptOfficial, confirmDraft, createDraft, rejectDraft, rollbackCatalogAcceptance } from "../scripts/price-server/catalog/write.mjs";
 import type { SkuCatalog } from "../src/sku/types";
 
 const fixturePath = new URL("./fixtures/catalog/official-product.html", import.meta.url);
@@ -146,6 +148,104 @@ describe("G3 catalog search job", () => {
       expect(manifest.entries.some((entry: { operation: string }) => entry.operation === "catalog-search-candidates")).toBe(true);
     } finally {
       await rm(persistRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("G4 official adapters and audited writes", () => {
+  it("selects the three vendor adapters and keeps HTML/PDF fixtures vendor-labelled", async () => {
+    expect(OFFICIAL_ADAPTERS.map((adapter) => adapter.id)).toEqual(["asus-product-v1", "seagate-product-v1", "corsair-product-v1"]);
+    for (const [brand, filename, url] of [
+      ["ASUS", "asus-product.html", "https://www.asus.com/example/g4"],
+      ["Seagate", "seagate-product.html", "https://www.seagate.com/example/g4"],
+      ["Corsair", "corsair-product.html", "https://www.corsair.com/example/g4"],
+    ] as const) {
+      const adapter = adapterForUrl(url);
+      expect(adapter?.brand).toBe(brand);
+      const body = await readFile(new URL(`./fixtures/catalog/${filename}`, import.meta.url), "utf8");
+      const extracted = adapter?.extract({ ...fetchResult, finalUrl: url, body, contentHash: crypto.createHash("sha256").update(body).digest("hex") });
+      expect(extracted?.adapter).toContain(brand.toLocaleLowerCase().replace(/^./, (char) => char));
+      expect(extracted?.fields.some((field) => field.sourceKind === "official-page")).toBe(true);
+      const pdfBody = await readFile(new URL(`./fixtures/catalog/${filename.replace(".html", ".pdf")}`, import.meta.url), "utf8");
+      const pdfExtracted = adapter?.extract({ ...fetchResult, finalUrl: url, contentType: "application/pdf", body: pdfBody, contentHash: crypto.createHash("sha256").update(pdfBody).digest("hex") });
+      expect(pdfExtracted?.fields.every((field) => field.sourceKind === "official-pdf")).toBe(true);
+    }
+  });
+
+  it("requires the write flag and six direct-accept checks before changing catalog", async () => {
+    const body = await readFile(new URL("./fixtures/catalog/asus-product.html", import.meta.url), "utf8");
+    const result = { ...fetchResult, finalUrl: "https://www.asus.com/example/g4", body, contentHash: crypto.createHash("sha256").update(body).digest("hex") };
+    const catalog: SkuCatalog = { schemaVersion: "2.0.0", updatedAt: "2026-08-23", skus: [{ id: "existing.other", category: "motherboard", brand: "Other", model: "Other", name: "Other", mpn: "OTHER-1", dims: { evidence: "unknown" }, power: { evidence: "unknown" }, price: { currency: "CNY", historicalLowEvidence: "unknown", currentEvidence: "unknown" } }] };
+    const job = queueSearch({ query: "ASUS-G4-001", category: "motherboard", brand: "ASUS", officialOnly: true }, {
+      catalog: { ...catalog, skus: [{ ...catalog.skus[0], id: "asus.g4", brand: "ASUS", model: "Pro WS G4", name: "ASUS Pro WS G4", mpn: "ASUS-G4-001", appearance: { page: result.finalUrl } }] },
+      fetcher: async () => result,
+      inspect: true,
+    });
+    const completed = await waitForJob(job.jobId);
+    const candidate = completed?.candidates[0];
+    expect(candidate?.extraction.status).toBe("ok");
+    const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-g4-"));
+    const catalogPath = path.join(root, "catalog.json");
+    const rollbackRoot = path.join(root, "rollback");
+    const rollbackManifestPath = path.join(rollbackRoot, "catalog-manifest.json");
+    const auditRoot = path.join(root, "audit");
+    try {
+      await writeFile(catalogPath, `${JSON.stringify(catalog)}\n`, "utf8");
+      const disabled = await acceptOfficial(candidate!.candidateId, { catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: false });
+      expect(disabled.status).toBe("blocked");
+      const accepted = await acceptOfficial(candidate!.candidateId, { catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
+      expect(accepted.status).toBe("accepted");
+      expect(accepted.catalogHash).toMatch(/^[a-f0-9]{64}$/);
+      const saved = JSON.parse(await readFile(catalogPath, "utf8"));
+      const sku = saved.skus.find((entry: { mpn?: string }) => entry.mpn === "ASUS-G4-001");
+      expect(sku.provenance.length).toBeGreaterThan(0);
+      expect(sku.dims.lengthMm).toBe(244);
+      const repeated = await acceptOfficial(candidate!.candidateId, { catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
+      expect(repeated).toEqual(accepted);
+      const rolledBack = await rollbackCatalogAcceptance(catalogPath, { rollbackManifestPath });
+      expect(rolledBack.target).toContain("catalog.json");
+      const restored = JSON.parse(await readFile(catalogPath, "utf8"));
+      expect(restored.skus.some((entry: { mpn?: string }) => entry.mpn === "ASUS-G4-001")).toBe(false);
+      const conflict = await acceptOfficial(candidate!.candidateId, { candidate: { ...candidate, conflicts: [{ field: "mpn", values: ["ASUS-G4-001", "ASUS-G4-002"], reason: "fixture conflict" }] }, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
+      expect(conflict.status).toBe("blocked");
+      expect(conflict.reasons.join(" ")).toContain("conflict");
+      const missing = await acceptOfficial(candidate!.candidateId, { candidate: { ...candidate, fields: candidate!.fields.filter((field: { field: string }) => field.field !== "dims.widthMm") }, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
+      expect(missing.status).toBe("blocked");
+      const nonAllowlisted = await acceptOfficial(candidate!.candidateId, { candidate: { ...candidate, canonicalUrl: "https://evil.example/g4" }, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
+      expect(nonAllowlisted.status).toBe("blocked");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps non-direct candidates in drafts and rejection does not touch catalog", async () => {
+    const conflictHtml = await readFile(new URL("./fixtures/catalog/conflict-product.html", import.meta.url), "utf8");
+    const conflictResult = { ...fetchResult, finalUrl: "https://www.asus.com/conflict", body: conflictHtml, contentHash: "g4-conflict" };
+    const job = queueSearch({ query: "EX-CONFLICT-1", category: "motherboard", brand: "ASUS", officialOnly: true }, {
+      catalog: { schemaVersion: "2.0.0", updatedAt: "2026-08-23", skus: [{ id: "conflict.example", category: "motherboard", brand: "ASUS", model: "Conflict", name: "Conflict", mpn: "EX-CONFLICT-1", dims: { evidence: "manual" }, power: { evidence: "manual" }, price: { currency: "CNY", historicalLowEvidence: "unknown", currentEvidence: "unknown" }, appearance: { page: conflictResult.finalUrl } }] },
+      fetcher: async () => conflictResult,
+      inspect: true,
+    });
+    const completed = await waitForJob(job.jobId);
+    const candidate = completed?.candidates[0];
+    expect(candidate?.extraction.status).toBe("partial");
+    const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-g4-draft-"));
+    try {
+      const draft = await createDraft(candidate!.candidateId, {}, { draftRoot: root, rollbackRoot: path.join(root, "rollback") });
+      expect(draft.status).toBe("draft");
+      expect(draft.conflicts.length).toBe(1);
+      const rejected = await rejectDraft(draft.draftId, { draftRoot: root, rollbackRoot: path.join(root, "rollback") });
+      expect(rejected.status).toBe("rejected");
+      expect((await readFile(path.join(root, `${new Date().toISOString().slice(0, 10)}.json`), "utf8"))).toContain(draft.draftId);
+      const catalogPath = path.join(root, "catalog.json");
+      await writeFile(catalogPath, JSON.stringify({ schemaVersion: "2.0.0", updatedAt: "2026-08-23", skus: [] }), "utf8");
+      const manualDraft = await createDraft(candidate!.candidateId, { brand: "ASUS", model: "Manual Board", mpn: "MANUAL-001", "dims.lengthMm": 244, "dims.widthMm": 244 }, { draftRoot: root, rollbackRoot: path.join(root, "rollback"), catalogPath });
+      expect(manualDraft.conflicts).toHaveLength(0);
+      const confirmed = await confirmDraft(manualDraft.draftId, { draftRoot: root, rollbackRoot: path.join(root, "rollback"), auditRoot: path.join(root, "audit"), catalogPath, catalogWriteEnabled: true });
+      expect(confirmed.status).toBe("confirmed");
+      expect(JSON.parse(await readFile(catalogPath, "utf8")).skus.some((entry: { mpn?: string }) => entry.mpn === "MANUAL-001")).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

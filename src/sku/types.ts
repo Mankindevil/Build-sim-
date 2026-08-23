@@ -139,6 +139,7 @@ export interface SkuRecord {
 
 export interface SkuCatalog {
   schemaVersion: string;
+  catalogVersion?: string;
   updatedAt: string;
   skus: SkuRecord[];
 }

@@ -264,20 +264,30 @@ git diff --check
 
 ### 任务清单
 
-- [ ] 从 JONSBO、ASUS、Seagate、Corsair 中选择 2–3 个页面稳定且覆盖当前基线 SKU 的品牌。
-- [ ] 每个 adapter 实现 `canHandle`、discover/extract，并提供 HTML/PDF fixture。
-- [ ] 实现 `POST /api/catalog/candidates/:id/accept-official`。
-- [ ] 服务端重复执行 allowlist、canonical、exact MPN/brand-model、抓取状态、关键字段、冲突和 provenance 检查。
-- [ ] 同 MPN 已有手工字段时禁止静默覆盖；只允许追加来源或进入 conflict。
-- [ ] 非直通候选进入 `SkuDraft` 确认页，确认时重新校验字段、重复 MPN、schema 和 feature flag。
-- [ ] 写入 catalog version、旧值备份、hash、字段变更摘要和 AuditEvent。
-- [ ] 重复请求返回同一结果，不重复创建 SKU；失败不得产生半写入。
+- [x] 从 JONSBO、ASUS、Seagate、Corsair 中选择 2–3 个页面稳定且覆盖当前基线 SKU 的品牌。
+- [x] 每个 adapter 实现 `canHandle`、discover/extract，并提供 HTML/PDF fixture。
+- [x] 实现 `POST /api/catalog/candidates/:id/accept-official`。
+- [x] 服务端重复执行 allowlist、canonical、exact MPN/brand-model、抓取状态、关键字段、冲突和 provenance 检查。
+- [x] 同 MPN 已有手工字段时禁止静默覆盖；只允许追加来源或进入 conflict。
+- [x] 非直通候选进入 `SkuDraft` 确认页，确认时重新校验字段、重复 MPN、schema 和 feature flag。
+- [x] 写入 catalog version、旧值备份、hash、字段变更摘要和 AuditEvent。
+- [x] 重复请求返回同一结果，不重复创建 SKU；失败不得产生半写入。
 
 ### 退出门禁
 
 - exact official candidate 可以直通并成功回滚。
 - 缺关键字段、冲突、非 allowlist 域名、登录墙或验证码状态全部阻断直通。
 - 非直通候选取消确认后，catalog、BuildConfig 和 BOM 不变化。
+
+### G4 执行记录（2026-08-23）
+
+- 状态：已实现，门禁通过，待提交/推送后确认。
+- 修改：新增 ASUS、Seagate、Corsair 三个官方 adapter 的 canHandle/discover/extract；新增 HTML/PDF fixtures；实现 `accept-official`、`SkuDraft` 创建/确认/拒绝、catalog version、字段 provenance、content hash、AuditEvent、幂等 key 和 rollback manifest。
+- 直通条件：allowlist、canonical、最终 URL、成功 HTTP 状态、exact MPN 或 exact brand/model、类别关键字段、无冲突、完整 provenance 和 content hash 全部通过才允许写入；默认 feature flag 关闭。
+- 测试：`npx vitest run tests/catalog-search.test.ts`（13 tests）、`npm test`（18 files / 211 tests）、`npm run typecheck`、`npm run build`、两个 legacy runners、`npm run test:g1:browser`、三家真实页面只读抽样（均 HTTP 200）、G4 API smoke、`git diff --check` 和敏感信息扫描均通过。
+- 回滚演练：临时 catalog 直通新增 SKU 后通过 rollback manifest 恢复旧 catalog；草稿拒绝和未确认状态均未修改 catalog。
+- 未解决 unknown：真实 ASUS/Seagate/Corsair 页面抽样存在动态字段缺失或冲突，均保持 partial/不可直通；厂商页面变化、验证码和登录墙仍需 adapter/Playwright 失败降级；本阶段没有把实时抽样写入正式 catalog。
+- 回滚：回退本阶段独立提交；使用对应 catalog/draft/audit rollback manifest 恢复旧值，不删除原始数据。
 
 ## 9. G5：价格联动与购买信息一致性（原 S4）
 

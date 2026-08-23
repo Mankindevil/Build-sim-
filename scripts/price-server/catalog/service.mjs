@@ -7,6 +7,7 @@ import { registryForBrand, registryForUrl } from "./registry.mjs";
 import { fetchOfficial } from "./fetch.mjs";
 import { validateOfficialUrl } from "./security.mjs";
 import { extractOfficialHtml, extractOfficialPdf } from "./extract.mjs";
+import { adapterForUrl } from "./adapters.mjs";
 import { atomicWriteJson } from "../store.mjs";
 
 const catalogJson = createRequire(import.meta.url)("../../../data/skus/catalog.json");
@@ -90,6 +91,27 @@ function scoreExtracted(candidate, extracted) {
   return { score: exactMpn ? 1 : brandModel ? 0.75 : 0.2, kind: exactMpn ? "exact-mpn" : brandModel ? "brand-model" : "weak", reasons: exactMpn ? ["official extracted MPN exact match"] : brandModel ? ["official extracted brand match; MPN not exact"] : ["official page did not prove exact identity"] };
 }
 
+const REQUIRED_FIELDS_BY_CATEGORY = {
+  case: ["dims.lengthMm", "dims.widthMm", "dims.heightMm"],
+  motherboard: ["dims.lengthMm", "dims.widthMm"],
+  cpu: ["power.tdpW"],
+  psu: ["power.ratedW"],
+  cooler: ["dims.heightMm"],
+  gpu: ["dims.lengthMm", "dims.slots"],
+  memory: ["attrs.capacity"],
+  storage: ["attrs.capacity", "attrs.interface"],
+  hba: ["attrs.interface"],
+  fan: ["dims.lengthMm"],
+  accessory: [],
+};
+
+function extractionStatus(candidate, extracted, fetchResult) {
+  if (fetchResult.status >= 400) return "failed";
+  const required = ["brand", "model", ...(candidate.query?.mpn || candidate.mpn ? ["mpn"] : []), ...(REQUIRED_FIELDS_BY_CATEGORY[candidate.category ?? candidate.query?.category] ?? [])];
+  const missingRequired = required.some((field) => !extracted.fields.some((entry) => entry.field === field));
+  return extracted.fields.length && !missingRequired && !extracted.conflicts.length ? "ok" : "partial";
+}
+
 async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFallback } = {}) {
   try {
     const fetchResult = fetcher === fetchOfficial && fetchCache.has(candidate.url)
@@ -102,10 +124,12 @@ async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFal
     const cacheKey = `${fetchResult.finalUrl}|${fetchResult.contentHash}`;
     let extracted = contentCache.get(cacheKey);
     if (!extracted) {
-      extracted = fetchResult.contentType.includes("pdf") ? extractOfficialPdf(fetchResult) : extractOfficialHtml(fetchResult);
+      const adapter = adapterForUrl(fetchResult.finalUrl);
+      extracted = adapter?.extract(fetchResult) ?? (fetchResult.contentType.includes("pdf") ? extractOfficialPdf(fetchResult) : extractOfficialHtml(fetchResult));
       if (!extracted.fields.length && browserFallback && !fetchResult.contentType.includes("pdf")) {
         const fallbackResult = await browserFallback(fetchResult.finalUrl);
-        const fallbackExtracted = extractOfficialHtml(fallbackResult);
+        const fallbackAdapter = adapterForUrl(fallbackResult.finalUrl);
+        const fallbackExtracted = fallbackAdapter?.extract(fallbackResult) ?? extractOfficialHtml(fallbackResult);
         extracted = {
           ...fallbackExtracted,
           warnings: [...extracted.warnings, ...fallbackExtracted.warnings],
@@ -118,9 +142,9 @@ async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFal
     return {
       ...candidate,
       canonicalUrl: canonicalUrl ?? fetchResult.canonicalUrl ?? fetchResult.finalUrl,
-      source: { ...candidate.source, retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
+      source: { ...candidate.source, retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
       match: scoreExtracted(candidate, extracted),
-      extraction: { status: fetchResult.status >= 400 ? "failed" : fields.length ? extracted.warnings.length ? "partial" : "ok" : "partial", fieldsFound: fields.length, fieldsMissing: Math.max(0, 6 - fields.length), adapter: extracted.adapter, ...(fetchResult.contentHash ? { contentHash: fetchResult.contentHash } : {}), ...(extracted.warnings.length ? { error: safeText(extracted.warnings.join("; ")) } : {}) },
+      extraction: { status: extractionStatus(candidate, extracted, fetchResult), fieldsFound: fields.length, fieldsMissing: Math.max(0, 6 - fields.length), adapter: extracted.adapter, ...(fetchResult.contentHash ? { contentHash: fetchResult.contentHash } : {}), ...(extracted.warnings.length ? { error: safeText(extracted.warnings.join("; ")) } : {}) },
       fields,
       ...(extracted.conflicts.length ? { conflicts: extracted.conflicts } : {}),
     };
@@ -174,6 +198,14 @@ export async function waitForJob(jobId, timeoutMs = 5_000) {
 }
 
 export function getJob(jobId) { return jobs.get(jobId) ?? null; }
+
+export function findCandidate(candidateId) {
+  for (const job of jobs.values()) {
+    const candidate = (job.candidates ?? []).find((entry) => entry.candidateId === candidateId);
+    if (candidate) return candidate;
+  }
+  return null;
+}
 
 export async function inspectUrl(body, options = {}) {
   const url = validateOfficialUrl(String(body.url ?? "")).toString();
