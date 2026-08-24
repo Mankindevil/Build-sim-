@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadDeepSeekConfig } from "./config.mjs";
 import { requestDeepSeek } from "./client.mjs";
+import { DEEPSEEK_PRICING, DEEPSEEK_PRICING_HASH, priceDeepSeekUsage, summarizeBillingCalls } from "./pricing.mjs";
 
 export const ADVICE_SCHEMA_VERSION = "1.0.0";
 export const ADVICE_PROMPT_VERSION = "build-advice-1.0.0";
@@ -11,6 +12,7 @@ const MAX_ARRAY = 64;
 const jobs = new Map();
 const cache = new Map();
 const rollbackQueues = new Map();
+const auditQueues = new Map();
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -82,13 +84,18 @@ async function appendAudit(event, options = {}) {
   const root = auditRoot(options);
   const day = event.generatedAt.slice(0, 10);
   const file = path.join(root, `${day}.json`);
-  let payload = { schemaVersion: "1.0.0", events: [] };
-  try { payload = JSON.parse(await readFile(file, "utf8")); } catch { /* first event */ }
-  const events = Array.isArray(payload.events) ? payload.events : [];
-  const existing = events.findIndex((item) => item.eventId === event.eventId);
-  if (existing >= 0) events[existing] = event;
-  else events.push(event);
-  await writeWithRollback(file, { schemaVersion: "1.0.0", events }, "advice-audit", options);
+  const prior = auditQueues.get(file) ?? Promise.resolve();
+  const current = prior.then(async () => {
+    let payload = { schemaVersion: "1.0.0", events: [] };
+    try { payload = JSON.parse(await readFile(file, "utf8")); } catch { /* first event */ }
+    const events = Array.isArray(payload.events) ? payload.events : [];
+    const existing = events.findIndex((item) => item.eventId === event.eventId);
+    if (existing >= 0) events[existing] = event;
+    else events.push(event);
+    await writeWithRollback(file, { schemaVersion: "1.0.0", events }, "advice-audit", options);
+  });
+  auditQueues.set(file, current.catch(() => {}));
+  await current;
 }
 
 async function persistJob(job, options = {}) {
@@ -207,7 +214,7 @@ function safeRequestId(value) {
 
 async function audit(job, options = {}) {
   const event = {
-    eventId: `advice-${job.inputHash}`,
+    eventId: `advice-${hash({ requestId: job.requestId })}`,
     eventType: "advice",
     requestId: job.requestId,
     provider: job.provider,
@@ -221,6 +228,8 @@ async function audit(job, options = {}) {
     validationErrors: job.validationErrors ?? [],
     latencyMs: job.latencyMs ?? null,
     retries: job.retries ?? 0,
+    billing: job.billing,
+    calls: job.calls ?? [],
     generatedAt: job.generatedAt,
   };
   await appendAudit(event, options);
@@ -237,7 +246,30 @@ function baseJob(input, inputHash, engineHash, model, generatedAt) {
     inputHash,
     engineHash,
     deterministic: deterministic(input),
+    calls: [],
+    billing: summarizeBillingCalls([]),
     generatedAt,
+  };
+}
+
+function billingCall(job, attempt, status, metadata = {}, extra = {}) {
+  const providerModel = metadata.providerModel ?? job.model;
+  const startedAt = metadata.startedAt ?? extra.startedAt ?? new Date().toISOString();
+  return {
+    callId: `${job.requestId}:${attempt}`,
+    requestId: job.requestId,
+    attempt,
+    status,
+    provider: "deepseek",
+    requestedModel: job.model,
+    providerModel,
+    providerRequestId: metadata.providerRequestId ?? null,
+    latencyMs: extra.latencyMs ?? null,
+    httpStatus: extra.httpStatus ?? null,
+    failureStage: extra.failureStage ?? null,
+    startedAt,
+    billing: metadata.billing ?? priceDeepSeekUsage(providerModel, null, { occurredAt: startedAt }),
+    generatedAt: new Date().toISOString(),
   };
 }
 
@@ -261,7 +293,7 @@ export async function createAdviceJob(body, options = {}) {
   const cacheKey = `${ADVICE_PROMPT_VERSION}:${inputHash}:${engineHash}:${config.model}`;
   const cached = cache.get(cacheKey);
   if (cached) {
-    const job = { ...baseJob(input, inputHash, engineHash, config.model, new Date().toISOString()), status: "completed", advice: cached, cacheHit: true };
+    const job = { ...baseJob(input, inputHash, engineHash, config.model, new Date().toISOString()), status: "completed", advice: cached, cacheHit: true, billing: summarizeBillingCalls([], { cacheServed: true }) };
     jobs.set(requestId, job); await audit(job, options); return job;
   }
   const job = baseJob(input, inputHash, engineHash, config.model, new Date().toISOString());
@@ -279,12 +311,15 @@ export async function runAdviceJob(job, input, options = {}) {
     let response;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        response = await requestDeepSeek(input, { config: options.config, fetchImpl: options.fetchImpl });
+        response = await requestDeepSeek(input, { config: options.config, fetchImpl: options.fetchImpl, now: options.now });
         const errors = validateResult(response.result, input);
-        if (errors.length) throw Object.assign(new Error("DeepSeek output validation failed"), { validationErrors: errors, stage: "validation" });
+        const call = billingCall(job, attempt + 1, errors.length ? "validation-failed" : "completed", response, { latencyMs: response.latencyMs, failureStage: errors.length ? "validation" : null });
+        job.calls.push(call);
+        if (errors.length) throw Object.assign(new Error("DeepSeek output validation failed"), { validationErrors: errors, stage: "validation", billingRecorded: true });
         break;
       } catch (error) {
-        job.retries = attempt;
+        if (!error.billingRecorded) job.calls.push(billingCall(job, attempt + 1, "failed", error.providerMetadata, { startedAt: error.startedAt, latencyMs: error.latencyMs, httpStatus: error.httpStatus, failureStage: error.stage ?? "request" }));
+        job.retries = attempt + 1;
         if (attempt === 1) throw error;
       }
     }
@@ -298,9 +333,53 @@ export async function runAdviceJob(job, input, options = {}) {
     job.failureStage = error.stage ?? "request";
     job.validationErrors = error.validationErrors ?? [error.message];
   }
+  job.retries = Math.max(0, job.calls.length - 1);
+  job.billing = summarizeBillingCalls(job.calls);
   await audit(job, options);
   jobs.set(job.requestId, job);
   return job;
+}
+
+export async function getAdviceBillingSummary({ limit = 100, ...options } = {}) {
+  const root = auditRoot(options);
+  const files = (await readdir(root).catch(() => [])).filter((file) => /^\d{4}-\d{2}-\d{2}\.json$/.test(file)).sort();
+  const events = [];
+  for (const file of files) {
+    try {
+      const payload = JSON.parse(await readFile(path.join(root, file), "utf8"));
+      events.push(...(Array.isArray(payload.events) ? payload.events : []));
+    } catch { /* malformed historical files remain isolated */ }
+  }
+  const calls = events.flatMap((event) => (event.calls ?? []).map((call) => ({ ...call, jobStatus: event.status }))).sort((a, b) => String(b.generatedAt).localeCompare(String(a.generatedAt)));
+  const bounded = calls.slice(0, Math.min(500, Math.max(1, Number(limit) || 100)));
+  const totals = summarizeBillingCalls(calls);
+  const byModel = Object.values(calls.reduce((acc, call) => {
+    const model = call.providerModel ?? call.requestedModel ?? "unknown";
+    const row = acc[model] ?? { model, calls: [] };
+    row.calls.push(call);
+    acc[model] = row;
+    return acc;
+  }, {})).map((row) => ({ model: row.model, ...summarizeBillingCalls(row.calls) }));
+  const byPricingBand = Object.values(calls.reduce((acc, call) => {
+    const pricingBand = call.billing?.pricing?.pricingBand?.id ?? "unknown";
+    const row = acc[pricingBand] ?? { pricingBand, label: call.billing?.pricing?.pricingBand?.label ?? "unknown", calls: [] };
+    row.calls.push(call);
+    acc[pricingBand] = row;
+    return acc;
+  }, {})).map((row) => ({ pricingBand: row.pricingBand, label: row.label, ...summarizeBillingCalls(row.calls) }));
+  return {
+    schemaVersion: "1.0.0",
+    generatedAt: new Date().toISOString(),
+    pricing: { ...DEEPSEEK_PRICING, pricingHash: DEEPSEEK_PRICING_HASH },
+    jobs: events.length,
+    cacheServedJobs: events.filter((event) => event.billing?.cacheServed).length,
+    totals,
+    byModel,
+    byPricingBand,
+    calls: bounded,
+    returnedCalls: bounded.length,
+    totalCalls: calls.length,
+  };
 }
 
 export async function getAdviceJob(requestId, options = {}) {
@@ -333,4 +412,4 @@ export async function restoreAdviceRollback(file, { manifestPath } = {}) {
   return { target: file, backup: entry.backup };
 }
 
-export const __testing = { validateInput, validateResult, canonicalize, hash, jobs, cache };
+export const __testing = { validateInput, validateResult, canonicalize, hash, jobs, cache, auditQueues };

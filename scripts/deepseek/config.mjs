@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULTS = Object.freeze({
   apiUrl: "https://api.deepseek.com",
-  model: "deepseek-chat",
+  model: "deepseek-v4-flash",
   timeoutMs: 30_000,
   maxTokens: 1_200,
   temperature: 0.2,

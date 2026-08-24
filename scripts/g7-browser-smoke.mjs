@@ -10,7 +10,7 @@ page.on("console", (message) => {
 });
 
 await page.goto("http://127.0.0.1:5173/index.html", { waitUntil: "networkidle" });
-for (const selector of ["#fit-chip", "#price-table", "#advice-deterministic", "#calibration-status", "#cfg-export-checklist"]) {
+for (const selector of ["#fit-chip", "#price-table", "#advice-deterministic", "#advice-billing", "#calibration-status", "#cfg-export-checklist"]) {
   if (!(await page.$(selector))) throw new Error(`missing ${selector}`);
 }
 
@@ -38,17 +38,24 @@ if (!exportPath) throw new Error("checklist download did not produce a file");
 const exported = await readFile(exportPath, "utf8");
 if (!exported.includes(evaluation.physical.hash) || !exported.includes(evaluation.calibration.hash)) throw new Error("export diverged from BuildEvaluation hashes");
 
-await page.click("#advice-generate");
-await page.waitForFunction(() => !document.querySelector("#advice-generate")?.hasAttribute("disabled"));
-const adviceStatus = await page.locator("#advice-status").textContent();
-const deterministicAfter = await page.locator("#advice-deterministic").textContent();
-if (!adviceStatus?.includes("AI 建议已关闭") && !adviceStatus?.includes("AI 建议暂不可用")) throw new Error(`unexpected advice downgrade status: ${adviceStatus}`);
-if (!deterministicAfter?.includes(evaluation.physical.hash) || !deterministicAfter.includes(evaluation.calibration.hash)) throw new Error("advice downgrade lost deterministic hashes");
+const liveAdvice = process.env.BUILD_SIM_BROWSER_LIVE_ADVICE === "1";
+let adviceStatus = await page.locator("#advice-status").textContent();
+if (liveAdvice) {
+  await page.click("#advice-generate");
+  await page.waitForFunction(() => !document.querySelector("#advice-generate")?.hasAttribute("disabled"), null, { timeout: 130_000 });
+  adviceStatus = await page.locator("#advice-status").textContent();
+  const deterministicAfter = await page.locator("#advice-deterministic").textContent();
+  if (!adviceStatus?.includes("建议已生成") && !adviceStatus?.includes("AI 建议已关闭") && !adviceStatus?.includes("AI 建议暂不可用")) throw new Error(`unexpected advice status: ${adviceStatus}`);
+  if (!deterministicAfter?.includes(evaluation.physical.hash) || !deterministicAfter.includes(evaluation.calibration.hash)) throw new Error("advice request lost deterministic hashes");
+}
+const billing = await page.locator("#advice-billing").textContent();
+if (!billing?.includes("Token") || !billing.includes("估算费用") || !billing.includes("北京时间") || (!billing.includes("计费时段") && !billing.includes("provider 调用记录"))) throw new Error("billing summary did not render pricing provenance and call state");
 if (errors.length) throw new Error(`page errors:\n${errors.join("\n")}`);
 
 console.log("G7 browser cross-layer smoke passed", {
   physicalHash: evaluation.physical.hash,
   calibrationHash: evaluation.calibration.hash,
   adviceStatus,
+  liveAdvice,
 });
 await browser.close();

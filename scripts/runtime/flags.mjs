@@ -9,11 +9,10 @@ function boolEnv(env, name, fallback = false) {
 }
 
 /** Server-side rollout switches. Safe defaults keep the existing app read-only. */
-export async function loadRuntimeFlags() {
-  const env = await loadEnv();
+export async function loadRuntimeFlags(envOverride) {
+  const env = envOverride ?? await loadEnv();
   return Object.freeze({
     catalogWriteEnabled: boolEnv(env, "BUILD_SIM_CATALOG_WRITE_ENABLED", false),
     adviceEnabled: boolEnv(env, "BUILD_SIM_ADVICE_ENABLED", false),
   });
 }
-

@@ -112,4 +112,117 @@ export interface AdviceJobResponse {
   failureStage?: string;
   validationErrors?: string[];
   generatedAt?: string;
+  cacheHit?: boolean;
+  calls?: AdviceBillingCall[];
+  billing?: AdviceBillingTotals;
+}
+
+export interface DeepSeekUsage {
+  promptTokens: number | null;
+  promptCacheHitTokens: number | null;
+  promptCacheMissTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  reasoningTokens: number | null;
+  warnings: string[];
+}
+
+export interface AdviceBillingCost {
+  cacheHitCny: number;
+  cacheMissCny: number;
+  outputCny: number;
+  totalCny: number;
+  currency: "CNY";
+  estimated: true;
+}
+
+export interface AdviceBillingCall {
+  callId: string;
+  requestId: string;
+  attempt: number;
+  status: "completed" | "validation-failed" | "failed";
+  provider: "deepseek";
+  requestedModel: string | null;
+  providerModel: string | null;
+  providerRequestId: string | null;
+  latencyMs: number | null;
+  httpStatus: number | null;
+  failureStage: string | null;
+  startedAt: string;
+  generatedAt: string;
+  billing: {
+    usage: DeepSeekUsage | null;
+    pricing: {
+      requestedModel: string | null;
+      billedModel: string | null;
+      aliasApplied: boolean;
+      pricingBand: {
+        id: "peak" | "off-peak";
+        label: string;
+        timeZone: "Asia/Shanghai";
+        occurredAt: string;
+        localDate: string;
+        localTime: string;
+        weekday: string;
+      } | null;
+      rates: { cacheHit: number; cacheMiss: number; output: number } | null;
+      pricingVersion: string;
+      pricingHash: string;
+      sourceUrl: string;
+      capturedAt: string;
+      currency: "CNY";
+      unitTokens: number;
+      timeZone: "Asia/Shanghai";
+    };
+    status: "priced" | "priced-with-warning" | "usage-unavailable" | "unknown-model" | "usage-incomplete";
+    cost: AdviceBillingCost | null;
+  };
+}
+
+export interface AdviceBillingTotals {
+  schemaVersion: "1.1.0";
+  pricingVersion: string;
+  pricingHash: string;
+  pricingSourceUrl: string;
+  pricingTimeZone: "Asia/Shanghai";
+  currency: "CNY";
+  estimated: true;
+  cacheServed: boolean;
+  providerCalls: number;
+  pricedCalls: number;
+  unknownCostCalls: number;
+  promptTokens: number;
+  promptCacheHitTokens: number;
+  promptCacheMissTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  estimatedCostCny: number;
+}
+
+export interface AdviceBillingSummary {
+  schemaVersion: "1.0.0";
+  generatedAt: string;
+  pricing: {
+    pricingVersion: string;
+    pricingHash: string;
+    capturedAt: string;
+    sourceUrl: string;
+    currency: "CNY";
+    unitTokens: number;
+    timeZone: "Asia/Shanghai";
+    bandRule: {
+      weekdays: readonly string[];
+      peakWindows: ReadonlyArray<{ start: string; end: string }>;
+      weekend: "off-peak";
+    };
+  };
+  jobs: number;
+  cacheServedJobs: number;
+  totals: AdviceBillingTotals;
+  byModel: Array<AdviceBillingTotals & { model: string }>;
+  byPricingBand: Array<AdviceBillingTotals & { pricingBand: string; label: string }>;
+  calls: AdviceBillingCall[];
+  returnedCalls: number;
+  totalCalls: number;
 }

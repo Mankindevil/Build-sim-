@@ -7,15 +7,7 @@ import { atomicWriteJson, restoreLatestRollback } from "../scripts/price-server/
 
 describe("G0 upgrade guardrails", () => {
   it("keeps catalog writes and advice disabled by default", async () => {
-    const previousCatalog = process.env.BUILD_SIM_CATALOG_WRITE_ENABLED;
-    const previousAdvice = process.env.BUILD_SIM_ADVICE_ENABLED;
-    delete process.env.BUILD_SIM_CATALOG_WRITE_ENABLED;
-    delete process.env.BUILD_SIM_ADVICE_ENABLED;
-    const flags = await loadRuntimeFlags();
-    if (previousCatalog === undefined) delete process.env.BUILD_SIM_CATALOG_WRITE_ENABLED;
-    else process.env.BUILD_SIM_CATALOG_WRITE_ENABLED = previousCatalog;
-    if (previousAdvice === undefined) delete process.env.BUILD_SIM_ADVICE_ENABLED;
-    else process.env.BUILD_SIM_ADVICE_ENABLED = previousAdvice;
+    const flags = await loadRuntimeFlags({});
     expect(flags).toEqual({ catalogWriteEnabled: false, adviceEnabled: false });
   });
 

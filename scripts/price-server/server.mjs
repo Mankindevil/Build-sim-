@@ -35,7 +35,7 @@ import { renderOfficialFallback } from "./catalog/browser-fallback.mjs";
 import { acceptOfficial, confirmDraft, createDraft, rejectDraft } from "./catalog/write.mjs";
 import { loadRuntimeFlags } from "../runtime/flags.mjs";
 import { buildAuditedQuote } from "./price-audit.mjs";
-import { createAdviceJob, getAdviceJob } from "../deepseek/advice.mjs";
+import { createAdviceJob, getAdviceBillingSummary, getAdviceJob } from "../deepseek/advice.mjs";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PRICE_SERVER_PORT ?? 5174);
@@ -202,6 +202,9 @@ const server = http.createServer(async (req, res) => {
       const flags = await loadRuntimeFlags();
       const job = await createAdviceJob(await readBody(req), { flags });
       return send(res, job.status === "advice-unavailable" ? 503 : job.status === "disabled" ? 200 : 202, job);
+    }
+    if (route === "GET /api/advice/billing") {
+      return send(res, 200, await getAdviceBillingSummary({ limit: url.searchParams.get("limit") ?? 100 }));
     }
     if (req.method === "GET" && url.pathname.startsWith("/api/advice/build/")) {
       const requestId = decodeURIComponent(url.pathname.slice("/api/advice/build/".length));

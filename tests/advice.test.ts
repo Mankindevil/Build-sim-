@@ -1,10 +1,10 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildAdviceInput, validateAdviceInput, validateAdviceResult } from "../src/advice/validate";
 import type { BuildAdviceInput, BuildAdviceResult } from "../src/advice/types";
-import { createAdviceJob, restoreAdviceRollback, waitForAdviceJob } from "../scripts/deepseek/advice.mjs";
+import { createAdviceJob, getAdviceBillingSummary, restoreAdviceRollback, waitForAdviceJob } from "../scripts/deepseek/advice.mjs";
 import { parseDeepSeekConfig } from "../scripts/deepseek/config.mjs";
 
 function input(): BuildAdviceInput {
@@ -58,7 +58,7 @@ describe("G6 structured DeepSeek advice", () => {
     expect(() => parseDeepSeekConfig({ DEEPSEEK_ENABLED: "true" })).toThrow(/API_KEY/);
     expect(() => parseDeepSeekConfig({ DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture-secret", DEEPSEEK_API_URL: "file:///tmp/deepseek" })).toThrow(/http/);
     expect(() => parseDeepSeekConfig({ DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture-secret", DEEPSEEK_TIMEOUT_MS: "999999" })).toThrow(/TIMEOUT/);
-    expect(parseDeepSeekConfig({})).toMatchObject({ enabled: false, model: "deepseek-chat", timeoutMs: 30_000 });
+    expect(parseDeepSeekConfig({})).toMatchObject({ enabled: false, model: "deepseek-v4-flash", timeoutMs: 30_000 });
   });
 
   it("builds a bounded input from the same BuildEvaluation facts", () => {
@@ -79,7 +79,7 @@ describe("G6 structured DeepSeek advice", () => {
 
   it("keeps deterministic findings when advice is disabled", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-g6-disabled-"));
-    const job = await createAdviceJob(input(), { flags: { adviceEnabled: false }, config: { enabled: false, model: "deepseek-chat" }, auditRoot: path.join(root, "events"), jobRoot: path.join(root, "jobs") });
+    const job = await createAdviceJob({ ...input(), requestId: "advice-disabled-fixture" }, { flags: { adviceEnabled: false }, config: { enabled: false, model: "deepseek-chat" }, auditRoot: path.join(root, "events"), jobRoot: path.join(root, "jobs") });
     expect(job.status).toBe("disabled");
     expect(job.deterministic.verdict).toBe("bad");
     expect((job as any).advice).toBeUndefined();
@@ -90,17 +90,25 @@ describe("G6 structured DeepSeek advice", () => {
     let calls = 0;
     const fetchImpl = async () => {
       calls += 1;
-      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(advice()) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ id: "deepseek-call-success", model: "deepseek-v4-flash", usage: { prompt_tokens: 3000, prompt_cache_hit_tokens: 1000, prompt_cache_miss_tokens: 2000, completion_tokens: 500, total_tokens: 3500, completion_tokens_details: { reasoning_tokens: 125 } }, choices: [{ message: { content: JSON.stringify(advice()) } }] }), { status: 200, headers: { "content-type": "application/json" } });
     };
-    const options = { flags: { adviceEnabled: true }, config: { enabled: true, apiKey: "secret-fixture-key", apiUrl: "https://api.deepseek.com", model: "deepseek-chat", timeoutMs: 1_000, maxTokens: 100, temperature: 0.2 }, fetchImpl, auditRoot: path.join(root, "events"), jobRoot: path.join(root, "jobs") };
+    const options = { flags: { adviceEnabled: true }, config: { enabled: true, apiKey: "secret-fixture-key", apiUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", timeoutMs: 1_000, maxTokens: 100, temperature: 0.2 }, fetchImpl, now: () => new Date("2026-08-24T00:59:00.000Z"), auditRoot: path.join(root, "events"), jobRoot: path.join(root, "jobs") };
     const first = await createAdviceJob(input(), options);
     const done = await waitForAdviceJob(first.requestId, options as never) as any;
     expect(done?.status).toBe("completed");
     expect(done?.advice?.recommendation.verdict).toBe("conditional");
+    expect(done?.billing).toMatchObject({ providerCalls: 1, promptCacheHitTokens: 1000, promptCacheMissTokens: 2000, completionTokens: 500, reasoningTokens: 125, estimatedCostCny: 0.0053 });
+    expect(done?.calls?.[0]).toMatchObject({ providerRequestId: "deepseek-call-success", status: "completed", startedAt: "2026-08-24T00:59:00.000Z", billing: { pricing: { pricingBand: { id: "off-peak" } } } });
     const second = await createAdviceJob({ ...input(), requestId: "advice-fixture-2" }, options);
     expect(second.status).toBe("completed");
     expect(calls).toBe(1);
-    const audit = JSON.parse(await readFile(path.join(root, "events", "2026-08-23.json"), "utf8"));
+    expect(second.billing).toMatchObject({ providerCalls: 0, estimatedCostCny: 0, cacheServed: true });
+    const billing = await getAdviceBillingSummary({ auditRoot: path.join(root, "events") } as never);
+    expect(billing.totals).toMatchObject({ providerCalls: 1, estimatedCostCny: 0.0053 });
+    expect(billing.byPricingBand).toEqual([expect.objectContaining({ pricingBand: "off-peak", providerCalls: 1, estimatedCostCny: 0.0053 })]);
+    expect(billing.calls[0]).toMatchObject({ callId: `${first.requestId}:1`, providerRequestId: "deepseek-call-success" });
+    const auditFile = (await readdir(path.join(root, "events"))).find((file) => file.endsWith(".json"))!;
+    const audit = JSON.parse(await readFile(path.join(root, "events", auditFile), "utf8"));
     expect(audit.events[0].responseHash).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(audit)).not.toContain("secret-fixture-key");
     const manifestPath = path.join(root, "rollback", "advice-manifest.json");
@@ -112,19 +120,21 @@ describe("G6 structured DeepSeek advice", () => {
   it("retries invalid JSON and degrades without blocking deterministic output", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-g6-invalid-"));
     let calls = 0;
-    const fetchImpl = async () => { calls += 1; return new Response(JSON.stringify({ choices: [{ message: { content: "not-json" } }] }), { status: 200 }); };
-    const first = await createAdviceJob({ ...input(), userGoal: "invalid-json-fixture" }, { flags: { adviceEnabled: true }, config: { enabled: true, apiKey: "secret", apiUrl: "https://api.deepseek.com", model: "deepseek-chat", timeoutMs: 1_000, maxTokens: 100, temperature: 0.2 }, fetchImpl, auditRoot: path.join(root, "events"), jobRoot: path.join(root, "jobs") });
+    const fetchImpl = async () => { calls += 1; return new Response(JSON.stringify({ id: `invalid-${calls}`, model: "deepseek-v4-flash", usage: { prompt_tokens: 100, prompt_cache_hit_tokens: 64, prompt_cache_miss_tokens: 36, completion_tokens: 10, total_tokens: 110 }, choices: [{ message: { content: "not-json" } }] }), { status: 200 }); };
+    const first = await createAdviceJob({ ...input(), requestId: "advice-invalid-json-fixture", userGoal: "invalid-json-fixture" }, { flags: { adviceEnabled: true }, config: { enabled: true, apiKey: "secret", apiUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", timeoutMs: 1_000, maxTokens: 100, temperature: 0.2 }, fetchImpl, now: () => new Date("2026-08-24T02:00:00.000Z"), auditRoot: path.join(root, "events"), jobRoot: path.join(root, "jobs") });
     const done = await waitForAdviceJob(first.requestId, { timeoutMs: 2_000, auditRoot: path.join(root, "events"), jobRoot: path.join(root, "jobs") } as never) as any;
     expect(done?.status).toBe("advice-unavailable");
     expect(done?.deterministic.verdict).toBe("bad");
     expect(calls).toBe(2);
+    expect(done?.billing).toMatchObject({ providerCalls: 2, pricedCalls: 2, promptCacheHitTokens: 128, promptCacheMissTokens: 72 });
+    expect(done?.calls?.every((call: { status: string }) => call.status === "failed")).toBe(true);
   });
 
   it("rejects a provider verdict that would downgrade bad", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-g6-verdict-"));
     const unsafe = advice("recommended");
     const fetchImpl = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(unsafe) } }] }), { status: 200 });
-    const first = await createAdviceJob({ ...input(), userGoal: "unsafe-verdict" }, { flags: { adviceEnabled: true }, config: { enabled: true, apiKey: "secret", apiUrl: "https://api.deepseek.com", model: "deepseek-chat", timeoutMs: 1_000, maxTokens: 100, temperature: 0.2 }, fetchImpl, auditRoot: path.join(root, "events"), jobRoot: path.join(root, "jobs") });
+    const first = await createAdviceJob({ ...input(), requestId: "advice-unsafe-verdict", userGoal: "unsafe-verdict" }, { flags: { adviceEnabled: true }, config: { enabled: true, apiKey: "secret", apiUrl: "https://api.deepseek.com", model: "deepseek-chat", timeoutMs: 1_000, maxTokens: 100, temperature: 0.2 }, fetchImpl, auditRoot: path.join(root, "events"), jobRoot: path.join(root, "jobs") });
     const done = await waitForAdviceJob(first.requestId, { timeoutMs: 2_000, auditRoot: path.join(root, "events"), jobRoot: path.join(root, "jobs") } as never) as any;
     expect(done?.status).toBe("advice-unavailable");
     expect(done?.failureStage).toBe("validation");

@@ -342,6 +342,10 @@
             <p id="advice-status" class="lab-callout" data-level="warn">AI 建议默认关闭；确定性引擎评估不依赖 DeepSeek。</p>
             <div><h4>确定性引擎判定</h4><div id="advice-deterministic"></div></div>
             <div><h4>DeepSeek 建议</h4><div id="advice-output" aria-live="polite"><p class="text-muted">点击“生成建议”后显示结构化建议；失败时保留上方确定性事实。</p></div></div>
+            <div class="advice-billing-section">
+              <div class="lab-section-head"><div><h4>Token 与费用</h4><small id="advice-billing-status">读取 billing…</small></div><button id="advice-billing-refresh" type="button" class="case-view-btn">刷新</button></div>
+              <div id="advice-billing" aria-live="polite"><p class="text-muted">正在读取本地脱敏调用审计。</p></div>
+            </div>
           </article>
         </aside>
       </div>
@@ -745,6 +749,11 @@
   #n6-lab .lab-callout { border-left: 3px solid var(--viz-series-3); padding: 9px 11px; background: color-mix(in srgb,var(--muted) 30%,transparent); font-size: 12px; }
   #n6-lab .lab-callout[data-level="warn"] { border-left-color: var(--warn); }
   #n6-lab .lab-callout[data-level="bad"] { border-left-color: var(--bad); }
+  #n6-lab .advice-billing-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid color-mix(in srgb,var(--line) 76%,transparent); }
+  #n6-lab .billing-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; margin: 8px 0; }
+  #n6-lab .billing-summary span { display: block; padding: 7px 8px; border: 1px solid var(--line); background: color-mix(in srgb,var(--muted) 22%,transparent); font-size: 11px; }
+  #n6-lab .billing-summary b { display: block; margin-top: 2px; font-size: 13px; color: var(--ink); }
+  #n6-lab .billing-table { min-width: 840px; font-size: 11px; }
   #n6-lab .backplane-map { display: grid; grid-template-columns: 1fr 28px 1fr 1fr; gap: 8px; align-items: center; margin: 14px 0; }
   #n6-lab .psu-node { grid-row: 1 / 5; border: 1px solid var(--viz-series-1); padding: 12px; }
   #n6-lab .wire { height: 2px; background: var(--viz-series-5); }

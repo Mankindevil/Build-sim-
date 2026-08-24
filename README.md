@@ -36,10 +36,12 @@ DeepSeek 建议层使用服务端环境变量管理。需要启用时，先复�
 
 ```bash
 cp .env.example .env.local
-# 编辑 .env.local：设置 DEEPSEEK_ENABLED=true 和 DEEPSEEK_API_KEY
+# 编辑 .env.local：设置 DEEPSEEK_ENABLED=true、BUILD_SIM_ADVICE_ENABLED=true 和 DEEPSEEK_API_KEY
 ```
 
 `DEEPSEEK_API_KEY`、`DEEPSEEK_API_URL`、模型、超时、token 上限和温度都由 `.env.local` 管理。不要使用 `VITE_` 前缀，也不要把 `.env.local` 提交到 Git；浏览器只接收结构化建议结果，不会读取 key。
+
+每次真实 provider 调用会从 DeepSeek 响应 `usage` 记录输入缓存命中、输入缓存未命中、输出、推理和总 token，并按带版本和来源的官方 CNY 单价快照计算估算费用。分时计价以请求开始时的北京时间为准：周一至周五 09:00–12:00、14:00–18:00 是高峰，其余时段（含周末全天）为空闲；每条调用记录都会保存命中的计费时段、当时单价与定价版本。页面“Token 与费用”可查看总计、分时段汇总和逐次调用明细，服务端也提供 `GET /api/advice/billing?limit=100`。审计记录不保存 key、prompt 或原始模型输出；本地 advice cache 命中不会重复计费。费用是基于 usage 的本地估算，不等同于 DeepSeek 账户余额账单。
 
 Opens the N6 Build Lab. Change PSU/cooler/GPU/etc.; FIT + wiring update from the engine; appearance gallery follows SKU.
 
