@@ -1,8 +1,10 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentRuntime, AgentRuntimeError } from "../agent/runtime";
 import { DeepSeekProviderAdapter } from "../agent/providers/deepseek";
 import { AgentToolRegistry } from "../agent/tool-registry";
+import { AgentSkillLoader } from "../agent/skill-loader";
 import { evaluateBuildAuthoritatively, parseAuthoritativeBuildConfig } from "./evaluation-service";
 import { FileAgentSessionStore } from "./file-session-store";
 import { loadAgentRuntimeConfig } from "./agent-env";
@@ -80,6 +82,10 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
     send(res, 200, { tools: runtime.getTools() });
     return true;
   }
+  if (route === "GET /api/agent/skills") {
+    send(res, 200, { skills: await runtime.getSkills() });
+    return true;
+  }
   if (route === "POST /api/agent/sessions") {
     const body = await readJson(req) as { provider?: "deepseek" | "claude"; model?: string };
     send(res, 201, await runtime.createSession(body));
@@ -92,10 +98,11 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
   }
   const messageMatch = url.pathname.match(/^\/api\/agent\/sessions\/([^/]+)\/messages$/);
   if (req.method === "POST" && messageMatch?.[1]) {
-    const body = await readJson(req) as { content?: string; buildConfig?: unknown };
+    const body = await readJson(req) as { content?: string; buildConfig?: unknown; skillId?: string };
     const result = await runtime.startRun(decodeURIComponent(messageMatch[1]), {
       content: body.content ?? "",
       ...(body.buildConfig !== undefined ? { buildConfig: parseAuthoritativeBuildConfig(body.buildConfig) } : {}),
+      ...(body.skillId !== undefined ? { skillId: body.skillId } : {}),
     });
     send(res, 202, result);
     return true;
@@ -171,10 +178,16 @@ const isMain = process.argv[1] !== undefined && fileURLToPath(import.meta.url) =
 if (isMain) {
   void (async () => {
     const config = await loadAgentRuntimeConfig();
+    const toolRegistry = new AgentToolRegistry(createBuildSimTools());
     const runtime = new AgentRuntime(
       [new DeepSeekProviderAdapter(config.deepseek)],
       new FileAgentSessionStore(),
-      { maxTokens: config.deepseek.maxTokens, temperature: config.deepseek.temperature, toolRegistry: new AgentToolRegistry(createBuildSimTools()) },
+      {
+        maxTokens: config.deepseek.maxTokens,
+        temperature: config.deepseek.temperature,
+        toolRegistry,
+        skillLoader: new AgentSkillLoader(path.resolve("skills"), toolRegistry),
+      },
     );
     const port = config.port ?? DEFAULT_PORT;
     createAgentServer({ runtime }).listen(port, HOST, () => {

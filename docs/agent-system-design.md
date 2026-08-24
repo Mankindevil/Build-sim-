@@ -1,6 +1,6 @@
 # Build Sim Agent System
 
-Status: A0 contract baseline. This document defines the target and gates; it is not implementation evidence.
+Status: A0-A4 implemented and gated. A5-A7 remain target work; their plan text is not implementation evidence.
 
 ## Goal
 
@@ -47,13 +47,15 @@ Write tools are not exposed in the initial release.
 
 Skill metadata is discovered first. Instructions are loaded only after activation and included in the skill definition hash.
 
+A4 implements a strict frontmatter parser, manifest validation against the live Tool registry, directory/id matching, context-budget enforcement, definition-integrity checks, metadata-only `/api/agent/skills` discovery, and per-run activation. An activated Skill contributes its instructions to the system context and restricts both provider-visible Tool definitions and dispatcher authorization to `allowedTools`. All four built-in Skills are read-only.
+
 ## Delivery gates
 
 - A0: contracts, design, baseline and contract tests.
 - A1: server/browser evaluation parity.
 - A2: persistent multi-turn DeepSeek streaming chat with cancellation and usage. Implemented with provider fixtures and local disabled-provider HTTP/SSE smoke; live provider behavior remains unverified without an enabled key.
 - A3: registry, schema validation, dispatcher, budgets and seven read-only tools.
-- A4: lazy Skill loader and four built-in skills.
+- A4: lazy Skill loader and four built-in skills. Implemented with manifest/hash/integrity tests and runtime enforcement of `allowedTools`.
 - A5: real chat UI and browser end-to-end flow.
 - A6: audit, redaction, definition hashes and write-approval contract; writes remain disabled.
 - A7: Claude fixture adapter contract, full regression, browser QA, secret scan, documentation and implementation matrix.
