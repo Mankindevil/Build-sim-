@@ -16,6 +16,8 @@
 | A5 聊天 UI | 已实现（fixture E2E） | `6f4b022db60768d62065d9a94e27828cce9a3f13` | 模型/Skill 选择、当前配置、多轮/SSE/Tool/usage/取消、桌面与 390px 浏览器 QA |
 | A6 审计与审批边界 | 已实现 | `d035e895f289ce3304007e015086dcbed2a99997` | `0600` 原子审计、内容 hash、脱敏、完整性校验、只读审计接口、写 Tool 硬禁用 |
 | A7 Claude 与最终交付 | 已实现（fixture） | 本文件所在最终阶段提交 | Claude Messages SSE/Tool/usage 适配、Provider 专属预算、最终回归与边界说明 |
+| C0-C6 官网发现与治理补齐 | 已实现 | `25cbaa6`…`e7124a7` | Registry、provider-neutral discovery、SearXNG fixture、动态页安全、proposal、可回滚补齐、Agent approval |
+| C7 完整交付门禁 | 已实现（live 边界见下） | 本文件所在最终阶段提交 | 全量/legacy/browser/secret/diff 门禁、4 类官网只读样本、执行报告 |
 
 ## 当前能力
 
@@ -25,13 +27,15 @@
 | Claude API 适配 | 是，显式启用后注册 | 只完成官方协议映射与 fixture 测试；未做 live Claude 请求 |
 | Provider 扩展 | 是 | 新 Provider 必须实现同一个 `ProviderAdapter`，不得把 wire format 泄漏进 Runtime/UI |
 | 权威装机事实 | 是 | 仅服务端 `BuildEvaluation` 可给出确定性结论；模型不能覆盖 bad/unknown |
-| 只读 Tool | 是，7 个 | 外部搜索的 3 个 Tool 还要求本机 `127.0.0.1:5174` 服务运行 |
+| read/external-read Tool | 是，8 个 | 4 个 external-read Tool 要求本机 Price/Catalog 服务运行；SearXNG 可选且本机 live 未验证 |
 | Skill | 是，4 个 | 当前按用户选择激活一个 Skill；未做模型自动路由 |
 | 流式 UI | 是 | Agent 服务不可用时聊天禁用，确定性模拟器继续工作 |
 | 会话持久化 | 是 | 会话为恢复聊天而保存正文；只在本地 Git-ignore 目录，权限 `0600` |
 | 运行审计 | 是 | 审计只保存 hash/usage/ids/终态，不保存 prompt 和原始 Tool/模型正文 |
-| 写 Tool | 否 | 只有未来审批契约；dispatcher 无条件返回 `write_tools_disabled` |
+| 写 Tool | 是，1 个 | 仅 `enrich_official_catalog`；candidate id + expected hash；必须精确审批，且仍受 catalog policy/backup/rollback 约束 |
 | 自动采购/修改配置 | 否 | 没有下单、接受候选、记录价格或修改配置的 Agent 写入口 |
+| 自动信任新域名 | 否 | 只能生成/列出 proposal；expected-hash 人工治理后才能更新 registry |
+| trusted exact-MPN 自动补齐 | 是，默认关闭 | draft 与正式写入由独立服务端 flags 控制；正式 catalog 在本次验收中写入 0 |
 
 ## Provider 注册与密钥边界
 
@@ -60,3 +64,12 @@ A7 于 2026-08-24 核对 Anthropic 官方文档：Messages stream 按 `message_s
 - 真实本地浏览器 fixture E2E：页面同时发现 DeepSeek 与 Claude，切换 Claude 后完成 Skill 激活、`get_build_evaluation`、流式文本、usage、持久化审计 hash；控制台 0 error。fixture 文案明确声明不代表 live Provider。
 - 浏览器生成的单个 session/audit 测试文件已按精确路径清理，未删除其他本地数据。
 - A7 独立提交、推送和远端 SHA 一致性仍以最终交付回复为准。
+
+2026-08-24 的 C7 提交前结果：
+
+- 完整 Vitest：42 个文件、315 项通过；其中 C7 单测证明 exact-MPN discovery/inspect/enrich/`BuildEvaluation`/rollback 闭环。
+- TypeScript、浏览器 production build、Agent SSR build、legacy model 85 assertions、legacy static 23 assertions 通过。
+- G1、G7 和 governed catalog Agent 三个真实 Chromium smoke 通过；catalog smoke 使用明确标记的本地事件 fixture，不代表 live Provider/SearXNG。
+- 真实只读样本覆盖 Thermalright 静态页、ASUS 动态页、Seagate 文本 PDF、Intel 日本地区域名；四者当次均 HTTP 200，但字段结果均为 `partial`，正式 catalog 写入 0。
+- 本机 SearXNG 连接失败；live DeepSeek/Claude、验证码/登录墙、扫描 PDF 和 Crawl4AI 未验证。
+- secret scan 0 findings、`git diff --check` 通过；C0-C7 本地完成，未获 push 授权。

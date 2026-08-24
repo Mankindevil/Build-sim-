@@ -355,6 +355,16 @@ Every one of these is returned in `ThermalResult.assumptions` with its own evide
 `ThermalResult.evidence` degrades to the weakest input — a bottom-PSU build is `unknown`
 overall, by construction.
 
+## Governed official-catalog enrichment
+
+Official-domain trust is data, not a search-engine or model judgment. `data/catalog/official-domains.json` records normalized brands, aliases, exact hostnames, regional hosts, trust status and governance metadata. A URL is eligible for official extraction only after canonicalization, HTTPS validation, registry matching, every-redirect/final-URL revalidation and DNS resolution that excludes localhost/private addresses. Browser fallback applies the same checks to the main document and blocks private or unsafe subresources.
+
+Discovery provider title/snippet/rank values are candidate evidence only. They never become `SkuRecord` fields. Official fields may come from deterministic HTML metadata, JSON-LD, specification tables, an official text PDF, or a bounded rendered page. Binary PDFs are first decoded through the pinned server-side `pdf-parse@2.4.5`; both source bytes and extracted text are size-limited, while the content hash remains bound to the original bytes. Every accepted field retains its source URL, extraction method and retrieval metadata; conflicting or missing required fields remain draft/partial/blocked rather than being filled from snippets or model prose. Scanned PDFs without a usable text layer are not automatically promoted.
+
+Unknown hosts create idempotent `DomainProposal` records. Approval or rejection is bound to the proposal's expected hash, and a registry mutation uses atomic replacement plus a rollback manifest. Automatic catalog enrichment is limited to an already inspected trusted exact-MPN candidate with an immutable candidate hash. It can produce a draft by policy; a formal catalog write additionally requires the explicit auto-accept and write flags, field provenance, no conflicts, a backup and rollback data. `CATALOG_AUTO_TRUST_NEW_DOMAINS` is intentionally unsupported.
+
+The Agent cannot author catalog values. `enrich_official_catalog` accepts only `candidateId` and `expectedHash`, is declared `effect: write`, and requires an out-of-band approval bound to Tool definition, session, canonical input hash and idempotency key. UI summaries keep search candidates, verified inspection, domain proposals, drafts and accepted catalog changes as separate states.
+
 ## Imported local references
 
 - `data/cases/jonsbo-n6/jonsbo-n6-manual.pdf`

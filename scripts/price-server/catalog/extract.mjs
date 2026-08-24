@@ -45,7 +45,7 @@ function addField(fields, conflicts, fetch, field, value, locator, snippet, sour
     sourceUrl: fetch.finalUrl,
     sourceKind,
     retrievedAt: fetch.retrievedAt,
-    extractor: "generic-official-html-v1",
+    extractor: sourceKind === "official-pdf" ? "generic-official-pdf-text-v1" : sourceKind === "official-rendered-page" ? "generic-official-rendered-html-v1" : "generic-official-html-v1",
     locator,
     snippet: String(snippet ?? "").slice(0, 240),
     confidence: 1,
@@ -95,8 +95,8 @@ export function extractOfficialHtml(fetch, { sourceKind = "official-page" } = {}
  * Conservative text-PDF extraction hook. The fetch layer keeps the response
  * hash and source URL; this parser only accepts explicit labelled rows from
  * text-bearing PDFs and never infers values from prose or neighbouring models.
- * Binary/scanned PDFs therefore remain partial/unknown until a dedicated
- * vendor adapter or browser fallback supplies text.
+ * The fetch layer decodes a bounded binary text layer first. Scanned PDFs and
+ * documents without explicit labelled rows remain partial/unknown.
  */
 export function extractOfficialPdf(fetch, { sourceKind = "official-pdf" } = {}) {
   const fields = [];

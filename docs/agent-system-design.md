@@ -1,6 +1,6 @@
 # Build Sim Agent System
 
-Status: A0-A7 implemented. Final gate evidence and unverified live-provider boundaries are listed in `agent-implementation-matrix.md`.
+Status: A0-A7 and official-catalog enrichment C0-C7 implemented locally. Final gate evidence and unverified live-provider boundaries are listed in `agent-implementation-matrix.md`.
 
 ## Goal
 
@@ -12,7 +12,7 @@ Build a provider-neutral, auditable PC-build agent. DeepSeek is the first live p
 2. The server recomputes `BuildEvaluation` from a validated `BuildConfig`; model-authored or browser-authored verdicts are never trusted.
 3. Models may explain, compare, prioritize, and propose. They cannot downgrade `bad`, fill `unknown`, invent numbers, or silently mutate platform state.
 4. Tools are typed atomic capabilities. Skills are lazy-loaded instructions that can only call their declared `allowedTools`.
-5. Read tools are the initial release. Every future write tool requires an out-of-band approval token, idempotency key, audit entry, backup, and rollback data.
+5. The single catalog write Tool requires an out-of-band approval token, exact Tool/session/input binding, idempotency key, audit entry, backup, and rollback data. No generic model-authored write surface exists.
 6. Tool inputs reject additional properties. Tool results are bounded, redacted, provenance-labelled, and never executed as instructions.
 7. Every provider turn and tool call is constrained by time, count, repetition, result-size, and cancellation budgets.
 
@@ -30,11 +30,13 @@ Build a provider-neutral, auditable PC-build agent. DeepSeek is the first live p
 | `get_price_snapshot` | read | implemented A3 |
 | `search_official_catalog` | external-read | implemented A3 |
 | `inspect_catalog_candidate` | external-read | implemented A3 |
+| `list_official_domain_proposals` | external-read | implemented C6 |
+| `enrich_official_catalog` | write, approval required | implemented C6 |
 | `search_price_candidates` | external-read | implemented A3 |
 
-A3 implementation registers these seven Tools as read-only, exposes their definition hashes in `/api/agent/tools`, and applies strict input schemas, per-Tool timeouts/result budgets, per-run turn/call/repetition budgets, cancellation, and structured error results. External-read Tools connect only to the fixed local catalog/price service and retain candidate/unaudited labels.
+A3 registered the original seven read/external-read Tools. C6 adds proposal listing and one narrowly typed write Tool. `enrich_official_catalog` accepts only an inspected candidate id and its immutable expected hash; it cannot submit a URL, trust decision, field name or field value. The dispatcher verifies a short-lived approval envelope against the Tool definition hash, session id, canonical input hash and idempotency key before execution, and successful replay returns the cached result. Approval tokens stay in run memory and are not persisted in sessions or forwarded to a Provider.
 
-Write tools are not exposed in the initial release.
+External-read Tools connect only to the fixed loopback catalog/price service and retain candidate/unaudited labels. The underlying catalog service separately enforces trusted-domain, HTTPS/final-URL/DNS/SSRF, exact-MPN, required-field, conflict, provenance, feature-flag, atomic backup and rollback gates. A proposed domain cannot pass inspection as trusted merely because a model or discovery provider returned it.
 
 ## Initial skills
 
@@ -42,12 +44,12 @@ Write tools are not exposed in the initial release.
 |---|---|
 | `build-diagnosis` | evaluation and SKU evidence |
 | `upgrade-advisor` | evaluation, comparison, SKU and price snapshots |
-| `shopping-research` | official catalog and price candidates |
+| `shopping-research` | official discovery, proposal explanation, governed enrichment and price candidates |
 | `assembly-and-wiring` | deterministic evaluation projection |
 
 Skill metadata is discovered first. Instructions are loaded only after activation and included in the skill definition hash.
 
-A4 implements a strict frontmatter parser, manifest validation against the live Tool registry, directory/id matching, context-budget enforcement, definition-integrity checks, metadata-only `/api/agent/skills` discovery, and per-run activation. An activated Skill contributes its instructions to the system context and restricts both provider-visible Tool definitions and dispatcher authorization to `allowedTools`. All four built-in Skills are read-only.
+A4 implements a strict frontmatter parser, manifest validation against the live Tool registry, directory/id matching, context-budget enforcement, definition-integrity checks, metadata-only `/api/agent/skills` discovery, and per-run activation. An activated Skill contributes its instructions to the system context and restricts both provider-visible Tool definitions and dispatcher authorization to `allowedTools`. C6 explicitly grants only `shopping-research@1.1.0` access to the catalog write Tool; the other Skills remain read-only.
 
 ## Delivery gates
 

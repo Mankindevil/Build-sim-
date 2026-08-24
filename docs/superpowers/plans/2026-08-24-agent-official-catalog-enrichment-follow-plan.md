@@ -676,3 +676,15 @@ test(catalog): close official enrichment delivery gates
 - 全门禁：完整 Vitest 41 文件/313 项、typecheck、build、legacy model/static、secret scan 220 files/0 findings、`git diff --check` 均通过。
 - 未验证：本阶段未用真实模型或真实 catalog 写入；approval fixture 证明契约与本地 Tool 编排，不代表 live Provider。
 - 回滚：回滚本阶段独立提交；catalog 写行为本身仍使用 C5 rollback manifest。
+
+### C7（2026-08-24）
+
+- 状态：已完成（本地，未推送）。
+- 闭环：新增 exact-MPN discovery → inspect → expected-hash enrichment → 临时 catalog → `BuildEvaluation` → rollback 测试；正式 catalog 自动写入 0。
+- PDF：live 样本发现旧 fixture 不代表真实二进制解析，补入 `pdf-parse@2.4.5` 的受限文本层提取和真实 ASUS manual 回归；扫描 PDF/OCR 仍不在范围。
+- 浏览器：G1、G7、C7 governed catalog Agent 三个 Chromium smoke 通过；C7 fixture 明确区分候选、官方检查、proposal、draft、rollback 和审计，不冒充 live Provider/SearXNG。
+- Live 官网：Thermalright 静态页、ASUS 动态页（触发 Playwright）、Seagate 官方 PDF、Intel 日本地区域名均 HTTP 200；四者均因必需字段未完整而保持 `partial`，未进入自动接受。
+- 外部条件：本机 SearXNG JSON endpoint 连接失败（exit 7）；live DeepSeek/Claude、验证码/登录墙、扫描 PDF、Crawl4AI 未验证。
+- 全门禁：完整 Vitest 42 文件/315 项、typecheck、build、legacy model/static、三个 browser smoke、secret scan 0 findings、`git diff --check` 均通过。
+- 数据：37 SKU、21 品牌标签、catalog 引用 13 个唯一官网 hostname，blocked=0，registry 覆盖率 100%。
+- Git：C0-C7 均为独立本地提交；无本任务 push 授权，因此不推送，远端仍为起始 SHA `1e4980ae73c975cf978521e5d8aba6e5da346f17`。

@@ -5,7 +5,11 @@ async function readLimited(response, maxBytes) {
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) throw new Error("official response exceeds size limit");
   const reader = response.body?.getReader();
-  if (!reader) return await response.text();
+  if (!reader) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.byteLength > maxBytes) throw new Error("official response exceeds size limit");
+    return buffer;
+  }
   const chunks = [];
   let size = 0;
   while (true) {
@@ -18,7 +22,23 @@ async function readLimited(response, maxBytes) {
     }
     chunks.push(value);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
+}
+
+export async function extractPdfText(buffer, options = {}) {
+  const maxBytes = options.maxBytes ?? DEFAULT_FETCH_LIMITS.maxBytes;
+  const { PDFParse } = options.pdfModule ?? await import("pdf-parse");
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  try {
+    const result = await parser.getText();
+    const text = String(result?.text ?? "");
+    if (Buffer.byteLength(text) > maxBytes) throw new Error("official PDF extracted text exceeds size limit");
+    return text;
+  } catch (error) {
+    throw new Error(`official PDF text extraction failed: ${error?.message ?? error}`);
+  } finally {
+    await parser.destroy();
+  }
 }
 
 export async function fetchOfficial(rawUrl, options = {}) {
@@ -50,15 +70,19 @@ export async function fetchOfficial(rawUrl, options = {}) {
   }
   if (!response) throw new Error("official fetch returned no response");
   if ([301, 302, 303, 307, 308].includes(response.status)) throw new Error("too many redirects");
-  const body = await readLimited(response, limits.maxBytes);
+  const rawBody = await readLimited(response, limits.maxBytes);
+  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+  const body = contentType.includes("pdf")
+    ? await extractPdfText(rawBody, { maxBytes: limits.maxBytes })
+    : rawBody.toString("utf8");
   return {
     requestedUrl: rawUrl,
     finalUrl: current.toString(),
     status: response.status,
-    contentType: response.headers.get("content-type")?.split(";")[0]?.trim() ?? "",
+    contentType,
     retrievedAt,
     body,
-    contentHash: crypto.createHash("sha256").update(body).digest("hex"),
+    contentHash: crypto.createHash("sha256").update(rawBody).digest("hex"),
     ...(response.headers.get("etag") ? { etag: response.headers.get("etag") } : {}),
     ...(response.headers.get("last-modified") ? { lastModified: response.headers.get("last-modified") } : {}),
     redirects,

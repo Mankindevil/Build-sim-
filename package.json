@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:g1:browser": "node scripts/g1-browser-smoke.mjs",
     "test:g7:browser": "node scripts/g7-browser-smoke.mjs",
+    "test:c7:browser": "node scripts/c7-catalog-agent-browser-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "price:refresh": "node scripts/price-refresh/refresh.mjs",
     "price:search": "node scripts/price-refresh/search.mjs",
@@ -33,5 +34,8 @@
     "typescript": "^5.9.2",
     "vite": "^7.1.3",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "pdf-parse": "2.4.5"
   }
 }

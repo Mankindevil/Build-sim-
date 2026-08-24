@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { normalizeModelQuery } from "../src/catalog-search/normalize";
 import { extractOfficialHtml, extractOfficialPdf } from "../scripts/price-server/catalog/extract.mjs";
-import { fetchOfficial } from "../scripts/price-server/catalog/fetch.mjs";
+import { extractPdfText, fetchOfficial } from "../scripts/price-server/catalog/fetch.mjs";
 import { validateOfficialUrl, validateRedirect } from "../scripts/price-server/catalog/security.mjs";
 import { getJob, queueSearch, waitForJob } from "../scripts/price-server/catalog/service.mjs";
 import { OFFICIAL_ADAPTERS, adapterForUrl } from "../scripts/price-server/catalog/adapters.mjs";
@@ -78,6 +78,14 @@ describe("G3 official extraction and provenance", () => {
     const extracted = extractOfficialPdf({ ...fetchResult, contentType: "application/pdf", body: "MPN: EX-PDF-1\nLength: 244 mm" });
     expect(extracted.fields.map((field) => field.field)).toEqual(["mpn", "dims.lengthMm"]);
     expect(extracted.fields.find((field) => field.field === "dims.lengthMm")?.sourceKind).toBe("official-pdf");
+    expect(extracted.fields.every((field) => field.extractor === "generic-official-pdf-text-v1")).toBe(true);
+  });
+
+  it("extracts a bounded text layer from a real binary official PDF", async () => {
+    const bytes = await readFile(new URL("../data/boards/asus-w680m-ace-se/asus-w680m-manual.pdf", import.meta.url));
+    const text = await extractPdfText(bytes, { maxBytes: 5_000_000 });
+    expect(text).toMatch(/W680M-ACE\s+SE/i);
+    expect(Buffer.byteLength(text)).toBeLessThan(5_000_000);
   });
 });
 
