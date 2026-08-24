@@ -1,6 +1,6 @@
 # Build Sim Agent System
 
-Status: A0-A4 implemented and gated. A5-A7 remain target work; their plan text is not implementation evidence.
+Status: A0-A5 implemented and gated. A6-A7 remain target work; their plan text is not implementation evidence.
 
 ## Goal
 
@@ -56,7 +56,7 @@ A4 implements a strict frontmatter parser, manifest validation against the live 
 - A2: persistent multi-turn DeepSeek streaming chat with cancellation and usage. Implemented with provider fixtures and local disabled-provider HTTP/SSE smoke; live provider behavior remains unverified without an enabled key.
 - A3: registry, schema validation, dispatcher, budgets and seven read-only tools.
 - A4: lazy Skill loader and four built-in skills. Implemented with manifest/hash/integrity tests and runtime enforcement of `allowedTools`.
-- A5: real chat UI and browser end-to-end flow.
+- A5: real chat UI and browser end-to-end flow. Implemented with model/Skill selection, current BuildConfig snapshots, persistent sessions, SSE text/Tool/usage events, cancellation, disabled-service handling, desktop/mobile QA, and a local DeepSeek-protocol fixture. The fixture is not live-provider evidence.
 - A6: audit, redaction, definition hashes and write-approval contract; writes remain disabled.
 - A7: Claude fixture adapter contract, full regression, browser QA, secret scan, documentation and implementation matrix.
 

@@ -22,6 +22,7 @@ import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 import n6Routing from "../../data/cases/jonsbo-n6/routing.json";
 import v1RuntimeUrl from "./v1-runtime.js?url";
 import { initAdvicePanel } from "./advice-panel";
+import { initAgentPanel } from "./agent-panel";
 import { buildAdviceInput } from "../advice/validate";
 
 let catalog = loadBundledCatalog();
@@ -919,6 +920,7 @@ async function boot(): Promise<void> {
 
   await initPricePanel({ catalog, onAudited: () => reapplyLocalPrices() });
   initAdvicePanel({ getInput: adviceInput });
+  await initAgentPanel({ getBuildConfig: configFromDom });
 }
 
 void boot();

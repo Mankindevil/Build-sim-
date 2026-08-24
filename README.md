@@ -55,6 +55,8 @@ npm run agent:serve
 
 内置 Skill 位于 `skills/*/SKILL.md`：`build-diagnosis`、`upgrade-advisor`、`shopping-research`、`assembly-and-wiring`。目录接口只返回 manifest 和定义哈希；正文仅在消息请求显式传入 `skillId` 后加载进该次运行的系统上下文。Skill 的 `allowedTools` 同时限制模型可见的 Tool 定义与服务端实际派发，模型即使输出越权调用也只会得到结构化 `tool_not_allowed` 结果。
 
+“装机预览”页包含 Provider-neutral Agent 聊天面板，可选择服务端模型与 Skill、保持多轮会话、随每条消息提交当前 BuildConfig、显示流式文本、Skill/Tool 定义哈希、结构化 Tool 结果、usage，并支持取消和新建会话。服务不可用时面板会保持禁用并明确提示，不影响确定性模拟器。`npm run agent:fixture` 只用于本地 DeepSeek SSE 协议和浏览器全链路测试，返回内容明确标注为 fixture，不能作为真实 DeepSeek 可用性证据。
+
 Opens the N6 Build Lab. Change PSU/cooler/GPU/etc.; FIT + wiring update from the engine; appearance gallery follows SKU.
 
 ```bash

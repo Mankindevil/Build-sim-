@@ -349,6 +349,32 @@
           </article>
         </aside>
       </div>
+      <section class="card agent-card" aria-labelledby="agent-title" data-testid="agent-panel">
+        <div class="lab-section-head agent-head">
+          <div><p class="lab-kicker">AGENT CHAT · PROVIDER NEUTRAL</p><h3 id="agent-title">装机 Agent</h3><p id="agent-status" class="agent-status" data-level="warn" aria-live="polite">正在连接本地 Agent 服务…</p></div>
+          <button id="agent-new-session" type="button" class="case-view-btn">新建会话</button>
+        </div>
+        <div class="agent-controls">
+          <label>模型<select id="agent-model" class="form-select" aria-label="Agent 模型"><option>读取模型…</option></select></label>
+          <label>Skill<select id="agent-skill" class="form-select" aria-label="Agent Skill"><option>读取 Skills…</option></select></label>
+          <p>浏览器只连接本地服务；API key 不进入页面。当前配置会随每条消息在服务端重新校验。</p>
+        </div>
+        <div class="agent-layout">
+          <div id="agent-transcript" class="agent-transcript" aria-live="polite" aria-label="Agent 对话">
+            <div class="agent-message agent-message-notice" data-role="notice"><span class="agent-message-role">运行事件</span><div class="agent-message-body">新会话会绑定当前模型；每条消息都会附带当前 BuildConfig 快照。</div></div>
+          </div>
+          <aside class="agent-run-log" aria-label="Agent 运行审计摘要">
+            <h4>本次运行</h4>
+            <ul id="agent-events"></ul>
+            <p id="agent-usage">尚无 token usage</p>
+          </aside>
+        </div>
+        <form id="agent-form" class="agent-composer">
+          <label for="agent-input">消息</label>
+          <textarea id="agent-input" class="form-control" rows="3" maxlength="20000" placeholder="例如：诊断当前配置最先需要解决的阻断项。Cmd/Ctrl + Enter 发送。"></textarea>
+          <div><button id="agent-cancel" type="button" class="case-view-btn" disabled>取消</button><button id="agent-send" type="submit">发送</button></div>
+        </form>
+      </section>
       <section class="card product-reference" aria-labelledby="product-reference-title">
         <div class="lab-section-head"><div><p class="lab-kicker">OFFICIAL APPEARANCE</p><h3 id="product-reference-title">真实产品外观与当前部件</h3></div><span>官方产品图 ≠ 官方 CAD</span></div>
         <div id="product-gallery" class="product-grid" aria-live="polite"></div>
@@ -750,6 +776,30 @@
   #n6-lab .lab-callout[data-level="warn"] { border-left-color: var(--warn); }
   #n6-lab .lab-callout[data-level="bad"] { border-left-color: var(--bad); }
   #n6-lab .advice-billing-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid color-mix(in srgb,var(--line) 76%,transparent); }
+  #n6-lab .agent-card { margin-top: 14px; }
+  #n6-lab .agent-head .agent-status { margin: 2px 0 0; font-size: 12px; }
+  #n6-lab .agent-controls { display: grid; grid-template-columns: minmax(190px,.7fr) minmax(220px,.8fr) minmax(260px,1.5fr); gap: 10px 14px; align-items: end; padding: 12px 0; border-block: 1px solid var(--border); }
+  #n6-lab .agent-controls label { display: grid; gap: 5px; color: var(--muted-foreground); font-size: 11px; }
+  #n6-lab .agent-controls p { margin: 0; color: var(--muted-foreground); font-size: 11px; }
+  #n6-lab .agent-layout { display: grid; grid-template-columns: minmax(0,2fr) minmax(220px,.7fr); gap: 12px; margin-top: 12px; }
+  #n6-lab .agent-transcript { min-height: 250px; max-height: 440px; overflow: auto; display: grid; align-content: start; gap: 9px; padding: 12px; border: 1px solid var(--border); background: color-mix(in srgb,var(--background) 78%,transparent); }
+  #n6-lab .agent-message { display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 8px; max-width: 90%; }
+  #n6-lab .agent-message-user { justify-self: end; grid-template-columns: 32px minmax(0,1fr); }
+  #n6-lab .agent-message-role { color: var(--muted-foreground); font-size: 10px; padding-top: 7px; }
+  #n6-lab .agent-message-body { white-space: pre-wrap; border: 1px solid var(--border); padding: 8px 10px; background: var(--card); font-size: 12px; line-height: 1.55; }
+  #n6-lab .agent-message-user .agent-message-body { border-color: color-mix(in srgb,var(--viz-series-1) 55%,var(--border)); background: color-mix(in srgb,var(--viz-series-1) 10%,var(--card)); }
+  #n6-lab .agent-message-notice { max-width: 100%; opacity: .82; }
+  #n6-lab .agent-run-log { border-left: 1px solid var(--border); padding-left: 12px; }
+  #n6-lab .agent-run-log h4 { margin: 0 0 8px; }
+  #n6-lab .agent-run-log ul { margin: 0; padding-left: 17px; font-size: 11px; }
+  #n6-lab .agent-run-log li { margin-bottom: 6px; }
+  #n6-lab .agent-run-log p { margin: 10px 0 0; color: var(--muted-foreground); font-size: 10px; }
+  #n6-lab .agent-composer { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 9px; align-items: end; margin-top: 12px; }
+  #n6-lab .agent-composer > label { align-self: start; padding-top: 8px; color: var(--muted-foreground); font-size: 11px; }
+  #n6-lab .agent-composer textarea { resize: vertical; min-height: 70px; }
+  #n6-lab .agent-composer > div { display: flex; gap: 6px; }
+  #n6-lab .agent-composer button { min-height: 36px; }
+  #n6-lab .agent-composer button:disabled { opacity: .5; cursor: not-allowed; }
   #n6-lab .billing-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; margin: 8px 0; }
   #n6-lab .billing-summary span { display: block; padding: 7px 8px; border: 1px solid var(--line); background: color-mix(in srgb,var(--muted) 22%,transparent); font-size: 11px; }
   #n6-lab .billing-summary b { display: block; margin-top: 2px; font-size: 13px; color: var(--ink); }
@@ -809,7 +859,7 @@
   #n6-lab tr.matrix-invalid td { color: var(--bad); }
   #n6-lab .status-ok { color: var(--ok); } #n6-lab .status-warn { color: var(--warn); } #n6-lab .status-bad { color: var(--bad); }
   @media (max-width: 1000px) { #n6-lab .lab-control-grid { grid-template-columns: repeat(3,1fr); } #n6-lab .lab-kpis { grid-template-columns: repeat(3,1fr); } #n6-lab .lab-overview-grid { grid-template-columns: 1fr; } }
-  @media (max-width: 736px) { #n6-lab .lab-hero, #n6-lab .lab-two-col, #n6-lab .lab-wiring-grid, #n6-lab .lab-price-head { grid-template-columns: 1fr; } #n6-lab .lab-control-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } #n6-lab .gpu-custom-fields { grid-template-columns: repeat(2,minmax(0,1fr)); } #n6-lab .accessory-grid { grid-template-columns: repeat(2,1fr); } #n6-lab .lab-check-grid { grid-template-columns: 1fr; } #n6-lab .spatial-data-strip { grid-template-columns: repeat(2,minmax(0,1fr)); } #n6-lab .spatial-help { position: static; max-width: none; justify-content: flex-start; border-width: 1px 0 0; } #n6-lab .reference-toolbar { align-items: stretch; flex-direction: column; } }
+  @media (max-width: 736px) { #n6-lab .lab-hero, #n6-lab .lab-two-col, #n6-lab .lab-wiring-grid, #n6-lab .lab-price-head, #n6-lab .agent-layout, #n6-lab .agent-controls { grid-template-columns: 1fr; } #n6-lab .lab-control-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } #n6-lab .gpu-custom-fields { grid-template-columns: repeat(2,minmax(0,1fr)); } #n6-lab .accessory-grid { grid-template-columns: repeat(2,1fr); } #n6-lab .lab-check-grid { grid-template-columns: 1fr; } #n6-lab .spatial-data-strip { grid-template-columns: repeat(2,minmax(0,1fr)); } #n6-lab .spatial-help { position: static; max-width: none; justify-content: flex-start; border-width: 1px 0 0; } #n6-lab .reference-toolbar { align-items: stretch; flex-direction: column; } #n6-lab .agent-run-log { border-left: 0; border-top: 1px solid var(--border); padding: 10px 0 0; } #n6-lab .agent-composer { grid-template-columns: 1fr; } #n6-lab .agent-composer > label { padding: 0; } #n6-lab .agent-composer > div { justify-content: flex-end; } }
   @media (max-width: 480px) { #n6-lab .lab-control-grid, #n6-lab .lab-kpis, #n6-lab .accessory-grid, #n6-lab .gpu-custom-fields { grid-template-columns: minmax(0,1fr); } #n6-lab .lab-owned { grid-template-columns: 1fr; } #n6-lab .lab-owned strong { grid-column: 1; } #n6-lab .metric-row { grid-template-columns: 85px 1fr; } #n6-lab .metric-row strong { grid-column: 2; } #n6-lab .port-map { grid-template-columns: 1fr 1fr; } #n6-lab .scenario-grid { grid-template-columns: 1fr; } #n6-lab .case-view text { font-size: 10px; } #n6-lab .spatial-svg { min-height: 420px; touch-action: pan-y; } #n6-lab .spatial-data-strip { grid-template-columns: 1fr; } #n6-lab .thermal-field-wrap { min-height: 250px; } #n6-lab .thermal-map-key { grid-template-columns: 1fr; } #n6-lab .thermal-map-key > div { grid-template-columns: auto 1fr; } #n6-lab .reference-sheet { min-height: 220px; } }
   #n6-lab .air-balance { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); }
   #n6-lab .air-cell { border: 1px solid var(--border); padding: 9px 10px; background: color-mix(in srgb,var(--card) 84%,#0b1020); }
