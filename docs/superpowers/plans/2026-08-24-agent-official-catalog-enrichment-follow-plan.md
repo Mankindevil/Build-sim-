@@ -637,3 +637,12 @@ test(catalog): close official enrichment delivery gates
 - 全门禁：完整 Vitest 36 文件/296 项、typecheck、build、legacy model/static、secret scan 210 files/0 findings、`git diff --check` 均通过。
 - 未验证：registry 来源为当前 committed catalog provenance/listing/page 迁移；本阶段未重新抓取这些官网。
 - 回滚：回滚本阶段独立提交恢复代码常量；版本化 registry 文件随提交一并移除。
+
+### C3（2026-08-24）
+
+- 状态：已完成。
+- 修改：新增 `CatalogDiscoveryRegistry`、`CatalogCacheDiscoveryProvider`、`RegistrySearchDiscoveryProvider`；discovery result 只保留 URL/title/snippet/provider/engine/retrievedAt/rank；trusted/HTTPS/canonical/去重在 inspect 前执行；provider 失败隔离；job key/记录包含 provider ids、registry version 与 query normalization version。
+- 聚焦测试：`catalog-discovery`、`catalog-search` 共 17 项通过，覆盖多产品候选、非 trusted 过滤、canonical 去重、snippet 隔离、provider failure 降级和版本化幂等键。
+- 全门禁：完整 Vitest 37 文件/300 项、typecheck、build、legacy model/static、secret scan 212 files/0 findings、`git diff --check` 均通过。
+- 未验证：C3 只有本地 catalog/registry provider 和离线 fixture provider；真实 URL discovery 留到 C4 SearXNG。
+- 回滚：回滚本阶段独立提交恢复原 service 内发现逻辑。

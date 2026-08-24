@@ -9,6 +9,8 @@ import { validateOfficialUrl } from "./security.mjs";
 import { extractOfficialHtml, extractOfficialPdf } from "./extract.mjs";
 import { adapterForUrl } from "./adapters.mjs";
 import { atomicWriteJson } from "../store.mjs";
+import { discoverOfficialUrls, QUERY_NORMALIZATION_VERSION } from "./discovery.mjs";
+import { OFFICIAL_REGISTRY_VERSION } from "./registry.mjs";
 
 const catalogJson = createRequire(import.meta.url)("../../../data/skus/catalog.json");
 
@@ -166,15 +168,28 @@ async function processJob(job, options) {
   job.status = "running";
   job.stage = "discover";
   await persistJob(job, options.persistRoot);
-  const candidates = catalogCandidates(job.query, options.catalog ?? catalogJson);
-  if (candidates.length === 0) {
-    const registry = registryCandidate(job.query);
-    if (registry) candidates.push(registry);
-  }
+  const discovery = await discoverOfficialUrls({ query: job.query, catalog: options.catalog ?? catalogJson, providers: options.discoveryProviders, limit: job.limit, signal: options.signal });
+  job.discovery = { providerIds: discovery.providerIds, registryVersion: discovery.registryVersion, queryNormalizationVersion: discovery.queryNormalizationVersion };
+  job.warnings.push(...discovery.warnings);
+  const candidates = discovery.candidates.map((entry) => ({
+    candidateId: candidateId(`${job.query.raw}|${entry.url}`),
+    query: job.query,
+    ...(job.query.brand ? { brand: job.query.brand } : {}),
+    ...(job.query.model ? { model: job.query.model } : {}),
+    ...(job.query.mpn ? { mpn: job.query.mpn } : {}),
+    ...(job.query.category ? { category: job.query.category } : {}),
+    title: entry.title || job.query.raw,
+    url: entry.url,
+    discovery: entry,
+    source: { kind: entry.provider === "catalog-cache" ? "official" : "search", provider: entry.provider, domain: domainOf(entry.url), retrievedAt: entry.retrievedAt },
+    match: { score: entry.provider === "catalog-cache" && job.query.mpn ? 1 : 0.3, kind: entry.provider === "catalog-cache" && job.query.mpn ? "exact-mpn" : "weak", reasons: [entry.provider === "catalog-cache" ? "catalog candidate" : "discovery candidate; inspection required"] },
+    extraction: { status: "not-run", fieldsFound: 0, fieldsMissing: 0 },
+  }));
   job.stage = "fetch";
   job.candidates = [];
   for (const candidate of candidates.slice(0, job.limit)) {
-    job.candidates.push(candidate.source.kind === "official" && options.inspect !== false ? await inspectCandidate(candidate, options) : candidate);
+    const inspectable = candidate.source.kind === "official" || candidate.source.provider !== "registry-search";
+    job.candidates.push(inspectable && options.inspect !== false ? await inspectCandidate(candidate, options) : candidate);
   }
   job.stage = "score";
   job.status = job.candidates.some((candidate) => candidate.extraction.status === "partial" || candidate.extraction.status === "failed") ? "partial" : "completed";
@@ -187,7 +202,8 @@ async function processJob(job, options) {
 export function queueSearch(body, options = {}) {
   const query = normalizeModelQuery(String(body.query ?? ""), { brand: body.brand, category: body.category, locale: body.locale ?? "zh-CN" });
   const limit = Math.min(20, Math.max(1, Number(body.limit ?? 10)));
-  const key = JSON.stringify({ query, officialOnly: body.officialOnly !== false, limit });
+  const providerIds = (options.discoveryProviders ?? []).map((provider) => provider.id);
+  const key = JSON.stringify({ query, officialOnly: body.officialOnly !== false, limit, providerIds: providerIds.length ? providerIds : ["catalog-cache", "registry-search"], registryVersion: OFFICIAL_REGISTRY_VERSION, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION });
   const id = jobId(key);
   const existing = jobs.get(id);
   if (existing) return existing;
