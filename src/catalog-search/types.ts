@@ -22,7 +22,7 @@ export interface FieldProvenance {
   value: unknown;
   evidence: EvidenceLevel;
   sourceUrl: string;
-  sourceKind: "official-page" | "official-pdf" | "marketplace" | "manual";
+  sourceKind: "official-page" | "official-pdf" | "official-ocr-pdf" | "official-rendered-page" | "marketplace" | "manual";
   retrievedAt: string;
   extractor: string;
   locator?: string;
@@ -66,6 +66,12 @@ export interface ModelCandidate {
     reasons: string[];
   };
   extraction: CandidateExtraction;
+  accessBarrier?: {
+    kind: "captcha" | "login-wall" | "paywall" | "rate-limit" | "access-denied";
+    status: number;
+    signals: string[];
+    manualAction: string;
+  };
   fields?: FieldProvenance[];
   conflicts?: { field: string; values: unknown[]; reason: string }[];
   priceCandidates?: PriceQuote[];
@@ -83,6 +89,14 @@ export interface OfficialFetchResult {
   etag?: string;
   lastModified?: string;
   redirects: string[];
+  pdfExtraction?: {
+    mode: "text" | "ocr";
+    ocrAttempted: boolean;
+    pagesProcessed?: number;
+    engine?: string;
+    confidence?: number | null;
+    ocrError?: string;
+  };
 }
 
 export interface ExtractedOfficialData {
@@ -91,6 +105,7 @@ export interface ExtractedOfficialData {
   conflicts: { field: string; values: unknown[]; reason: string }[];
   warnings: string[];
   adapter: string;
+  accessBarrier?: ModelCandidate["accessBarrier"];
 }
 
 export interface SkuDraft {

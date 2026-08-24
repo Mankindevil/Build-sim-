@@ -89,7 +89,7 @@ function validateFields(candidate, fields, { allowManual = false } = {}) {
   if (!category) errors.push("missing category");
   for (const required of REQUIRED_FIELDS[category] ?? []) if (fieldValue(fields, required) === undefined) errors.push(`missing ${required}`);
   for (const field of fields) {
-    if (!allowManual && !["official-page", "official-pdf", "official-rendered-page"].includes(field.sourceKind)) errors.push(`field ${field.field} is not official`);
+    if (!allowManual && !["official-page", "official-pdf", "official-ocr-pdf", "official-rendered-page"].includes(field.sourceKind)) errors.push(`field ${field.field} is not official`);
     if (!field.provenanceId || !field.sourceUrl || !field.retrievedAt || !field.extractor) errors.push(`field ${field.field} provenance incomplete`);
     if (typeof field.value === "number" && (!Number.isFinite(field.value) || field.value < 0)) errors.push(`field ${field.field} has invalid number`);
     if (field.sourceKind !== "manual") {
@@ -129,6 +129,7 @@ function validateOfficialCandidate(candidate) {
   const fields = canonicalFields(candidate);
   const fieldResult = validateFields(candidate, fields);
   errors.push(...fieldResult.errors);
+  if (fields.some((field) => field.sourceKind === "official-ocr-pdf")) errors.push("OCR-derived fields require manual draft confirmation");
   if (candidate.conflicts?.length) errors.push("unresolved official field conflict");
   const identity = exactIdentity(candidate, fields);
   if (!identity) errors.push("exact MPN or exact brand/model identity was not proven");

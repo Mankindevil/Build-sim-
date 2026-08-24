@@ -14,7 +14,7 @@ import crypto from "node:crypto";
 
 export const CATALOG_CONTRACT_VERSION = "1.0.0";
 export const DISCOVERY_EVIDENCE_KINDS = Object.freeze(["catalog", "registry-search", "searxng"]);
-export const OFFICIAL_FIELD_SOURCE_KINDS = Object.freeze(["official-page", "official-pdf", "official-rendered-page"]);
+export const OFFICIAL_FIELD_SOURCE_KINDS = Object.freeze(["official-page", "official-pdf", "official-ocr-pdf", "official-rendered-page"]);
 
 export function isOfficialFieldProvenance(value) {
   return Boolean(value

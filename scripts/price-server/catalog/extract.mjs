@@ -1,3 +1,5 @@
+import { detectAccessBarrier } from "./access-barrier.mjs";
+
 const FIELD_ALIASES = [
   ["mpn", /^(mpn|sku|part\s*(number|no\.?))$/i],
   ["brand", /^brand$/i],
@@ -5,7 +7,7 @@ const FIELD_ALIASES = [
   ["dims.lengthMm", /^(length|depth|长度|深度)$/i],
   ["dims.widthMm", /^(width|宽度)$/i],
   ["dims.heightMm", /^(height|高度)$/i],
-  ["dims.slots", /^(slot|slots|槽位)$/i],
+  ["dims.slots", /^(slot|slots|pci\s+expansion\s+slot|槽位)$/i],
   ["power.tdpW", /^(tdp|tdp\s*power|热设计功耗)$/i],
   ["power.tgpW", /^(tgp|graphics\s*power|显卡功耗)$/i],
   ["attrs.capacity", /^(capacity|容量)$/i],
@@ -45,10 +47,10 @@ function addField(fields, conflicts, fetch, field, value, locator, snippet, sour
     sourceUrl: fetch.finalUrl,
     sourceKind,
     retrievedAt: fetch.retrievedAt,
-    extractor: sourceKind === "official-pdf" ? "generic-official-pdf-text-v1" : sourceKind === "official-rendered-page" ? "generic-official-rendered-html-v1" : "generic-official-html-v1",
+    extractor: sourceKind === "official-ocr-pdf" ? "tesseract-js-ocr-v1" : sourceKind === "official-pdf" ? "generic-official-pdf-text-v1" : sourceKind === "official-rendered-page" ? "generic-official-rendered-html-v1" : "generic-official-html-v1",
     locator,
     snippet: String(snippet ?? "").slice(0, 240),
-    confidence: 1,
+    confidence: sourceKind === "official-ocr-pdf" ? 0.7 : 1,
   });
 }
 
@@ -73,6 +75,8 @@ export function extractOfficialHtml(fetch, { sourceKind = "official-page" } = {}
   const fields = [];
   const conflicts = [];
   const warnings = [];
+  const accessBarrier = detectAccessBarrier(fetch);
+  if (accessBarrier) warnings.push(`access barrier detected: ${accessBarrier.kind}; ${accessBarrier.manualAction}`);
   parseJsonLd(html, fetch, fields, conflicts);
   const title = strip(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)?.[1]);
   if (title) addField(fields, conflicts, fetch, "model", title, "HTML title", title, sourceKind);
@@ -88,7 +92,7 @@ export function extractOfficialHtml(fetch, { sourceKind = "official-page" } = {}
   const expected = ["brand", "model", "mpn", "dims.lengthMm", "power.tdpW", "power.tgpW"];
   const missing = expected.filter((field) => !fields.some((entry) => entry.field === field));
   if (missing.length) warnings.push(`missing official fields: ${missing.join(", ")}`);
-  return { title: title || undefined, fields, conflicts, warnings, adapter: "generic-official-html-v1" };
+  return { title: title || undefined, fields, conflicts, warnings, adapter: "generic-official-html-v1", ...(accessBarrier ? { accessBarrier } : {}) };
 }
 
 /**
@@ -98,14 +102,22 @@ export function extractOfficialHtml(fetch, { sourceKind = "official-page" } = {}
  * The fetch layer decodes a bounded binary text layer first. Scanned PDFs and
  * documents without explicit labelled rows remain partial/unknown.
  */
-export function extractOfficialPdf(fetch, { sourceKind = "official-pdf" } = {}) {
+export function extractOfficialPdf(fetch, { sourceKind = fetch.pdfExtraction?.mode === "ocr" ? "official-ocr-pdf" : "official-pdf" } = {}) {
   const fields = [];
   const conflicts = [];
   const warnings = [];
   const text = String(fetch.body ?? "").replace(/\u0000/g, " ");
   const lines = text.split(/\r?\n/).map((line) => line.replace(/[^\x20-\x7E\u4E00-\u9FFF]+/g, " ").trim()).filter(Boolean);
   for (const line of lines) {
-    const match = line.match(/^([^:：]{1,80})\s*[:：]\s*(.{1,160})$/);
+    const normalizedLine = line.replace(/^\s*\|\s*/, "").replace(/\s*\|\s*$/, "");
+    const dimension = normalizedLine.match(/^(?:dimension|dimensions|size)\s*[:：]\s*(\d+(?:\.\d+)?)\s*mm\s*\(W\)\s*[*x×]\s*(\d+(?:\.\d+)?)\s*mm\s*\((?:D|L)\)\s*[*x×]\s*(\d+(?:\.\d+)?)\s*mm\s*\(H\)/i);
+    if (dimension) {
+      addField(fields, conflicts, fetch, "dims.widthMm", Number(dimension[1]), "PDF dimension label (W)", normalizedLine, sourceKind);
+      addField(fields, conflicts, fetch, "dims.lengthMm", Number(dimension[2]), "PDF dimension label (D/L)", normalizedLine, sourceKind);
+      addField(fields, conflicts, fetch, "dims.heightMm", Number(dimension[3]), "PDF dimension label (H)", normalizedLine, sourceKind);
+      continue;
+    }
+    const match = normalizedLine.match(/^([^:：]{1,80})\s*[:：]\s*(.{1,160})$/);
     if (!match) continue;
     const alias = FIELD_ALIASES.find(([, pattern]) => pattern.test(strip(match[1])));
     if (!alias) continue;
@@ -113,10 +125,12 @@ export function extractOfficialPdf(fetch, { sourceKind = "official-pdf" } = {}) 
     addField(fields, conflicts, fetch, alias[0], value, `PDF text label: ${strip(match[1])}`, `${strip(match[1])}: ${strip(match[2])}`, sourceKind);
   }
   if (!fields.length) warnings.push("PDF text extractor found no explicit labelled fields");
+  if (fetch.pdfExtraction?.mode === "ocr") warnings.push(`scanned PDF OCR requires manual review (${fetch.pdfExtraction.pagesProcessed ?? 0} pages, ${fetch.pdfExtraction.engine ?? "unknown engine"})`);
+  if (fetch.pdfExtraction?.ocrError) warnings.push(`scanned PDF OCR unavailable: ${fetch.pdfExtraction.ocrError}`);
   const expected = ["brand", "model", "mpn", "dims.lengthMm", "power.tdpW", "power.tgpW"];
   const missing = expected.filter((field) => !fields.some((entry) => entry.field === field));
   if (missing.length) warnings.push(`missing official PDF fields: ${missing.join(", ")}`);
-  return { fields, conflicts, warnings, adapter: "generic-official-pdf-text-v1" };
+  return { fields, conflicts, warnings, adapter: sourceKind === "official-ocr-pdf" ? "generic-official-pdf-ocr-v1" : "generic-official-pdf-text-v1" };
 }
 
 export const genericOfficialAdapter = {

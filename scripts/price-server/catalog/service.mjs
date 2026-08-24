@@ -114,6 +114,7 @@ const REQUIRED_FIELDS_BY_CATEGORY = {
 
 function extractionStatus(candidate, extracted, fetchResult) {
   if (fetchResult.status >= 400) return "failed";
+  if (extracted.accessBarrier || fetchResult.pdfExtraction?.mode === "ocr") return "partial";
   const required = ["brand", "model", ...(candidate.query?.mpn || candidate.mpn ? ["mpn"] : []), ...(REQUIRED_FIELDS_BY_CATEGORY[candidate.category ?? candidate.query?.category] ?? [])];
   const missingRequired = required.some((field) => !extracted.fields.some((entry) => entry.field === field));
   return extracted.fields.length && !missingRequired && !extracted.conflicts.length ? "ok" : "partial";
@@ -162,6 +163,7 @@ async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFal
       match: scoreExtracted(candidate, extracted),
       extraction: { status: extractionStatus(candidate, extracted, fetchResult), fieldsFound: fields.length, fieldsMissing: Math.max(0, 6 - fields.length), adapter: extracted.adapter, ...(fetchResult.contentHash ? { contentHash: fetchResult.contentHash } : {}), ...(extracted.warnings.length ? { error: safeText(extracted.warnings.join("; ")) } : {}) },
       fields,
+      ...(extracted.accessBarrier ? { accessBarrier: extracted.accessBarrier } : {}),
       ...(extracted.conflicts.length ? { conflicts: extracted.conflicts } : {}),
     };
     return { ...inspected, expectedHash: catalogCandidateInputHash(inspected) };
