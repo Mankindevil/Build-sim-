@@ -49,7 +49,9 @@ Provider-neutral Agent 服务单独运行在 `127.0.0.1:5175`，默认关闭。�
 npm run agent:serve
 ```
 
-服务端提供模型目录、持久化会话、消息运行、取消和 SSE 事件接口（`/api/agent/models`、`/api/agent/sessions`、`/api/agent/runs/:id/events`）。会话文件写入被 Git 忽略的 `data/agent/sessions/`，权限为当前用户读写。浏览器不会直接调用 DeepSeek，也不会接收 API key。当前已用 fixture 验证 DeepSeek SSE、多轮上下文、usage、超时和取消；没有真实 provider 响应证据时，不把 live DeepSeek 标为已验证。
+服务端提供模型/Tool 目录、持久化会话、消息运行、取消和 SSE 事件接口（`/api/agent/models`、`/api/agent/tools`、`/api/agent/sessions`、`/api/agent/runs/:id/events`）。会话文件写入被 Git 忽略的 `data/agent/sessions/`，权限为当前用户读写。浏览器不会直接调用 DeepSeek，也不会接收 API key。当前已用 fixture 验证 DeepSeek SSE、多轮上下文、usage、超时和取消；没有真实 provider 响应证据时，不把 live DeepSeek 标为已验证。
+
+首批 Agent Tool 全部只读：`get_build_evaluation`、`compare_builds`、`get_sku_facts`、`get_price_snapshot`、`search_official_catalog`、`inspect_catalog_candidate`、`search_price_candidates`。前四个直接读取服务端确定性事实；后三个只连接固定的本地价格服务 `127.0.0.1:5174`，沿用官方域名 allowlist、SSRF 防护和未审计候选语义，因此执行外部搜索时还需要同时运行 `npm run price:serve`。Tool Runtime 会校验严格 schema、限制轮次/调用数/重复调用/超时/结果体积，并把 Tool definition hash 写入事件流。
 
 Opens the N6 Build Lab. Change PSU/cooler/GPU/etc.; FIT + wiring update from the engine; appearance gallery follows SKU.
 

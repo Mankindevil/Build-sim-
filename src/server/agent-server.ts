@@ -2,9 +2,11 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { AgentRuntime, AgentRuntimeError } from "../agent/runtime";
 import { DeepSeekProviderAdapter } from "../agent/providers/deepseek";
+import { AgentToolRegistry } from "../agent/tool-registry";
 import { evaluateBuildAuthoritatively, parseAuthoritativeBuildConfig } from "./evaluation-service";
 import { FileAgentSessionStore } from "./file-session-store";
 import { loadAgentRuntimeConfig } from "./agent-env";
+import { createBuildSimTools } from "./domain-tools";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 5175;
@@ -72,6 +74,10 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
   const route = `${req.method} ${url.pathname}`;
   if (route === "GET /api/agent/models") {
     send(res, 200, { models: runtime.getModels() });
+    return true;
+  }
+  if (route === "GET /api/agent/tools") {
+    send(res, 200, { tools: runtime.getTools() });
     return true;
   }
   if (route === "POST /api/agent/sessions") {
@@ -168,7 +174,7 @@ if (isMain) {
     const runtime = new AgentRuntime(
       [new DeepSeekProviderAdapter(config.deepseek)],
       new FileAgentSessionStore(),
-      { maxTokens: config.deepseek.maxTokens, temperature: config.deepseek.temperature },
+      { maxTokens: config.deepseek.maxTokens, temperature: config.deepseek.temperature, toolRegistry: new AgentToolRegistry(createBuildSimTools()) },
     );
     const port = config.port ?? DEFAULT_PORT;
     createAgentServer({ runtime }).listen(port, HOST, () => {

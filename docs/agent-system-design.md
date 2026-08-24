@@ -24,13 +24,15 @@ Build a provider-neutral, auditable PC-build agent. DeepSeek is the first live p
 
 | Tool | Effect | Initial state |
 |---|---|---|
-| `get_build_evaluation` | read | planned A3 |
-| `compare_builds` | read | planned A3 |
-| `get_sku_facts` | read | planned A3 |
-| `get_price_snapshot` | read | planned A3 |
-| `search_official_catalog` | external-read | planned A3 |
-| `inspect_catalog_candidate` | external-read | planned A3 |
-| `search_price_candidates` | external-read | planned A3 |
+| `get_build_evaluation` | read | implemented A3 |
+| `compare_builds` | read | implemented A3 |
+| `get_sku_facts` | read | implemented A3 |
+| `get_price_snapshot` | read | implemented A3 |
+| `search_official_catalog` | external-read | implemented A3 |
+| `inspect_catalog_candidate` | external-read | implemented A3 |
+| `search_price_candidates` | external-read | implemented A3 |
+
+A3 implementation registers these seven Tools as read-only, exposes their definition hashes in `/api/agent/tools`, and applies strict input schemas, per-Tool timeouts/result budgets, per-run turn/call/repetition budgets, cancellation, and structured error results. External-read Tools connect only to the fixed local catalog/price service and retain candidate/unaudited labels.
 
 Write tools are not exposed in the initial release.
 
