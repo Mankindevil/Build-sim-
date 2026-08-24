@@ -73,6 +73,7 @@ export async function discoverOfficialUrls({ query, catalog = bundledCatalog, pr
   const providerRegistry = new CatalogDiscoveryRegistry(selected);
   const allowedDomains = allowedDomainsForQuery(query, registry);
   const warnings = [];
+  const proposals = [];
   const byCanonical = new Map();
   for (const provider of providerRegistry.providers) {
     let results;
@@ -89,11 +90,17 @@ export async function discoverOfficialUrls({ query, catalog = bundledCatalog, pr
         const url = canonicalizeDiscoveredUrl(result.url);
         if (!byCanonical.has(url)) byCanonical.set(url, { ...result, url, title: safeText(result.title), snippet: safeText(result.snippet), provider: provider.id });
       } catch (error) {
+        try {
+          const proposedUrl = new URL(raw?.url);
+          if (proposedUrl.protocol === "https:" && !registry.brands.some((entry) => entry.domains.some((domain) => proposedUrl.hostname === domain || proposedUrl.hostname.endsWith(`.${domain}`)))) {
+            proposals.push({ brand: query.brand, domain: proposedUrl.hostname.toLocaleLowerCase(), url: proposedUrl.toString(), title: safeText(raw?.title), snippet: safeText(raw?.snippet), provider: provider.id, retrievedAt: raw?.retrievedAt });
+          }
+        } catch { /* malformed discovery values are warnings only */ }
         warnings.push(`${provider.id}: candidate blocked: ${safeText(error?.message ?? error)}`);
       }
       if (byCanonical.size >= limit) break;
     }
     if (byCanonical.size >= limit) break;
   }
-  return { providerIds: providerRegistry.ids(), registryVersion: registry.version ?? OFFICIAL_REGISTRY_VERSION, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, candidates: [...byCanonical.values()], warnings };
+  return { providerIds: providerRegistry.ids(), registryVersion: registry.version ?? OFFICIAL_REGISTRY_VERSION, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, candidates: [...byCanonical.values()], proposals, warnings };
 }

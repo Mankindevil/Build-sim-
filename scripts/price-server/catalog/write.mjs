@@ -89,7 +89,7 @@ function validateFields(candidate, fields, { allowManual = false } = {}) {
   if (!category) errors.push("missing category");
   for (const required of REQUIRED_FIELDS[category] ?? []) if (fieldValue(fields, required) === undefined) errors.push(`missing ${required}`);
   for (const field of fields) {
-    if (!allowManual && !["official-page", "official-pdf"].includes(field.sourceKind)) errors.push(`field ${field.field} is not official`);
+    if (!allowManual && !["official-page", "official-pdf", "official-rendered-page"].includes(field.sourceKind)) errors.push(`field ${field.field} is not official`);
     if (!field.provenanceId || !field.sourceUrl || !field.retrievedAt || !field.extractor) errors.push(`field ${field.field} provenance incomplete`);
     if (typeof field.value === "number" && (!Number.isFinite(field.value) || field.value < 0)) errors.push(`field ${field.field} has invalid number`);
     if (field.sourceKind !== "manual") {
@@ -261,7 +261,7 @@ export async function acceptOfficial(candidateId, options = {}) {
   const nextCatalog = { ...catalog, catalogVersion: catalogVersion(catalog), updatedAt: dateKey(), skus: nextSkus };
   const catalogHash = jsonHash(nextCatalog);
   const eventId = `catalog-event-${sha256(idempotencyKey).slice(0, 20)}`;
-  const result = { status: "accepted", candidateId, skuId: proposed.id, catalogVersion: nextCatalog.catalogVersion, catalogHash, inputHash, idempotencyKey, changedFields: changed, eventId, rollbackManifest: resolved.rollbackManifestPath };
+  const result = { status: "accepted", candidateId, skuId: proposed.id, catalogVersion: nextCatalog.catalogVersion, catalogHash, inputHash, idempotencyKey, registryVersion: resolved.registryVersion, extractorVersion: candidate.extraction.adapter, contentHash: candidate.extraction.contentHash, changedFields: changed, eventId, rollbackManifest: resolved.rollbackManifestPath };
   const event = { eventId, operation: "accept-official", idempotencyKey, candidateId, skuId: proposed.id, status: "accepted", inputHash, contentHash: candidate.extraction.contentHash, catalogHash, catalogVersion: nextCatalog.catalogVersion, changedFields: changed, createdAt: now(), result };
   try {
     await atomicWriteJson(resolved.catalogPath, nextCatalog, { operation: "catalog-accept-official", rollbackRoot: resolved.rollbackRoot, manifestPath: resolved.rollbackManifestPath });
@@ -293,6 +293,10 @@ export async function createDraft(candidateId, selections = {}, options = {}) {
     status: "draft",
     createdAt: now(),
     updatedAt: now(),
+    inputHash: jsonHash({ candidateId, fields: selected, conflicts: candidate.conflicts ?? [] }),
+    registryVersion: options.registryVersion,
+    extractorVersion: candidate.extraction?.adapter,
+    contentHash: candidate.extraction?.contentHash,
   };
   drafts.set(draftId, draft);
   await persistDraft(draft, resolved);

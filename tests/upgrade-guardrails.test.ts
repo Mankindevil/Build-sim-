@@ -8,7 +8,13 @@ import { atomicWriteJson, restoreLatestRollback } from "../scripts/price-server/
 describe("G0 upgrade guardrails", () => {
   it("keeps catalog writes and advice disabled by default", async () => {
     const flags = await loadRuntimeFlags({});
-    expect(flags).toEqual({ catalogWriteEnabled: false, adviceEnabled: false });
+    expect(flags).toEqual({
+      catalogWriteEnabled: false,
+      catalogAutoEnrichTrustedOfficial: true,
+      catalogAutoAcceptExactMpn: false,
+      catalogAutoTrustNewDomains: false,
+      adviceEnabled: false,
+    });
   });
 
   it("writes through a temporary file and records an old-value rollback", async () => {

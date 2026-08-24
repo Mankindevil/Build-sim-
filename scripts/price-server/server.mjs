@@ -7,6 +7,8 @@
  */
 
 import http from "node:http";
+import { decideDomainProposal, listDomainProposals } from "./catalog/domain-proposals.mjs";
+import { runAutoEnrichment } from "./catalog/auto-enrichment.mjs";
 import {
   buildAndWriteLatest,
   loadCandidates,
@@ -219,6 +221,20 @@ const server = http.createServer(async (req, res) => {
     if (route === "POST /api/catalog/inspect") {
       const result = await inspectUrl(await readBody(req), { browserFallback: renderOfficialFallback });
       return send(res, 200, result);
+    }
+    if (route === "GET /api/catalog/domain-proposals") return send(res, 200, await listDomainProposals({ persistRoot: process.cwd() }));
+    if (req.method === "POST" && url.pathname.startsWith("/api/catalog/domain-proposals/") && (url.pathname.endsWith("/approve") || url.pathname.endsWith("/reject"))) {
+      const approve = url.pathname.endsWith("/approve");
+      const suffix = approve ? "/approve" : "/reject";
+      const proposalId = decodeURIComponent(url.pathname.slice("/api/catalog/domain-proposals/".length, -suffix.length));
+      const body = await readBody(req);
+      return send(res, 200, await decideDomainProposal(proposalId, approve ? "approved" : "rejected", body.expectedHash, { persistRoot: process.cwd() }));
+    }
+    if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/enrich")) {
+      const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/enrich".length));
+      const flags = await loadRuntimeFlags();
+      const result = await runAutoEnrichment(candidateId, { autoEnrichTrustedOfficial: flags.catalogAutoEnrichTrustedOfficial, autoAcceptExactMpn: flags.catalogAutoAcceptExactMpn, catalogWriteEnabled: flags.catalogWriteEnabled });
+      return send(res, result.status === "accepted" || result.status === "draft" ? 200 : 409, result);
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/accept-official")) {
       const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/accept-official".length));

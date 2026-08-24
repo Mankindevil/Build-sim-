@@ -14,6 +14,7 @@ import { OFFICIAL_REGISTRY_VERSION } from "./registry.mjs";
 import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./discovery.mjs";
 import { createSearXngDiscoveryProvider } from "./searxng-discovery.mjs";
 import { loadEnv } from "../env.mjs";
+import { createDomainProposal } from "./domain-proposals.mjs";
 
 const catalogJson = createRequire(import.meta.url)("../../../data/skus/catalog.json");
 
@@ -156,7 +157,7 @@ async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFal
     return {
       ...candidate,
       canonicalUrl: canonicalUrl ?? fetchResult.canonicalUrl ?? fetchResult.finalUrl,
-      source: { ...candidate.source, retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
+      source: { ...candidate.source, kind: "official", retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
       match: scoreExtracted(candidate, extracted),
       extraction: { status: extractionStatus(candidate, extracted, fetchResult), fieldsFound: fields.length, fieldsMissing: Math.max(0, 6 - fields.length), adapter: extracted.adapter, ...(fetchResult.contentHash ? { contentHash: fetchResult.contentHash } : {}), ...(extracted.warnings.length ? { error: safeText(extracted.warnings.join("; ")) } : {}) },
       fields,
@@ -181,6 +182,13 @@ async function processJob(job, options) {
   const discovery = await discoverOfficialUrls({ query: job.query, catalog: options.catalog ?? catalogJson, providers: discoveryProviders, limit: job.limit, signal: options.signal });
   job.discovery = { providerIds: discovery.providerIds, registryVersion: discovery.registryVersion, queryNormalizationVersion: discovery.queryNormalizationVersion };
   job.warnings.push(...discovery.warnings);
+  job.domainProposals = [];
+  if (options.persistRoot) {
+    for (const proposal of discovery.proposals ?? []) {
+      const saved = await createDomainProposal({ ...proposal, brand: proposal.brand ?? job.query.brand, mpn: job.query.mpn, reason: "discovery candidate domain is not governed" }, { persistRoot: options.persistRoot });
+      if (saved?.proposalId) job.domainProposals.push(saved);
+    }
+  }
   const candidates = discovery.candidates.map((entry) => ({
     candidateId: candidateId(`${job.query.raw}|${entry.url}`),
     query: job.query,

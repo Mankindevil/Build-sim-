@@ -655,3 +655,13 @@ test(catalog): close official enrichment delivery gates
 - 全门禁：完整 Vitest 38 文件/304 项、typecheck、build、legacy model/static、secret scan 215 files/0 findings、`git diff --check` 均通过。
 - Live：`curl http://127.0.0.1:8080/search?...&format=json` 连接失败（exit 7），本机没有可用 SearXNG；未把端口或 fixture 当作 live 证据。
 - 回滚：回滚本阶段独立提交；默认配置本就不会启用 SearXNG。
+
+### C5（2026-08-24）
+
+- 状态：已完成（默认 auto-accept 仍关闭）。
+- 修改：新增 DomainProposal 幂等持久化、事件、expected-hash approve/reject、registry 原子备份/rollback；untrusted discovery 不进入 inspect，只生成 proposed；新增 trusted candidate→draft/accept enrichment policy，结果记录 input/registry/extractor/content hash；rendered official provenance 纳入确定性来源；`CATALOG_AUTO_TRUST_NEW_DOMAINS=true` 被硬拒绝。
+- 策略：`CATALOG_AUTO_ENRICH_TRUSTED_OFFICIAL=true` 可生成 draft；`CATALOG_AUTO_ACCEPT_EXACT_MPN=false` 保持默认；只有 exact MPN + trusted final/canonical + 2xx + required fields + provenance + no conflict + write flag 才接受。
+- 聚焦测试：`catalog-domain-proposals`、`catalog-auto-enrichment`、`catalog-search` 共 19 项通过；覆盖 proposal 幂等、approve/reject、registry rollback、draft、accept 幂等和 catalog rollback。
+- 全门禁：完整 Vitest 40 文件/310 项、typecheck、build、legacy model/static、secret scan 219 files/0 findings、`git diff --check` 均通过。
+- 数据：测试自动补齐写入 1、draft 2、blocked approval 1；全部发生在临时目录并已回滚/清理，正式 catalog 自动写入 0。
+- 回滚：回滚本阶段独立提交；proposal/registry/catalog 写入另有各自 rollback manifest。
