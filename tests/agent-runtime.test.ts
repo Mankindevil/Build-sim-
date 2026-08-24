@@ -28,6 +28,9 @@ describe("A2 Agent runtime", () => {
     expect(parseAgentRuntimeConfig({ DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture" }).deepseek.enabled).toBe(false);
     expect(parseAgentRuntimeConfig({ BUILD_SIM_AGENT_ENABLED: "true", DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture", AGENT_SERVER_PORT: "5176" })).toMatchObject({ enabled: true, port: 5176, deepseek: { enabled: true } });
     expect(() => parseAgentRuntimeConfig({ AGENT_SERVER_PORT: "70000" })).toThrow(/AGENT_SERVER_PORT/);
+    expect(parseAgentRuntimeConfig({ BUILD_SIM_AGENT_ENABLED: "true", CLAUDE_ENABLED: "false" }).claude.enabled).toBe(false);
+    expect(parseAgentRuntimeConfig({ BUILD_SIM_AGENT_ENABLED: "true", CLAUDE_ENABLED: "true", CLAUDE_API_KEY: "fixture" })).toMatchObject({ claude: { enabled: true, model: "claude-sonnet-4-20250514" } });
+    expect(() => parseAgentRuntimeConfig({ CLAUDE_ENABLED: "true" })).toThrow("CLAUDE_API_KEY");
   });
 
   it("persists and replays provider-neutral multi-turn conversation state", async () => {
@@ -47,6 +50,24 @@ describe("A2 Agent runtime", () => {
     ]);
     expect(turns[1]?.messages.map((message) => message.content)).toEqual(["第一问", "回答 1", "第二问"]);
     expect(runtime.getRun(second.runId).events.map((event) => event.type)).toEqual(["run_status", "run_status", "text_delta", "text_delta", "usage", "run_status"]);
+  });
+
+  it("selects Claude through the same session contract with provider-specific budgets", async () => {
+    const requests: ProviderTurnRequest[] = [];
+    const claude: ProviderAdapter = {
+      id: "claude",
+      models: [{ provider: "claude", id: "claude-fixture", label: "Claude fixture", capabilities: { streaming: true, tools: true, parallelTools: true, structuredOutput: true, thinking: false } }],
+      async createTurn(request) {
+        requests.push(request);
+        return { provider: "claude", providerRequestId: "msg-fixture", model: request.model, content: "Claude fixture response", toolCalls: [], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: null }, latencyMs: 1 };
+      },
+    };
+    const runtime = new AgentRuntime([fakeProvider([]), claude], new MemoryAgentSessionStore(), { providerSettings: { claude: { maxTokens: 333, temperature: 0.4 } } });
+    const session = await runtime.createSession({ provider: "claude", model: "claude-fixture" });
+    const run = await runtime.startRun(session.id, { content: "same contract" });
+    await runtime.waitForRun(run.runId);
+    expect(requests[0]).toMatchObject({ model: "claude-fixture", maxTokens: 333, temperature: 0.4 });
+    expect((await runtime.getSession(session.id)).messages.at(-1)).toMatchObject({ role: "assistant", content: "Claude fixture response" });
   });
 
   it("cancels an in-flight provider call and publishes terminal events", async () => {

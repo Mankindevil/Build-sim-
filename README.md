@@ -61,6 +61,8 @@ npm run agent:serve
 
 未来写 Tool 的 `AgentWriteApprovalEnvelope` 要求短时效、精确绑定 Tool/定义/会话/输入哈希、幂等键、人工主体、带外 token、备份目标和回滚策略。这个契约当前只用于前置设计与验证；注册表仍无条件返回 `write_tools_disabled`，审批对象本身不能开启写执行。
 
+Claude 使用同一个 `ProviderAdapter`、会话、Skill、Tool、SSE 和审计契约。适配器按 Anthropic Messages API 的流式 content blocks 映射文本、`tool_use`、`tool_result` 与 usage；只有同时设置 `BUILD_SIM_AGENT_ENABLED=true`、`CLAUDE_ENABLED=true` 和服务端 `CLAUDE_API_KEY` 时才注册 Claude 模型，默认仍只有 DeepSeek。当前 Claude 只通过协议 fixture 验证，没有 live Claude 调用证据；配置示例见 `.env.example`，最终边界见 `docs/agent-implementation-matrix.md`。
+
 Opens the N6 Build Lab. Change PSU/cooler/GPU/etc.; FIT + wiring update from the engine; appearance gallery follows SKU.
 
 ```bash

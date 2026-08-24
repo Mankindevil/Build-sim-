@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentRuntime, AgentRuntimeError } from "../agent/runtime";
 import { DeepSeekProviderAdapter } from "../agent/providers/deepseek";
+import { ClaudeProviderAdapter } from "../agent/providers/claude";
 import { AgentToolRegistry } from "../agent/tool-registry";
 import { AgentSkillLoader } from "../agent/skill-loader";
 import { evaluateBuildAuthoritatively, parseAuthoritativeBuildConfig } from "./evaluation-service";
@@ -185,12 +186,20 @@ if (isMain) {
   void (async () => {
     const config = await loadAgentRuntimeConfig();
     const toolRegistry = new AgentToolRegistry(createBuildSimTools());
+    const adapters = [
+      new DeepSeekProviderAdapter(config.deepseek),
+      ...(config.claude.enabled ? [new ClaudeProviderAdapter(config.claude)] : []),
+    ];
     const runtime = new AgentRuntime(
-      [new DeepSeekProviderAdapter(config.deepseek)],
+      adapters,
       new FileAgentSessionStore(),
       {
         maxTokens: config.deepseek.maxTokens,
         temperature: config.deepseek.temperature,
+        providerSettings: {
+          deepseek: { maxTokens: config.deepseek.maxTokens, temperature: config.deepseek.temperature },
+          claude: { maxTokens: config.claude.maxTokens, temperature: config.claude.temperature },
+        },
         toolRegistry,
         skillLoader: new AgentSkillLoader(path.resolve("skills"), toolRegistry),
         auditStore: new FileAgentRunAuditStore(),

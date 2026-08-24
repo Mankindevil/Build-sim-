@@ -57,6 +57,7 @@ export class AgentRuntime {
       id?: () => string;
       maxTokens?: number;
       temperature?: number;
+      providerSettings?: Partial<Record<AgentProviderId, { maxTokens: number; temperature: number }>>;
       toolRegistry?: AgentToolRegistry;
       skillLoader?: AgentSkillLoader;
       auditStore?: AgentRunAuditStore;
@@ -203,8 +204,8 @@ export class AgentRuntime {
           system,
           messages: structuredClone(session.messages),
           tools: this.options.toolRegistry?.definitions(allowedTools) ?? [],
-          maxTokens: this.options.maxTokens ?? 2_000,
-          temperature: this.options.temperature ?? 0.2,
+          maxTokens: this.options.providerSettings?.[provider.id]?.maxTokens ?? this.options.maxTokens ?? 2_000,
+          temperature: this.options.providerSettings?.[provider.id]?.temperature ?? this.options.temperature ?? 0.2,
           signal: run.controller.signal,
           onTextDelta: (text) => this.emit(run, { type: "text_delta", runId: run.id, text, at: this.now() }),
         });

@@ -1,6 +1,6 @@
 # Build Sim Agent System
 
-Status: A0-A6 implemented and gated. A7 remains target work; its plan text is not implementation evidence.
+Status: A0-A7 implemented. Final gate evidence and unverified live-provider boundaries are listed in `agent-implementation-matrix.md`.
 
 ## Goal
 
@@ -18,7 +18,7 @@ Build a provider-neutral, auditable PC-build agent. DeepSeek is the first live p
 
 ## Provider boundary
 
-`ProviderAdapter.createTurn()` consumes internal messages and tool definitions and returns normalized text, tool calls, usage, stop reason, model, provider request id, and latency. DeepSeek Chat Completions and Claude Messages wire formats stay inside their respective adapters.
+`ProviderAdapter.createTurn()` consumes internal messages and tool definitions and returns normalized text, tool calls, usage, stop reason, model, provider request id, and latency. DeepSeek Chat Completions and Claude Messages wire formats stay inside their respective adapters. Claude is registered only when explicitly enabled and configured; otherwise it does not appear as an unusable model option.
 
 ## Initial tools
 
@@ -58,6 +58,6 @@ A4 implements a strict frontmatter parser, manifest validation against the live 
 - A4: lazy Skill loader and four built-in skills. Implemented with manifest/hash/integrity tests and runtime enforcement of `allowedTools`.
 - A5: real chat UI and browser end-to-end flow. Implemented with model/Skill selection, current BuildConfig snapshots, persistent sessions, SSE text/Tool/usage events, cancellation, disabled-service handling, desktop/mobile QA, and a local DeepSeek-protocol fixture. The fixture is not live-provider evidence.
 - A6: audit, redaction, definition hashes and write-approval contract; writes remain disabled. Implemented with atomic `0600` run records, content hashes rather than raw prompts/results, credential-shaped redaction, integrity verification, a read-only audit endpoint, and a short-lived execution-bound approval envelope contract. The Tool dispatcher still rejects every write Tool.
-- A7: Claude fixture adapter contract, full regression, browser QA, secret scan, documentation and implementation matrix.
+- A7: Claude fixture adapter contract, full regression, browser QA, secret scan, documentation and implementation matrix. Implemented against Anthropic's official Messages streaming event flow and client Tool content blocks; live Claude remains unverified without an enabled key.
 
 Each stage requires its focused tests plus the full test suite, typecheck, production build, an independent commit, push, and remote-ref equality check. A failed gate stops the sequence.
