@@ -43,6 +43,14 @@ cp .env.example .env.local
 
 每次真实 provider 调用会从 DeepSeek 响应 `usage` 记录输入缓存命中、输入缓存未命中、输出、推理和总 token，并按带版本和来源的官方 CNY 单价快照计算估算费用。分时计价以请求开始时的北京时间为准：周一至周五 09:00–12:00、14:00–18:00 是高峰，其余时段（含周末全天）为空闲；每条调用记录都会保存命中的计费时段、当时单价与定价版本。页面“Token 与费用”可查看总计、分时段汇总和逐次调用明细，服务端也提供 `GET /api/advice/billing?limit=100`。审计记录不保存 key、prompt 或原始模型输出；本地 advice cache 命中不会重复计费。费用是基于 usage 的本地估算，不等同于 DeepSeek 账户余额账单。
 
+Provider-neutral Agent 服务单独运行在 `127.0.0.1:5175`，默认关闭。启用 DeepSeek 多轮聊天时，还需在 `.env.local` 设置 `BUILD_SIM_AGENT_ENABLED=true`；然后运行：
+
+```bash
+npm run agent:serve
+```
+
+服务端提供模型目录、持久化会话、消息运行、取消和 SSE 事件接口（`/api/agent/models`、`/api/agent/sessions`、`/api/agent/runs/:id/events`）。会话文件写入被 Git 忽略的 `data/agent/sessions/`，权限为当前用户读写。浏览器不会直接调用 DeepSeek，也不会接收 API key。当前已用 fixture 验证 DeepSeek SSE、多轮上下文、usage、超时和取消；没有真实 provider 响应证据时，不把 live DeepSeek 标为已验证。
+
 Opens the N6 Build Lab. Change PSU/cooler/GPU/etc.; FIT + wiring update from the engine; appearance gallery follows SKU.
 
 ```bash

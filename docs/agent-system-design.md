@@ -49,7 +49,7 @@ Skill metadata is discovered first. Instructions are loaded only after activatio
 
 - A0: contracts, design, baseline and contract tests.
 - A1: server/browser evaluation parity.
-- A2: persistent multi-turn DeepSeek streaming chat with cancellation and usage.
+- A2: persistent multi-turn DeepSeek streaming chat with cancellation and usage. Implemented with provider fixtures and local disabled-provider HTTP/SSE smoke; live provider behavior remains unverified without an enabled key.
 - A3: registry, schema validation, dispatcher, budgets and seven read-only tools.
 - A4: lazy Skill loader and four built-in skills.
 - A5: real chat UI and browser end-to-end flow.

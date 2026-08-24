@@ -1,0 +1,82 @@
+import { mkdtemp, readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { AgentRuntime } from "../src/agent/runtime";
+import { MemoryAgentSessionStore } from "../src/agent/session-store";
+import type { ProviderAdapter, ProviderTurnRequest } from "../src/agent/contracts";
+import { FileAgentSessionStore } from "../src/server/file-session-store";
+import { parseAgentRuntimeConfig } from "../src/server/agent-env";
+
+function fakeProvider(turns: ProviderTurnRequest[]): ProviderAdapter {
+  return {
+    id: "deepseek",
+    models: [{ provider: "deepseek", id: "deepseek-v4-flash", label: "DeepSeek V4 Flash", capabilities: { streaming: true, tools: true, parallelTools: true, structuredOutput: true, thinking: true } }],
+    async createTurn(request) {
+      turns.push(request);
+      const text = `回答 ${turns.length}`;
+      request.onTextDelta?.(text.slice(0, 2));
+      request.onTextDelta?.(text.slice(2));
+      return { provider: "deepseek", providerRequestId: `provider-${turns.length}`, model: request.model, content: text, toolCalls: [], stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12, cacheReadTokens: 0, cacheWriteTokens: 10, reasoningTokens: 0 }, latencyMs: 5 };
+    },
+  };
+}
+
+describe("A2 Agent runtime", () => {
+  it("keeps the provider disabled unless both Agent and DeepSeek flags are enabled", () => {
+    expect(parseAgentRuntimeConfig({}).deepseek.enabled).toBe(false);
+    expect(parseAgentRuntimeConfig({ DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture" }).deepseek.enabled).toBe(false);
+    expect(parseAgentRuntimeConfig({ BUILD_SIM_AGENT_ENABLED: "true", DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture", AGENT_SERVER_PORT: "5176" })).toMatchObject({ enabled: true, port: 5176, deepseek: { enabled: true } });
+    expect(() => parseAgentRuntimeConfig({ AGENT_SERVER_PORT: "70000" })).toThrow(/AGENT_SERVER_PORT/);
+  });
+
+  it("persists and replays provider-neutral multi-turn conversation state", async () => {
+    const turns: ProviderTurnRequest[] = [];
+    let sequence = 0;
+    const store = new MemoryAgentSessionStore();
+    const runtime = new AgentRuntime([fakeProvider(turns)], store, { id: () => String(++sequence), now: () => "2026-08-24T00:00:00.000Z" });
+    const session = await runtime.createSession();
+    const first = await runtime.startRun(session.id, { content: "第一问" });
+    await runtime.waitForRun(first.runId);
+    const second = await runtime.startRun(session.id, { content: "第二问" });
+    await runtime.waitForRun(second.runId);
+
+    const saved = await runtime.getSession(session.id);
+    expect(saved.messages.map((message) => [message.role, message.content])).toEqual([
+      ["user", "第一问"], ["assistant", "回答 1"], ["user", "第二问"], ["assistant", "回答 2"],
+    ]);
+    expect(turns[1]?.messages.map((message) => message.content)).toEqual(["第一问", "回答 1", "第二问"]);
+    expect(runtime.getRun(second.runId).events.map((event) => event.type)).toEqual(["run_status", "run_status", "text_delta", "text_delta", "usage", "run_status"]);
+  });
+
+  it("cancels an in-flight provider call and publishes terminal events", async () => {
+    const provider: ProviderAdapter = {
+      ...fakeProvider([]),
+      async createTurn(request) {
+        await new Promise<void>((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+        throw new Error("unreachable");
+      },
+    };
+    const runtime = new AgentRuntime([provider], new MemoryAgentSessionStore());
+    const session = await runtime.createSession();
+    const run = await runtime.startRun(session.id, { content: "取消它" });
+    runtime.cancelRun(run.runId);
+    await runtime.waitForRun(run.runId);
+    expect(runtime.getRun(run.runId).status).toBe("cancelled");
+    expect(runtime.getRun(run.runId).events.at(-1)).toMatchObject({ type: "run_status", status: "cancelled" });
+  });
+
+  it("writes recoverable session JSON atomically without provider secrets", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-agent-session-"));
+    let sequence = 0;
+    const store = new FileAgentSessionStore(root);
+    const runtime = new AgentRuntime([fakeProvider([])], store, { id: () => String(++sequence), now: () => "2026-08-24T00:00:00.000Z" });
+    const session = await runtime.createSession();
+    const run = await runtime.startRun(session.id, { content: "持久化" });
+    await runtime.waitForRun(run.runId);
+    const restored = await new FileAgentSessionStore(root).get(session.id);
+    expect(restored?.messages.at(-1)).toMatchObject({ role: "assistant", content: "回答 1" });
+    const raw = await readFile(path.join(root, `${session.id}.json`), "utf8");
+    expect(raw).not.toContain("API_KEY");
+  });
+});

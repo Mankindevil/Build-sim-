@@ -19,7 +19,8 @@
     "price:login": "node scripts/price-server/login.mjs",
     "price:fixture": "node scripts/price-server/fixture.mjs",
     "agent:build": "vite build --config vite.agent.config.ts",
-    "agent:serve": "npm run agent:build && node dist-agent/agent-server.js"
+    "agent:serve": "npm run agent:build && node dist-agent/agent-server.js",
+    "agent:secret-scan": "node scripts/agent-secret-scan.mjs"
   },
   "engines": {
     "node": ">=20"
