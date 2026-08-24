@@ -41,7 +41,7 @@ describe("A6 write approval contract", () => {
     expect(validateWriteApprovalEnvelope(valid, new Date("2026-08-24T00:11:00.000Z"))).toContain("approval expired");
   });
 
-  it("keeps write Tool execution disabled even when its contract declares approval", async () => {
+  it("keeps write Tool execution blocked until an exact approval envelope is supplied", async () => {
     const execute = vi.fn(async () => ({ ok: true, content: {}, provenance: [] }));
     const writeTool: AgentToolSpec = {
       contractVersion: AGENT_CONTRACT_VERSION,
@@ -57,7 +57,7 @@ describe("A6 write approval contract", () => {
     };
     const registry = new AgentToolRegistry([writeTool]);
     const dispatched = await registry.dispatch(writeTool.name, {}, { sessionId: "session-fixture", runId: "run-fixture", buildConfig: null, signal: new AbortController().signal });
-    expect(dispatched.result).toMatchObject({ ok: false, errorCode: "write_tools_disabled" });
+    expect(dispatched.result).toMatchObject({ ok: false, errorCode: "approval_required" });
     expect(execute).not.toHaveBeenCalled();
   });
 });

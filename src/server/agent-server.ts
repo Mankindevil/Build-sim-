@@ -11,6 +11,7 @@ import { FileAgentSessionStore } from "./file-session-store";
 import { FileAgentRunAuditStore } from "./file-audit-store";
 import { loadAgentRuntimeConfig } from "./agent-env";
 import { createBuildSimTools } from "./domain-tools";
+import type { AgentWriteApprovalEnvelope } from "../agent/contracts";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 5175;
@@ -100,11 +101,12 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
   }
   const messageMatch = url.pathname.match(/^\/api\/agent\/sessions\/([^/]+)\/messages$/);
   if (req.method === "POST" && messageMatch?.[1]) {
-    const body = await readJson(req) as { content?: string; buildConfig?: unknown; skillId?: string };
+    const body = await readJson(req) as { content?: string; buildConfig?: unknown; skillId?: string; approvals?: AgentWriteApprovalEnvelope[] };
     const result = await runtime.startRun(decodeURIComponent(messageMatch[1]), {
       content: body.content ?? "",
       ...(body.buildConfig !== undefined ? { buildConfig: parseAuthoritativeBuildConfig(body.buildConfig) } : {}),
       ...(body.skillId !== undefined ? { skillId: body.skillId } : {}),
+      ...(Array.isArray(body.approvals) ? { approvals: body.approvals } : {}),
     });
     send(res, 202, result);
     return true;

@@ -233,7 +233,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/enrich")) {
       const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/enrich".length));
       const flags = await loadRuntimeFlags();
-      const result = await runAutoEnrichment(candidateId, { autoEnrichTrustedOfficial: flags.catalogAutoEnrichTrustedOfficial, autoAcceptExactMpn: flags.catalogAutoAcceptExactMpn, catalogWriteEnabled: flags.catalogWriteEnabled });
+      const body = await readBody(req);
+      const result = await runAutoEnrichment(candidateId, { expectedHash: body.expectedHash, autoEnrichTrustedOfficial: flags.catalogAutoEnrichTrustedOfficial, autoAcceptExactMpn: flags.catalogAutoAcceptExactMpn, catalogWriteEnabled: flags.catalogWriteEnabled });
       return send(res, result.status === "accepted" || result.status === "draft" ? 200 : 409, result);
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/accept-official")) {

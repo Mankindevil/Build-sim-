@@ -15,6 +15,7 @@ import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider } from "
 import { createSearXngDiscoveryProvider } from "./searxng-discovery.mjs";
 import { loadEnv } from "../env.mjs";
 import { createDomainProposal } from "./domain-proposals.mjs";
+import { catalogCandidateInputHash } from "./contracts.mjs";
 
 const catalogJson = createRequire(import.meta.url)("../../../data/skus/catalog.json");
 
@@ -154,7 +155,7 @@ async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFal
     }
     contentCache.set(cacheKey, extracted);
     const fields = extracted.fields;
-    return {
+    const inspected = {
       ...candidate,
       canonicalUrl: canonicalUrl ?? fetchResult.canonicalUrl ?? fetchResult.finalUrl,
       source: { ...candidate.source, kind: "official", retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
@@ -163,6 +164,7 @@ async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFal
       fields,
       ...(extracted.conflicts.length ? { conflicts: extracted.conflicts } : {}),
     };
+    return { ...inspected, expectedHash: catalogCandidateInputHash(inspected) };
   } catch (error) {
     return { ...candidate, extraction: { status: "partial", fieldsFound: 0, fieldsMissing: 6, error: error?.message ?? String(error) }, source: { ...candidate.source, retrievedAt: now() } };
   }

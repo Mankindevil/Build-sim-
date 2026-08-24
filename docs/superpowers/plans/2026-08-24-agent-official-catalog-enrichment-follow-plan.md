@@ -665,3 +665,14 @@ test(catalog): close official enrichment delivery gates
 - 全门禁：完整 Vitest 40 文件/310 项、typecheck、build、legacy model/static、secret scan 219 files/0 findings、`git diff --check` 均通过。
 - 数据：测试自动补齐写入 1、draft 2、blocked approval 1；全部发生在临时目录并已回滚/清理，正式 catalog 自动写入 0。
 - 回滚：回滚本阶段独立提交；proposal/registry/catalog 写入另有各自 rollback manifest。
+
+### C6（2026-08-24）
+
+- 状态：已完成（浏览器全链路合并到 C7 验收）。
+- Tool：新增只读 `list_official_domain_proposals` 与写入 `enrich_official_catalog`；后者 input 仅 candidateId/expectedHash，明确 `effect: write`、`approval: required`，不能提交字段、URL 或 trust decision。
+- 审批：复用 A6 envelope，精确绑定 Tool definition hash、session、input hash 与 idempotency key；缺失/失效/错绑均阻断，成功结果按幂等键重放；approval token 不进入 Provider message、会话或 Tool input。
+- Skill/UI：`shopping-research@1.1.0` 显式允许 proposal/list/enrich 且不扩大其他 Skill；UI 分别显示搜索候选、官网检查、proposal 状态、draft/accepted、字段 diff 与 rollback 引用。
+- 聚焦测试：`agent-tools`、`agent-runtime`、`agent-approval`、`catalog-auto-enrichment`、`agent-skills`、`agent-panel` 共 27 项通过。
+- 全门禁：完整 Vitest 41 文件/313 项、typecheck、build、legacy model/static、secret scan 220 files/0 findings、`git diff --check` 均通过。
+- 未验证：本阶段未用真实模型或真实 catalog 写入；approval fixture 证明契约与本地 Tool 编排，不代表 live Provider。
+- 回滚：回滚本阶段独立提交；catalog 写行为本身仍使用 C5 rollback manifest。

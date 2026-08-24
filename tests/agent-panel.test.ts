@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { initAgentPanel } from "../src/lab/agent-panel";
+import { formatCatalogToolResult, initAgentPanel } from "../src/lab/agent-panel";
 
 class FakeEventSource {
   readonly listeners = new Map<string, Array<(event: Event) => void>>();
@@ -34,6 +34,12 @@ const skill = { manifest: { id: "build-diagnosis", name: "装机诊断", descrip
 const session = { contractVersion: "1.0.0", id: "session-fixture", provider: "deepseek", model: model.id, buildConfig: null, messages: [], createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" };
 
 describe("A5 Agent panel", () => {
+  it("labels catalog candidate, proposal, official inspection and write states distinctly", () => {
+    expect(formatCatalogToolResult("search_official_catalog", { status: "partial", candidates: [{}, {}], domainProposals: [{}], discovery: { providerIds: ["searxng"] } })).toContain("搜索候选 2");
+    expect(formatCatalogToolResult("inspect_catalog_candidate", { extraction: { status: "ok", fieldsFound: 5 }, source: { domain: "asus.com" }, expectedHash: "a".repeat(64) })).toContain("expected hash 已生成");
+    expect(formatCatalogToolResult("list_official_domain_proposals", { proposals: [{ trustStatus: "proposed" }, { trustStatus: "rejected" }] })).toContain("proposed 1");
+    expect(formatCatalogToolResult("enrich_official_catalog", { status: "draft", changedFields: [], rollbackManifest: "manifest.json" })).toContain("目录补齐 · draft");
+  });
   beforeEach(fixtureHtml);
 
   it("shows provider-neutral model and metadata-only Skill catalogs", async () => {

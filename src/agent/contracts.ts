@@ -93,6 +93,7 @@ export interface AgentToolContext {
   runId: string;
   buildConfig: BuildConfig | null;
   signal: AbortSignal;
+  approval?: AgentWriteApprovalEnvelope;
 }
 
 export interface AgentToolResult {

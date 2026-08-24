@@ -36,12 +36,12 @@ function selectedSections(input: unknown): Section[] {
   return requested?.length ? requested : ["findings", "bom", "power", "price", "noise", "physical", "calibration"];
 }
 
-async function localService(pathname: string, body: unknown, signal: AbortSignal): Promise<AgentToolResult> {
+async function localService(pathname: string, body: unknown, signal: AbortSignal, method: "GET" | "POST" = "POST"): Promise<AgentToolResult> {
   try {
     const response = await fetch(`${PRICE_SERVICE}${pathname}`, {
-      method: "POST",
+      method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
       signal,
     });
     const payload = await response.json().catch(() => ({ error: "local service returned invalid JSON" }));
@@ -207,6 +207,35 @@ const inspectCatalogCandidate: AgentToolSpec = {
   async execute(input, context) { return localService("/api/catalog/inspect", input, context.signal); },
 };
 
+const listOfficialDomainProposals: AgentToolSpec = {
+  contractVersion: AGENT_CONTRACT_VERSION,
+  name: "list_official_domain_proposals",
+  title: "列出待治理官网域名",
+  description: "List governed domain proposals from the fixed local catalog service. Proposed and rejected domains remain non-official and cannot be inspected as trusted sources.",
+  effect: "external-read",
+  approval: "never",
+  timeoutMs: 10_000,
+  maxResultBytes: 80_000,
+  inputSchema: schema({}),
+  async execute(_input, context) { return localService("/api/catalog/domain-proposals", null, context.signal, "GET"); },
+};
+
+const enrichOfficialCatalog: AgentToolSpec = {
+  contractVersion: AGENT_CONTRACT_VERSION,
+  name: "enrich_official_catalog",
+  title: "按已核验候选补齐目录",
+  description: "Write only one already-inspected candidate id and its expected immutable hash through the governed local enrichment policy. The Tool cannot submit fields, URLs, trust decisions, or model-authored values and always requires an out-of-band approval envelope.",
+  effect: "write",
+  approval: "required",
+  timeoutMs: 30_000,
+  maxResultBytes: 100_000,
+  inputSchema: schema({ candidateId: { type: "string", minLength: 10, maxLength: 160 }, expectedHash: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["candidateId", "expectedHash"]),
+  async execute(input, context) {
+    const value = input as { candidateId: string; expectedHash: string };
+    return localService(`/api/catalog/candidates/${encodeURIComponent(value.candidateId)}/enrich`, { expectedHash: value.expectedHash }, context.signal);
+  },
+};
+
 const searchPriceCandidates: AgentToolSpec = {
   contractVersion: AGENT_CONTRACT_VERSION,
   name: "search_price_candidates",
@@ -225,5 +254,5 @@ const searchPriceCandidates: AgentToolSpec = {
 };
 
 export function createBuildSimTools(): AgentToolSpec[] {
-  return [getBuildEvaluation, compareBuilds, getSkuFacts, getPriceSnapshot, searchOfficialCatalog, inspectCatalogCandidate, searchPriceCandidates];
+  return [getBuildEvaluation, compareBuilds, getSkuFacts, getPriceSnapshot, searchOfficialCatalog, inspectCatalogCandidate, listOfficialDomainProposals, enrichOfficialCatalog, searchPriceCandidates];
 }

@@ -8,6 +8,7 @@ import type {
   AgentSession,
   LoadedAgentSkill,
   ProviderAdapter,
+  AgentWriteApprovalEnvelope,
 } from "./contracts";
 import { AGENT_CONTRACT_VERSION } from "./contracts";
 import type { AgentSessionStore } from "./session-store";
@@ -37,12 +38,14 @@ interface RunRecord {
   startedAt: string;
   done: Promise<void>;
   resolveDone: () => void;
+  approvals: AgentWriteApprovalEnvelope[];
 }
 
 export interface StartAgentRunInput {
   content: string;
   buildConfig?: AgentSession["buildConfig"];
   skillId?: string;
+  approvals?: AgentWriteApprovalEnvelope[];
 }
 
 export class AgentRuntime {
@@ -144,6 +147,7 @@ export class AgentRuntime {
       startedAt: now,
       done,
       resolveDone,
+      approvals: structuredClone(input.approvals ?? []),
     };
     this.runs.set(run.id, run);
     this.emit(run, { type: "run_status", runId: run.id, status: "queued", at: now });
@@ -245,11 +249,14 @@ export class AgentRuntime {
           if (count > limits.maxRepeatedToolCalls) throw new AgentRuntimeError("run_limit_exceeded", `Repeated Agent Tool call blocked: ${call.name}`, 429);
           const definitionHash = this.options.toolRegistry.definitionHashOrUnregistered(call.name);
           this.emit(run, { type: "tool_call", runId: run.id, call, toolDefinitionHash: definitionHash, at: this.now() });
+          const inputHash = agentAuditHash(call.input);
+          const approval = run.approvals.find((entry) => entry.toolName === call.name && entry.toolDefinitionHash === definitionHash && entry.sessionId === session.id && entry.inputHash === inputHash);
           const dispatched = await this.options.toolRegistry.dispatch(call.name, call.input, {
             sessionId: session.id,
             runId: run.id,
             buildConfig: session.buildConfig,
             signal: run.controller.signal,
+            ...(approval ? { approval } : {}),
           }, allowedTools);
           const resultBytes = Buffer.byteLength(JSON.stringify(dispatched.result));
           const result = resultBytes > limits.maxToolResultBytes
@@ -259,7 +266,7 @@ export class AgentRuntime {
             callId: call.id,
             name: call.name,
             definitionHash: dispatched.definitionHash,
-            inputHash: agentAuditHash(call.input),
+            inputHash,
             resultHash: agentAuditHash(result),
             ok: result.ok,
             errorCode: result.errorCode ?? null,

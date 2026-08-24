@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 /**
  * Provider-neutral catalog enrichment contracts. These records deliberately
  * separate URL discovery evidence from official field evidence.
@@ -32,4 +34,14 @@ export function assertDiscoveryResult(value) {
   if (!Number.isFinite(Date.parse(value.retrievedAt))) throw new Error("discovery retrievedAt must be an ISO timestamp");
   if ("fields" in value || "officialFields" in value) throw new Error("discovery results cannot contain official fields");
   return value;
+}
+
+export function catalogCandidateInputHash(candidate) {
+  const value = { candidateId: candidate?.candidateId, canonicalUrl: candidate?.canonicalUrl, source: candidate?.source, extraction: candidate?.extraction, fields: candidate?.fields, conflicts: candidate?.conflicts ?? [] };
+  const stable = (entry) => {
+    if (Array.isArray(entry)) return `[${entry.map(stable).join(",")}]`;
+    if (entry && typeof entry === "object") return `{${Object.entries(entry).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`).join(",")}}`;
+    return JSON.stringify(entry);
+  };
+  return crypto.createHash("sha256").update(stable(value)).digest("hex");
 }

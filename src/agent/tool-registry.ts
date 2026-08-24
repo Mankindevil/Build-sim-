@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { stableDefinition, validateToolSpec } from "./contract-validation";
 import type { AgentToolContext, AgentToolResult, AgentToolSpec, ProviderToolDefinition } from "./contracts";
+import { approvalMatchesExecution, validateWriteApprovalEnvelope } from "./approval-contract";
+import { agentAuditHash } from "./audit";
 import { validateJsonSchema } from "./tool-schema";
 
 export interface DispatchedToolResult {
@@ -11,6 +13,7 @@ export interface DispatchedToolResult {
 export class AgentToolRegistry {
   private readonly tools = new Map<string, AgentToolSpec>();
   private readonly hashes = new Map<string, string>();
+  private readonly writeResults = new Map<string, AgentToolResult>();
 
   constructor(specs: AgentToolSpec[]) {
     for (const spec of specs) {
@@ -56,8 +59,17 @@ export class AgentToolRegistry {
     if (!tool || (allowedTools && !allowedTools.has(name))) {
       return { definitionHash: "unregistered", result: { ok: false, content: null, errorCode: "tool_not_allowed", message: `Tool is not registered or allowed: ${name}`, provenance: [] } };
     }
-    if (tool.effect === "write" || tool.approval !== "never") {
-      return { definitionHash: this.definitionHash(name), result: { ok: false, content: null, errorCode: "write_tools_disabled", message: "Write Tools remain disabled; an approval envelope alone cannot enable execution", provenance: [] } };
+    if (tool.effect === "write") {
+      const definitionHash = this.definitionHash(name);
+      if (!context.approval) return { definitionHash, result: { ok: false, content: null, errorCode: "approval_required", message: "Write Tool requires an out-of-band approval envelope", provenance: [] } };
+      const errors = validateWriteApprovalEnvelope(context.approval);
+      if (errors.length) return { definitionHash, result: { ok: false, content: null, errorCode: "approval_invalid", message: errors.join("; "), provenance: [] } };
+      const execution = { toolName: name, toolDefinitionHash: definitionHash, sessionId: context.sessionId, inputHash: agentAuditHash(input) };
+      if (!approvalMatchesExecution(context.approval, execution)) return { definitionHash, result: { ok: false, content: null, errorCode: "approval_mismatch", message: "Approval envelope is not bound to this exact Tool execution", provenance: [] } };
+      const replay = this.writeResults.get(context.approval.idempotencyKey);
+      if (replay) return { definitionHash, result: replay };
+    } else if (tool.approval !== "never") {
+      return { definitionHash: this.definitionHash(name), result: { ok: false, content: null, errorCode: "tool_contract_invalid", message: "Read Tool cannot require approval", provenance: [] } };
     }
     const validationErrors = validateJsonSchema(input, tool.inputSchema as Record<string, unknown>);
     if (validationErrors.length) {
@@ -76,6 +88,7 @@ export class AgentToolRegistry {
       if (bytes > Math.min(tool.maxResultBytes, 1_000_000)) {
         return { definitionHash: this.definitionHash(name), result: { ok: false, content: { originalBytes: bytes }, errorCode: "tool_result_too_large", message: "Tool result exceeded its context budget", provenance: result.provenance, truncated: true } };
       }
+      if (tool.effect === "write" && context.approval && result.ok) this.writeResults.set(context.approval.idempotencyKey, result);
       return { definitionHash: this.definitionHash(name), result };
     } catch (error) {
       return { definitionHash: this.definitionHash(name), result: { ok: false, content: null, errorCode: "tool_execution_failed", message: error instanceof Error ? error.message : "Tool execution failed", provenance: [] } };

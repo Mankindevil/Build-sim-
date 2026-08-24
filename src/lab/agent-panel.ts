@@ -26,6 +26,27 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+export function formatCatalogToolResult(toolName: string, content: unknown): string {
+  const value = content && typeof content === "object" ? content as Record<string, unknown> : {};
+  if (toolName === "search_official_catalog") {
+    const candidates = Array.isArray(value.candidates) ? value.candidates : [];
+    const proposals = Array.isArray(value.domainProposals) ? value.domainProposals : [];
+    const discovery = value.discovery && typeof value.discovery === "object" ? value.discovery as { providerIds?: string[] } : {};
+    return `搜索候选 ${candidates.length} · provider ${(discovery.providerIds ?? []).join(",") || "unknown"} · 待治理域名 ${proposals.length} · job ${text(value.status ?? "unknown")}`;
+  }
+  if (toolName === "inspect_catalog_candidate") {
+    const extraction = value.extraction && typeof value.extraction === "object" ? value.extraction as { status?: string; fieldsFound?: number } : {};
+    const source = value.source && typeof value.source === "object" ? value.source as { domain?: string } : {};
+    return `官方检查 ${text(extraction.status ?? "unknown")} · ${text(source.domain ?? "unknown domain")} · 字段 ${extraction.fieldsFound ?? 0} · ${value.expectedHash ? "expected hash 已生成" : "无可写 hash"}`;
+  }
+  if (toolName === "list_official_domain_proposals") {
+    const proposals = Array.isArray(value.proposals) ? value.proposals as Array<{ trustStatus?: string }> : [];
+    return `域名治理 · proposed ${proposals.filter((entry) => entry.trustStatus === "proposed").length} · rejected ${proposals.filter((entry) => entry.trustStatus === "rejected").length} · trusted ${proposals.filter((entry) => entry.trustStatus === "trusted").length}`;
+  }
+  if (toolName === "enrich_official_catalog") return `目录补齐 · ${text(value.status ?? "blocked")} · ${Array.isArray(value.changedFields) ? value.changedFields.length : 0} 个字段差异 · ${text(value.rollbackManifest ?? "无回滚引用")}`;
+  return "";
+}
+
 async function json<T>(fetchImpl: typeof fetch, path: string, init?: RequestInit): Promise<T> {
   const response = await fetchImpl(`${API}${path}`, { headers: { "Content-Type": "application/json" }, ...init });
   const payload = await response.json().catch(() => ({ error: "invalid_json", message: `HTTP ${response.status}` })) as T & { error?: string; message?: string };
@@ -172,7 +193,10 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
     });
     source.addEventListener("tool_result", (event) => {
       const data = parse<Extract<AgentRunEvent, { type: "tool_result" }>>(event);
-      if (data) addEvent(`Tool 结果 · ${data.toolName} · ${data.result.ok ? "ok" : data.result.errorCode ?? "error"}`, data.result.ok ? "ok" : "warn");
+      if (data) {
+        const summary = formatCatalogToolResult(data.toolName, data.result.content);
+        addEvent(`Tool 结果 · ${data.toolName} · ${data.result.ok ? "ok" : data.result.errorCode ?? "error"}${summary ? ` · ${summary}` : ""}`, data.result.ok ? "ok" : "warn");
+      }
     });
     source.addEventListener("usage", (event) => {
       const data = parse<Extract<AgentRunEvent, { type: "usage" }>>(event);

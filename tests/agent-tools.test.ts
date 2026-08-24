@@ -11,13 +11,14 @@ function context(): AgentToolContext {
 }
 
 describe("A3 Build Sim Tool registry", () => {
-  it("registers exactly seven read-only tools with stable definition hashes", () => {
+  it("registers governed read/external-read tools and one approval-bound write tool", () => {
     const registry = new AgentToolRegistry(createBuildSimTools());
     expect(registry.names()).toEqual([
-      "compare_builds", "get_build_evaluation", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "search_official_catalog", "search_price_candidates",
+      "compare_builds", "enrich_official_catalog", "get_build_evaluation", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "list_official_domain_proposals", "search_official_catalog", "search_price_candidates",
     ]);
-    expect(registry.catalog()).toHaveLength(7);
-    expect(registry.catalog().every((tool) => tool.effect !== "write" && /^[a-f0-9]{64}$/.test(tool.definitionHash))).toBe(true);
+    expect(registry.catalog()).toHaveLength(9);
+    expect(registry.catalog().every((tool) => /^[a-f0-9]{64}$/.test(tool.definitionHash))).toBe(true);
+    expect(registry.catalog().filter((tool) => tool.effect === "write")).toEqual([expect.objectContaining({ name: "enrich_official_catalog", approval: "required" })]);
   });
 
   it("returns bounded authoritative evaluation projections and rejects schema drift", async () => {
@@ -49,15 +50,17 @@ describe("A3 Build Sim Tool registry", () => {
   it("routes external reads only through the fixed local service", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-      calls.push({ url, body: JSON.parse(String(init?.body)) });
+      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
       return new Response(JSON.stringify({ status: "queued", candidates: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     const registry = new AgentToolRegistry(createBuildSimTools());
     expect((await registry.dispatch("search_official_catalog", { query: "ASUS W680M", limit: 3 }, context())).result.ok).toBe(true);
+    expect((await registry.dispatch("list_official_domain_proposals", {}, context())).result.ok).toBe(true);
     expect((await registry.dispatch("inspect_catalog_candidate", { url: "http://127.0.0.1/private" }, context())).result).toMatchObject({ ok: false, errorCode: "tool_input_invalid" });
     expect((await registry.dispatch("search_price_candidates", { skuIds: ["case.jonsbo-n6"], channels: ["official"], limit: 1 }, context())).result.ok).toBe(true);
     expect(calls).toEqual([
       { url: "http://127.0.0.1:5174/api/catalog/search", body: { query: "ASUS W680M", limit: 3, officialOnly: true } },
+      { url: "http://127.0.0.1:5174/api/catalog/domain-proposals", body: null },
       { url: "http://127.0.0.1:5174/api/price/collect", body: { skuIds: ["case.jonsbo-n6"], channels: ["official"], limit: 1 } },
     ]);
     vi.unstubAllGlobals();
