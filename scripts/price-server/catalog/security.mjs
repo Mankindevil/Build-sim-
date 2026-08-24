@@ -35,13 +35,15 @@ export async function assertPublicHostname(hostname, options = {}) {
   return hostname;
 }
 
-export function validateOfficialUrl(raw, { allowHttp = false } = {}) {
+/** @param {string} raw @param {{allowHttp?: boolean, registry?: any}} [options] */
+export function validateOfficialUrl(raw, options = {}) {
+  const { allowHttp = false, registry } = options;
   let url;
   try { url = new URL(raw); } catch { throw new Error("invalid URL"); }
   if (!allowHttp && url.protocol !== "https:") throw new Error("official URL must use https");
   if (allowHttp && !["https:", "http:"].includes(url.protocol)) throw new Error("official URL protocol is not allowed");
   if (isPrivateHostname(url.hostname)) throw new Error("private or local URL is blocked");
-  if (!registryForUrl(url)) throw new Error("official domain is not allowlisted");
+  if (registryForUrl(url, registry)?.trustStatus !== "trusted") throw new Error("official domain is not trusted or allowlisted");
   url.username = "";
   url.password = "";
   url.hash = "";

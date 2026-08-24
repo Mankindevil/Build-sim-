@@ -627,3 +627,13 @@ test(catalog): close official enrichment delivery gates
 - 全门禁：完整 Vitest 35 文件/289 项、typecheck、build、legacy model/static、secret scan 208 files/0 findings、`git diff --check` 均通过。
 - 未验证：未访问真实动态官网；Playwright 安全行为使用离线 fake module 验证。
 - 回滚：回滚本阶段独立提交；`catalog/security.mjs` 中 C0 前既有 env limits hunk 未纳入本提交。
+
+### C2（2026-08-24）
+
+- 状态：已完成。
+- 修改：新增 `data/catalog/official-domains.json`、严格同步 loader/schema/hash；迁移 4 个 seed 品牌并加入 Intel、Kingston、NVIDIA、Samsung、Seasonic、SilverStone、FSP、Thermalright；Intel 的 `.com`/`.co.jp` 显式列出；alias/大小写、trustStatus 与 malformed/public-suffix/重复治理已生效。
+- 数据：37 个 SKU、21 个品牌标签；catalog 引用 13 个唯一官网 hostname，blocked=0，registry 覆盖率 100%。Generic/Unknown/无官网品牌未自动 trusted。
+- 聚焦测试：`catalog-registry`、`catalog-search` 共 20 项通过。
+- 全门禁：完整 Vitest 36 文件/296 项、typecheck、build、legacy model/static、secret scan 210 files/0 findings、`git diff --check` 均通过。
+- 未验证：registry 来源为当前 committed catalog provenance/listing/page 迁移；本阶段未重新抓取这些官网。
+- 回滚：回滚本阶段独立提交恢复代码常量；版本化 registry 文件随提交一并移除。

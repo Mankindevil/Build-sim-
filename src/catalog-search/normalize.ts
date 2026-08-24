@@ -1,7 +1,7 @@
 import type { SkuCategory } from "../sku/types";
 import type { NormalizedModelQuery } from "./types";
 
-const BRANDS = ["JONSBO", "ASUS", "Seagate", "Corsair", "Intel", "Samsung", "Noctua", "Thermalright", "ID-COOLING", "LSI", "NVIDIA"];
+const BRANDS = ["JONSBO", "ASUS", "Seagate", "Corsair", "Intel", "Kingston", "Samsung", "Seasonic", "SilverStone", "FSP", "Thermalright", "Noctua", "ID-COOLING", "LSI", "NVIDIA"];
 const CATEGORY_WORDS: [SkuCategory, string[]][] = [
   ["case", ["case", "机箱"]],
   ["motherboard", ["motherboard", "mainboard", "主板"]],
