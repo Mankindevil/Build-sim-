@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { DEFAULT_FETCH_LIMITS, validateOfficialUrl, validateRedirect } from "./security.mjs";
+import { DEFAULT_FETCH_LIMITS, validateOfficialUrlResolved } from "./security.mjs";
 
 async function readLimited(response, maxBytes) {
   const declared = Number(response.headers.get("content-length"));
@@ -23,7 +23,7 @@ async function readLimited(response, maxBytes) {
 
 export async function fetchOfficial(rawUrl, options = {}) {
   const limits = { ...DEFAULT_FETCH_LIMITS, ...options };
-  let current = validateOfficialUrl(rawUrl, limits);
+  let current = await validateOfficialUrlResolved(rawUrl, limits);
   const redirects = [];
   const retrievedAt = new Date().toISOString();
   let response;
@@ -44,7 +44,7 @@ export async function fetchOfficial(rawUrl, options = {}) {
     if (![301, 302, 303, 307, 308].includes(response.status)) break;
     const location = response.headers.get("location");
     if (!location) throw new Error("redirect without location");
-    const next = validateRedirect(new URL(location, current).toString(), limits);
+    const next = await validateOfficialUrlResolved(new URL(location, current).toString(), limits);
     redirects.push(next.toString());
     current = next;
   }

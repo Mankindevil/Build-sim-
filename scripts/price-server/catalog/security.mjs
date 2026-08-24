@@ -1,4 +1,5 @@
 import net from "node:net";
+import { lookup as dnsLookup } from "node:dns/promises";
 import { registryForUrl } from "./registry.mjs";
 
 export const DEFAULT_FETCH_LIMITS = Object.freeze({ maxBytes: 5_000_000, timeoutMs: 15_000, maxRedirects: 4 });
@@ -18,6 +19,22 @@ export function isPrivateHostname(hostname) {
   return false;
 }
 
+/** @param {string} hostname @param {{lookup?: (hostname:string, options:{all:true, verbatim:true}) => Promise<Array<{address:string, family:number}>>}} [options] */
+export async function assertPublicHostname(hostname, options = {}) {
+  const lookup = options.lookup ?? dnsLookup;
+  if (isPrivateHostname(hostname)) throw new Error("private or local URL is blocked");
+  if (net.isIP(hostname)) return hostname;
+  let addresses;
+  try {
+    addresses = await lookup(hostname, { all: true, verbatim: true });
+  } catch (error) {
+    throw new Error(`official DNS lookup failed: ${error?.message ?? error}`);
+  }
+  if (!addresses.length) throw new Error("official DNS lookup returned no addresses");
+  if (addresses.some((entry) => isPrivateHostname(entry.address))) throw new Error("official domain resolves to a private or local address");
+  return hostname;
+}
+
 export function validateOfficialUrl(raw, { allowHttp = false } = {}) {
   let url;
   try { url = new URL(raw); } catch { throw new Error("invalid URL"); }
@@ -33,4 +50,19 @@ export function validateOfficialUrl(raw, { allowHttp = false } = {}) {
 
 export function validateRedirect(raw, options = {}) {
   return validateOfficialUrl(raw, options);
+}
+
+export async function validateOfficialUrlResolved(raw, options = {}) {
+  const url = validateOfficialUrl(raw, options);
+  await assertPublicHostname(url.hostname, options);
+  return url;
+}
+
+export async function validatePublicSubresourceUrl(raw, options = {}) {
+  let url;
+  try { url = new URL(raw); } catch { throw new Error("invalid subresource URL"); }
+  if (["data:", "blob:"].includes(url.protocol)) return url;
+  if (url.protocol !== "https:") throw new Error("browser subresource URL must use https");
+  await assertPublicHostname(url.hostname, options);
+  return url;
 }

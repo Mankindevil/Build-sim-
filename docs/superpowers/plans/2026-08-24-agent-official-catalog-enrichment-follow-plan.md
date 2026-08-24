@@ -618,3 +618,12 @@ test(catalog): close official enrichment delivery gates
 - 全门禁：完整 Vitest 34 文件/284 项、typecheck、build、legacy model 85 assertions、legacy static 23 assertions、secret scan 207 files/0 findings、`git diff --check` 均通过。
 - 未验证：本阶段无网络验证；fixtures 只证明离线契约。
 - 回滚：回滚本阶段独立提交；不影响开始前既有 env/端口改动。
+
+### C1（2026-08-24）
+
+- 状态：已完成。
+- 修改：直接 fetch 与 Playwright 路径均增加 DNS 解析后私网阻断；Chromium 主文档请求与导航后最终 URL 重新执行 trusted/HTTPS/DNS 校验；私网或不安全子请求、超大渲染结果被阻断；缺类别必需字段即触发 renderer，失败保留静态字段并标记 partial。
+- 聚焦测试：`catalog-search`、`catalog-browser-security` 共 18 项通过，覆盖 allowlisted 跳出、DNS rebinding、localhost 子请求、渲染大小、fallback 条件与失败降级。
+- 全门禁：完整 Vitest 35 文件/289 项、typecheck、build、legacy model/static、secret scan 208 files/0 findings、`git diff --check` 均通过。
+- 未验证：未访问真实动态官网；Playwright 安全行为使用离线 fake module 验证。
+- 回滚：回滚本阶段独立提交；`catalog/security.mjs` 中 C0 前既有 env limits hunk 未纳入本提交。

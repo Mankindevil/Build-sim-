@@ -112,6 +112,11 @@ function extractionStatus(candidate, extracted, fetchResult) {
   return extracted.fields.length && !missingRequired && !extracted.conflicts.length ? "ok" : "partial";
 }
 
+export function missingRequiredFields(candidate, extracted) {
+  const required = ["brand", "model", ...(candidate.query?.mpn || candidate.mpn ? ["mpn"] : []), ...(REQUIRED_FIELDS_BY_CATEGORY[candidate.category ?? candidate.query?.category] ?? [])];
+  return required.filter((field) => !extracted.fields.some((entry) => entry.field === field));
+}
+
 async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFallback } = {}) {
   try {
     const fetchResult = fetcher === fetchOfficial && fetchCache.has(candidate.url)
@@ -126,15 +131,19 @@ async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFal
     if (!extracted) {
       const adapter = adapterForUrl(fetchResult.finalUrl);
       extracted = adapter?.extract(fetchResult) ?? (fetchResult.contentType.includes("pdf") ? extractOfficialPdf(fetchResult) : extractOfficialHtml(fetchResult));
-      if (!extracted.fields.length && browserFallback && !fetchResult.contentType.includes("pdf")) {
-        const fallbackResult = await browserFallback(fetchResult.finalUrl);
-        const fallbackAdapter = adapterForUrl(fallbackResult.finalUrl);
-        const fallbackExtracted = fallbackAdapter?.extract(fallbackResult) ?? extractOfficialHtml(fallbackResult);
-        extracted = {
-          ...fallbackExtracted,
-          warnings: [...extracted.warnings, ...fallbackExtracted.warnings],
-          adapter: `${extracted.adapter}+${fallbackExtracted.adapter}+playwright-fallback`,
-        };
+      if (missingRequiredFields(candidate, extracted).length && browserFallback && !fetchResult.contentType.includes("pdf")) {
+        try {
+          const fallbackResult = await browserFallback(fetchResult.finalUrl);
+          const fallbackAdapter = adapterForUrl(fallbackResult.finalUrl);
+          const fallbackExtracted = fallbackAdapter?.extract(fallbackResult) ?? extractOfficialHtml(fallbackResult, { sourceKind: "official-rendered-page" });
+          extracted = {
+            ...fallbackExtracted,
+            warnings: [...extracted.warnings, ...fallbackExtracted.warnings],
+            adapter: `${extracted.adapter}+${fallbackExtracted.adapter}+playwright-fallback`,
+          };
+        } catch (error) {
+          extracted = { ...extracted, warnings: [...extracted.warnings, `Playwright fallback failed: ${safeText(error?.message ?? error)}`] };
+        }
       }
     }
     contentCache.set(cacheKey, extracted);

@@ -24,6 +24,7 @@ const fetchResult = {
   contentHash: crypto.createHash("sha256").update(html).digest("hex"),
   redirects: [],
 };
+const publicDnsLookup = async () => [{ address: "203.0.113.10", family: 4 }];
 
 afterEach(() => {
   // The fetcher tests temporarily replace the global network primitive.
@@ -97,10 +98,10 @@ describe("G3 official URL safety", () => {
       expect(init?.headers).not.toHaveProperty("authorization");
       return new Response("", { status: 302, headers: { location: calls === 1 ? "https://www.asus.com/next" : "https://127.0.0.1/blocked" } });
     }) as typeof fetch;
-    await expect(fetchOfficial("https://www.asus.com/start", { timeoutMs: 200 })).rejects.toThrow(/private|local/);
+    await expect(fetchOfficial("https://www.asus.com/start", { timeoutMs: 200, lookup: publicDnsLookup })).rejects.toThrow(/private|local/);
     globalThis.fetch = originalFetch;
     globalThis.fetch = (async () => new Response("x".repeat(120), { status: 200, headers: { "content-type": "text/html" } })) as typeof fetch;
-    await expect(fetchOfficial("https://www.asus.com/large", { maxBytes: 32 })).rejects.toThrow(/size limit/);
+    await expect(fetchOfficial("https://www.asus.com/large", { maxBytes: 32, lookup: publicDnsLookup })).rejects.toThrow(/size limit/);
   });
 });
 
