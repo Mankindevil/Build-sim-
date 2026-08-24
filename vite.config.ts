@@ -23,6 +23,10 @@ export default defineConfig({
         target: "http://127.0.0.1:5174",
         changeOrigin: false,
       },
+      "/api/agent": {
+        target: "http://127.0.0.1:5175",
+        changeOrigin: false,
+      },
     },
   },
   build: {

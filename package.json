@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && npm run agent:build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -17,7 +17,9 @@
     "price:search": "node scripts/price-refresh/search.mjs",
     "price:serve": "node scripts/price-server/server.mjs",
     "price:login": "node scripts/price-server/login.mjs",
-    "price:fixture": "node scripts/price-server/fixture.mjs"
+    "price:fixture": "node scripts/price-server/fixture.mjs",
+    "agent:build": "vite build --config vite.agent.config.ts",
+    "agent:serve": "npm run agent:build && node dist-agent/agent-server.js"
   },
   "engines": {
     "node": ">=20"

@@ -1,5 +1,7 @@
 node_modules/
 dist/
+dist-agent/
+data/agent/
 .DS_Store
 *.log
 .cache/
