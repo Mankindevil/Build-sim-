@@ -11,6 +11,9 @@ import { adapterForUrl } from "./adapters.mjs";
 import { atomicWriteJson } from "../store.mjs";
 import { discoverOfficialUrls, QUERY_NORMALIZATION_VERSION } from "./discovery.mjs";
 import { OFFICIAL_REGISTRY_VERSION } from "./registry.mjs";
+import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./discovery.mjs";
+import { createSearXngDiscoveryProvider } from "./searxng-discovery.mjs";
+import { loadEnv } from "../env.mjs";
 
 const catalogJson = createRequire(import.meta.url)("../../../data/skus/catalog.json");
 
@@ -168,7 +171,14 @@ async function processJob(job, options) {
   job.status = "running";
   job.stage = "discover";
   await persistJob(job, options.persistRoot);
-  const discovery = await discoverOfficialUrls({ query: job.query, catalog: options.catalog ?? catalogJson, providers: options.discoveryProviders, limit: job.limit, signal: options.signal });
+  let discoveryProviders = options.discoveryProviders;
+  if (!discoveryProviders) {
+    const env = await loadEnv();
+    const mode = env.CATALOG_DISCOVERY_PROVIDER || "registry";
+    if (!["registry", "searxng"].includes(mode)) throw new Error("CATALOG_DISCOVERY_PROVIDER must be registry or searxng");
+    discoveryProviders = [new CatalogCacheDiscoveryProvider(options.catalog ?? catalogJson), ...(mode === "searxng" ? [createSearXngDiscoveryProvider(env, { cacheRoot: options.discoveryCacheRoot })] : []), new RegistrySearchDiscoveryProvider()];
+  }
+  const discovery = await discoverOfficialUrls({ query: job.query, catalog: options.catalog ?? catalogJson, providers: discoveryProviders, limit: job.limit, signal: options.signal });
   job.discovery = { providerIds: discovery.providerIds, registryVersion: discovery.registryVersion, queryNormalizationVersion: discovery.queryNormalizationVersion };
   job.warnings.push(...discovery.warnings);
   const candidates = discovery.candidates.map((entry) => ({

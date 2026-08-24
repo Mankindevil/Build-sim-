@@ -1,0 +1,7 @@
+{
+  "query": "ASUS-G4-001 site:asus.com",
+  "results": [
+    { "url": "https://www.asus.com/motherboards/g4#specs", "title": "ASUS G4", "content": "Search snippet says 4096 GB and 2000 W but is not official field evidence.", "engine": "fixture" },
+    { "url": "https://evil.example/copied-g4", "title": "Copied G4", "content": "Untrusted result", "engine": "fixture" }
+  ]
+}

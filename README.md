@@ -98,3 +98,7 @@ Never present inferred geometry, heatmaps, or planning prices as manufacturer CA
 ## Provenance
 
 See `docs/PROVENANCE.md` and `docs/ROADMAP.md`.
+
+## Trusted official catalog discovery
+
+Official domains live in the versioned `data/catalog/official-domains.json` registry. The default `CATALOG_DISCOVERY_PROVIDER=registry` uses only the bundled catalog and vendor search links. To opt into a local SearXNG JSON service, set `CATALOG_DISCOVERY_PROVIDER=searxng`; the endpoint stays server-only and must be a loopback HTTP URL. SearXNG title/snippet data is retained only as discovery evidence: official fields still require a trusted final URL and deterministic HTML/JSON-LD/spec-table/PDF/rendered extraction with field-level provenance. Provider timeout, invalid JSON, or untrusted candidates degrade the job to warning/partial and do not block the simulator.

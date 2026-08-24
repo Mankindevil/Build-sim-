@@ -646,3 +646,12 @@ test(catalog): close official enrichment delivery gates
 - 全门禁：完整 Vitest 37 文件/300 项、typecheck、build、legacy model/static、secret scan 212 files/0 findings、`git diff --check` 均通过。
 - 未验证：C3 只有本地 catalog/registry provider 和离线 fixture provider；真实 URL discovery 留到 C4 SearXNG。
 - 回滚：回滚本阶段独立提交恢复原 service 内发现逻辑。
+
+### C4（2026-08-24）
+
+- 状态：已完成（离线）；live SearXNG 外部未验证。
+- 修改：新增只读 `SearXngDiscoveryProvider`；endpoint 仅允许服务端固定 loopback HTTP；exact MPN + per-domain `site:` 查询；限制 query/domain/result/响应大小/超时/并发；严格 JSON 解析；内存/原子落盘 TTL 缓存 key 包含 provider/query/domain/registry version；默认 provider 仍为 `registry`。
+- 聚焦测试：`searxng-discovery`、`catalog-discovery`、`server-env` 共 10 项通过；错误 snippet 只保留 candidate evidence，非 trusted URL 在 inspect 前阻断。
+- 全门禁：完整 Vitest 38 文件/304 项、typecheck、build、legacy model/static、secret scan 215 files/0 findings、`git diff --check` 均通过。
+- Live：`curl http://127.0.0.1:8080/search?...&format=json` 连接失败（exit 7），本机没有可用 SearXNG；未把端口或 fixture 当作 live 证据。
+- 回滚：回滚本阶段独立提交；默认配置本就不会启用 SearXNG。
