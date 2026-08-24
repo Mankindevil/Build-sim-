@@ -164,3 +164,50 @@ export interface AgentRunLimits {
   maxToolResultBytes: number;
 }
 
+export interface AgentWriteApprovalEnvelope {
+  contractVersion: typeof AGENT_CONTRACT_VERSION;
+  approvalId: string;
+  toolName: string;
+  toolDefinitionHash: string;
+  sessionId: string;
+  inputHash: string;
+  idempotencyKey: string;
+  issuedAt: string;
+  expiresAt: string;
+  approvedBy: string;
+  approvalToken: string;
+  backup: { required: true; target: string };
+  rollback: { required: true; strategy: string };
+}
+
+export interface AgentRunAuditRecord {
+  contractVersion: typeof AGENT_CONTRACT_VERSION;
+  runId: string;
+  sessionId: string;
+  provider: AgentProviderId;
+  model: string;
+  status: AgentRunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  buildConfigHash: string | null;
+  skill: { id: string; version: string; definitionHash: string } | null;
+  providerTurns: Array<{
+    providerRequestId: string | null;
+    model: string;
+    stopReason: ProviderTurnResult["stopReason"];
+    usage: ProviderUsage;
+    latencyMs: number;
+  }>;
+  toolCalls: Array<{
+    callId: string;
+    name: string;
+    definitionHash: string;
+    inputHash: string;
+    resultHash: string;
+    ok: boolean;
+    errorCode: string | null;
+    provenanceHash: string;
+  }>;
+  error: { code: string; message: string } | null;
+  recordHash: string;
+}

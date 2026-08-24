@@ -58,6 +58,7 @@ describe("A5 Agent panel", () => {
       if (url.endsWith("/sessions") && method === "POST") return payload(session, 201);
       if (url.endsWith("/sessions/session-fixture/messages")) return payload({ runId: "run-fixture", status: "queued" }, 202);
       if (url.endsWith("/sessions/session-fixture")) return payload({ ...session, messages: [{ id: "a1", role: "assistant", content: "最终持久化回答", createdAt: "2026-08-24T00:00:01.000Z" }] });
+      if (url.endsWith("/runs/run-fixture/audit")) return payload({ status: "completed", recordHash: "c".repeat(64) });
       throw new Error(`unexpected ${method} ${url}`);
     });
     await initAgentPanel({ getBuildConfig: () => ({ schemaVersion: "2.0.0", id: "live" }), fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => stream });
@@ -76,6 +77,7 @@ describe("A5 Agent panel", () => {
     await vi.waitFor(() => expect(document.querySelector("#agent-transcript")?.textContent).toContain("最终持久化回答"));
     expect(document.querySelector("#agent-events")?.textContent).toContain("Skill · build-diagnosis");
     expect(document.querySelector("#agent-events")?.textContent).toContain("Tool 结果 · get_build_evaluation · ok");
+    expect(document.querySelector("#agent-events")?.textContent).toContain("审计记录 · completed · cccccccccccc");
     expect(document.querySelector("#agent-usage")?.textContent).toContain("total 13");
     expect(stream.closed).toBe(true);
   });

@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentRunEvent, AgentSession, ProviderModel } from "../agent/contracts";
+import type { AgentMessage, AgentRunAuditRecord, AgentRunEvent, AgentSession, ProviderModel } from "../agent/contracts";
 
 const API = "/api/agent";
 
@@ -135,6 +135,12 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
       stream = null;
       activeRunId = null;
       try { await syncAssistant(sessionId); } catch (error) { addEvent(`会话同步失败：${text((error as Error).message)}`, "warn"); }
+      try {
+        const audit = await json<AgentRunAuditRecord>(fetchImpl, `/runs/${encodeURIComponent(runId)}/audit`);
+        addEvent(`审计记录 · ${audit.status} · ${audit.recordHash.slice(0, 12)}`, audit.status === "completed" ? "ok" : "warn");
+      } catch (error) {
+        addEvent(`审计读取失败：${text((error as Error).message)}`, "warn");
+      }
       setBusy(false);
       if (state === "completed") setStatus("回答完成 · 确定性事实仍以 BuildEvaluation 为准", "ok");
       else if (state === "cancelled") setStatus("本次运行已取消", "warn");

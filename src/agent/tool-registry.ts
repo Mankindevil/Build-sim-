@@ -57,7 +57,7 @@ export class AgentToolRegistry {
       return { definitionHash: "unregistered", result: { ok: false, content: null, errorCode: "tool_not_allowed", message: `Tool is not registered or allowed: ${name}`, provenance: [] } };
     }
     if (tool.effect === "write" || tool.approval !== "never") {
-      return { definitionHash: this.definitionHash(name), result: { ok: false, content: null, errorCode: "tool_approval_required", message: "Write Tools are disabled in the initial Agent release", provenance: [] } };
+      return { definitionHash: this.definitionHash(name), result: { ok: false, content: null, errorCode: "write_tools_disabled", message: "Write Tools remain disabled; an approval envelope alone cannot enable execution", provenance: [] } };
     }
     const validationErrors = validateJsonSchema(input, tool.inputSchema as Record<string, unknown>);
     if (validationErrors.length) {

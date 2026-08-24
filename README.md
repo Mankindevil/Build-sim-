@@ -57,6 +57,10 @@ npm run agent:serve
 
 “装机预览”页包含 Provider-neutral Agent 聊天面板，可选择服务端模型与 Skill、保持多轮会话、随每条消息提交当前 BuildConfig、显示流式文本、Skill/Tool 定义哈希、结构化 Tool 结果、usage，并支持取消和新建会话。服务不可用时面板会保持禁用并明确提示，不影响确定性模拟器。`npm run agent:fixture` 只用于本地 DeepSeek SSE 协议和浏览器全链路测试，返回内容明确标注为 fixture，不能作为真实 DeepSeek 可用性证据。
 
+每次运行另写入权限为 `0600` 的 `data/agent/audit/<runId>.json`，并可通过 `GET /api/agent/runs/:id/audit` 读取。审计记录包含配置、Tool 输入/结果/证据的 SHA-256、Skill/Tool definition hash、Provider request id、usage、延迟与终态，不复制 prompt、原始 Tool 结果或模型正文；敏感键、Bearer 值和 key 形态文本会再次脱敏，并用 `recordHash` 检查文件完整性。多轮会话文件为了恢复聊天会包含用户、模型和 Tool 正文，两者用途不同，均只保存在被 Git 忽略的本地目录中。
+
+未来写 Tool 的 `AgentWriteApprovalEnvelope` 要求短时效、精确绑定 Tool/定义/会话/输入哈希、幂等键、人工主体、带外 token、备份目标和回滚策略。这个契约当前只用于前置设计与验证；注册表仍无条件返回 `write_tools_disabled`，审批对象本身不能开启写执行。
+
 Opens the N6 Build Lab. Change PSU/cooler/GPU/etc.; FIT + wiring update from the engine; appearance gallery follows SKU.
 
 ```bash

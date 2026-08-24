@@ -7,6 +7,7 @@ import { AgentToolRegistry } from "../agent/tool-registry";
 import { AgentSkillLoader } from "../agent/skill-loader";
 import { evaluateBuildAuthoritatively, parseAuthoritativeBuildConfig } from "./evaluation-service";
 import { FileAgentSessionStore } from "./file-session-store";
+import { FileAgentRunAuditStore } from "./file-audit-store";
 import { loadAgentRuntimeConfig } from "./agent-env";
 import { createBuildSimTools } from "./domain-tools";
 
@@ -112,6 +113,11 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
     send(res, 200, runtime.getRun(decodeURIComponent(runMatch[1])));
     return true;
   }
+  const auditMatch = url.pathname.match(/^\/api\/agent\/runs\/([^/]+)\/audit$/);
+  if (req.method === "GET" && auditMatch?.[1]) {
+    send(res, 200, await runtime.getRunAudit(decodeURIComponent(auditMatch[1])));
+    return true;
+  }
   const cancelMatch = url.pathname.match(/^\/api\/agent\/runs\/([^/]+)\/cancel$/);
   if (req.method === "POST" && cancelMatch?.[1]) {
     const runId = decodeURIComponent(cancelMatch[1]);
@@ -187,6 +193,7 @@ if (isMain) {
         temperature: config.deepseek.temperature,
         toolRegistry,
         skillLoader: new AgentSkillLoader(path.resolve("skills"), toolRegistry),
+        auditStore: new FileAgentRunAuditStore(),
       },
     );
     const port = config.port ?? DEFAULT_PORT;
