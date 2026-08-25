@@ -1,0 +1,64 @@
+import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { FilePlanRepository } from "../plans/file-repository";
+import type { PlanRepository } from "../plans/contracts";
+import { ensureDefaultPlan } from "../plans/seed";
+import { handleWorkspaceRoute } from "./workspace-routes";
+
+const HOST = "127.0.0.1";
+const DEFAULT_PORT = 5176;
+const MAX_BODY_BYTES = 1_000_000;
+
+function send(response: ServerResponse, status: number, payload: unknown): void {
+  response.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  response.end(status === 204 ? undefined : JSON.stringify(payload));
+}
+
+async function readJson(request: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.length;
+    if (bytes > MAX_BODY_BYTES) throw new Error("request body too large");
+    chunks.push(buffer);
+  }
+  if (!chunks.length) return {};
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+export function createWorkspaceServer(repository: PlanRepository): http.Server {
+  return http.createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", `http://${HOST}`);
+    let body: unknown = {};
+    try {
+      if (request.method === "POST" || request.method === "PATCH") body = await readJson(request);
+    } catch (error) {
+      send(response, 400, { error: "invalid_request", message: error instanceof Error ? error.message : "Invalid request" });
+      return;
+    }
+    const result = await handleWorkspaceRoute(request.method, url.pathname, body, repository);
+    send(response, result.status, result.payload);
+  });
+}
+
+const isMain = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  void (async () => {
+    const port = Number(process.env.WORKSPACE_SERVER_PORT ?? DEFAULT_PORT);
+    const root = path.resolve(process.env.PLAN_REPOSITORY_ROOT ?? "runtime/plans");
+    const repository = new FilePlanRepository({ root });
+    await ensureDefaultPlan(repository);
+    createWorkspaceServer(repository).listen(port, HOST, () => {
+      console.log(`Build Sim workspace server listening on http://${HOST}:${port}`);
+    });
+  })().catch((error) => {
+    console.error(error instanceof Error ? error.message : "Workspace server failed to start");
+    process.exitCode = 1;
+  });
+}

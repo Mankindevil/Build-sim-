@@ -1,11 +1,14 @@
 node_modules/
 dist/
 dist-agent/
+dist-workspace/
 data/agent/
 .DS_Store
 *.log
 .cache/
 coverage/
+tests/model-test-report.json
+tests/static-test-report.json
 .env
 .env.*
 *.local

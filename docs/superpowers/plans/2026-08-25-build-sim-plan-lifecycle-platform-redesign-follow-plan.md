@@ -1069,3 +1069,17 @@ R3 工作台编辑器  R4 评估版本化
 - 未验证项：无 R0 阻断项
 - 回滚方式：移除独立 `src/plans/`、R0 tests/fixture 与 baseline 文档；无需改动既有数据
 - Push：未授权
+
+### R1 执行记录
+
+- 状态：完成
+- 起始 HEAD：`22b8f6b`
+- 完成提交：`feat(plans): add versioned workspace repository`（SHA 见 Git log）
+- 修改文件：文件 PlanRepository、默认 N6 seed、旧进度迁移 reader、workspace REST routes/server、Vite proxy/build 配置及 R1 tests
+- 聚焦测试：`npx vitest run tests/plan-store.test.ts tests/plan-api.test.ts tests/plan-migration.test.ts`，3 files / 11 tests passed
+- 全量门禁：Vitest 54 files / 377 tests passed；typecheck passed；client + Agent + workspace production build passed；legacy model 85 assertions passed；legacy static 23 assertions passed；secret scan 278 files / 0 findings；`git diff --check` passed
+- 浏览器证据：R1 为服务/存储阶段，无新增 UI 验收声明
+- 数据迁移：实现 `build-sim.progress.v1` 幂等 reader、原始 JSON backup marker；旧交易仅生成 `unlinked` link，不猜测 plan/version/item
+- 未验证项：真实浏览器 localStorage 的迁移触发由 R2 接入；不阻塞 R1 存储底座
+- 回滚方式：停止 workspace server，移除 `/api/workspace` proxy 与独立 `runtime/plans/`；软删除数据位于 repository `.trash/`
+- Push：未授权

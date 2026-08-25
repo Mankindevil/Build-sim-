@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && npm run agent:build",
+    "build": "tsc --noEmit && vite build && npm run agent:build && npm run workspace:build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -24,6 +24,8 @@
     "agent:fixture": "node scripts/agent-provider-fixture.mjs",
     "agent:secret-scan": "node scripts/agent-secret-scan.mjs",
     "agent:live-smoke": "vite-node scripts/agent-live-smoke.ts",
+    "workspace:build": "vite build --config vite.workspace.config.ts",
+    "workspace:serve": "npm run workspace:build && node dist-workspace/workspace-server.js",
     "searxng:up": "node scripts/searxng-local.mjs up",
     "searxng:health": "node scripts/searxng-local.mjs health",
     "searxng:smoke": "node scripts/searxng-live-smoke.mjs"

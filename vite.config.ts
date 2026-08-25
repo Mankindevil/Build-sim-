@@ -8,6 +8,7 @@ export default defineConfig(async () => {
   const previewPort = intEnv(env, "WEB_PREVIEW_PORT", 4173, { min: 1, max: 65_535 });
   const pricePort = intEnv(env, "PRICE_SERVER_PORT", 5174, { min: 1, max: 65_535 });
   const agentPort = intEnv(env, "AGENT_SERVER_PORT", 5175, { min: 1, max: 65_535 });
+  const workspacePort = intEnv(env, "WORKSPACE_SERVER_PORT", 5176, { min: 1, max: 65_535 });
 
   return {
     root: ".",
@@ -39,6 +40,10 @@ export default defineConfig(async () => {
         },
         "/api/agent": {
           target: `http://127.0.0.1:${agentPort}`,
+          changeOrigin: false,
+        },
+        "/api/workspace": {
+          target: `http://127.0.0.1:${workspacePort}`,
           changeOrigin: false,
         },
       },
