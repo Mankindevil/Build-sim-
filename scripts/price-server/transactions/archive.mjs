@@ -24,6 +24,24 @@ function nullableNumber(value) {
   return Number.isFinite(value) ? Math.max(0, Number(value)) : null;
 }
 
+function nullableId(value, max = 180) {
+  return value ? text(value, max) : null;
+}
+
+function sanitizeLink(raw) {
+  const link = raw && typeof raw === "object" ? raw : {};
+  const planId = nullableId(link.planId);
+  const planItemId = nullableId(link.planItemId);
+  const requestedStatus = ["linked", "unlinked", "stale"].includes(link.linkStatus) ? link.linkStatus : "unlinked";
+  return {
+    schemaVersion: "1.0.0",
+    planId,
+    planVersionIdAtCapture: nullableId(link.planVersionIdAtCapture),
+    planItemId,
+    linkStatus: planId && planItemId && requestedStatus === "linked" ? "linked" : requestedStatus === "stale" && planId ? "stale" : "unlinked",
+  };
+}
+
 function sanitizeItem(raw, receiptId) {
   if (!raw || typeof raw !== "object") throw new Error("交易记录不能为空");
   const evidence = raw.transaction && typeof raw.transaction === "object" ? raw.transaction : {};
@@ -66,9 +84,14 @@ async function atomicJson(file, payload) {
 }
 
 function publicRecord(record) {
-  return {
+  const normalized = {
     ...record,
-    image: record.image ? { ...record.image, imageUrl: `/api/price/transactions/archive/${encodeURIComponent(record.receiptId)}/image` } : null,
+    schemaVersion: 2,
+    link: sanitizeLink(record.link),
+  };
+  return {
+    ...normalized,
+    image: normalized.image ? { ...normalized.image, imageUrl: `/api/price/transactions/archive/${encodeURIComponent(normalized.receiptId)}/image` } : null,
   };
 }
 
@@ -89,11 +112,12 @@ export async function archiveTransaction(body, options) {
   await rename(temporaryImage, imagePath);
   const storedAt = new Date().toISOString();
   const record = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     receiptId,
     storedAt,
     updatedAt: storedAt,
     item,
+    link: sanitizeLink(body?.link ?? body?.item?.planLink),
     image: {
       fileName: item.transaction.fileName,
       storageName: imageName,
@@ -104,6 +128,17 @@ export async function archiveTransaction(body, options) {
   };
   await atomicJson(metadataPath(root, receiptId), record);
   return publicRecord(record);
+}
+
+export async function updateTransactionArchive(receiptIdValue, body, options) {
+  const receiptId = assertReceiptId(receiptIdValue);
+  const file = metadataPath(options.root, receiptId);
+  const existing = JSON.parse(await readFile(file, "utf8"));
+  const item = sanitizeItem({ ...existing.item, ...(body?.item ?? {}), transaction: existing.item?.transaction }, receiptId);
+  const updatedAt = new Date().toISOString();
+  const next = { ...existing, schemaVersion: 2, item, link: sanitizeLink(body?.link ?? existing.link), updatedAt };
+  await atomicJson(file, next);
+  return publicRecord(next);
 }
 
 export async function listTransactionArchives(options) {

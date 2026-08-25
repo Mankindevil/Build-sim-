@@ -1,4 +1,5 @@
 import { BUILD_STAGE_LABELS, BUILD_STAGES, type BuildStage, type TransactionEvidence, type TransactionImportRecord } from "./build-progress";
+import type { PlanTransactionLink } from "../plans/contracts";
 
 const MAX_FILE_BYTES = 5_000_000;
 const TERMINAL_JOB_STATUS = new Set(["completed", "partial", "failed"]);
@@ -48,11 +49,13 @@ async function jsonResponse<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
-function readAsDataUrl(file: File): Promise<string> {
+function readAsDataUrl(file: File, onProgress?: (loaded: number, total: number) => void, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result ?? ""));
     reader.onerror = () => reject(reader.error ?? new Error("无法读取截图"));
+    reader.onprogress = (event) => { if (event.lengthComputable) onProgress?.(event.loaded, event.total); };
+    signal?.addEventListener("abort", () => { reader.abort(); reject(new DOMException("已取消", "AbortError")); }, { once: true });
     reader.readAsDataURL(file);
   });
 }
@@ -93,19 +96,58 @@ function recordFromAnalysis(analysis: TransactionAnalysis, verification: Transac
   };
 }
 
-export function initTransactionImport(options: { onImport: (record: TransactionImportRecord, screenshot: File) => void }): void {
+export interface TransactionImportPlanContext {
+  planId: string;
+  planVersionId: string | null;
+  planName: string;
+  items: Array<{ id: string; skuId: string; name: string; category: string }>;
+}
+
+export function initTransactionImport(options: { onImport: (record: TransactionImportRecord, screenshot: File) => void; getPlanContext?: () => TransactionImportPlanContext | null }): void {
   const input = $("transaction-screenshot-input") as HTMLInputElement | null;
   const drop = $("transaction-screenshot-drop");
   const preview = $("transaction-screenshot-preview") as HTMLImageElement | null;
   const status = $("transaction-screenshot-status");
   const result = $("transaction-screenshot-result");
   if (!input || !drop || !preview || !status || !result) return;
+  if (!$("transaction-flow")) {
+    const flow = document.createElement("ol");
+    flow.id = "transaction-flow"; flow.className = "transaction-flow"; flow.setAttribute("aria-label", "交易导入进度");
+    flow.innerHTML = '<li data-step="upload" data-state="current"><span>选择截图</span></li><li data-step="recognize" data-state="idle"><span>识别交易</span></li><li data-step="enrich" data-state="idle"><span>核验型号</span></li><li data-step="review" data-state="idle"><span>确认入档</span></li>';
+    drop.parentElement?.insertBefore(flow, drop);
+  }
 
   let previewUrl: string | null = null;
+  let activeRequest: AbortController | null = null;
+  let lastFile: File | null = null;
+  let currentPhase = "";
+  let phaseStartedAt = 0;
+  let phaseTimer: number | null = null;
   const setStatus = (copy: string, level: "idle" | "busy" | "ok" | "warn" | "bad" = "idle"): void => {
     status.textContent = copy;
     status.dataset.level = level;
   };
+  const setPhase = (phase: "selected" | "reading" | "recognizing" | "enriching" | "reviewing" | "staged" | "cancelled" | "failed", copy: string, level: "idle" | "busy" | "ok" | "warn" | "bad" = "idle"): void => {
+    if (currentPhase !== phase) { currentPhase = phase; phaseStartedAt = performance.now(); }
+    const renderCopy = () => setStatus(`${copy}${level === "busy" && (phase === "recognizing" || phase === "enriching") ? ` · elapsed ${Math.max(0, Math.floor((performance.now() - phaseStartedAt) / 1000))}s` : ""}`, level);
+    renderCopy();
+    if (phaseTimer !== null) { window.clearInterval(phaseTimer); phaseTimer = null; }
+    if (level === "busy" && (phase === "recognizing" || phase === "enriching")) phaseTimer = window.setInterval(renderCopy, 1000);
+    status.dataset.phase = phase;
+    const order = ["selected", "recognizing", "enriching", "reviewing"];
+    const effective = phase === "reading" ? "selected" : phase === "staged" ? "reviewing" : phase;
+    const currentIndex = order.indexOf(effective);
+    for (const step of document.querySelectorAll<HTMLElement>("#transaction-flow [data-step]")) {
+      const mapped = step.dataset.step === "upload" ? "selected" : step.dataset.step === "recognize" ? "recognizing" : step.dataset.step === "enrich" ? "enriching" : "reviewing";
+      const index = order.indexOf(mapped);
+      step.dataset.state = phase === "failed" || phase === "cancelled" ? index === Math.max(0, currentIndex) ? phase : index < currentIndex ? "done" : "idle" : index < currentIndex ? "done" : index === currentIndex ? phase === "staged" ? "done" : "current" : "idle";
+    }
+  };
+  const retry = ($("transaction-retry") as HTMLButtonElement | null) ?? document.createElement("button");
+  if (!retry.id) { retry.id = "transaction-retry"; retry.type = "button"; retry.className = "case-view-btn"; retry.textContent = "重试"; status.insertAdjacentElement("afterend", retry); }
+  retry.hidden = true;
+  const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "case-view-btn"; cancel.textContent = "取消当前处理"; cancel.hidden = true; cancel.dataset.transactionCancel = ""; retry.insertAdjacentElement("afterend", cancel);
+  const readProgress = document.createElement("progress"); readProgress.max = 100; readProgress.hidden = true; readProgress.setAttribute("aria-label", "读取截图进度"); cancel.insertAdjacentElement("afterend", readProgress);
   const showReview = (record: TransactionImportRecord, screenshot: File, copy: string): void => {
     result.hidden = false;
     result.replaceChildren();
@@ -163,7 +205,19 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       stage.append(option);
     }
     stage.value = record.stage ?? "purchased";
-    fields.append(makeLabel(record.skuId ? "部件名称（正式 SKU）" : "部件名称", name), makeLabel("分类", category), makeLabel("数量", qty), makeLabel("成交单价 ¥", price), makeLabel("当前状态", stage));
+    const planContext = options.getPlanContext?.() ?? null;
+    const link = document.createElement("select");
+    link.className = "transaction-review-link";
+    const unlinked = document.createElement("option"); unlinked.value = ""; unlinked.textContent = planContext ? `保留为 ${planContext.planName} 的未关联采购项` : "保留在未关联交易 inbox"; link.append(unlinked);
+    for (const item of planContext?.items ?? []) {
+      const option = document.createElement("option"); option.value = item.id; option.textContent = `${CATEGORY_LABELS[item.category] ?? item.category} · ${item.name}`;
+      option.selected = item.skuId === record.skuId;
+      link.append(option);
+    }
+    fields.append(makeLabel(record.skuId ? "部件名称（正式 SKU）" : "部件名称", name), makeLabel("分类", category), makeLabel("数量", qty), makeLabel("成交单价 ¥", price), makeLabel("当前状态", stage), makeLabel("关联方案部件", link));
+    const evidence = document.createElement("p");
+    evidence.className = "transaction-review-evidence";
+    evidence.textContent = `证据：${record.evidence.fileName} · OCR ${record.evidence.ocrEngine} · 置信度 ${record.evidence.ocrConfidence === null ? "unknown" : `${record.evidence.ocrConfidence}%`} · ${record.evidence.excerpt || "无可展示摘录"}`;
 
     const actions = document.createElement("div");
     actions.className = "transaction-review-actions";
@@ -177,11 +231,19 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
     discard.addEventListener("click", () => {
       result.hidden = true;
       result.replaceChildren();
-      setStatus("本次识别结果已放弃，未写入基座。", "idle");
+      setPhase("selected", "本次识别结果已放弃，未写入方案或档案。可重新选择截图。", "idle");
     });
     confirm.addEventListener("click", () => {
       const rawPrice = price.value.trim();
       const selectedStage = BUILD_STAGES.includes(stage.value as BuildStage) ? stage.value as BuildStage : "purchased";
+      const selectedItem = planContext?.items.find((item) => item.id === link.value);
+      const planLink: PlanTransactionLink = {
+        schemaVersion: "1.0.0",
+        planId: planContext?.planId ?? null,
+        planVersionIdAtCapture: planContext?.planVersionId ?? null,
+        planItemId: selectedItem?.id ?? null,
+        linkStatus: planContext && selectedItem ? "linked" : "unlinked",
+      };
       options.onImport({
         ...record,
         name: name.value.trim() || record.name,
@@ -189,24 +251,26 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
         qty: Math.max(1, Math.round(Number(qty.value) || 1)),
         unitPriceCny: rawPrice === "" ? null : Math.max(0, Number(rawPrice) || 0),
         stage: selectedStage,
+        planLink,
       }, screenshot);
       result.hidden = true;
       result.replaceChildren();
-      setStatus("已加入下方编辑区，仍可继续修改；点击右下角“保存基座”后才会正式保存。", "ok");
+      setPhase("staged", "staged · 已加入编辑区但尚未归档；点击“保存基座/保存更改”后才会成为 archived。", "ok");
     });
     actions.append(discard, confirm);
-    result.append(heading, fields, actions);
+    result.append(heading, fields, evidence, actions);
   };
 
-  const updateFromCatalogJob = async (analysis: TransactionAnalysis): Promise<TransactionImportRecord> => {
+  const updateFromCatalogJob = async (analysis: TransactionAnalysis, signal: AbortSignal): Promise<TransactionImportRecord> => {
     const jobId = analysis.catalogSearch?.jobId;
     if (!jobId) return recordFromAnalysis(analysis, "search-failed");
     let job: CatalogJob | null = null;
     for (let index = 0; index < 45; index += 1) {
       await sleep(index === 0 ? 250 : 750);
-      job = await jsonResponse<CatalogJob>(await fetch(`/api/catalog/search/${encodeURIComponent(jobId)}`, { headers: { Accept: "application/json" } }));
+      if (signal.aborted) throw new DOMException("已取消", "AbortError");
+      job = await jsonResponse<CatalogJob>(await fetch(`/api/catalog/search/${encodeURIComponent(jobId)}`, { headers: { Accept: "application/json" }, signal }));
       if (TERMINAL_JOB_STATUS.has(job.status)) break;
-      setStatus(`正在联网补充官方参数 · ${job.stage ?? job.status}`, "busy");
+      setPhase("enriching", `正在联网补充官方参数 · ${job.stage ?? job.status} · 阶段耗时由服务决定，不伪造百分比`, "busy");
     }
     if (!job || !TERMINAL_JOB_STATUS.has(job.status)) {
       const timedOut = recordFromAnalysis(analysis, "search-failed");
@@ -227,6 +291,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ expectedHash: candidate.expectedHash }),
+          signal,
         }));
         if (enrichment.status === "draft") {
           verification = "catalog-draft";
@@ -248,44 +313,70 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
   const processFile = async (file: File): Promise<void> => {
     if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { setStatus("请选择 PNG、JPEG 或 WebP 图片。", "bad"); return; }
     if (file.size > MAX_FILE_BYTES) { setStatus("截图不能超过 5MB。", "bad"); return; }
+    lastFile = file;
+    activeRequest?.abort();
+    const controller = new AbortController();
+    activeRequest = controller;
     input.disabled = true;
     drop.dataset.busy = "true";
-    setStatus("正在识别商品型号、数量与成交价…", "busy");
+    retry.hidden = true; cancel.hidden = false;
+    setPhase("selected", `selected · ${file.name} · ${(file.size / 1000).toFixed(1)} KB`, "busy");
     result.hidden = true;
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     previewUrl = URL.createObjectURL(file);
     preview.src = previewUrl;
     preview.hidden = false;
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => { timedOut = true; controller.abort(); }, 75_000);
     try {
+      readProgress.hidden = false; readProgress.value = 0;
+      setPhase("reading", "reading · 正在读取本地文件 0%", "busy");
+      const imageDataUrl = await readAsDataUrl(file, (loaded, total) => {
+        const percent = total ? Math.round(loaded / total * 100) : 0;
+        readProgress.value = percent;
+        setPhase("reading", `reading · 正在读取本地文件 ${percent}%`, "busy");
+      }, controller.signal);
+      readProgress.hidden = true;
+      setPhase("recognizing", "recognizing · OCR 正在识别商品、数量与成交价；仅显示阶段与耗时，不伪造百分比", "busy");
       const analysis = await jsonResponse<TransactionAnalysis>(await fetch("/api/price/transactions/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: file.name, capturedAt: new Date(file.lastModified || Date.now()).toISOString(), imageDataUrl: await readAsDataUrl(file) }),
+        body: JSON.stringify({ fileName: file.name, capturedAt: new Date(file.lastModified || Date.now()).toISOString(), imageDataUrl }),
+        signal: controller.signal,
       }));
       const verification: TransactionEvidence["verification"] = analysis.status === "matched-catalog" ? "matched-catalog" : analysis.status === "catalog-search-required" ? "online-searching" : "identity-review-required";
       let record = recordFromAnalysis(analysis, verification);
       const costCopy = billingCopy(analysis);
       let resultCopy = `OCR 识别完成${costCopy} · 尚未写入基座`;
       if (analysis.status === "matched-catalog") {
-        setStatus("已匹配正式 SKU；请核对数量、成交价和状态。", "ok");
+        setPhase("reviewing", "reviewing · 已匹配正式 SKU；请核对数量、成交价、证据和方案部件。", "ok");
         resultCopy = `正式 SKU · ${(analysis.catalogMatch?.score ?? 0) * 100}% 匹配${costCopy} · 尚未保存`;
       } else if (analysis.status === "catalog-search-required" && analysis.catalogSearch) {
-        setStatus("正在联网补充官网参数；完成后可检查并修改识别结果…", "busy");
-        record = await updateFromCatalogJob(analysis);
+        setPhase("enriching", "enriching · 正在联网补充官网参数；此阶段不显示虚假百分比", "busy");
+        record = await updateFromCatalogJob(analysis, controller.signal);
         resultCopy = record.evidence.verification === "catalog-draft" ? `已生成官方参数草稿${costCopy} · 尚未保存` : record.evidence.verification === "catalog-candidate" ? `已关联官网候选${costCopy} · 尚未保存` : `官网参数待补${costCopy} · 尚未保存`;
       } else {
-        setStatus("截图中没有足够明确的型号；请手动修正后再加入基座。", "warn");
+        setPhase("reviewing", "reviewing · 型号证据不足；请手动修正，unknown 保持 unknown。", "warn");
         resultCopy = `待确认型号 · 参数保持 unknown${costCopy} · 尚未保存`;
       }
       showReview(record, file, resultCopy);
     } catch (error) {
-      setStatus(`识别失败：${error instanceof Error ? error.message : "本地服务不可用"}`, "bad");
+      const aborted = controller.signal.aborted;
+      setPhase(aborted && !timedOut ? "cancelled" : "failed", timedOut ? "识别超时；已保留截图，可直接重试或重新选择。" : aborted ? "已取消处理；截图未归档，可直接重试或重新选择。" : `识别失败：${error instanceof Error ? error.message : "本地服务不可用"}。已保留截图，可直接重试。`, aborted && !timedOut ? "warn" : "bad");
+      retry.hidden = false;
     } finally {
+      window.clearTimeout(timeoutId);
+      readProgress.hidden = true;
+      cancel.hidden = true;
+      if (activeRequest === controller) activeRequest = null;
       input.disabled = false;
       delete drop.dataset.busy;
       input.value = "";
     }
   };
+
+  cancel.addEventListener("click", () => activeRequest?.abort());
+  retry.addEventListener("click", () => { if (lastFile) void processFile(lastFile); });
 
   input.addEventListener("change", () => { const file = input.files?.[0]; if (file) void processFile(file); });
   for (const eventName of ["dragenter", "dragover"]) drop.addEventListener(eventName, (event) => { event.preventDefault(); drop.dataset.drag = "true"; });

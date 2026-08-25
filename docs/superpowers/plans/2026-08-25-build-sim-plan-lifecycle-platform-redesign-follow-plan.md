@@ -825,18 +825,18 @@ R2、R4 完成；与 R7 只依赖稳定契约，不应直接耦合 Agent UI。
 
 ### 任务
 
-- [ ] 交易入口在工作台和采购页可见，并默认绑定 active plan。
-- [ ] 上传展示 selected/reading/recognizing/enriching/reviewing/staged/archiving/archived。
-- [ ] 对真实可计算环节显示 determinate progress；对 OCR/联网阶段使用阶段进度和耗时，不伪造百分比。
-- [ ] 支持取消、重试、重新选择、超时、服务不可用和部分成功。
-- [ ] 校对页显示截图、商品、分类、数量、单价、匹配 SKU、置信度和 evidence。
-- [ ] 用户选择关联已有 plan item，或创建 unlinked purchase item。
-- [ ] staged 与 archived 明确区分；关闭时保护未保存结果。
-- [ ] 批量归档逐笔反馈；一笔失败不丢失其他 staged item。
-- [ ] 交易列表支持搜索、分类/状态/方案筛选、排序和空状态。
-- [ ] 支持编辑摘要、重新关联、删除原图、删除整笔、查看官方来源。
-- [ ] archived transaction schema 升级并兼容旧记录；旧记录进入未关联 inbox。
-- [ ] 关联交易后更新采购状态和已投入预算；价格 unknown 不强行补零。
+- [x] 交易入口在工作台和采购页可见，并默认绑定 active plan。
+- [x] 上传展示 selected/reading/recognizing/enriching/reviewing/staged/archiving/archived。
+- [x] 对真实可计算环节显示 determinate progress；对 OCR/联网阶段使用阶段进度和耗时，不伪造百分比。
+- [x] 支持取消、重试、重新选择、超时、服务不可用和部分成功。
+- [x] 校对页显示截图、商品、分类、数量、单价、匹配 SKU、置信度和 evidence。
+- [x] 用户选择关联已有 plan item，或创建 unlinked purchase item。
+- [x] staged 与 archived 明确区分；关闭时保护未保存结果。
+- [x] 批量归档逐笔反馈；一笔失败不丢失其他 staged item。
+- [x] 交易列表支持搜索、分类/状态/方案筛选、排序和空状态。
+- [x] 支持编辑摘要、重新关联、删除原图、删除整笔、查看官方来源。
+- [x] archived transaction schema 升级并兼容旧记录；旧记录进入未关联 inbox。
+- [x] 关联交易后更新采购状态和已投入预算；价格 unknown 不强行补零。
 
 ### 聚焦验证
 
@@ -1171,4 +1171,20 @@ R3 工作台编辑器  R4 评估版本化
 - Bundle/性能：Three 动态 chunk 552.39 kB / gzip 140.07 kB；主入口 308.62 kB / gzip 106.01 kB；Agent/workspace SSR 分别 305.45/248.68 kB
 - 未验证项：R8/R9 将把真实方案交易链接和 reconcile 后装机任务摘要替换当前受限 purchase/task summary
 - 回滚方式：移除 proposal/audit workspace routes、Agent proposal card/context envelope 与 `acceptServerPlan`；方案、版本、evaluation 和 Three 场景格式保持不变
+- Push：未授权
+
+### R8 执行记录
+
+- 状态：完成
+- 起始 HEAD：`fad2415`
+- 完成提交：`feat(transactions): link staged receipts to build plans`（SHA 见 Git log）
+- 修改文件：transaction archive schema v2/compat reader/PATCH、PlanTransactionLink review 与重关联、按 active plan 隔离的采购状态、阶段/耗时/读取进度、取消/重试/超时、逐笔批量归档、历史搜索/分类/状态/方案/排序、隐私删除、R8 tests/E2E
+- 聚焦测试：`npx vitest run tests/transaction-import-ui.test.ts tests/transaction-archive.test.ts tests/transaction-plan-link.test.ts tests/transaction-history-ui.test.ts`，4 files / 9 tests passed；build progress partial-batch/plan-isolation regression passed
+- 全量门禁：Vitest 74 files / 422 tests passed；typecheck passed；client + Agent + workspace production build passed；legacy model 85 assertions passed；legacy static 23 assertions passed；secret scan 319 files / 0 findings；`git diff --check` passed
+- 浏览器证据：transaction E2E passed；工作台进入上传 → OCR review evidence/confidence → 默认关联 active plan PSU → staged 未写 → archived 后已投入预算增加 ¥899 → active plan 历史可见 → 删除原图后交易摘要与链接仍保留
+- 数据与迁移：新归档写 schema v2；v1 读取时投影为 `unlinked` inbox，原文件不被静默重写；浏览器采购状态写 `build-sim.progress.v2:<planId>`，不把旧全局进度猜测绑定到任一方案
+- 失败与隐私：OCR/联网阶段只显示阶段和 elapsed；本地读取才显示 determinate 百分比；取消/超时/服务失败保留所选文件可重试；批量失败只保留失败 receipt 为 staged；原图与整笔删除语义分离
+- Bundle/性能：Three 动态 chunk 552.39 kB / gzip 140.07 kB；主入口 320.77 kB / gzip 109.92 kB；交易搜索/筛选为本地有界列表操作
+- 未验证项：R9 将把 plan-linked purchase 状态接入稳定 BuildTask sourceRef/reconcile；R10 将覆盖大批量/离线/损坏归档与性能门禁
+- 回滚方式：回退 transaction schema v2 writer/PATCH 与 plan-scoped progress；v1 兼容读取和原始归档文件可继续保留，不需删除交易数据
 - Push：未授权

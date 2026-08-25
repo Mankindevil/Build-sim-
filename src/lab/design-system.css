@@ -494,6 +494,29 @@ body:has(#n6-lab#n6-lab) {
   line-height: 1.55;
 }
 
+#n6-lab#n6-lab .transaction-flow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#n6-lab#n6-lab .transaction-flow li {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+#n6-lab#n6-lab .transaction-flow li[data-state="current"],
+#n6-lab#n6-lab .transaction-flow li[data-state="done"] { border-color: var(--primary); color: var(--primary); }
+#n6-lab#n6-lab .transaction-flow li[data-state="failed"] { border-color: var(--bad); color: var(--bad); }
+#n6-lab#n6-lab .transaction-flow li[data-state="cancelled"] { border-color: var(--warn); color: var(--warn); }
+
 #n6-lab#n6-lab .transaction-drop {
   display: flex;
   gap: 10px;
@@ -581,9 +604,16 @@ body:has(#n6-lab#n6-lab) {
 
 #n6-lab#n6-lab .transaction-review-fields {
   display: grid;
-  grid-template-columns: minmax(210px, 1.8fr) minmax(100px, .8fr) 74px 110px 112px;
+  grid-template-columns: minmax(190px, 1.5fr) minmax(90px, .7fr) 68px 100px 100px minmax(180px, 1.3fr);
   gap: 8px;
   margin-top: 7px;
+}
+
+#n6-lab#n6-lab .transaction-review-evidence {
+  margin: 7px 0 0;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  overflow-wrap: anywhere;
 }
 
 #n6-lab#n6-lab .transaction-review-fields label {
@@ -673,6 +703,26 @@ body:has(#n6-lab#n6-lab) {
 #n6-lab#n6-lab .transaction-history-status[data-level="pending"] { border-left-color: var(--primary); color: var(--primary); }
 #n6-lab#n6-lab .transaction-history-status[data-level="bad"] { border-left-color: var(--bad); color: var(--bad); }
 
+#n6-lab#n6-lab .transaction-history-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(4, minmax(110px, auto));
+  gap: 7px;
+  margin: 10px 0;
+}
+
+#n6-lab#n6-lab .transaction-history-toolbar input,
+#n6-lab#n6-lab .transaction-history-toolbar select,
+#n6-lab#n6-lab [data-archive-edit-name],
+#n6-lab#n6-lab [data-archive-link-item] {
+  min-height: 32px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 9px;
+}
+
 #n6-lab#n6-lab .transaction-history-list {
   display: grid;
   gap: 8px;
@@ -751,7 +801,11 @@ body:has(#n6-lab#n6-lab) {
   display: flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
+  max-width: 310px;
 }
+
+#n6-lab#n6-lab .transaction-history-actions label { display:grid;gap:3px;color:var(--muted-foreground);font-size:8px }
 
 #n6-lab#n6-lab .transaction-history-actions .danger {
   border-color: color-mix(in srgb, var(--bad) 50%, var(--border));

@@ -177,6 +177,7 @@ function currentPlanAgentContext(): PlanAgentContext | null {
     purchaseSummary: {
       bom: state.evaluationSnapshot.evaluation.bom.map((line) => ({ skuId: line.skuId, qty: line.qty, bucket: line.bucket })),
       price: state.evaluationSnapshot.evaluation.price,
+      progress: buildProgress?.summary() ?? null,
       note: "汇总不含交易截图、凭据或支付信息。",
     },
     buildTaskSummary: { status: "pending-reconcile", note: "R9 前仅提供当前 evaluation assembly 摘要。", assemblySteps: state.evaluationSnapshot.evaluation.assembly.steps.map((step) => ({ id: step.id, label: step.label, kind: step.kind })) },
@@ -1061,9 +1062,34 @@ async function boot(): Promise<void> {
   buildProgress = initBuildProgress({
     getCatalog: () => catalog,
     baseSkuIds: ["case.jonsbo-n6", BOARD_ID, "cpu.i5-14500"],
+    getPlanContext: () => {
+      const state = planStore?.getState();
+      return state?.activePlan && state.evaluation ? { planId: state.activePlan.id, planVersionId: state.activePlan.activeVersionId, planName: state.activePlan.name, evaluation: state.evaluation } : null;
+    },
+    getPlans: () => planStore?.getState().plans.map((plan) => ({ id: plan.id, name: plan.name })) ?? [],
   });
-  initTransactionImport({ onImport: (record, screenshot) => buildProgress?.stageTransaction(record, screenshot) });
-  if (latestEvaluation) buildProgress.syncEvaluation(latestEvaluation);
+  initTransactionImport({
+    onImport: (record, screenshot) => buildProgress?.stageTransaction(record, screenshot),
+    getPlanContext: () => {
+      const state = planStore?.getState();
+      if (!state?.activePlan || !state.evaluation) return null;
+      return {
+        planId: state.activePlan.id,
+        planVersionId: state.activePlan.activeVersionId,
+        planName: state.activePlan.name,
+        items: state.evaluation.bom.map((line) => {
+          const sku = catalog.skus.find((entry) => entry.id === line.skuId);
+          return { id: line.skuId, skuId: line.skuId, name: sku?.name ?? line.skuId, category: sku?.category ?? "其他" };
+        }),
+      };
+    },
+  });
+  const syncBuildProgressPlan = () => {
+    const state = planStore?.getState();
+    if (state?.activePlan && state.evaluation) buildProgress?.activatePlan({ planId: state.activePlan.id, planVersionId: state.activePlan.activeVersionId, planName: state.activePlan.name, evaluation: state.evaluation });
+  };
+  planStore?.subscribe(syncBuildProgressPlan);
+  syncBuildProgressPlan();
 
   await initPricePanel({ catalog, onAudited: () => reapplyLocalPrices() });
   initAdvicePanel({ getInput: adviceInput });

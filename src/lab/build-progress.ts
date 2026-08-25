@@ -2,8 +2,10 @@ import type { BuildEvaluation } from "../core/evaluate";
 import type { BuildLineItem } from "../config/types";
 import type { PurchaseBucket, SkuCatalog, SkuRecord } from "../sku/types";
 import { createTransactionScreenshotArchive, type TransactionArchiveRecord, type TransactionScreenshotArchive } from "./transaction-archive";
+import type { PlanTransactionLink } from "../plans/contracts";
 
 export const BUILD_PROGRESS_STORAGE_KEY = "build-sim.progress.v1";
+export const BUILD_PROGRESS_PLAN_STORAGE_PREFIX = "build-sim.progress.v2:";
 
 export const BUILD_STAGES = ["candidate", "locked", "purchased", "installed"] as const;
 export type BuildStage = typeof BUILD_STAGES[number];
@@ -24,6 +26,7 @@ export interface BuildProgressItem {
   unitPriceCny: number | null;
   stage: BuildStage;
   source: "catalog" | "manual" | "transaction";
+  planLink?: PlanTransactionLink;
   transaction?: TransactionEvidence;
 }
 
@@ -54,7 +57,15 @@ export interface TransactionImportRecord {
   qty: number;
   unitPriceCny: number | null;
   stage?: BuildStage;
+  planLink?: PlanTransactionLink;
   evidence: TransactionEvidence;
+}
+
+export interface BuildProgressPlanContext {
+  planId: string;
+  planVersionId: string | null;
+  planName: string;
+  evaluation: BuildEvaluation;
 }
 
 export interface BuildProgressState {
@@ -75,8 +86,10 @@ export interface BuildProgressSummary {
 
 export interface BuildProgressController {
   syncEvaluation: (evaluation: BuildEvaluation) => void;
+  activatePlan: (context: BuildProgressPlanContext) => void;
   stageTransaction: (record: TransactionImportRecord, screenshot?: File) => void;
   importTransaction: (record: TransactionImportRecord) => void;
+  summary: () => BuildProgressSummary;
 }
 
 const stageRank = new Map(BUILD_STAGES.map((stage, index) => [stage, index]));
@@ -129,6 +142,7 @@ export function normalizeProgressState(input: unknown): BuildProgressState {
       unitPriceCny: Number.isFinite(item.unitPriceCny) ? Math.max(0, Number(item.unitPriceCny)) : null,
       stage: item.stage,
       source: item.source === "manual" || item.source === "transaction" ? item.source : "catalog",
+      ...(item.planLink && typeof item.planLink === "object" ? { planLink: item.planLink as PlanTransactionLink } : {}),
       ...(item.transaction && typeof item.transaction === "object" ? { transaction: item.transaction as TransactionEvidence } : {}),
     };
   }
@@ -201,19 +215,23 @@ function categoryOptions(selected: string, disabled = false): string {
   return values.map((category) => `<option value="${esc(category)}"${category === selected ? " selected" : ""}${disabled ? " disabled" : ""}>${esc(categoryLabel(category))}</option>`).join("");
 }
 
-function loadState(): BuildProgressState {
+function storageKey(planId: string | null): string {
+  return planId ? `${BUILD_PROGRESS_PLAN_STORAGE_PREFIX}${planId}` : BUILD_PROGRESS_STORAGE_KEY;
+}
+
+function loadState(planId: string | null): BuildProgressState {
   try {
-    const raw = window.localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY);
+    const raw = window.localStorage.getItem(storageKey(planId));
     return raw ? normalizeProgressState(JSON.parse(raw)) : emptyProgressState();
   } catch {
     return emptyProgressState();
   }
 }
 
-function persistState(state: BuildProgressState): void {
+function persistState(state: BuildProgressState, planId: string | null): void {
   state.updatedAt = now();
   try {
-    window.localStorage.setItem(BUILD_PROGRESS_STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(storageKey(planId), JSON.stringify(state));
   } catch {
     // The UI remains usable when storage is disabled; only cross-refresh persistence is lost.
   }
@@ -222,10 +240,15 @@ function persistState(state: BuildProgressState): void {
 export function initBuildProgress(args: {
   getCatalog: () => SkuCatalog;
   baseSkuIds: string[];
+  getPlanContext?: () => BuildProgressPlanContext | null;
+  getPlans?: () => Array<{ id: string; name: string }>;
   screenshotArchive?: TransactionScreenshotArchive;
 }): BuildProgressController {
-  let state = loadState();
-  let currentBom: BuildLineItem[] = [];
+  const initialPlan = args.getPlanContext?.() ?? null;
+  let activePlanId = initialPlan?.planId ?? null;
+  let activePlanVersionId = initialPlan?.planVersionId ?? null;
+  let state = loadState(activePlanId);
+  let currentBom: BuildLineItem[] = initialPlan?.evaluation.bom ?? [];
   const pendingTransactions = new Map<string, BuildProgressItem>();
   const pendingScreenshotDeletes = new Set<string>();
   const pendingArchiveDeletes = new Set<string>();
@@ -237,6 +260,21 @@ export function initBuildProgress(args: {
   const editor = $("build-base-editor");
   const currentPanel = $("build-review-current-panel");
   const transactionsPanel = $("build-review-transactions-panel");
+  const historyStatus = $("transaction-history-status");
+  let historyToolbar = document.querySelector<HTMLElement>(".transaction-history-toolbar");
+  if (!historyToolbar && historyStatus) {
+    historyToolbar = document.createElement("div"); historyToolbar.className = "transaction-history-toolbar"; historyStatus.parentElement?.insertBefore(historyToolbar, historyStatus);
+  }
+  const ensureHistoryControl = <T extends HTMLInputElement | HTMLSelectElement>(id: string, create: () => T): T | null => {
+    const existing = document.getElementById(id) as T | null;
+    if (existing) return existing;
+    const control = create(); control.id = id; historyToolbar?.append(control); return control;
+  };
+  const historySearch = ensureHistoryControl("transaction-history-search", () => { const input = document.createElement("input"); input.type = "search"; input.placeholder = "搜索商品、分类、文件名或方案"; input.setAttribute("aria-label", "搜索交易"); return input; });
+  const historyStateFilter = ensureHistoryControl("transaction-history-filter", () => { const select = document.createElement("select"); select.innerHTML = '<option value="all">全部状态</option><option value="pending">staged</option><option value="archived">archived</option>'; select.setAttribute("aria-label", "交易归档状态"); return select; });
+  const historyPlanFilter = ensureHistoryControl("transaction-history-plan-filter", () => { const select = document.createElement("select"); select.setAttribute("aria-label", "交易方案筛选"); return select; });
+  const historyCategoryFilter = ensureHistoryControl("transaction-history-category-filter", () => { const select = document.createElement("select"); select.innerHTML = '<option value="all">全部分类</option>'; select.setAttribute("aria-label", "交易分类筛选"); return select; });
+  const historySort = ensureHistoryControl("transaction-history-sort", () => { const select = document.createElement("select"); select.innerHTML = '<option value="updated-desc">最近更新</option><option value="price-desc">金额从高到低</option><option value="name-asc">商品名称</option>'; select.setAttribute("aria-label", "交易排序"); return select; });
 
   const currentCatalogItems = (): BuildProgressItem[] => currentBom
     .map((line) => state.items[line.skuId])
@@ -327,16 +365,25 @@ export function initBuildProgress(args: {
 
   const formatBytes = (value: number): string => value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(value / 1_000))} KB`;
 
+  const effectiveLinkStatus = (record: TransactionArchiveRecord): PlanTransactionLink["linkStatus"] => {
+    if (record.link.linkStatus !== "linked" || record.link.planId !== activePlanId) return record.link.linkStatus;
+    return currentBom.some((line) => line.skuId === record.link.planItemId) ? "linked" : "stale";
+  };
+
   const transactionCard = (record: TransactionArchiveRecord): string => {
     const item = record.item;
     const evidence = item.transaction;
     const pending = Boolean(record.pendingFile);
     const deletingImage = pendingScreenshotDeletes.has(record.receiptId);
     const officialUrl = safeOfficialUrl(evidence?.officialUrl as string | null | undefined);
+    const activeItems = currentBom.map((line) => state.items[line.skuId]).filter((entry): entry is BuildProgressItem => Boolean(entry));
+    const linkOptions = [`<option value="">未关联采购项</option>`, ...activeItems.map((entry) => `<option value="${esc(entry.id)}"${record.link.planId === activePlanId && record.link.planItemId === entry.id ? " selected" : ""}>${esc(categoryLabel(entry.category))} · ${esc(entry.name)}</option>`)].join("");
+    const planName = args.getPlans?.().find((plan) => plan.id === record.link.planId)?.name ?? record.link.planId;
+    const linkStatus = effectiveLinkStatus(record);
     return `<article class="transaction-history-card${pending ? " is-pending" : ""}" data-archive-receipt="${esc(record.receiptId)}">
       <div class="transaction-history-visual">${record.image && !deletingImage ? `<img alt="${esc(item.name)} 的交易截图" data-archive-image="${esc(record.receiptId)}">` : `<span>${deletingImage ? "原图待删除" : "仅保留交易摘要"}</span>`}</div>
-      <div class="transaction-history-copy"><div><small>${pending ? "待保存到服务器" : "服务器已归档"} · ${esc(formatArchiveDate(record.storedAt))}</small><strong>${esc(item.name)}</strong></div><p>${esc(categoryLabel(item.category))} · ${item.qty} 件 · ${item.unitPriceCny === null ? "价格待补" : formatCny(item.unitPriceCny)} · ${esc(BUILD_STAGE_LABELS[item.stage as BuildStage] ?? item.stage)}</p><p>${evidence ? `${esc(evidence.fileName)} · ${esc(verificationLabel(evidence.verification as TransactionEvidence["verification"]))} · ${esc(evidence.ocrEngine)}` : "交易证据待补"}${record.image ? ` · ${formatBytes(record.image.bytes)}` : ""}${officialUrl ? ` · <a href="${esc(officialUrl)}" target="_blank" rel="noreferrer">官网来源</a>` : ""}</p></div>
-      <div class="transaction-history-actions">${record.image && !deletingImage ? `<a class="case-view-btn" data-archive-open="${esc(record.receiptId)}" target="_blank" rel="noreferrer">查看原图</a>${pending ? "" : `<button type="button" class="case-view-btn" data-archive-delete-image="${esc(record.receiptId)}">删除原图</button>`}` : ""}${pending ? "" : `<button type="button" class="case-view-btn danger" data-archive-delete-record="${esc(record.receiptId)}">删除整笔档案</button>`}</div>
+      <div class="transaction-history-copy"><div><small>${pending ? "staged · 待保存" : "archived · 服务器已归档"} · ${esc(formatArchiveDate(record.storedAt))}</small><input data-archive-edit-name value="${esc(item.name)}" aria-label="交易商品摘要"></div><p>${esc(categoryLabel(item.category))} · ${item.qty} 件 · ${item.unitPriceCny === null ? "价格 unknown" : formatCny(item.unitPriceCny)} · ${esc(BUILD_STAGE_LABELS[item.stage as BuildStage] ?? item.stage)}</p><p data-link-status="${linkStatus}">${linkStatus === "linked" ? `已关联 ${esc(planName ?? "方案")} / ${esc(record.link.planItemId ?? "")}` : linkStatus === "stale" ? `原关联已 stale · ${esc(planName ?? "未知方案")}` : "未关联 inbox"}</p><p>${evidence ? `${esc(evidence.fileName)} · ${esc(verificationLabel(evidence.verification as TransactionEvidence["verification"]))} · ${esc(evidence.ocrEngine)}` : "交易证据待补"}${record.image ? ` · ${formatBytes(record.image.bytes)}` : ""}${officialUrl ? ` · <a href="${esc(officialUrl)}" target="_blank" rel="noreferrer">官网来源</a>` : ""}</p></div>
+      <div class="transaction-history-actions">${pending ? "" : `<label>关联当前方案部件<select data-archive-link-item>${linkOptions}</select></label><button type="button" class="case-view-btn" data-archive-update="${esc(record.receiptId)}">保存摘要与关联</button>`}${record.image && !deletingImage ? `<a class="case-view-btn" data-archive-open="${esc(record.receiptId)}" target="_blank" rel="noreferrer">查看原图</a>${pending ? "" : `<button type="button" class="case-view-btn" data-archive-delete-image="${esc(record.receiptId)}">删除原图</button>`}` : ""}${pending ? "" : `<button type="button" class="case-view-btn danger" data-archive-delete-record="${esc(record.receiptId)}">删除整笔档案</button>`}</div>
     </article>`;
   };
 
@@ -356,7 +403,31 @@ export function initBuildProgress(args: {
         .filter((record): record is TransactionArchiveRecord => Boolean(record));
       if (token !== transactionRenderToken) return;
       const pendingIds = new Set(pendingRecords.map((record) => record.receiptId));
-      const records = [...pendingRecords, ...remoteRecords.filter((record) => !pendingIds.has(record.receiptId))];
+      const allRecords = [...pendingRecords, ...remoteRecords.filter((record) => !pendingIds.has(record.receiptId))];
+      const previousPlanFilter = historyPlanFilter?.value;
+      if (historyPlanFilter) {
+        const plans = args.getPlans?.() ?? [];
+        historyPlanFilter.innerHTML = `<option value="all">全部方案与 inbox</option><option value="unlinked">未关联 inbox</option>${plans.map((plan) => `<option value="${esc(plan.id)}">${esc(plan.name)}</option>`).join("")}`;
+        historyPlanFilter.value = previousPlanFilter || activePlanId || "all";
+      }
+      const previousCategory = historyCategoryFilter?.value;
+      if (historyCategoryFilter) {
+        const categories = [...new Set(allRecords.map((record) => record.item.category))].sort();
+        historyCategoryFilter.innerHTML = `<option value="all">全部分类</option>${categories.map((category) => `<option value="${esc(category)}">${esc(categoryLabel(category))}</option>`).join("")}`;
+        historyCategoryFilter.value = previousCategory && categories.includes(previousCategory) ? previousCategory : "all";
+      }
+      const query = historySearch?.value.trim().toLocaleLowerCase() ?? "";
+      const planFilter = historyPlanFilter?.value || "all";
+      const stateFilter = historyStateFilter?.value || "all";
+      const categoryFilter = historyCategoryFilter?.value || "all";
+      const records = allRecords.filter((record) => {
+        const pending = Boolean(record.pendingFile);
+        const searchable = `${record.item.name} ${record.item.category} ${record.item.transaction?.fileName ?? ""} ${record.link.planId ?? ""}`.toLocaleLowerCase();
+        return (!query || searchable.includes(query))
+          && (planFilter === "all" || planFilter === "unlinked" ? planFilter === "all" || effectiveLinkStatus(record) !== "linked" : record.link.planId === planFilter)
+          && (stateFilter === "all" || stateFilter === (pending ? "pending" : "archived"))
+          && (categoryFilter === "all" || record.item.category === categoryFilter);
+      }).sort((left, right) => historySort?.value === "price-desc" ? ((right.item.unitPriceCny ?? -1) * right.item.qty) - ((left.item.unitPriceCny ?? -1) * left.item.qty) : historySort?.value === "name-asc" ? left.item.name.localeCompare(right.item.name, "zh-CN") : right.updatedAt.localeCompare(left.updatedAt));
       host.innerHTML = records.length ? records.map(transactionCard).join("") : `<div class="transaction-history-empty"><strong>还没有交易档案</strong><p>上传截图、核对识别结果并保存基座后，会在这里形成可复核记录。</p></div>`;
       for (const record of records) {
         const image = host.querySelector<HTMLImageElement>(`[data-archive-image="${CSS.escape(record.receiptId)}"]`);
@@ -369,7 +440,7 @@ export function initBuildProgress(args: {
       }
       const count = $("build-review-transaction-count");
       if (count) count.textContent = `${records.length} 笔`;
-      status.textContent = `${remoteRecords.length} 笔服务器档案${pendingRecords.length ? ` · ${pendingRecords.length} 笔待保存` : ""}${pendingScreenshotDeletes.size || pendingArchiveDeletes.size ? " · 有删除操作待保存" : ""}`;
+      status.textContent = `${records.length}/${allRecords.length} 笔可见 · ${remoteRecords.length} archived${pendingRecords.length ? ` · ${pendingRecords.length} staged` : ""}${pendingScreenshotDeletes.size || pendingArchiveDeletes.size ? " · 有删除操作待保存" : ""}`;
       status.dataset.level = pendingRecords.length || pendingScreenshotDeletes.size || pendingArchiveDeletes.size ? "pending" : "ok";
     } catch (error) {
       if (token !== transactionRenderToken) return;
@@ -409,6 +480,7 @@ export function initBuildProgress(args: {
     if (status) {
       status.textContent = count ? "识别结果或档案操作尚未生效；确认后统一保存到服务器与当前基座。" : "修改与新截图只会在点击“保存基座”后生效。";
       status.dataset.level = count ? "pending" : "idle";
+      status.dataset.phase = count ? "staged" : "idle";
     }
   };
 
@@ -434,7 +506,9 @@ export function initBuildProgress(args: {
     dialog.showModal();
   };
 
-  const closeEditor = (discardPending = true): void => {
+  const closeEditor = (discardPending = true, protectPending = false): void => {
+    const pendingCount = pendingTransactions.size + pendingScreenshotDeletes.size + pendingArchiveDeletes.size;
+    if (protectPending && pendingCount && !window.confirm(`${pendingCount} 项 staged 更改尚未归档。确认放弃并关闭？`)) return;
     if (discardPending) {
       pendingTransactions.clear();
       pendingScreenshotDeletes.clear();
@@ -447,13 +521,15 @@ export function initBuildProgress(args: {
   };
 
   $("build-base-edit")?.addEventListener("click", openEditor);
-  $("build-base-close")?.addEventListener("click", () => closeEditor());
+  $("build-base-close")?.addEventListener("click", () => closeEditor(true, true));
   $("build-base-cancel")?.addEventListener("click", () => closeEditor());
   $("build-review-current-tab")?.addEventListener("click", () => setReviewTab("current"));
   $("build-review-transactions-tab")?.addEventListener("click", () => setReviewTab("transactions"));
   $("transaction-history-refresh")?.addEventListener("click", () => void renderTransactionHistory());
+  historySearch?.addEventListener("input", () => void renderTransactionHistory());
+  for (const control of [historyStateFilter, historyPlanFilter, historyCategoryFilter, historySort]) control?.addEventListener("change", () => void renderTransactionHistory());
   dialog?.addEventListener("click", (event) => {
-    if (event.target === dialog) closeEditor();
+    if (event.target === dialog) closeEditor(true, true);
   });
 
   $("build-add-custom")?.addEventListener("click", () => {
@@ -473,6 +549,22 @@ export function initBuildProgress(args: {
 
   $("transaction-history-list")?.addEventListener("click", (event) => {
     const target = event.target as Element;
+    const updateButton = target.closest<HTMLElement>("[data-archive-update]");
+    if (updateButton?.dataset.archiveUpdate) {
+      const receiptId = updateButton.dataset.archiveUpdate;
+      const card = updateButton.closest<HTMLElement>("[data-archive-receipt]");
+      const planItemId = card?.querySelector<HTMLSelectElement>("[data-archive-link-item]")?.value || null;
+      const name = card?.querySelector<HTMLInputElement>("[data-archive-edit-name]")?.value.trim();
+      const link: PlanTransactionLink = { schemaVersion: "1.0.0", planId: activePlanId, planVersionIdAtCapture: activePlanVersionId, planItemId, linkStatus: activePlanId && planItemId ? "linked" : "unlinked" };
+      updateButton.setAttribute("aria-busy", "true");
+      void screenshotArchive.updateRecord(receiptId, { ...(name ? { item: { name } } : {}), link }).then(() => {
+        if (historyStatus) { historyStatus.textContent = "交易摘要与方案关联已更新。"; historyStatus.dataset.level = "ok"; }
+        return renderTransactionHistory();
+      }).catch((error) => {
+        if (historyStatus) { historyStatus.textContent = `更新失败：${error instanceof Error ? error.message : "服务不可用"}`; historyStatus.dataset.level = "bad"; }
+      }).finally(() => updateButton.removeAttribute("aria-busy"));
+      return;
+    }
     const imageButton = target.closest<HTMLElement>("[data-archive-delete-image]");
     const recordButton = target.closest<HTMLElement>("[data-archive-delete-record]");
     const receiptId = imageButton?.dataset.archiveDeleteImage ?? recordButton?.dataset.archiveDeleteRecord;
@@ -509,7 +601,8 @@ export function initBuildProgress(args: {
       const stage = isBuildStage(rawStage) ? rawStage : existing?.stage ?? "candidate";
       const pending = pendingTransactions.get(id);
       const transaction = pending?.transaction ?? existing?.transaction;
-      nextState.items[id] = { id, skuId: pending?.skuId ?? existing?.skuId ?? (source === "catalog" ? id : null), name, category, qty, unitPriceCny, stage, source, ...(transaction ? { transaction } : {}) };
+      const planLink = pending?.planLink ?? existing?.planLink;
+      nextState.items[id] = { id, skuId: pending?.skuId ?? existing?.skuId ?? (source === "catalog" ? id : null), name, category, qty, unitPriceCny, stage, source, ...(planLink ? { planLink } : {}), ...(transaction ? { transaction } : {}) };
       if (source !== "catalog") retainedExternal.add(id);
     }
     for (const item of Object.values(nextState.items)) {
@@ -519,10 +612,11 @@ export function initBuildProgress(args: {
     if (saveStatus) {
       saveStatus.textContent = "正在保存基座并归档截图到服务器…";
       saveStatus.dataset.level = "pending";
+      saveStatus.dataset.phase = "archiving";
     }
     try {
-      const archived = await screenshotArchive.commit(Object.values(nextState.items).filter((item) => item.transaction));
-      for (const record of archived) {
+      const batch = await screenshotArchive.commit(Object.values(nextState.items).filter((item) => item.transaction));
+      for (const record of batch.archived) {
         const item = Object.values(nextState.items).find((candidate) => candidate.transaction?.receiptId === record.receiptId);
         if (!item?.transaction) continue;
         item.transaction.screenshotArchive = "server";
@@ -530,14 +624,40 @@ export function initBuildProgress(args: {
         item.transaction.screenshotMimeType = record.image?.mimeType ?? null;
         item.transaction.screenshotSize = record.image?.bytes ?? null;
       }
-      for (const receiptId of pendingScreenshotDeletes) await screenshotArchive.deleteScreenshot(receiptId);
-      for (const receiptId of pendingArchiveDeletes) await screenshotArchive.deleteRecord(receiptId);
+      const failures = [...batch.failures];
+      for (const receiptId of pendingScreenshotDeletes) {
+        try { await screenshotArchive.deleteScreenshot(receiptId); } catch (error) { failures.push({ receiptId, message: error instanceof Error ? error.message : "删除原图失败" }); }
+      }
+      for (const receiptId of pendingArchiveDeletes) {
+        try { await screenshotArchive.deleteRecord(receiptId); } catch (error) { failures.push({ receiptId, message: error instanceof Error ? error.message : "删除档案失败" }); }
+      }
+      const failedReceipts = new Set(failures.map((failure) => failure.receiptId));
+      for (const [id, pending] of pendingTransactions) {
+        if (!pending.transaction || !failedReceipts.has(pending.transaction.receiptId)) continue;
+        if (state.items[id]) nextState.items[id] = state.items[id];
+        else delete nextState.items[id];
+      }
       state = nextState;
-      persistState(state);
-      pendingTransactions.clear();
-      pendingScreenshotDeletes.clear();
-      pendingArchiveDeletes.clear();
-      closeEditor(false);
+      persistState(state, activePlanId);
+      for (const [id, pending] of pendingTransactions) if (!pending.transaction || !failedReceipts.has(pending.transaction.receiptId)) pendingTransactions.delete(id);
+      for (const receiptId of [...pendingScreenshotDeletes]) if (!failedReceipts.has(receiptId)) pendingScreenshotDeletes.delete(receiptId);
+      for (const receiptId of [...pendingArchiveDeletes]) if (!failedReceipts.has(receiptId)) pendingArchiveDeletes.delete(receiptId);
+      if (!failures.length) {
+        closeEditor(false);
+        if (saveStatus) {
+          saveStatus.textContent = `archived · ${batch.archived.length} 笔截图已归档，方案采购状态已更新。`;
+          saveStatus.dataset.level = "ok";
+          saveStatus.dataset.phase = "archived";
+        }
+      }
+      else {
+        renderEditor();
+        if (saveStatus) {
+          saveStatus.textContent = `部分保存：${batch.archived.length} 笔已归档，${failures.length} 笔仍为 staged，可直接重试。`;
+          saveStatus.dataset.level = "bad";
+          saveStatus.dataset.phase = "staged";
+        }
+      }
       render();
     } catch (error) {
       if (saveStatus) {
@@ -553,7 +673,7 @@ export function initBuildProgress(args: {
     for (const item of currentCatalogItems()) {
       if (item.stage === "candidate") item.stage = "locked";
     }
-    persistState(state);
+    persistState(state, activePlanId);
     render();
   });
 
@@ -562,7 +682,7 @@ export function initBuildProgress(args: {
     const id = select?.dataset.progressId;
     if (!select || !id || !isBuildStage(select.value) || !state.items[id]) return;
     state.items[id].stage = select.value;
-    persistState(state);
+    persistState(state, activePlanId);
     render();
   });
 
@@ -573,6 +693,7 @@ export function initBuildProgress(args: {
         : null;
       const id = matchedCatalog?.id ?? `transaction-${record.receiptId}`;
       const existing = state.items[id];
+      const planLink = record.planLink ?? (activePlanId ? { schemaVersion: "1.0.0", planId: activePlanId, planVersionIdAtCapture: activePlanVersionId, planItemId: matchedCatalog?.id ?? null, linkStatus: matchedCatalog ? "linked" : "unlinked" } satisfies PlanTransactionLink : undefined);
       pendingTransactions.set(id, {
         id,
         skuId: record.skuId,
@@ -582,6 +703,7 @@ export function initBuildProgress(args: {
         unitPriceCny: record.unitPriceCny ?? existing?.unitPriceCny ?? null,
         stage: record.stage ?? (existing?.stage === "installed" ? "installed" : "purchased"),
         source: matchedCatalog ? "catalog" : "transaction",
+        ...(planLink ? { planLink } : {}),
         transaction: record.evidence,
       });
       if (screenshot) screenshotArchive.stage(record.receiptId, screenshot, record.evidence.contentHash, record.evidence.capturedAt);
@@ -595,6 +717,7 @@ export function initBuildProgress(args: {
         : null;
       const id = matchedCatalog?.id ?? `transaction-${record.receiptId}`;
       const existing = state.items[id];
+      const planLink = record.planLink ?? (activePlanId ? { schemaVersion: "1.0.0", planId: activePlanId, planVersionIdAtCapture: activePlanVersionId, planItemId: matchedCatalog?.id ?? null, linkStatus: matchedCatalog ? "linked" : "unlinked" } satisfies PlanTransactionLink : undefined);
       state.items[id] = {
         id,
         skuId: record.skuId,
@@ -604,9 +727,10 @@ export function initBuildProgress(args: {
         unitPriceCny: record.unitPriceCny ?? existing?.unitPriceCny ?? null,
         stage: record.stage ?? (existing?.stage === "installed" ? "installed" : "purchased"),
         source: matchedCatalog ? "catalog" : "transaction",
+        ...(planLink ? { planLink } : {}),
         transaction: record.evidence,
       };
-      persistState(state);
+      persistState(state, activePlanId);
       render();
     },
     syncEvaluation(evaluation) {
@@ -614,5 +738,20 @@ export function initBuildProgress(args: {
       for (const line of currentBom) ensureLine(line);
       render();
     },
+    activatePlan(context) {
+      if (context.planId !== activePlanId) {
+        pendingTransactions.clear();
+        pendingScreenshotDeletes.clear();
+        pendingArchiveDeletes.clear();
+        screenshotArchive.discard();
+        activePlanId = context.planId;
+        state = loadState(activePlanId);
+      }
+      activePlanVersionId = context.planVersionId;
+      currentBom = context.evaluation.bom;
+      for (const line of currentBom) ensureLine(line);
+      render();
+    },
+    summary() { return summarizeProgress(currentItems()); },
   };
 }

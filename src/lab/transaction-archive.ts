@@ -1,3 +1,5 @@
+import type { PlanTransactionLink } from "../plans/contracts";
+
 export interface TransactionArchiveItemSnapshot {
   id: string;
   skuId: string | null;
@@ -7,6 +9,7 @@ export interface TransactionArchiveItemSnapshot {
   unitPriceCny: number | null;
   stage: string;
   source: string;
+  planLink?: PlanTransactionLink;
   transaction?: {
     receiptId: string;
     fileName: string;
@@ -28,11 +31,12 @@ export interface TransactionArchiveItemSnapshot {
 }
 
 export interface TransactionArchiveRecord {
-  schemaVersion: 1;
+  schemaVersion: 2;
   receiptId: string;
   storedAt: string;
   updatedAt: string;
   item: TransactionArchiveItemSnapshot;
+  link: PlanTransactionLink;
   image: {
     fileName: string;
     mimeType: string;
@@ -43,14 +47,20 @@ export interface TransactionArchiveRecord {
   pendingFile?: File;
 }
 
+export interface TransactionArchiveBatchResult {
+  archived: TransactionArchiveRecord[];
+  failures: Array<{ receiptId: string; message: string }>;
+}
+
 export interface TransactionScreenshotArchive {
   stage: (receiptId: string, file: File, contentHash: string, capturedAt: string) => void;
   discard: (receiptIds?: Iterable<string>) => void;
-  commit: (items: TransactionArchiveItemSnapshot[]) => Promise<TransactionArchiveRecord[]>;
+  commit: (items: TransactionArchiveItemSnapshot[]) => Promise<TransactionArchiveBatchResult>;
   list: () => Promise<TransactionArchiveRecord[]>;
   pendingRecord: (receiptId: string, item: TransactionArchiveItemSnapshot) => TransactionArchiveRecord | null;
   deleteScreenshot: (receiptId: string) => Promise<void>;
   deleteRecord: (receiptId: string) => Promise<void>;
+  updateRecord: (receiptId: string, input: { item?: Partial<TransactionArchiveItemSnapshot>; link?: PlanTransactionLink }) => Promise<TransactionArchiveRecord>;
 }
 
 interface PendingScreenshot {
@@ -90,20 +100,25 @@ export function createTransactionScreenshotArchive(): TransactionScreenshotArchi
     },
     async commit(items) {
       const archived: TransactionArchiveRecord[] = [];
+      const failures: TransactionArchiveBatchResult["failures"] = [];
       for (const item of items) {
         const receiptId = item.transaction?.receiptId;
         const screenshot = receiptId ? pending.get(receiptId) : null;
         if (!receiptId || !screenshot) continue;
-        if (screenshot.contentHash !== item.transaction?.contentHash) throw new Error("待归档截图与交易证据不一致");
-        const record = await jsonResponse<TransactionArchiveRecord>(await fetch("/api/price/transactions/archive", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ receiptId, item, screenshotDataUrl: await readAsDataUrl(screenshot.file) }),
-        }));
-        pending.delete(receiptId);
-        archived.push(record);
+        try {
+          if (screenshot.contentHash !== item.transaction?.contentHash) throw new Error("待归档截图与交易证据不一致");
+          const record = await jsonResponse<TransactionArchiveRecord>(await fetch("/api/price/transactions/archive", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ receiptId, item, link: item.planLink, screenshotDataUrl: await readAsDataUrl(screenshot.file) }),
+          }));
+          pending.delete(receiptId);
+          archived.push(record);
+        } catch (error) {
+          failures.push({ receiptId, message: error instanceof Error ? error.message : "归档失败" });
+        }
       }
-      return archived;
+      return { archived, failures };
     },
     async list() {
       const response = await jsonResponse<{ records: TransactionArchiveRecord[] }>(await fetch("/api/price/transactions/archive", { headers: { Accept: "application/json" } }));
@@ -113,11 +128,12 @@ export function createTransactionScreenshotArchive(): TransactionScreenshotArchi
       const screenshot = pending.get(receiptId);
       if (!screenshot) return null;
       return {
-        schemaVersion: 1,
+        schemaVersion: 2,
         receiptId,
         storedAt: "",
         updatedAt: "",
         item,
+        link: item.planLink ?? { schemaVersion: "1.0.0", planId: null, planVersionIdAtCapture: null, planItemId: null, linkStatus: "unlinked" },
         image: {
           fileName: screenshot.file.name,
           mimeType: screenshot.file.type,
@@ -135,6 +151,13 @@ export function createTransactionScreenshotArchive(): TransactionScreenshotArchi
     async deleteRecord(receiptId) {
       pending.delete(receiptId);
       await jsonResponse(await fetch(`/api/price/transactions/archive/${encodeURIComponent(receiptId)}`, { method: "DELETE" }));
+    },
+    async updateRecord(receiptId, input) {
+      return jsonResponse<TransactionArchiveRecord>(await fetch(`/api/price/transactions/archive/${encodeURIComponent(receiptId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      }));
     },
   };
 }

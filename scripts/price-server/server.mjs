@@ -42,7 +42,7 @@ import { intEnv, loadEnv } from "./env.mjs";
 import { analyzeTransactionScreenshot } from "./transactions/receipt.mjs";
 import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./catalog/discovery.mjs";
 import { createSearXngDiscoveryProvider } from "./catalog/searxng-discovery.mjs";
-import { archiveTransaction, deleteTransactionArchive, deleteTransactionImage, listTransactionArchives, readTransactionImage } from "./transactions/archive.mjs";
+import { archiveTransaction, deleteTransactionArchive, deleteTransactionImage, listTransactionArchives, readTransactionImage, updateTransactionArchive } from "./transactions/archive.mjs";
 
 const HOST = "127.0.0.1";
 const env = await loadEnv();
@@ -233,6 +233,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (transactionImageMatch && req.method === "DELETE") return send(res, 200, await deleteTransactionImage(decodeURIComponent(transactionImageMatch[1]), { root: TRANSACTION_ARCHIVE_ROOT }));
     const transactionArchiveMatch = url.pathname.match(/^\/api\/price\/transactions\/archive\/([^/]+)$/);
+    if (transactionArchiveMatch && req.method === "PATCH") return send(res, 200, await updateTransactionArchive(decodeURIComponent(transactionArchiveMatch[1]), await readBody(req), { root: TRANSACTION_ARCHIVE_ROOT }));
     if (transactionArchiveMatch && req.method === "DELETE") return send(res, 200, await deleteTransactionArchive(decodeURIComponent(transactionArchiveMatch[1]), { root: TRANSACTION_ARCHIVE_ROOT }));
     if (route === "POST /api/price/transactions/analyze") {
       const body = await readBody(req, TRANSACTION_BODY_MAX_BYTES);
