@@ -958,7 +958,7 @@ async function boot(): Promise<void> {
     getCatalog: () => catalog,
     baseSkuIds: ["case.jonsbo-n6", BOARD_ID, "cpu.i5-14500"],
   });
-  initTransactionImport({ onImport: (record) => buildProgress?.stageTransaction(record) });
+  initTransactionImport({ onImport: (record, screenshot) => buildProgress?.stageTransaction(record, screenshot) });
   if (latestEvaluation) buildProgress.syncEvaluation(latestEvaluation);
 
   await initPricePanel({ catalog, onAudited: () => reapplyLocalPrices() });

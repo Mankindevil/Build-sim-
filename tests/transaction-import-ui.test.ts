@@ -45,7 +45,7 @@ describe("transaction screenshot review UI", () => {
     price.value = "1250";
     document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")!.click();
 
-    expect(onImport).toHaveBeenCalledWith(expect.objectContaining({ name: "Seasonic VERTEX GX-1000", category: "psu", qty: 2, unitPriceCny: 1250, stage: "purchased" }));
+    expect(onImport).toHaveBeenCalledWith(expect.objectContaining({ name: "Seasonic VERTEX GX-1000", category: "psu", qty: 2, unitPriceCny: 1250, stage: "purchased" }), expect.any(File));
     expect(document.querySelector("#transaction-screenshot-status")?.textContent).toContain("保存基座");
   });
 });

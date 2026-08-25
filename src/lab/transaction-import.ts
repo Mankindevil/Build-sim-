@@ -93,7 +93,7 @@ function recordFromAnalysis(analysis: TransactionAnalysis, verification: Transac
   };
 }
 
-export function initTransactionImport(options: { onImport: (record: TransactionImportRecord) => void }): void {
+export function initTransactionImport(options: { onImport: (record: TransactionImportRecord, screenshot: File) => void }): void {
   const input = $("transaction-screenshot-input") as HTMLInputElement | null;
   const drop = $("transaction-screenshot-drop");
   const preview = $("transaction-screenshot-preview") as HTMLImageElement | null;
@@ -106,7 +106,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
     status.textContent = copy;
     status.dataset.level = level;
   };
-  const showReview = (record: TransactionImportRecord, copy: string): void => {
+  const showReview = (record: TransactionImportRecord, screenshot: File, copy: string): void => {
     result.hidden = false;
     result.replaceChildren();
     const heading = document.createElement("div");
@@ -189,7 +189,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
         qty: Math.max(1, Math.round(Number(qty.value) || 1)),
         unitPriceCny: rawPrice === "" ? null : Math.max(0, Number(rawPrice) || 0),
         stage: selectedStage,
-      });
+      }, screenshot);
       result.hidden = true;
       result.replaceChildren();
       setStatus("已加入下方编辑区，仍可继续修改；点击右下角“保存基座”后才会正式保存。", "ok");
@@ -277,7 +277,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
         setStatus("截图中没有足够明确的型号；请手动修正后再加入基座。", "warn");
         resultCopy = `待确认型号 · 参数保持 unknown${costCopy} · 尚未保存`;
       }
-      showReview(record, resultCopy);
+      showReview(record, file, resultCopy);
     } catch (error) {
       setStatus(`识别失败：${error instanceof Error ? error.message : "本地服务不可用"}`, "bad");
     } finally {

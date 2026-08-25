@@ -379,7 +379,7 @@ body:has(#n6-lab#n6-lab) {
 #n6-lab#n6-lab .build-dialog-shell {
   display: grid;
   max-height: min(86vh, 860px);
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   padding: 22px;
 }
 
@@ -402,12 +402,76 @@ body:has(#n6-lab#n6-lab) {
   font-size: 11px;
 }
 
+#n6-lab#n6-lab .build-review-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 12px 0;
+}
+
+#n6-lab#n6-lab .build-review-tabs button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+#n6-lab#n6-lab .build-review-tabs button[aria-selected="true"] {
+  border-color: color-mix(in srgb, var(--primary) 48%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--foreground);
+}
+
+#n6-lab#n6-lab .build-review-tabs small {
+  color: var(--primary);
+  font-size: 8px;
+}
+
+#n6-lab#n6-lab .build-review-panel {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+#n6-lab#n6-lab .build-review-panel[hidden] {
+  display: none;
+}
+
+#n6-lab#n6-lab .build-review-current-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#n6-lab#n6-lab .build-review-current-summary article {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background) 34%, transparent);
+}
+
+#n6-lab#n6-lab .build-review-current-summary small,
+#n6-lab#n6-lab .build-review-current-summary span {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+#n6-lab#n6-lab .build-review-current-summary strong {
+  font-size: 15px;
+}
+
 #n6-lab#n6-lab .transaction-import {
   display: grid;
   grid-template-columns: minmax(220px, .8fr) minmax(300px, 1.2fr);
   gap: 10px 16px;
   align-items: center;
-  margin-top: 14px;
+  margin-top: 0;
   padding: 14px;
   border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
   border-radius: 12px;
@@ -569,6 +633,142 @@ body:has(#n6-lab#n6-lab) {
 #n6-lab#n6-lab .build-transaction-proof a {
   color: var(--primary);
   text-decoration: none;
+}
+
+#n6-lab#n6-lab .transaction-history-head {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+#n6-lab#n6-lab .transaction-history-head h4,
+#n6-lab#n6-lab .transaction-history-head p {
+  margin: 0;
+}
+
+#n6-lab#n6-lab .transaction-history-head h4 {
+  margin: 3px 0 5px;
+  font-size: 14px;
+}
+
+#n6-lab#n6-lab .transaction-history-head > div > p:last-child,
+#n6-lab#n6-lab .transaction-history-status {
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+#n6-lab#n6-lab .transaction-history-status {
+  margin: 10px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+#n6-lab#n6-lab .transaction-history-status[data-level="ok"] { border-left-color: var(--ok); color: var(--ok); }
+#n6-lab#n6-lab .transaction-history-status[data-level="busy"],
+#n6-lab#n6-lab .transaction-history-status[data-level="pending"] { border-left-color: var(--primary); color: var(--primary); }
+#n6-lab#n6-lab .transaction-history-status[data-level="bad"] { border-left-color: var(--bad); color: var(--bad); }
+
+#n6-lab#n6-lab .transaction-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+#n6-lab#n6-lab .transaction-history-card {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--background) 36%, transparent);
+}
+
+#n6-lab#n6-lab .transaction-history-card.is-pending {
+  border-color: color-mix(in srgb, var(--primary) 58%, var(--border));
+}
+
+#n6-lab#n6-lab .transaction-history-visual {
+  display: grid;
+  width: 104px;
+  height: 70px;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+#n6-lab#n6-lab .transaction-history-visual img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#n6-lab#n6-lab .transaction-history-visual span {
+  padding: 8px;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  text-align: center;
+}
+
+#n6-lab#n6-lab .transaction-history-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+#n6-lab#n6-lab .transaction-history-copy > div {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+#n6-lab#n6-lab .transaction-history-copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#n6-lab#n6-lab .transaction-history-copy small,
+#n6-lab#n6-lab .transaction-history-copy p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+#n6-lab#n6-lab .transaction-history-copy a {
+  color: var(--primary);
+}
+
+#n6-lab#n6-lab .transaction-history-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+#n6-lab#n6-lab .transaction-history-actions .danger {
+  border-color: color-mix(in srgb, var(--bad) 50%, var(--border));
+  color: var(--bad);
+}
+
+#n6-lab#n6-lab .transaction-history-empty {
+  padding: 34px 18px;
+  border: 1px dashed var(--border);
+  border-radius: 11px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+#n6-lab#n6-lab .transaction-history-empty p {
+  margin: 5px 0 0;
+  font-size: 9px;
 }
 
 #n6-lab#n6-lab .build-base-editor {
@@ -1556,6 +1756,23 @@ body:has(#n6-lab#n6-lab) {
     grid-template-columns: minmax(0, 1fr) 72px 105px;
   }
 
+  #n6-lab#n6-lab .build-review-current-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #n6-lab#n6-lab .transaction-history-card {
+    grid-template-columns: 90px minmax(0, 1fr);
+  }
+
+  #n6-lab#n6-lab .transaction-history-visual {
+    width: 90px;
+  }
+
+  #n6-lab#n6-lab .transaction-history-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
   #n6-lab#n6-lab .transaction-review-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1630,6 +1847,31 @@ body:has(#n6-lab#n6-lab) {
 
   #n6-lab#n6-lab .transaction-import {
     grid-template-columns: 1fr;
+  }
+
+  #n6-lab#n6-lab .build-review-current-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  #n6-lab#n6-lab .transaction-history-head,
+  #n6-lab#n6-lab .transaction-history-copy > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  #n6-lab#n6-lab .transaction-history-card {
+    grid-template-columns: 1fr;
+  }
+
+  #n6-lab#n6-lab .transaction-history-visual {
+    width: 100%;
+    height: 124px;
+  }
+
+  #n6-lab#n6-lab .transaction-history-actions {
+    grid-column: 1;
+    align-items: stretch;
+    flex-direction: column;
   }
 
   #n6-lab#n6-lab .transaction-status,

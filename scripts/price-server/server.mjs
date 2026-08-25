@@ -42,6 +42,7 @@ import { intEnv, loadEnv } from "./env.mjs";
 import { analyzeTransactionScreenshot } from "./transactions/receipt.mjs";
 import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./catalog/discovery.mjs";
 import { createSearXngDiscoveryProvider } from "./catalog/searxng-discovery.mjs";
+import { archiveTransaction, deleteTransactionArchive, deleteTransactionImage, listTransactionArchives, readTransactionImage } from "./transactions/archive.mjs";
 
 const HOST = "127.0.0.1";
 const env = await loadEnv();
@@ -51,6 +52,7 @@ const TRANSACTION_BODY_MAX_BYTES = intEnv(env, "TRANSACTION_SCREENSHOT_BODY_MAX_
 const TRANSACTION_OCR_TIMEOUT_MS = intEnv(env, "TRANSACTION_SCREENSHOT_OCR_TIMEOUT_MS", 60_000, { min: 5_000, max: 120_000 });
 const TRANSACTION_OCR_PROVIDER = env.TRANSACTION_OCR_PROVIDER || "deepseek-ocr";
 const DEEPSEEK_OCR_MAX_TOKENS = intEnv(env, "DEEPSEEK_OCR_MAX_TOKENS", 2_048, { min: 128, max: 8_192 });
+const TRANSACTION_ARCHIVE_ROOT = env.TRANSACTION_ARCHIVE_ROOT || `${process.cwd()}/runtime/transactions`;
 if (!["deepseek-ocr", "tesseract"].includes(TRANSACTION_OCR_PROVIDER)) throw new Error("TRANSACTION_OCR_PROVIDER must be deepseek-ocr or tesseract");
 
 function send(res, status, payload) {
@@ -60,6 +62,18 @@ function send(res, status, payload) {
     "Cache-Control": "no-store",
   });
   res.end(body);
+}
+
+function sendImage(res, payload) {
+  const safeName = String(payload.fileName ?? "transaction-screenshot").replace(/[\r\n"]/g, "_").slice(0, 160);
+  res.writeHead(200, {
+    "Content-Type": payload.mimeType,
+    "Content-Length": payload.buffer.byteLength,
+    "Content-Disposition": `inline; filename="${safeName}"`,
+    "Cache-Control": "private, no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  res.end(payload.buffer);
 }
 
 async function readBody(req, maxBytes = MAX_BODY_BYTES) {
@@ -207,6 +221,19 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (route === "GET /api/price/health") return send(res, 200, { ok: true, port: PORT });
+    if (route === "GET /api/price/transactions/archive") return send(res, 200, { records: await listTransactionArchives({ root: TRANSACTION_ARCHIVE_ROOT }) });
+    if (route === "POST /api/price/transactions/archive") {
+      const body = await readBody(req, TRANSACTION_BODY_MAX_BYTES);
+      return send(res, 201, await archiveTransaction(body, { root: TRANSACTION_ARCHIVE_ROOT }));
+    }
+    const transactionImageMatch = url.pathname.match(/^\/api\/price\/transactions\/archive\/([^/]+)\/image$/);
+    if (transactionImageMatch && req.method === "GET") {
+      const image = await readTransactionImage(decodeURIComponent(transactionImageMatch[1]), { root: TRANSACTION_ARCHIVE_ROOT });
+      return image ? sendImage(res, image) : send(res, 404, { error: "transaction screenshot not found" });
+    }
+    if (transactionImageMatch && req.method === "DELETE") return send(res, 200, await deleteTransactionImage(decodeURIComponent(transactionImageMatch[1]), { root: TRANSACTION_ARCHIVE_ROOT }));
+    const transactionArchiveMatch = url.pathname.match(/^\/api\/price\/transactions\/archive\/([^/]+)$/);
+    if (transactionArchiveMatch && req.method === "DELETE") return send(res, 200, await deleteTransactionArchive(decodeURIComponent(transactionArchiveMatch[1]), { root: TRANSACTION_ARCHIVE_ROOT }));
     if (route === "POST /api/price/transactions/analyze") {
       const body = await readBody(req, TRANSACTION_BODY_MAX_BYTES);
       const catalog = await loadCatalog();

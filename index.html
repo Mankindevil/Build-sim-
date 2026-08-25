@@ -52,24 +52,39 @@
         <div><p class="lab-kicker">BUILD RECORD</p><h3 id="build-base-dialog-title">编辑装机档案</h3><p>正式 SKU 参与确定性评估；用户记录部件只跟踪采购与组装，不进入兼容性计算。</p></div>
         <button id="build-base-close" type="button" class="case-view-btn" aria-label="关闭编辑装机档案">关闭</button>
       </header>
-      <section class="transaction-import" aria-labelledby="transaction-import-title">
-        <div class="transaction-import-copy">
-          <p class="lab-kicker">TRANSACTION AGENT</p>
-          <h4 id="transaction-import-title">从交易截图补充装机档案</h4>
-          <p>上传后先检查并修改识别结果，再加入下方基座；点击“保存基座”后才会写入当前浏览器。</p>
-        </div>
-        <label id="transaction-screenshot-drop" class="transaction-drop" for="transaction-screenshot-input">
-          <input id="transaction-screenshot-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
-          <img id="transaction-screenshot-preview" alt="待识别交易截图预览" hidden>
-          <span><b>上传交易截图</b><small>点击选择或拖入 PNG / JPEG / WebP · 最大 5MB</small></span>
-        </label>
-        <p id="transaction-screenshot-status" class="transaction-status" data-level="idle" aria-live="polite">截图仅发送到服务端配置的 DeepSeek 视觉 OCR，不保存原图；基座只保留脱敏摘要和内容哈希，界面展示本地费用估算。</p>
-        <div id="transaction-screenshot-result" class="transaction-result" aria-live="polite" hidden></div>
+      <nav class="build-review-tabs" aria-label="装机档案 Review">
+        <button id="build-review-current-tab" type="button" aria-selected="true">当前配置 <small id="build-review-current-count">0 项</small></button>
+        <button id="build-review-transactions-tab" type="button" aria-selected="false">交易记录 <small id="build-review-transaction-count">0 笔</small></button>
+      </nav>
+      <section id="build-review-current-panel" class="build-review-panel" aria-labelledby="build-review-current-tab">
+        <div id="build-review-current-summary" class="build-review-current-summary" aria-live="polite"></div>
+        <section class="transaction-import" aria-labelledby="transaction-import-title">
+          <div class="transaction-import-copy">
+            <p class="lab-kicker">TRANSACTION AGENT</p>
+            <h4 id="transaction-import-title">从交易截图补充装机档案</h4>
+            <p>上传后先检查并修改识别结果，再加入下方基座；点击“保存基座”后才会归档到服务器。</p>
+          </div>
+          <label id="transaction-screenshot-drop" class="transaction-drop" for="transaction-screenshot-input">
+            <input id="transaction-screenshot-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+            <img id="transaction-screenshot-preview" alt="待识别交易截图预览" hidden>
+            <span><b>上传交易截图</b><small>点击选择或拖入 PNG / JPEG / WebP · 最大 5MB</small></span>
+          </label>
+          <p id="transaction-screenshot-status" class="transaction-status" data-level="idle" aria-live="polite">截图会发送给服务端 DeepSeek 视觉 OCR；只有点击“保存基座”后，原图和交易摘要才会归档到服务器持久化目录。</p>
+          <div id="transaction-screenshot-result" class="transaction-result" aria-live="polite" hidden></div>
+        </section>
+        <div id="build-base-editor" class="build-base-editor"></div>
+        <button id="build-add-custom" type="button" class="case-view-btn">添加用户记录部件</button>
       </section>
-      <div id="build-base-editor" class="build-base-editor"></div>
-      <button id="build-add-custom" type="button" class="case-view-btn">添加用户记录部件</button>
+      <section id="build-review-transactions-panel" class="build-review-panel" aria-labelledby="build-review-transactions-tab" hidden>
+        <header class="transaction-history-head">
+          <div><p class="lab-kicker">SERVER ARCHIVE</p><h4>交易与截图档案</h4><p>这里展示服务器已归档记录和本次待保存记录。原图可能含订单号、姓名或地址，请按需保留。</p></div>
+          <button id="transaction-history-refresh" type="button" class="case-view-btn">刷新档案</button>
+        </header>
+        <p id="transaction-history-status" class="transaction-history-status" data-level="idle" aria-live="polite">正在读取服务器档案…</p>
+        <div id="transaction-history-list" class="transaction-history-list"></div>
+      </section>
       <footer class="build-dialog-actions">
-        <p id="build-base-save-status" data-level="idle" aria-live="polite">修改只会在点击“保存基座”后生效。</p>
+        <p id="build-base-save-status" data-level="idle" aria-live="polite">修改与新截图只会在点击“保存基座”后生效。</p>
         <button id="build-base-cancel" type="button" class="case-view-btn">取消</button>
         <button id="build-base-save" type="button">保存基座</button>
       </footer>
