@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { boxesOverlap, detectConflicts } from "../src/core/occupancy";
-import { evaluateBuild } from "../src/core/evaluate";
+import { derivePower, evaluateBuild } from "../src/core/evaluate";
 import { loadBundledCatalog } from "../src/sku/catalog";
 import { parseConfig } from "../src/config/types";
 import baseline from "../data/configs/baseline-atx-1hdd.json";
@@ -114,5 +114,77 @@ describe("wiring + config", () => {
   it("SKU appearance is present for owned case", () => {
     const n6 = catalog.skus.find((s) => s.id === "case.jonsbo-n6")!;
     expect(n6.appearance?.image).toContain("n6.webp");
+  });
+
+  it("exposes one power fact source with explicit primary/secondary PSU loads", () => {
+    const cfg = structuredClone(baseline) as BuildConfig;
+    cfg.selection.psuTopology = "dual";
+    cfg.selection.secondaryPsuId = "psu.corsair-sf750-atx31";
+    cfg.selection.dualStart = "sync";
+    cfg.selection.diskCount = 8;
+    const power = derivePower(cfg, catalog, {
+      workload: "combined",
+      cpuPl1W: 90,
+      cpuPl2W: 125,
+      fans: { front: { size: 140, count: 2 }, right: { size: 120, count: 2 } },
+    });
+    const result = evaluateBuild(cfg, catalog, {
+      workload: "combined",
+      cpuPl1W: 90,
+      cpuPl2W: 125,
+      ambientC: 25,
+      fanMode: "balanced",
+      fans: { front: { size: 140, count: 2 }, right: { size: 120, count: 2 } },
+      upperWatts: power.upperDcW ?? 0,
+      psuDcWatts: power.lowerDcW ?? 0,
+      loads: power.loads,
+    });
+    expect(result.power.psus.map((load) => load.role)).toEqual(["primary", "secondary"]);
+    expect(result.power.psus[0]?.dcLoadW).toBeGreaterThan(0);
+    expect(result.power.psus[1]?.dcLoadW).toBeGreaterThan(0);
+    expect(result.power.psus[1]?.chamber).toBe("lower");
+    expect(result.power.dcW).toBeCloseTo((result.power.mainDcW ?? 0) + (result.power.driveDcW ?? 0));
+    expect(result.power).toBe(result.power);
+    expect(result.price.items).toEqual(result.bom.map((line) => expect.objectContaining({ skuId: line.skuId, qty: line.qty })));
+  });
+
+  it("keeps unknown power facts structured instead of inventing a wall number", () => {
+    const cfg = structuredClone(baseline) as BuildConfig;
+    cfg.selection.secondaryPsuId = "psu.not-in-catalog";
+    cfg.selection.psuTopology = "dual";
+    cfg.selection.dualStart = "sync";
+    const power = derivePower(cfg, catalog, { workload: "work", fans: {} });
+    expect(power.unknown).toContain("secondary.psu");
+    expect(power.psus[1]?.wallW).toBeNull();
+    expect(power.pathologicalWallW).toBeNull();
+  });
+
+  it("uses the configured fan groups and preserves one evaluation snapshot", () => {
+    const cfg = structuredClone(baseline) as BuildConfig;
+    const noFans = derivePower(cfg, catalog, { workload: "idle", fans: {} });
+    const populated = derivePower(cfg, catalog, {
+      workload: "idle",
+      fans: {
+        front: { size: 140, count: 2 },
+        rear: { size: 120, count: 1 },
+        left: { size: 120, count: 2 },
+        right: { size: 120, count: 2 },
+      },
+    });
+    expect(noFans.fanW).toBe(5);
+    expect(populated.fanW).toBe(5 + 2 * 2 + 1 * 2 + 2 * 2 + 2 * 2);
+    const evaluation = evaluateBuild(cfg, catalog, {
+      workload: "idle",
+      ambientC: 25,
+      fanMode: "balanced",
+      fans: { front: { size: 140, count: 2 } },
+      upperWatts: populated.upperDcW ?? 0,
+      psuDcWatts: 0,
+      power: populated,
+      loads: populated.loads,
+    });
+    expect(evaluation.power).toBe(populated);
+    expect(evaluation.bom).toEqual(expect.arrayContaining(evaluation.price.items.map((item) => expect.objectContaining({ skuId: item.skuId }))));
+    expect(evaluation.wiring.bayPaths.length).toBe(9);
   });
 });

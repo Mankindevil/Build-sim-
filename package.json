@@ -6,16 +6,27 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && npm run agent:build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:g1:browser": "node scripts/g1-browser-smoke.mjs",
+    "test:g7:browser": "node scripts/g7-browser-smoke.mjs",
+    "test:c7:browser": "node scripts/c7-catalog-agent-browser-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "price:refresh": "node scripts/price-refresh/refresh.mjs",
     "price:search": "node scripts/price-refresh/search.mjs",
     "price:serve": "node scripts/price-server/server.mjs",
     "price:login": "node scripts/price-server/login.mjs",
-    "price:fixture": "node scripts/price-server/fixture.mjs"
+    "price:fixture": "node scripts/price-server/fixture.mjs",
+    "agent:build": "vite build --config vite.agent.config.ts",
+    "agent:serve": "npm run agent:build && node dist-agent/agent-server.js",
+    "agent:fixture": "node scripts/agent-provider-fixture.mjs",
+    "agent:secret-scan": "node scripts/agent-secret-scan.mjs",
+    "agent:live-smoke": "vite-node scripts/agent-live-smoke.ts",
+    "searxng:up": "node scripts/searxng-local.mjs up",
+    "searxng:health": "node scripts/searxng-local.mjs health",
+    "searxng:smoke": "node scripts/searxng-live-smoke.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -27,5 +38,10 @@
     "typescript": "^5.9.2",
     "vite": "^7.1.3",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@tesseract.js-data/eng": "1.0.0",
+    "pdf-parse": "2.4.5",
+    "tesseract.js": "7.0.0"
   }
 }

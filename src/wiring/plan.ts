@@ -118,6 +118,13 @@ export function checkBackplaneHarness(
     sata: harness?.sataConnectors ?? null,
     molex: harness?.molexConnectors ?? null,
   };
+  const mixedPeripheralLeads = harness?.mixedPeripheralLeads ?? 0;
+  const uniquePeripheralLeads =
+    harness?.peripheralLeads !== undefined
+      ? harness.peripheralLeads
+      : confirmed.sata !== null && confirmed.molex !== null
+        ? Math.max(0, confirmed.sata + confirmed.molex - mixedPeripheralLeads)
+        : null;
   const spinUp = spinUpLoad(config, catalog, psu?.attrs ?? {});
   const leadEvidence = harness?.leadEvidence ?? harness?.evidence ?? "unknown";
   const socketCount = Number(psu?.attrs?.["peripheralSockets"]);
@@ -131,6 +138,7 @@ export function checkBackplaneHarness(
     required,
     confirmed,
     connectors,
+    uniquePeripheralLeads,
     peripheralSockets,
     socketLimited,
     spinUp,
@@ -158,6 +166,30 @@ export function checkBackplaneHarness(
       daisyChainOnly: (connectors.molex ?? 0) >= required.molex,
       verdict: "bad",
       evidence: socketEvidence,
+      notes,
+    };
+  }
+
+  // A mixed SATA+Molex cable is connector-capable in both typed columns, but it
+  // is still only one physical cable. Never add the two columns and call that
+  // many independent leads.
+  if (
+    mixedPeripheralLeads > 0 &&
+    uniquePeripheralLeads !== null &&
+    uniquePeripheralLeads < BP.inlets
+  ) {
+    notes.push(
+      `${psu?.name ?? feedPsuId} 原盒只有 ${uniquePeripheralLeads} 根独立外围线；其中 ${mixedPeripheralLeads} 根是 SATA+Molex 混合线，不能在两类里各算一次。`,
+    );
+    notes.push(
+      `接头种类虽覆盖 SATA 与 Molex，但 ${BP.inlets} 个背板口只能共用这 ${uniquePeripheralLeads} 根线，仍违反一口一线要求。`,
+    );
+    return {
+      ...base,
+      oneLeadPerInlet: false,
+      daisyChainOnly: true,
+      verdict: "bad",
+      evidence: leadEvidence,
       notes,
     };
   }
@@ -299,6 +331,7 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
       bayId: `bay-${bayIndex}`,
       bayIndex,
       target: "none",
+      assignment: { controller: "none", connector: "none", portIndex: null },
       portLabel: "无可用端口",
       evidence: "inferred",
       note:
@@ -327,6 +360,7 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
         bayId: `bay-${i}`,
         bayIndex: i,
         target: slot.viaSlim ? "slimsas" : "sata",
+        assignment: { controller: "board", connector: slot.viaSlim ? "slimsas" : "sata", portIndex: slot.slot + 1 },
         portLabel: slot.viaSlim
           ? `SlimSAS lane plan #${slot.slot - boardPorts.nativeSata + 1}（启动盘）`
           : `MB SATA_${slot.slot + 1}（启动盘）`,
@@ -341,6 +375,7 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
         bayId: `bay-${i}`,
         bayIndex: i,
         target: "sata",
+        assignment: { controller: "none", connector: "none", portIndex: null },
         portLabel: "—",
         evidence: "official",
         note: "Empty tray",
@@ -354,6 +389,7 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
         bayId: `bay-${i}`,
         bayIndex: i,
         target: "hba",
+        assignment: { controller: "hba", connector: "sff-8643", portIndex: port + 1 },
         portLabel: `HBA C${Math.floor(port / fanout) + 1}·P${(port % fanout) + 1} (plan)`,
         evidence: "inferred",
         note: "Exact Mini-SAS breakout orientation not verified against a locked cable SKU",
@@ -372,6 +408,7 @@ export function planN6Wiring(config: BuildConfig, catalog: SkuCatalog): WiringPl
       bayId: `bay-${i}`,
       bayIndex: i,
       target: slot.viaSlim ? "slimsas" : "sata",
+      assignment: { controller: "board", connector: slot.viaSlim ? "slimsas" : "sata", portIndex: slot.slot + 1 },
       portLabel: slot.viaSlim
         ? `SlimSAS lane plan #${slot.slot - boardPorts.nativeSata + 1}`
         : `MB SATA_${slot.slot + 1}`,

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "1.0.0",
+  "cases": {
+    "trustedExactMpn": {
+      "query": "ASUS-G4-001",
+      "url": "https://www.asus.com/example/g4",
+      "mpn": "ASUS-G4-001"
+    },
+    "proposedDomain": {
+      "brand": "ExampleBrand",
+      "url": "https://products.example.org/EX-1000",
+      "trustStatus": "proposed"
+    },
+    "misleadingSnippet": {
+      "url": "https://www.asus.com/example/g4",
+      "title": "ASUS-G4-001 4096 GB 2000 W",
+      "snippet": "Search index claims a 4096 GB capacity and 2000 W power draw; neither value is official field evidence."
+    },
+    "dynamicMissingRequired": {
+      "category": "motherboard",
+      "staticFields": ["brand", "model", "mpn"],
+      "renderedFields": ["dims.lengthMm", "dims.widthMm"]
+    },
+    "redirectOutOfRegistry": {
+      "requestedUrl": "https://www.asus.com/example",
+      "finalUrl": "https://mirror.example.net/example"
+    },
+    "fieldConflict": {
+      "field": "mpn",
+      "values": ["EX-CONFLICT-1", "EX-CONFLICT-2"]
+    }
+  }
+}

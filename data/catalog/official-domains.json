@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAt": "2026-08-24T00:00:00.000Z",
+  "brands": [
+    { "brand": "JONSBO", "aliases": ["Jonsbo"], "domains": ["jonsbo.com"], "trustStatus": "trusted", "source": "seed", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.jonsbo.com/search?q={query}" } },
+    { "brand": "ASUS", "aliases": ["Asus"], "domains": ["asus.com"], "trustStatus": "trusted", "source": "seed", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.asus.com/search/result/?searchkey={query}" } },
+    { "brand": "Seagate", "domains": ["seagate.com"], "trustStatus": "trusted", "source": "seed", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.seagate.com/search/?q={query}" } },
+    { "brand": "Corsair", "aliases": ["CORSAIR"], "domains": ["corsair.com"], "trustStatus": "trusted", "source": "seed", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.corsair.com/search?q={query}" } },
+    { "brand": "Intel", "domains": ["intel.com", "intel.co.jp"], "trustStatus": "trusted", "source": "catalog-provenance", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.intel.com/content/www/us/en/search.html?ws=text#q={query}" } },
+    { "brand": "Kingston", "domains": ["kingston.com"], "trustStatus": "trusted", "source": "catalog-provenance", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.kingston.com/en/search?query={query}" } },
+    { "brand": "NVIDIA", "aliases": ["Nvidia"], "domains": ["nvidia.com"], "trustStatus": "trusted", "source": "catalog-provenance", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.nvidia.com/en-us/search/?q={query}" } },
+    { "brand": "Samsung", "domains": ["samsung.com"], "trustStatus": "trusted", "source": "catalog-provenance", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.samsung.com/us/search/searchMain/?listType=g&searchTerm={query}" } },
+    { "brand": "Seasonic", "domains": ["seasonic.com"], "trustStatus": "trusted", "source": "catalog-provenance", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://seasonic.com/search/?q={query}" } },
+    { "brand": "SilverStone", "aliases": ["Silverstone"], "domains": ["silverstonetek.com"], "trustStatus": "trusted", "source": "catalog-provenance", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.silverstonetek.com/en/search?query={query}" } },
+    { "brand": "FSP", "domains": ["fsplifestyle.com"], "trustStatus": "trusted", "source": "catalog-provenance", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.fsplifestyle.com/search?keyword={query}" } },
+    { "brand": "Thermalright", "domains": ["thermalright.com"], "trustStatus": "trusted", "source": "catalog-provenance", "approvedAt": "2026-08-24T00:00:00.000Z", "search": { "kind": "site-search", "urlTemplate": "https://www.thermalright.com/?s={query}" } }
+  ]
+}

@@ -65,18 +65,32 @@ describe("panel socket plan", () => {
     expect(molex[0]?.targets).toEqual(["背板口 3", "背板口 4"]);
   });
 
-  it("shows the ATX unit failing with a free socket still available", () => {
+  it("shows the V5 ATX unit failing with all three peripheral sockets occupied", () => {
     const plan = planPanelWiring(
       config({ psuId: "psu.seasonic-focus-gx-850-v5", psuTopology: "auto" }),
       catalog,
     );
-    expect(plan.freeSockets.filter((s) => s.group === "peripheral")).toHaveLength(1);
-    expect(plan.notes.join()).toContain("加购同型号原厂线可以插上");
+    expect(plan.freeSockets.filter((s) => s.group === "peripheral")).toHaveLength(0);
+    expect(plan.notes.join()).toContain("加购线无处可插");
     expect(plan.unmet.join()).toContain("Molex(PATA) 线少 1 根");
   });
 
+  it("models FSP's two mixed cables once while sharing them across four typed inlets", () => {
+    const plan = planPanelWiring(
+      config({ psuId: "psu.fsp-dagger-pro-850-atx31", psuTopology: "bottom" }),
+      catalog,
+    );
+    const mixed = plan.cables.filter((c) => c.kind === "mixed");
+    expect(mixed).toHaveLength(2);
+    expect(mixed.every((c) => c.status === "chained")).toBe(true);
+    expect(plan.inlets.filter((inlet) => inlet.shared)).toHaveLength(2);
+  });
+
   it("refuses to draw a panel it has not counted", () => {
-    const plan = planPanelWiring(config({ psuId: "psu.gw-f8-850", psuTopology: "auto" }), catalog);
+    const plan = planPanelWiring(
+      config({ psuId: "psu.greatwall-f8-850", psuTopology: "auto" }),
+      catalog,
+    );
     expect(plan.panelKnown).toBe(false);
     expect(plan.evidence).toBe("unknown");
     expect(plan.notes.join()).toContain("不能当作实物布局");

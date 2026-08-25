@@ -56,6 +56,28 @@
   "psuLimits": { "atxMaxLengthMm": 220, "sfxMaxLengthMm": 100 },
   "coolerLimits": { "overheadAtxMm": 65, "openTopMm": 160 },
   "gpuLimits": { "planningMinMm": 275, "publishedMaxMm": 320 },
+  "powerProfile": {
+    "boardBaseW": 23,
+    "fanBaseW": 5,
+    "fan120W": 2,
+    "fan140W": 2,
+    "dualSyncW": 1,
+    "cpuIdleW": 12,
+    "cpuReadW": 22,
+    "cpuQuickSyncW": 45,
+    "hbaW": 12,
+    "driveSpinUpExtraW": 31.2,
+    "evidence": "planning",
+    "source": "Build Sim planning profile; replace with measured snapshot when available"
+  },
+  "thermalProfile": {
+    "airDensityKgM3": 1.184,
+    "airCpJPerKgK": 1005,
+    "systemDerate": { "lo": 0.35, "hi": 0.65 },
+    "passiveCfm": { "lo": 2, "hi": 6 },
+    "evidence": "standard",
+    "source": "dry-air standard properties plus N6 drive-dense planning envelope"
+  },
   "hba": {
     "defaultSkuId": "hba.lsi-9300-8i-it"
   },

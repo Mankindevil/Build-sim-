@@ -36,6 +36,8 @@ export interface PriceCandidate {
   fxAssumed?: { rate: number; asOf: string; source: string } | null;
   variantLabel?: string;
   variantSkuId?: string;
+  sourceHash?: string;
+  provenanceId?: string;
   reason?: string;
   note?: string;
 }

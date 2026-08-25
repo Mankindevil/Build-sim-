@@ -55,31 +55,30 @@ The case rule is about **cables**, but most vendors publish only **connector tot
 | Corsair SF1000 ATX 3.1 (`CP-9020257`) | same explorer page; cross-checked against a PDD listing spec image (`public/assets/reference/corsair-sf-cable-spec-pdd.png`) | **2** / 8 | **1** / 3 |
 | SilverStone SX750-G | [official product page](https://www.silverstonetek.com/en/product/info/power-supplies/SX750Gold/) — connectors only; manual notes a 60W ceiling per peripheral connector | unknown / 8 | unknown / 3 |
 | FSP DAGGER PRO 850W ATX 3.1 (`SDA2-850 GEN5`) | [official page](https://www.fsplifestyle.com/us/product/DAGGERPRO850W_GEN5.html) + [LanOC photos](https://lanoc.org/review/power-supplies/fsp-dagger-pro-850w-psu?start=2) — the two peripheral cables are **mixed**: 2×SATA+1×Molex+FDD and 3×SATA+1×Molex | 2 / 6 | 2 / 2 |
-| Seasonic FOCUS GX-850 | [Cybenetics (ATX v3.1)](https://www.cybenetics.com/evaluations/psus/2573/en/) + [TechPowerUp (ATX 3.0)](https://www.techpowerup.com/review/seasonic-focus-gx-atx-3-0-850-w/2.html) cable tables | **2** / 8 | **1** / 3 |
+| Seasonic FOCUS GX-750 / GX-850 V5 | [official V5 / ATX 3.1 product page](https://seasonic.com/focus-gx-atx-3-1/) cable table and gallery | **2** / 8 | **1** / 3 |
 
-The whole Corsair SF series ships **one** peripheral cable, so it cannot give each of the
+The reviewed Corsair SF models ship **three** peripheral cables, but only **one** is Molex/PATA,
+so they cannot give each of the
 four N6 inlets its own lead: `checkBackplaneHarness` returns `bad` with `daisyChainOnly`.
 
-### No candidate PSU satisfies one-lead-per-inlet as shipped
+### No candidate PSU is confirmed to satisfy one-lead-per-inlet as shipped
 
 Two independent walls, and each SKU hits at least one:
 
 | SKU | Form | Peripheral sockets | Molex leads in box | Verdict |
 |---|---|---|---|---|
-| Corsair SF750 / SF1000 | SFX | 3 (inferred) | 1 | `bad` — socket-limited |
+| Corsair SF750 / SF1000 | SFX | 3 (SF750 inferred; SF1000 official) | 1 | `bad` — socket-limited |
 | SilverStone SX750 | SFX | 3 (inferred, from the Platinum panel) | unknown | `bad` — socket-limited |
-| FSP DAGGER PRO 850W | SFX | **2** (official) | 2, but on shared SATA+Molex cables | `bad` — socket-limited |
-| Seasonic FOCUS GX-850 | ATX | 4 (inferred) | **1** | `bad` — one Molex lead short |
+| FSP DAGGER PRO 850W | SFX | **2** (official) | 2, but on the same two mixed SATA+Molex cables | `bad` — socket-limited |
+| Seasonic FOCUS GX-750 / GX-850 V5 | ATX | **3** (official gallery) | **1** | `bad` — socket-limited |
+| Great Wall F8 850W | ATX | unknown | unknown | `unknown` — exact product evidence missing |
 
-So ATX is *not* automatically compliant. The GX-850 clears the socket wall but still ships a
-single Molex cable, and the two PATA inlets are physically typed — spare SATA leads cannot
-substitute, and a SATA→Molex adapter would re-concentrate the spin-up surge on an
-already-loaded lead. The ATX route is the only *fixable* one: buy one more same-generation
-Seasonic peripheral cable, after counting the panel sockets by hand (the 4 is inferred from
-the ATX 3.0 bundle, and the ATX 3.1 sample ships only three peripheral cables).
-
-Socket counts for `psu.seasonic-focus-gx-750-v5` and `psu.gw-f8-850` remain `unknown`; they are
-not evidence of compliance.
+ATX and ATX 3.1 do *not* guarantee four peripheral sockets. Every counted ATX 3.1 candidate in
+this catalog has only two or three. The prior GX-850 result came from applying an older ATX 3.0
+review sample's extra SATA 3.3 cable to V5; the official V5 gallery instead shows three
+Peripheral SATA/Molex sockets. All three are occupied by the bundled 2× SATA + 1× Molex leads,
+so buying another lead cannot fix the N6 one-lead-per-inlet requirement. The Great Wall entry
+remains unknown because its exact product identity and panel evidence have not been locked.
 
 ### PSU-side socket ceiling (why buying a cable does not fix it)
 
@@ -354,6 +353,16 @@ velocities, pressure drops or hot spots. The split matters, so it is explicit:
 Every one of these is returned in `ThermalResult.assumptions` with its own evidence label, and
 `ThermalResult.evidence` degrades to the weakest input — a bottom-PSU build is `unknown`
 overall, by construction.
+
+## Governed official-catalog enrichment
+
+Official-domain trust is data, not a search-engine or model judgment. `data/catalog/official-domains.json` records normalized brands, aliases, exact hostnames, regional hosts, trust status and governance metadata. A URL is eligible for official extraction only after canonicalization, HTTPS validation, registry matching, every-redirect/final-URL revalidation and DNS resolution that excludes localhost/private addresses. Browser fallback applies the same checks to the main document and blocks private or unsafe subresources.
+
+Discovery provider title/snippet/rank values are candidate evidence only. They never become `SkuRecord` fields. Official fields may come from deterministic HTML metadata, JSON-LD, specification tables, an official text PDF, or a bounded rendered page. Binary PDFs are first decoded through the pinned server-side `pdf-parse@2.4.5`; both source bytes and extracted text are size-limited, while the content hash remains bound to the original bytes. Every accepted field retains its source URL, extraction method and retrieval metadata; conflicting or missing required fields remain draft/partial/blocked rather than being filled from snippets or model prose. Scanned PDFs without a usable text layer are not automatically promoted.
+
+Unknown hosts create idempotent `DomainProposal` records. Approval or rejection is bound to the proposal's expected hash, and a registry mutation uses atomic replacement plus a rollback manifest. Automatic catalog enrichment is limited to an already inspected trusted exact-MPN candidate with an immutable candidate hash. It can produce a draft by policy; a formal catalog write additionally requires the explicit auto-accept and write flags, field provenance, no conflicts, a backup and rollback data. `CATALOG_AUTO_TRUST_NEW_DOMAINS` is intentionally unsupported.
+
+The Agent cannot author catalog values. `enrich_official_catalog` accepts only `candidateId` and `expectedHash`, is declared `effect: write`, and requires an out-of-band approval bound to Tool definition, session, canonical input hash and idempotency key. UI summaries keep search candidates, verified inspection, domain proposals, drafts and accepted catalog changes as separate states.
 
 ## Imported local references
 

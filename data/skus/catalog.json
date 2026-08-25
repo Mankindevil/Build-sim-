@@ -1,6 +1,6 @@
 {
   "schemaVersion": "2.0.0",
-  "updatedAt": "2026-08-21",
+  "updatedAt": "2026-08-25",
   "skus": [
     {
       "id": "case.jonsbo-n6",
@@ -78,6 +78,10 @@
         "nativeSataPorts": 4,
         "slimsasSataPorts": 4,
         "m2Slots": 2,
+        "pcieX16Slots": 1,
+        "pcieChipsetX4Slots": 1,
+        "pcieX1Slots": 1,
+        "capabilityEvidence": "official",
         "sataPortsEvidence": "official",
         "sataPortsNote": "手册 p.1-9（pdf 21）：4 个原生 SATA 6Gb/s；SlimSAS 另购转接线最多再带 4 个 SATA。SlimSAS 的 NVMe 与 SATA 模式互斥，本机两条 980 PRO 占 M.2_1/M.2_2，SlimSAS 留给 SATA 模式。对应 constraint-registry 的 w680m.storage.nativeSata 与 w680m.storage.slimSasModes；两者相加得 8 是推算，不代表转接线已购。",
         "sataPortsSourceFile": "references/asus-w680m-manual.pdf",
@@ -147,25 +151,27 @@
       },
       "harness": {
         "modularCables": 10,
+        "peripheralLeads": 3,
         "sataLeads": 2,
         "molexLeads": 1,
         "sataConnectors": 8,
         "molexConnectors": 3,
         "pciePower": [
-          "3x PCIe 8-pin (6+2)",
+          "2x single PCIe 8-pin (6+2)",
+          "1x dual-connector PCIe 8-pin (6+2)",
           "1x 12V-2x6"
         ],
         "evidence": "official",
         "leadEvidence": "official",
-        "sourceUrl": "https://www.cybenetics.com/evaluations/psus/2573/en/",
-        "note": "Cybenetics（ATX v3.1 样品）线材表：2 根 SATA 线（各 4 头）+ 1 根 Molex 线（3 头）。TechPowerUp 的 ATX 3.0 样品另含 1 根 SATA 3.3 线（2 头）。两版都只有一根 Molex 线，因此背板两个 PATA 口无法各得一根独立线。"
+        "sourceUrl": "https://seasonic.com/focus-gx-atx-3-1/",
+        "note": "Seasonic 官方 V5 / ATX 3.1 线材表：2 根 SATA 线（各 4 头）+ 1 根 Molex 线（3 头），共 3 根独立外围线。旧 ATX 3.0 评测样品的额外 SATA 3.3 线不能套用到 V5。"
       },
       "price": {
         "currency": "CNY",
         "current": null,
         "historicalLow": null,
         "asOf": "2026-08-20",
-        "listingUrl": "https://seasonic.com/focus-gx-atx-3/",
+        "listingUrl": "https://seasonic.com/focus-gx-atx-3-1/",
         "note": "V1 planning band ¥899–999 from PDD multi-SKU screenshots — not locked as auditable current. historicalLow unknown",
         "historicalLowEvidence": "unknown",
         "currentEvidence": "unknown"
@@ -176,27 +182,27 @@
       ],
       "attrs": {
         "form": "ATX",
-        "fanOffLoadW": 255,
+        "fanOffLoadW": null,
         "fanOffLoadFraction": 0.3,
-        "cybeneticsNoiseDba": 28.4,
-        "cybeneticsEfficiency": 0.89,
-        "noiseEvidence": "cybenetics",
-        "efficiencyEvidence": "cybenetics",
-        "noiseSourceUrl": "https://www.cybenetics.com/evaluations/psus/2573/en/",
-        "noiseNote": "Cybenetics Focus GX-850 ATX 3.1 avg ~28.44 dBA @115V open bench; Hybrid fanless ≤~30% load per Seasonic S3FC. Not in-chassis N6 measurement.",
+        "cybeneticsNoiseDba": null,
+        "cybeneticsEfficiency": null,
+        "planningEfficiency": 0.89,
+        "noiseEvidence": "unknown",
+        "efficiencyEvidence": "inferred",
+        "noiseSourceUrl": "https://seasonic.com/focus-gx-atx-3-1/",
+        "noiseNote": "官方 V5 页确认 Hybrid Fan Control 与 Cybenetics A+ 等级，但没有给精确停转功率或平均 dBA；不再沿用其他版本样品的数值。",
         "certification": "80 PLUS Gold",
         "certificationEvidence": "official",
         "modular": "full",
-        "peripheralSockets": 4,
-        "peripheralSocketsEvidence": "inferred",
-        "peripheralSocketsNote": "推算，不是逐座点数：TechPowerUp 评测的 ATX 3.0 版原盒含 4 根外围类线（2×SATA + 1×SATA3.3 + 1×Molex），Seasonic 官方教程说明 SATA 与 Molex 共用同一种 6-pin 外围座，故面板外围座 ≥4。但 Cybenetics 的 ATX v3.1 样品只列 2×SATA + 1×Molex（无 SATA3.3），说明随版本变化——V5/3.1 是否仍有第 4 个空位需开箱点数。",
-        "peripheralSocketsSourceUrl": "https://www.techpowerup.com/review/seasonic-focus-gx-atx-3-0-850-w/2.html",
-        "peripheralSocketsCrossCheck": "https://www.cybenetics.com/evaluations/psus/2573/en/"
+        "atx12vVersion": "3.1",
+        "peripheralSockets": 3,
+        "peripheralSocketsEvidence": "official",
+        "peripheralSocketsNote": "Seasonic 官方 V5 产品图库的模组面板可直接数出 3 个 Peripheral SATA / Molex 6-pin 座；原盒 2 根 SATA + 1 根 Molex 正好占满。",
+        "peripheralSocketsSourceUrl": "https://seasonic.com/focus-gx-atx-3-1/"
       },
       "appearance": {
-        "image": "assets/official/focus-gx.webp",
-        "page": "https://seasonic.com/focus-gx-atx-3/",
-        "note": "FOCUS GX 系列官方图；下单要核对 V5 / ATX 版本"
+        "page": "https://seasonic.com/focus-gx-atx-3-1/",
+        "note": "FOCUS GX V5 / ATX 3.1 官方页；旧版缓存图不再用于 V5 面板判断"
       },
       "modularPanel": {
         "groups": [
@@ -204,13 +210,13 @@
             "id": "peripheral",
             "label": "Peripheral (SATA/Molex 通用)",
             "pins": 6,
-            "sockets": 4
+            "sockets": 3
           }
         ],
         "total": null,
-        "evidence": "inferred",
-        "source": "按原盒 4 根外围类线推算外围座 ≥4（Seasonic 官方教程：SATA 与 Molex 共用同一种 6-pin 外围座）。其余分组未逐座点数，故不填。",
-        "sourceUrl": "https://www.techpowerup.com/review/seasonic-focus-gx-atx-3-0-850-w/2.html"
+        "evidence": "official",
+        "source": "Seasonic 官方 V5 产品图库逐座点数：Peripheral SATA / Molex 共 3 座；其余分组未在数据中建模。",
+        "sourceUrl": "https://seasonic.com/focus-gx-atx-3-1/"
       }
     },
     {
@@ -230,9 +236,21 @@
         "evidence": "official"
       },
       "harness": {
-        "modularCables": 3,
-        "evidence": "inferred",
-        "note": "Planning count; verify before buy"
+        "modularCables": 9,
+        "peripheralLeads": 3,
+        "sataLeads": 2,
+        "molexLeads": 1,
+        "sataConnectors": 8,
+        "molexConnectors": 3,
+        "pciePower": [
+          "2x single PCIe 8-pin (6+2)",
+          "1x dual-connector PCIe 8-pin (6+2)",
+          "1x 12V-2x6"
+        ],
+        "evidence": "official",
+        "leadEvidence": "official",
+        "sourceUrl": "https://seasonic.com/focus-gx-atx-3-1/",
+        "note": "Seasonic 官方 V5 / ATX 3.1 线材表：2 根 SATA 线（各 4 头）+ 1 根 Molex 线（3 头），共 3 根独立外围线。"
       },
       "price": {
         "currency": "CNY",
@@ -246,18 +264,41 @@
       ],
       "attrs": {
         "form": "ATX",
-        "fanOffLoadW": 225,
+        "fanOffLoadW": null,
         "fanOffLoadFraction": 0.3,
-        "cybeneticsNoiseDba": 28,
-        "cybeneticsEfficiency": 0.89,
-        "noiseEvidence": "cybenetics",
+        "cybeneticsNoiseDba": null,
+        "cybeneticsEfficiency": null,
+        "planningEfficiency": 0.89,
+        "noiseEvidence": "unknown",
         "efficiencyEvidence": "inferred",
-        "noiseNote": "Same FOCUS GX ATX 3.x family Cybenetics A- / ~28 dBA class; 750W unit fanless ≤~30% (225W). Confirm exact evaluation page when locking SKU."
+        "noiseSourceUrl": "https://seasonic.com/focus-gx-atx-3-1/",
+        "noiseNote": "官方 V5 页确认 Hybrid Fan Control 与 Cybenetics A+ 等级，但没有给精确停转功率或平均 dBA。",
+        "certification": "80 PLUS Gold",
+        "certificationEvidence": "official",
+        "modular": "full",
+        "atx12vVersion": "3.1",
+        "peripheralSockets": 3,
+        "peripheralSocketsEvidence": "official",
+        "peripheralSocketsNote": "Seasonic 官方 V5 产品图库的模组面板可直接数出 3 个 Peripheral SATA / Molex 6-pin 座；原盒 2 根 SATA + 1 根 Molex 正好占满。",
+        "peripheralSocketsSourceUrl": "https://seasonic.com/focus-gx-atx-3-1/"
       },
       "appearance": {
-        "image": "assets/official/focus-gx.webp",
-        "page": "https://seasonic.com/focus-gx-atx-3/",
-        "note": "FOCUS GX 系列官方图；下单要核对 V5 / ATX 版本"
+        "page": "https://seasonic.com/focus-gx-atx-3-1/",
+        "note": "FOCUS GX V5 / ATX 3.1 官方页；旧版缓存图不再用于 V5 面板判断"
+      },
+      "modularPanel": {
+        "groups": [
+          {
+            "id": "peripheral",
+            "label": "Peripheral (SATA/Molex 通用)",
+            "pins": 6,
+            "sockets": 3
+          }
+        ],
+        "total": null,
+        "evidence": "official",
+        "source": "Seasonic 官方 V5 产品图库逐座点数：Peripheral SATA / Molex 共 3 座；其余分组未在数据中建模。",
+        "sourceUrl": "https://seasonic.com/focus-gx-atx-3-1/"
       }
     },
     {
@@ -321,6 +362,7 @@
       },
       "harness": {
         "modularCables": 9,
+        "peripheralLeads": 3,
         "sataLeads": 2,
         "molexLeads": 1,
         "sataConnectors": 8,
@@ -354,7 +396,7 @@
         "cybeneticsEfficiency": 0.92,
         "noiseEvidence": "inferred",
         "efficiencyEvidence": "inferred",
-        "noiseNote": "Zero-RPM / hybrid until ~40% common on SF series; noise/efficiency planning until Cybenetics page locked for this ATX 3.1 revision.",
+        "noiseNote": "Corsair 官方说明 SF750 在约 300W 前保持 Zero RPM；精确 dBA / 效率仍是规划值。",
         "certification": "80 PLUS Platinum",
         "cybeneticsEfficiencyClass": "Platinum",
         "cybeneticsNoiseClass": "A-",
@@ -430,6 +472,7 @@
       },
       "harness": {
         "modularCables": 11,
+        "peripheralLeads": 3,
         "sataLeads": 2,
         "molexLeads": 1,
         "sataConnectors": 8,
@@ -459,13 +502,13 @@
       ],
       "attrs": {
         "form": "SFX",
-        "fanOffLoadW": 300,
+        "fanOffLoadW": 400,
         "fanOffLoadFraction": 0.4,
         "cybeneticsNoiseDba": 27,
         "cybeneticsEfficiency": 0.92,
         "noiseEvidence": "inferred",
         "efficiencyEvidence": "inferred",
-        "noiseNote": "Zero-RPM / hybrid until ~40% common on SF series; noise/efficiency planning until Cybenetics page locked for this ATX 3.1 revision.",
+        "noiseNote": "Corsair 官方说明 SF1000 在约 400W 前保持 Zero RPM；精确 dBA / 效率仍是规划值。",
         "certification": "80 PLUS Platinum",
         "cybeneticsEfficiencyClass": "Platinum",
         "cybeneticsNoiseClass": "A-",
@@ -541,6 +584,7 @@
         "evidence": "official"
       },
       "harness": {
+        "peripheralLeads": null,
         "sataConnectors": 8,
         "molexConnectors": 3,
         "sataLeads": null,
@@ -642,6 +686,8 @@
         "evidence": "official"
       },
       "harness": {
+        "peripheralLeads": 2,
+        "mixedPeripheralLeads": 2,
         "sataConnectors": 6,
         "molexConnectors": 2,
         "sataLeads": 2,

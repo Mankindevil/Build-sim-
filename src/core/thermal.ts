@@ -1,4 +1,5 @@
 import type { EvidenceLevel } from "./evidence";
+import { THERMAL_PROFILE } from "./capabilities";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 
 /**
@@ -14,8 +15,8 @@ import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
  */
 
 /** Dry air at 25 °C, 101.325 kPa. */
-export const AIR_DENSITY_KG_M3 = 1.184;
-export const AIR_CP_J_PER_KGK = 1005;
+export const AIR_DENSITY_KG_M3 = THERMAL_PROFILE.airDensityKgM3;
+export const AIR_CP_J_PER_KGK = THERMAL_PROFILE.airCpJPerKgK;
 export const M3_S_PER_CFM = 4.719474e-4;
 /** Sensible-heat capacity of one CFM of air: ρ·cp·V̇ ≈ 0.5615 W/K. */
 export const W_PER_K_PER_CFM = AIR_DENSITY_KG_M3 * AIR_CP_J_PER_KGK * M3_S_PER_CFM;
@@ -43,10 +44,10 @@ const FAN_FREE_AIR_CFM: Record<FanSize, Record<FanMode, Range>> = {
  * tray stack. Drive-dense chassis are high-impedance; the low end assumes the
  * backplane and nine trays are the dominant restriction.
  */
-const SYSTEM_DERATE: Range = { lo: 0.35, hi: 0.65 };
+const SYSTEM_DERATE: Range = THERMAL_PROFILE.systemDerate;
 
 /** Buoyancy-driven leakage when no fan serves a chamber. Wide by construction. */
-const PASSIVE_CFM: Range = { lo: 2, hi: 6 };
+const PASSIVE_CFM: Range = THERMAL_PROFILE.passiveCfm;
 
 /** Drive case-to-local-air resistance. No vendor θ is published for 3.5″ HDDs. */
 const HDD_THETA_K_PER_W: Range = { lo: 0.8, hi: 1.9 };

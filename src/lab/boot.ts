@@ -1,5 +1,5 @@
 import { loadBundledCatalog, requireSku, bundledPriceSummary } from "../sku/catalog";
-import { evaluateBuild, type BuildEvaluation, type ThermalEnv } from "../core/evaluate";
+import { derivePower, evaluateBuild, type BuildEvaluation, type PowerEvaluation, type ThermalEnv } from "../core/evaluate";
 import { EVIDENCE_LABELS } from "../core/evidence";
 import { sampleSlice, type FieldBounds, type SlicePlane } from "../core/thermal-field";
 import { N6_DECK_Y, N6_ENVELOPE_BOX, N6_INTERIOR_BOX } from "../adapters/jonsbo-n6/geometry";
@@ -10,6 +10,7 @@ import {
   serializeConfig,
 } from "../config/io";
 import type { BuildConfig, BootMode, HbaMode, PsuTopology } from "../config/types";
+import type { FanMode, FanGroupInput } from "../core/thermal";
 import { buildLabCatalogs } from "./view-models";
 import { formatSnapshotStamp } from "../price/types";
 import { applyPriceSnapshot, snapshotSummary } from "../price/merge";
@@ -20,15 +21,49 @@ import { boardSataPorts, boardStorage, nativeSataCeiling } from "../core/policy"
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 import n6Routing from "../../data/cases/jonsbo-n6/routing.json";
 import v1RuntimeUrl from "./v1-runtime.js?url";
+import { initAdvicePanel } from "./advice-panel";
+import { initAgentPanel } from "./agent-panel";
+import { buildAdviceInput } from "../advice/validate";
+import { initBuildProgress, type BuildProgressController } from "./build-progress";
+import { initTransactionImport } from "./transaction-import";
+import "./design-system.css";
 
 let catalog = loadBundledCatalog();
 const views = buildLabCatalogs(catalog);
 let priceStamp = bundledPriceSummary();
+let latestEvaluation: BuildEvaluation | null = null;
+let buildProgress: BuildProgressController | null = null;
 
 const BOARD_ID = "board.asus-w680m-ace-se";
 
+export interface LabEvaluationOptions {
+  ambientC: number;
+  fanMode: FanMode;
+  fans: { front?: FanGroupInput | null; rear?: FanGroupInput | null; left?: FanGroupInput | null; right?: FanGroupInput | null };
+  workload?: NonNullable<ThermalEnv["workload"]>;
+  cpuPl1W?: number;
+  cpuPl2W?: number;
+  reserveHbaSlot?: boolean;
+  gpuOverride?: ThermalEnv["gpuOverride"];
+}
+
 function $(id: string): HTMLElement | null {
   return document.getElementById(id);
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[char] ?? char);
+}
+
+function findingTitle(message: string): string {
+  const lead = message.split(/[：。；]/, 1)[0]?.trim() || message.trim();
+  return lead.length > 46 ? `${lead.slice(0, 46)}…` : lead;
 }
 
 function val(id: string): string {
@@ -70,6 +105,47 @@ function configFromDom(): BuildConfig {
   return config;
 }
 
+function adviceInput() {
+  const evaluation = latestEvaluation ?? evaluate();
+  const ids = new Set([
+    evaluation.config.caseId,
+    evaluation.config.boardId,
+    evaluation.config.cpuId,
+    evaluation.config.selection.psuId,
+    evaluation.config.selection.secondaryPsuId ?? "",
+    evaluation.config.selection.coolerId,
+    evaluation.config.selection.gpuId,
+    evaluation.config.selection.memoryId,
+    evaluation.config.selection.diskSkuId ?? "",
+    evaluation.config.selection.hbaSkuId ?? "",
+  ]);
+  const selectedSkuFacts = catalog.skus
+    .filter((sku) => ids.has(sku.id))
+    .map((sku) => ({
+      skuId: sku.id,
+      name: sku.name,
+      fields: {
+        brand: sku.brand,
+        model: sku.model,
+        mpn: sku.mpn,
+        category: sku.category,
+        dims: sku.dims,
+        power: sku.power,
+        harness: sku.harness,
+        modularPanel: sku.modularPanel,
+        price: sku.price,
+        attrs: sku.attrs,
+      },
+      provenance: sku.provenance ?? [],
+    }));
+  return buildAdviceInput({
+    requestId: "advice-client",
+    buildConfig: evaluation.config,
+    evaluation,
+    selectedSkuFacts,
+  });
+}
+
 function applyConfigToDom(config: BuildConfig): void {
   const set = (id: string, value: string) => {
     const el = $(id) as HTMLInputElement | HTMLSelectElement | null;
@@ -95,24 +171,38 @@ function evidenceLabel(level: keyof typeof EVIDENCE_LABELS): string {
 function updateFitFromEngine(result: ReturnType<typeof evaluateBuild>): void {
   const chip = $("fit-chip");
   if (!chip) return;
-  const worst = result.occupancy.verdict;
+  const badCount = result.findings.filter((finding) => finding.verdict === "bad").length;
+  const warnCount = result.findings.filter((finding) => finding.verdict === "warn").length;
+  const worst = badCount > 0 ? "bad" : warnCount > 0 ? "warn" : result.occupancy.verdict;
   chip.setAttribute("data-level", worst === "ok" ? "ok" : worst);
-  const top = result.findings[0];
-  if (!top) {
-    chip.textContent = "兼容：引擎未发现冲突";
-    return;
-  }
-  chip.textContent = `${worst === "ok" ? "兼容" : worst === "warn" ? "警告" : "冲突"}：${top.message}`;
+  chip.textContent = badCount > 0
+    ? `存在阻断 · ${badCount} 项`
+    : warnCount > 0
+      ? `需要确认 · ${warnCount} 项`
+      : "评估通过 · 未发现冲突";
 
   const list = $("verdict-list");
   if (list) {
     list.innerHTML = result.findings
       .slice(0, 8)
       .map(
-        (f) =>
-          `<li><b>${f.verdict}</b> · ${evidenceLabel(f.evidence)} — ${f.message}</li>`,
+        (f) => `<li class="finding-row" data-level="${f.verdict}">
+          <span class="finding-level">${f.verdict === "bad" ? "阻断" : f.verdict === "warn" ? "警告" : "通过"}</span>
+          <span class="finding-evidence">${escapeHtml(evidenceLabel(f.evidence))}</span>
+          <details><summary>${escapeHtml(findingTitle(f.message))}</summary><p>${escapeHtml(f.message)}</p><small>${escapeHtml(f.id)}</small></details>
+        </li>`,
       )
       .join("");
+  }
+
+  const routeCopy = $("route-copy");
+  const primary = result.findings.find((finding) => finding.verdict === "bad")
+    ?? result.findings.find((finding) => finding.verdict === "warn")
+    ?? result.findings[0];
+  if (routeCopy && primary) {
+    const firstSentence = primary.message.split("。", 1)[0] ?? primary.message;
+    routeCopy.textContent = firstSentence.length > 180 ? `${firstSentence.slice(0, 180)}…` : firstSentence;
+    routeCopy.setAttribute("title", primary.message);
   }
 }
 
@@ -163,7 +253,7 @@ function updateBackplaneHarness(wiring: ReturnType<typeof evaluateBuild>["wiring
     const leads =
       check.verdict === "unknown"
         ? "线数未锁定"
-        : `SATA ${check.confirmed.sata}/${check.required.sata} · Molex ${check.confirmed.molex}/${check.required.molex}`;
+        : `独立外围线 ${check.uniquePeripheralLeads ?? "unknown"}/${check.inlets} · SATA ${check.confirmed.sata}/${check.required.sata} · Molex ${check.confirmed.molex}/${check.required.molex}`;
     count.innerHTML = `${role}<br><b>${psuName}</b><br>${leads}`;
   }
 
@@ -187,7 +277,7 @@ function updateBackplaneHarness(wiring: ReturnType<typeof evaluateBuild>["wiring
     rear.textContent =
       check.verdict === "unknown"
         ? `${psuName} · 独立线数未锁定`
-        : `${psuName} · SATA ${check.confirmed.sata} + Molex ${check.confirmed.molex}`;
+        : `${psuName} · ${check.uniquePeripheralLeads ?? "unknown"}/${check.inlets} 条独立外围线`;
   }
 }
 
@@ -244,7 +334,7 @@ function updatePanelWiring(config: BuildConfig): void {
     state: i.cableId === null ? "unmet" : i.shared ? "shared" : "ok",
   }));
   for (const c of plan.cables) {
-    if (c.kind === "sata" || c.kind === "molex") continue;
+    if (c.kind === "sata" || c.kind === "molex" || c.kind === "mixed") continue;
     loads.push({
       label: c.targets[0] ?? c.label,
       sub: c.socketId ? `${c.label} · ${c.connectors} 头` : `${c.label} · 无插座可插`,
@@ -610,16 +700,26 @@ function updateAirBalance(result: ReturnType<typeof evaluateBuild>): void {
   }
 }
 
+function updateCalibration(result: BuildEvaluation): void {
+  const el = $("calibration-status");
+  if (!el) return;
+  const unknown = result.calibration.unknown;
+  el.dataset.level = unknown.length ? "warn" : "ok";
+  el.textContent = unknown.length
+    ? `校准 ${result.calibration.snapshot.calibrationVersion} · unknown ${unknown.length} · hash ${result.calibration.hash.slice(-8)}`
+    : `校准 ${result.calibration.snapshot.calibrationVersion} · 已收窄规划区间 · hash ${result.calibration.hash.slice(-8)}`;
+}
+
 function updateGalleryFromSkus(config: BuildConfig): void {
   const gallery = $("product-gallery");
   if (!gallery) return;
 
   const cards: { name: string; status: string; skuId: string; note?: string }[] = [
-    { name: "JONSBO N6", status: "已购", skuId: config.caseId },
-    { name: "ASUS W680M-ACE SE", status: "已购", skuId: config.boardId },
-    { name: "Intel Core i5-14500", status: "已购", skuId: config.cpuId },
+    { name: requireSku(catalog, config.caseId).name, status: "已购", skuId: config.caseId },
+    { name: requireSku(catalog, config.boardId).name, status: "已购", skuId: config.boardId },
+    { name: requireSku(catalog, config.cpuId).name, status: "已购", skuId: config.cpuId },
     { name: requireSku(catalog, config.selection.memoryId).name, status: "待购", skuId: config.selection.memoryId },
-    { name: "Samsung 980 PRO ×2", status: "已有", skuId: "storage.samsung-980-pro" },
+    { name: `${requireSku(catalog, n6Profile.defaults.ownedNvmeSkuId).name} ×${n6Profile.defaults.ownedNvmeQty}`, status: "已有", skuId: n6Profile.defaults.ownedNvmeSkuId },
     { name: requireSku(catalog, config.selection.psuId).name, status: "待购", skuId: config.selection.psuId },
     { name: requireSku(catalog, config.selection.coolerId).name, status: "待购", skuId: config.selection.coolerId },
     {
@@ -640,7 +740,7 @@ function updateGalleryFromSkus(config: BuildConfig): void {
       const ref = sku?.appearance;
       const snap = sku?.price.snapshot;
       const priceBit = snap
-        ? ` · ¥${sku?.price.current} (${formatSnapshotStamp(snap)})`
+        ? ` · ¥${sku?.price.current} (${formatSnapshotStamp(snap)}${snap.variantLabel ? ` · 规格 ${snap.variantLabel}` : ""}${snap.provenanceId ? ` · prov ${snap.provenanceId.slice(0, 12)}` : ""})`
         : typeof sku?.price.current === "number"
           ? ` · ¥${sku.price.current}`
           : typeof sku?.price.paid === "number"
@@ -712,12 +812,27 @@ function reapplyLocalPrices(): void {
  * render pass and passes the result back into `afterRender`, so the KPI strip and
  * the air-balance card are reading the same numbers from the same run.
  */
-function evaluate(env?: ThermalEnv): BuildEvaluation {
-  return evaluateBuild(configFromDom(), catalog, env);
+function evaluate(options?: LabEvaluationOptions): BuildEvaluation {
+  const config = configFromDom();
+  if (!options) return evaluateBuild(config, catalog);
+  const power: PowerEvaluation = derivePower(config, catalog, options);
+  const lower = config.selection.psuTopology === "bottom" || config.selection.psuTopology === "dual";
+  if (power.upperDcW === null || (lower && power.lowerDcW === null)) {
+    return evaluateBuild(config, catalog);
+  }
+  const thermal: ThermalEnv = {
+    ...options,
+    upperWatts: power.upperDcW,
+    psuDcWatts: lower ? power.lowerDcW! : 0,
+    loads: power.loads,
+    power,
+  };
+  return evaluateBuild(config, catalog, thermal);
 }
 
 function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   const evaluation = result ?? evaluate(env);
+  latestEvaluation = evaluation;
   updateFitFromEngine(evaluation);
   updateWiringFromEngine(evaluation);
   updateBackplaneHarness(evaluation.wiring);
@@ -725,8 +840,10 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   updateRouting(evaluation);
   updateAssembly(evaluation);
   updateAirBalance(evaluation);
+  updateCalibration(evaluation);
   updateGalleryFromSkus(evaluation.config);
   updatePriceStamp();
+  buildProgress?.syncEvaluation(evaluation);
 }
 
 function bindConfigChrome(): void {
@@ -737,7 +854,7 @@ function bindConfigChrome(): void {
   $("cfg-export-checklist")?.addEventListener("click", () => {
     const config = configFromDom();
     const result = evaluateBuild(config, catalog);
-    downloadText(`${config.id}-checklist.md`, exportChecklist(config, result.bom));
+    downloadText(`${config.id}-checklist.md`, exportChecklist(config, result.bom, result));
   });
   $("cfg-import-json")?.addEventListener("change", async (ev) => {
     const file = (ev.target as HTMLInputElement).files?.[0];
@@ -757,6 +874,8 @@ declare global {
       gpus: typeof views.gpus;
       rams: typeof views.rams;
       officialProducts: typeof views.officialProducts;
+      skuName: (id: string) => string;
+      ids: { caseId: string; boardId: string; cpuId: string; nvmeId: string; hbaId: string; diskId: string };
       profile: typeof n6Profile;
       /** Board storage facts, so the runtime never restates a count the SKU owns. */
       boardStorage: ReturnType<typeof boardStorage>;
@@ -764,7 +883,7 @@ declare global {
       sataCeiling: (nvmeCount: number) => number;
       priceSnapshot: ReturnType<typeof bundledPriceSummary>;
       /** Runs the V2 engine for the current DOM config. Pure and synchronous. */
-      evaluate: (env?: ThermalEnv) => BuildEvaluation;
+      evaluate: (options?: LabEvaluationOptions) => BuildEvaluation;
       /** Millimetre-registered slice of the heat field, for the 2D canvas. */
       thermalSlice: (
         field: FieldBounds,
@@ -793,6 +912,15 @@ declare global {
 async function boot(): Promise<void> {
   window.__N6_LAB__ = {
     ...views,
+    skuName: (id: string) => requireSku(catalog, id).name,
+    ids: {
+      caseId: "case.jonsbo-n6",
+      boardId: BOARD_ID,
+      cpuId: "cpu.i5-14500",
+      nvmeId: n6Profile.defaults.ownedNvmeSkuId,
+      hbaId: n6Profile.hba.defaultSkuId,
+      diskId: n6Profile.defaults.diskSkuId,
+    },
     profile: n6Profile,
     boardStorage: boardStorage(catalog, BOARD_ID),
     sataCeiling: (nvmeCount: number) =>
@@ -824,7 +952,18 @@ async function boot(): Promise<void> {
     document.body.appendChild(s);
   });
 
+  // Progress is local and synchronous: make the editable base available as soon
+  // as the deterministic evaluation has rendered, without waiting on API panels.
+  buildProgress = initBuildProgress({
+    getCatalog: () => catalog,
+    baseSkuIds: ["case.jonsbo-n6", BOARD_ID, "cpu.i5-14500"],
+  });
+  initTransactionImport({ onImport: (record, screenshot) => buildProgress?.stageTransaction(record, screenshot) });
+  if (latestEvaluation) buildProgress.syncEvaluation(latestEvaluation);
+
   await initPricePanel({ catalog, onAudited: () => reapplyLocalPrices() });
+  initAdvicePanel({ getInput: adviceInput });
+  await initAgentPanel({ getBuildConfig: configFromDom });
 }
 
 void boot();

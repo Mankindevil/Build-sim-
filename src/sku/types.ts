@@ -1,5 +1,5 @@
 import type { EvidenceLevel } from "../core/evidence";
-import type { SkuPriceSnapshotMeta } from "../price/types";
+import type { PriceProvenance, SkuPriceSnapshotMeta } from "../price/types";
 
 export type SkuCategory =
   | "case"
@@ -36,6 +36,16 @@ export interface PriceEvidence {
   currentEvidence: EvidenceLevel;
   /** Present when `current` came from data/prices snapshot merge. */
   snapshot?: SkuPriceSnapshotMeta;
+  /** A listing headline/`from` value is visible context, never part of totals. */
+  from?: {
+    amount: number | null;
+    currency: string | null;
+    listingUrl?: string;
+    fetchedAt?: string;
+    evidence: "unknown";
+    note?: string;
+  };
+  provenance?: PriceProvenance;
 }
 
 export interface DimMm {
@@ -66,6 +76,14 @@ export interface PowerSpec {
  */
 export interface HarnessSpec {
   modularCables?: number;
+  /**
+   * Physically distinct peripheral cables in the box. This is the count that
+   * can be compared with a one-cable-per-inlet rule. It is not necessarily
+   * `sataLeads + molexLeads`: a mixed cable can carry both connector types.
+   */
+  peripheralLeads?: number | null;
+  /** Mixed SATA+Molex cables already included in both typed lead counts. */
+  mixedPeripheralLeads?: number;
   /** Physically separate SATA-power cables; `null` when the vendor publishes connector totals only. */
   sataLeads?: number | null;
   /** Physically separate 4-pin peripheral (Molex/PATA) cables. */
@@ -131,12 +149,15 @@ export interface SkuRecord {
   tags?: string[];
   /** Official product appearance (not CAD). Missing => unknown in UI. */
   appearance?: AppearanceRef;
+  /** Field-level sources from official/catalog inspection; absent on legacy rows. */
+  provenance?: import("../catalog-search/types").FieldProvenance[];
   /** Category-specific payload */
   attrs?: Record<string, unknown>;
 }
 
 export interface SkuCatalog {
   schemaVersion: string;
+  catalogVersion?: string;
   updatedAt: string;
   skus: SkuRecord[];
 }

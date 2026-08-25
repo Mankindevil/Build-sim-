@@ -1,0 +1,140 @@
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { formatCatalogToolResult, initAgentPanel } from "../src/lab/agent-panel";
+
+class FakeEventSource {
+  readonly listeners = new Map<string, Array<(event: Event) => void>>();
+  closed = false;
+  addEventListener(type: string, listener: (event: Event) => void): void {
+    const entries = this.listeners.get(type) ?? [];
+    entries.push(listener);
+    this.listeners.set(type, entries);
+  }
+  emit(type: string, data: unknown): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(new MessageEvent(type, { data: JSON.stringify(data) }));
+  }
+  close(): void { this.closed = true; }
+}
+
+function fixtureHtml(): void {
+  document.body.innerHTML = `
+    <p id="agent-status" data-level="warn"></p>
+    <select id="agent-model"></select><select id="agent-skill"></select>
+    <button id="agent-new-session"></button>
+    <div id="agent-transcript"></div><ul id="agent-events"></ul><p id="agent-usage"></p>
+    <form id="agent-form"><textarea id="agent-input"></textarea><button id="agent-cancel" type="button" disabled></button><button id="agent-send" type="submit"></button></form>`;
+}
+
+function payload(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+}
+
+const model = { provider: "deepseek", id: "deepseek-v4-flash", label: "DeepSeek V4 Flash", capabilities: { streaming: true, tools: true, parallelTools: true, structuredOutput: true, thinking: true } };
+const skill = { manifest: { id: "build-diagnosis", name: "装机诊断", description: "fixture", version: "1.0.0", allowedTools: ["get_build_evaluation", "get_sku_facts"], readOnly: true }, definitionHash: "a".repeat(64) };
+const session = { contractVersion: "1.0.0", id: "session-fixture", provider: "deepseek", model: model.id, buildConfig: null, messages: [], createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" };
+
+describe("A5 Agent panel", () => {
+  it("labels catalog candidate, proposal, official inspection and write states distinctly", () => {
+    expect(formatCatalogToolResult("search_official_catalog", { status: "partial", candidates: [{}, {}], domainProposals: [{}], discovery: { providerIds: ["searxng"] } })).toContain("搜索候选 2");
+    expect(formatCatalogToolResult("inspect_catalog_candidate", { extraction: { status: "ok", fieldsFound: 5 }, source: { domain: "asus.com" }, expectedHash: "a".repeat(64) })).toContain("expected hash 已生成");
+    expect(formatCatalogToolResult("list_official_domain_proposals", { proposals: [{ trustStatus: "proposed" }, { trustStatus: "rejected" }] })).toContain("proposed 1");
+    expect(formatCatalogToolResult("enrich_official_catalog", { status: "draft", changedFields: [], rollbackManifest: "manifest.json" })).toContain("目录补齐 · draft");
+  });
+  beforeEach(fixtureHtml);
+
+  it("shows provider-neutral model and metadata-only Skill catalogs", async () => {
+    const pro = { ...model, id: "deepseek-v4-pro", label: "DeepSeek V4 Pro · 深度推理" };
+    const vision = { ...model, id: "deepseek-v4-flash-vision-exp", label: "DeepSeek V4 Flash Vision Exp · 视觉" };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/models") ? payload({ models: [model, pro, vision] }) : payload({ skills: [skill] }));
+    await initAgentPanel({ getBuildConfig: () => ({}), fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => new FakeEventSource() });
+    expect((document.querySelector("#agent-model") as HTMLSelectElement).value).toBe(model.id);
+    expect((document.querySelector("#agent-skill") as HTMLSelectElement).value).toBe("build-diagnosis");
+    expect((document.querySelector("#agent-model") as HTMLSelectElement).options).toHaveLength(3);
+    expect(document.querySelector("#agent-status")?.textContent).toContain("3 模型 · 1 Skills");
+    expect(document.body.textContent).not.toContain("装机诊断工作流");
+  });
+
+  it("refreshes a stale model catalog and retries session creation once", async () => {
+    const current = { ...model, id: "deepseek-v4-pro", label: "DeepSeek V4 Pro · 深度推理" };
+    let modelReads = 0;
+    let sessionCreates = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/models")) return payload({ models: modelReads++ === 0 ? [model] : [current] });
+      if (url.endsWith("/skills")) return payload({ skills: [skill] });
+      if (url.endsWith("/sessions") && init?.method === "POST") {
+        sessionCreates += 1;
+        if (sessionCreates === 1) return payload({ error: "model_not_found", message: `Unknown Agent model: ${model.id}` }, 404);
+        return payload({ ...session, model: current.id }, 201);
+      }
+      if (url.endsWith("/messages")) return payload({ runId: "run-refreshed", status: "queued" }, 202);
+      throw new Error(`unexpected ${url}`);
+    });
+    await initAgentPanel({ getBuildConfig: () => ({}), fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => new FakeEventSource() });
+    expect(document.querySelector("#agent-status")?.textContent).toContain("1 模型");
+    expect((document.querySelector("#agent-model") as HTMLSelectElement).value).toBe(model.id);
+    (document.querySelector("#agent-input") as HTMLTextAreaElement).value = "刷新模型";
+    document.querySelector("#agent-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(sessionCreates).toBe(2));
+    expect((document.querySelector("#agent-model") as HTMLSelectElement).value).toBe(current.id);
+    expect(document.querySelector("#agent-events")?.textContent).toContain("模型目录已自动刷新");
+  });
+
+  it("streams text, Tool audit events, usage, and the persisted final assistant message", async () => {
+    const stream = new FakeEventSource();
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      requests.push({ url, method, body });
+      if (url.endsWith("/models")) return payload({ models: [model] });
+      if (url.endsWith("/skills")) return payload({ skills: [skill] });
+      if (url.endsWith("/sessions") && method === "POST") return payload(session, 201);
+      if (url.endsWith("/sessions/session-fixture/messages")) return payload({ runId: "run-fixture", status: "queued" }, 202);
+      if (url.endsWith("/sessions/session-fixture")) return payload({ ...session, messages: [{ id: "a1", role: "assistant", content: "最终持久化回答", createdAt: "2026-08-24T00:00:01.000Z" }] });
+      if (url.endsWith("/runs/run-fixture/audit")) return payload({ status: "completed", recordHash: "c".repeat(64) });
+      throw new Error(`unexpected ${method} ${url}`);
+    });
+    await initAgentPanel({ getBuildConfig: () => ({ schemaVersion: "2.0.0", id: "live" }), fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => stream });
+    (document.querySelector("#agent-input") as HTMLTextAreaElement).value = "诊断当前配置";
+    document.querySelector("#agent-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(requests.some((entry) => entry.url.endsWith("/messages"))).toBe(true));
+    expect(requests.find((entry) => entry.url.endsWith("/messages"))?.body).toMatchObject({ content: "诊断当前配置", skillId: "build-diagnosis", buildConfig: { schemaVersion: "2.0.0", id: "live" } });
+
+    stream.emit("skill_activated", { type: "skill_activated", runId: "run-fixture", skillId: "build-diagnosis", definitionHash: "a".repeat(64), at: "now" });
+    stream.emit("tool_call", { type: "tool_call", runId: "run-fixture", call: { id: "c1", name: "get_build_evaluation", input: {} }, toolDefinitionHash: "b".repeat(64), at: "now" });
+    stream.emit("tool_result", { type: "tool_result", runId: "run-fixture", callId: "c1", toolName: "get_build_evaluation", result: { ok: true, content: {}, provenance: ["BuildEvaluation"] }, at: "now" });
+    stream.emit("text_delta", { type: "text_delta", runId: "run-fixture", text: "流式回答", at: "now" });
+    stream.emit("usage", { type: "usage", runId: "run-fixture", provider: "deepseek", model: model.id, usage: { inputTokens: 10, outputTokens: 3, totalTokens: 13, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, billing: { status: "priced", pricing: { billedModel: model.id, pricingVersion: "fixture", sourceUrl: "https://api-docs.deepseek.com", pricingBand: { id: "off-peak", label: "空闲时段" }, rates: { cacheHit: 0.05, cacheMiss: 1.5, output: 4.5 } }, cost: { cacheHitCny: 0, cacheMissCny: 0.000015, outputCny: 0.0000135, totalCny: 0.0000285, currency: "CNY", estimated: true } }, at: "now" });
+    stream.emit("run_status", { type: "run_status", runId: "run-fixture", status: "completed", at: "now" });
+
+    await vi.waitFor(() => expect(document.querySelector("#agent-transcript")?.textContent).toContain("最终持久化回答"));
+    expect(document.querySelector("#agent-events")?.textContent).toContain("Skill · build-diagnosis");
+    expect(document.querySelector("#agent-events")?.textContent).toContain("Tool 结果 · get_build_evaluation · ok");
+    expect(document.querySelector("#agent-events")?.textContent).toContain("审计记录 · completed · cccccccccccc");
+    expect(document.querySelector("#agent-usage")?.textContent).toContain("total 13");
+    expect(document.querySelector("#agent-usage")?.textContent).toContain("估算费用");
+    expect(document.querySelector("#agent-usage")?.textContent).toContain("非余额账单");
+    expect(stream.closed).toBe(true);
+  });
+
+  it("sends cancellation for the active run", async () => {
+    const stream = new FakeEventSource();
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/models")) return payload({ models: [model] });
+      if (url.endsWith("/skills")) return payload({ skills: [skill] });
+      if (url.endsWith("/sessions") && init?.method === "POST") return payload(session, 201);
+      if (url.endsWith("/messages")) return payload({ runId: "run-cancel", status: "queued" }, 202);
+      if (url.endsWith("/runs/run-cancel/cancel")) return payload({ runId: "run-cancel", status: "running" }, 202);
+      return payload({ ...session, messages: [] });
+    });
+    await initAgentPanel({ getBuildConfig: () => ({}), fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => stream });
+    (document.querySelector("#agent-input") as HTMLTextAreaElement).value = "取消测试";
+    document.querySelector("#agent-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect((document.querySelector("#agent-cancel") as HTMLButtonElement).disabled).toBe(false));
+    (document.querySelector("#agent-cancel") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledWith("/api/agent/runs/run-cancel/cancel", expect.objectContaining({ method: "POST" })));
+  });
+});

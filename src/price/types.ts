@@ -19,15 +19,42 @@ export interface PriceQuote {
   match: PriceMatchKind;
   /** Audited quotes only — never invent. */
   evidence: "audited" | "unknown";
+  /** Only a resolved variant may enter an audited snapshot. */
+  priceKind?: "variant" | "from";
+  variantLabel?: string;
+  priceAmount?: number;
+  priceCurrency?: string;
+  fetchedAt?: string;
+  /** Deterministic reference to the captured listing/audit input. */
+  provenanceId?: string;
+  sourceHash?: string;
+  provenance?: PriceProvenance;
+  note?: string;
+}
+
+export interface PriceProvenance {
+  provenanceId: string;
+  sourceUrl?: string;
+  sourceKind: "marketplace-listing" | "official-price" | "manual";
+  fetchedAt: string;
+  contentHash?: string;
+  inputHash: string;
+  variantLabel?: string;
   note?: string;
 }
 
 export interface PriceSnapshotFile {
-  schemaVersion: "1.0.0";
+  schemaVersion: "1.0.0" | "1.1.0";
   /** Snapshot calendar date YYYY-MM-DD */
   asOf: string;
   /** Optional human note for the whole file */
   note?: string;
+  snapshotId?: string;
+  generatedAt?: string;
+  catalogVersion?: string;
+  inputHash?: string;
+  contentHash?: string;
+  priceVersion?: string;
   quotes: PriceQuote[];
 }
 
@@ -36,6 +63,12 @@ export interface SkuPriceSnapshotMeta {
   asOf: string;
   listingUrl?: string;
   match?: PriceMatchKind;
+  variantLabel?: string;
+  snapshotId?: string;
+  inputHash?: string;
+  contentHash?: string;
+  catalogVersion?: string;
+  provenanceId?: string;
 }
 
 /** Display stamp, e.g. `snapshot 2026-08-21 · jd` */
@@ -44,7 +77,9 @@ export function formatSnapshotStamp(meta: SkuPriceSnapshotMeta): string {
 }
 
 export function isAuditedQuote(q: PriceQuote): boolean {
-  return q.evidence === "audited" && Number.isFinite(q.priceCny) && q.priceCny > 0;
+  if (q.priceKind === "from") return false;
+  if (q.priceKind === "variant" && !String(q.variantLabel ?? "").trim()) return false;
+  return q.evidence === "audited" && q.currency === "CNY" && Number.isFinite(q.priceCny) && q.priceCny > 0;
 }
 
 /** Map snapshot evidence onto catalog PriceEvidence.currentEvidence. */

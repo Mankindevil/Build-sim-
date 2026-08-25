@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1.0.0",
+  "asOf": "2026-08-21",
+  "quotes": [
+    { "skuId": "storage.seagate-exos-x24-24tb", "platform": "fixture", "variantLabel": "24TB", "currency": "CNY", "priceCny": 1999, "evidence": "audited" }
+  ]
+}

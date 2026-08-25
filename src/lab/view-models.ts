@@ -1,32 +1,34 @@
 import type { SkuCatalog, SkuRecord } from "../sku/types";
 import { formatSnapshotStamp } from "../price/types";
 
+export type PriceBand = [number | null, number | null];
+
 /** V1-shaped display DTOs — derived from SKU records for the existing lab renderer. */
 export type PsuView = {
   name: string;
   form: "ATX" | "SFX";
-  watts: number;
-  length: number;
-  price: [number, number];
-  mid: number;
+  watts: number | null;
+  length: number | null;
+  price: PriceBand;
+  mid: number | null;
   /**
    * Independent leads usable for backplane inlets (SATA + Molex), not the total
    * modular cable count — a 9-cable box with one Molex lead still cannot fill
    * four inlets one-per-lead.
    */
-  harness: number;
-  /** SATA/PATA modular sockets; 0 when unknown. Caps how many leads can ever be plugged. */
-  peripheralSockets: number;
+  harness: number | null;
+  /** SATA/PATA modular sockets; null when unknown. Caps how many leads can ever be plugged. */
+  peripheralSockets: number | null;
   certification: string;
   modular: string;
   official: string;
   source: string;
   mode: string;
-  fanOff: number;
+  fanOff: number | null;
   /** Open-bench Cybenetics / planning dBA when fan is spinning. */
-  noiseDba: number;
+  noiseDba: number | null;
   /** Average efficiency used for waste-heat estimate (0–1). */
-  efficiency: number;
+  efficiency: number | null;
   noiseEvidence: string;
   confidence?: string;
 };
@@ -34,12 +36,12 @@ export type PsuView = {
 export type CoolerView = {
   name: string;
   type: string;
-  height: number;
-  idleNoise: number;
-  maxNoise: number;
-  price: [number, number];
-  mid: number;
-  ram: number;
+  height: number | null;
+  idleNoise: number | null;
+  maxNoise: number | null;
+  price: PriceBand;
+  mid: number | null;
+  ram: number | null;
   fit: string;
   note: string;
 };
@@ -47,33 +49,33 @@ export type CoolerView = {
 export type GpuView = {
   name: string;
   kind: string;
-  vram: number;
-  tgp: number;
-  idle: number;
-  length: number;
-  slots: number;
-  noise: number;
-  price: [number, number];
-  mid: number;
+  vram: number | null;
+  tgp: number | null;
+  idle: number | null;
+  length: number | null;
+  slots: number | null;
+  noise: number | null;
+  price: PriceBand;
+  mid: number | null;
   official: string;
   cooling: string;
   ai: string;
   specificGeometry: boolean;
-  newPrice?: [number, number];
+  newPrice?: PriceBand;
 };
 
 export type RamView = {
   name: string;
-  height: number;
-  modules: number;
-  capacity: number;
+  height: number | null;
+  modules: number | null;
+  capacity: number | null;
   ecc: boolean;
   speed: string;
   xmp: boolean;
   qvl: boolean;
   mpn?: string;
-  price: [number, number];
-  mid: number;
+  price: PriceBand;
+  mid: number | null;
   priceQuality: string;
   note: string;
 };
@@ -84,17 +86,21 @@ export type AppearanceRef = {
   note?: string;
 };
 
-function planningBand(sku: SkuRecord): [number, number] {
+function planningBand(sku: SkuRecord): PriceBand {
   // Prefer audited snapshot current; else paid; never invent historical lows.
   const cur = sku.price.current;
   const paid = sku.price.paid;
   if (typeof cur === "number") return [cur, cur];
   if (typeof paid === "number") return [paid, paid];
-  return [0, 0];
+  return [null, null];
 }
 
 function priceQualityFor(sku: SkuRecord, fallback: string): string {
-  if (sku.price.snapshot) return formatSnapshotStamp(sku.price.snapshot);
+  if (sku.price.snapshot) {
+    const variant = sku.price.snapshot.variantLabel ? ` · ${sku.price.snapshot.variantLabel}` : "";
+    const source = sku.price.snapshot.provenanceId ? ` · prov ${sku.price.snapshot.provenanceId.slice(0, 12)}` : "";
+    return `${formatSnapshotStamp(sku.price.snapshot)}${variant}${source}`;
+  }
   if (typeof sku.price.current === "number" && sku.price.currentEvidence !== "unknown") {
     return `current · ${sku.price.asOf ?? "undated"}`;
   }
@@ -102,14 +108,14 @@ function priceQualityFor(sku: SkuRecord, fallback: string): string {
 }
 
 /** Snapshot/current overrides planning extras; paid-only stays a single-point band. */
-function displayBand(sku: SkuRecord, planning?: [number, number]): [number, number] {
+function displayBand(sku: SkuRecord, planning?: PriceBand): PriceBand {
   if (typeof sku.price.current === "number") return [sku.price.current, sku.price.current];
   if (planning) return planning;
   return planningBand(sku);
 }
 
-function midOf(band: [number, number]): number {
-  return Math.round((band[0] + band[1]) / 2);
+function midOf(band: PriceBand): number | null {
+  return band[0] === null || band[1] === null ? null : Math.round((band[0] + band[1]) / 2);
 }
 
 /** Extra display fields not yet fully modeled on SkuRecord.attrs */
@@ -176,20 +182,12 @@ const PSU_EXTRAS: Record<string, Partial<PsuView>> = {
     mid: 949,
     source: "拼多多可见 ¥898–999；多 SKU 需核对 850W 选项",
     mode: "ATX 后上置",
-    fanOff: 255,
-    noiseDba: 28.4,
-    efficiency: 0.89,
-    noiseEvidence: "cybenetics",
   },
   "psu.seasonic-focus-gx-750-v5": {
     price: [849, 949],
     mid: 899,
     source: "拼多多多 SKU 可见约 ¥899；所选功率需复核",
     mode: "ATX 后上置",
-    fanOff: 225,
-    noiseDba: 28.0,
-    efficiency: 0.89,
-    noiseEvidence: "cybenetics",
   },
   "psu.greatwall-f8-850": {
     price: [459, 599],
@@ -336,7 +334,7 @@ export function buildLabCatalogs(catalog: SkuCatalog): {
   const psus: Record<string, PsuView> = {};
   for (const sku of byCategory(catalog, "psu")) {
     const ex = PSU_EXTRAS[sku.id] ?? {};
-    const band = displayBand(sku, ex.price as [number, number] | undefined);
+    const band = displayBand(sku, ex.price as PriceBand | undefined);
     const form = (sku.attrs?.form as "ATX" | "SFX" | undefined) ?? "ATX";
     const noiseFromSku =
       (sku.attrs?.cybeneticsNoiseDba as number | null | undefined) ??
@@ -347,20 +345,25 @@ export function buildLabCatalogs(catalog: SkuCatalog): {
     psus[sku.id] = {
       name: sku.name,
       form,
-      watts: sku.power.ratedW ?? 0,
-      length: sku.dims.lengthMm ?? 0,
+      watts: sku.power.ratedW ?? null,
+      length: sku.dims.lengthMm ?? null,
       price: band,
       mid: typeof sku.price.current === "number" ? sku.price.current : (ex.mid ?? midOf(band)),
-      harness: (sku.harness?.sataLeads ?? 0) + (sku.harness?.molexLeads ?? 0),
-      peripheralSockets: (sku.attrs?.peripheralSockets as number | undefined) ?? 0,
+      harness:
+        typeof sku.harness?.peripheralLeads === "number"
+          ? sku.harness.peripheralLeads
+          : typeof sku.harness?.sataLeads === "number" && typeof sku.harness?.molexLeads === "number"
+            ? sku.harness.sataLeads + sku.harness.molexLeads
+            : null,
+      peripheralSockets: typeof sku.attrs?.peripheralSockets === "number" ? sku.attrs.peripheralSockets : null,
       certification: (sku.attrs?.certification as string | undefined) ?? "未记录",
       modular: MODULAR_ZH[(sku.attrs?.modular as string | undefined) ?? ""] ?? "未记录",
       official: sku.price.note ?? "—",
       source: ex.source ?? sku.price.note ?? "—",
       mode: ex.mode ?? (form === "SFX" ? "SFX" : "ATX"),
-      fanOff: (sku.attrs?.fanOffLoadW as number | undefined) ?? ex.fanOff ?? 0,
-      noiseDba: (typeof noiseFromSku === "number" ? noiseFromSku : undefined) ?? ex.noiseDba ?? 24,
-      efficiency: (typeof effFromSku === "number" ? effFromSku : undefined) ?? ex.efficiency ?? 0.88,
+      fanOff: (sku.attrs?.fanOffLoadW as number | undefined) ?? ex.fanOff ?? null,
+      noiseDba: (typeof noiseFromSku === "number" ? noiseFromSku : undefined) ?? ex.noiseDba ?? null,
+      efficiency: (typeof effFromSku === "number" ? effFromSku : undefined) ?? ex.efficiency ?? null,
       noiseEvidence: (sku.attrs?.noiseEvidence as string | undefined) ?? ex.noiseEvidence ?? "unknown",
       ...(ex.confidence ? { confidence: ex.confidence } : {}),
     };
@@ -372,12 +375,12 @@ export function buildLabCatalogs(catalog: SkuCatalog): {
     coolers[sku.id] = {
       name: sku.name,
       type: ex.type ?? "散热器",
-      height: sku.dims.heightMm ?? 0,
-      idleNoise: ex.idleNoise ?? 20,
-      maxNoise: ex.maxNoise ?? 30,
+      height: sku.dims.heightMm ?? null,
+      idleNoise: ex.idleNoise ?? null,
+      maxNoise: ex.maxNoise ?? null,
       price: displayBand(sku, ex.price),
-      mid: typeof sku.price.current === "number" ? sku.price.current : (ex.mid ?? 0),
-      ram: (sku.attrs?.maxRamHeightMm as number | undefined) ?? 99,
+      mid: typeof sku.price.current === "number" ? sku.price.current : (ex.mid ?? midOf(displayBand(sku, ex.price))),
+      ram: (sku.attrs?.maxRamHeightMm as number | undefined) ?? null,
       fit: (sku.attrs?.fitHint as string | undefined) ?? "unknown",
       note: ex.note ?? "",
     };
@@ -390,12 +393,12 @@ export function buildLabCatalogs(catalog: SkuCatalog): {
     gpus[sku.id] = {
       name: sku.name,
       kind: ex.kind ?? "—",
-      vram: (sku.attrs?.vramGb as number | undefined) ?? 0,
-      tgp: sku.power.tgpW ?? 0,
-      idle: sku.power.idleW ?? 0,
-      length: sku.dims.lengthMm ?? 0,
-      slots: sku.dims.slots ?? 0,
-      noise: ex.noise ?? 0,
+      vram: (sku.attrs?.vramGb as number | undefined) ?? null,
+      tgp: sku.power.tgpW ?? null,
+      idle: sku.power.idleW ?? null,
+      length: sku.dims.lengthMm ?? null,
+      slots: sku.dims.slots ?? null,
+      noise: ex.noise ?? null,
       price: band,
       mid: typeof sku.price.current === "number" ? sku.price.current : (ex.mid ?? midOf(band)),
       official: sku.price.note ?? "—",
@@ -413,9 +416,9 @@ export function buildLabCatalogs(catalog: SkuCatalog): {
     const attrNote = (sku.attrs?.note as string | undefined) ?? "";
     rams[sku.id] = {
       name: sku.name,
-      height: sku.dims.heightMm ?? 31,
-      modules: (sku.attrs?.modules as number | undefined) ?? 1,
-      capacity: (sku.attrs?.capacityGb as number | undefined) ?? 0,
+      height: sku.dims.heightMm ?? null,
+      modules: (sku.attrs?.modules as number | undefined) ?? null,
+      capacity: (sku.attrs?.capacityGb as number | undefined) ?? null,
       ecc: Boolean(sku.attrs?.ecc),
       speed: String(sku.attrs?.speedMt ?? ""),
       xmp: Boolean(sku.attrs?.xmp),

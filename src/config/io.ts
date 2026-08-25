@@ -1,5 +1,6 @@
 import type { BuildConfig, BuildLineItem, BuildSelection } from "./types";
 import { parseConfig, serializeConfig } from "./types";
+import type { BuildEvaluation } from "../core/evaluate";
 
 export { parseConfig, serializeConfig };
 
@@ -25,7 +26,7 @@ export function createConfig(partial: {
   return config;
 }
 
-export function exportChecklist(config: BuildConfig, bom: BuildLineItem[]): string {
+export function exportChecklist(config: BuildConfig, bom: BuildLineItem[], evaluation?: BuildEvaluation): string {
   const lines = [
     `# Install checklist — ${config.name}`,
     "",
@@ -47,6 +48,19 @@ export function exportChecklist(config: BuildConfig, bom: BuildLineItem[]): stri
   ];
   for (const line of bom) {
     lines.push(`- [${line.bucket}] ${line.qty}× ${line.skuId}`);
+  }
+  if (evaluation) {
+    lines.push(
+      "",
+      "## Deterministic evidence",
+      `- BuildEvaluation physical ruleset: ${evaluation.physical.rulesetVersion}`,
+      `- BuildEvaluation physical hash: ${evaluation.physical.hash}`,
+      `- Physical provenance: ${evaluation.physical.provenance.join(", ")}`,
+      `- Calibration snapshot: ${evaluation.calibration.snapshot.calibrationVersion}`,
+      `- Calibration hash: ${evaluation.calibration.hash}`,
+      `- Calibration unknown: ${evaluation.calibration.unknown.join(", ") || "none"}`,
+      `- Physical findings: ${evaluation.physical.findings.map((finding) => `${finding.verdict}:${finding.id}`).join(", ") || "none"}`,
+    );
   }
   lines.push("", "## Notes");
   for (const n of config.notes ?? []) lines.push(`- ${n}`);

@@ -1,0 +1,5 @@
+{
+  "extends": "baseline.json",
+  "id": "fixture-front-240-radiator",
+  "selection": { "coolerId": "cooler.arctic-liquid-freezer-240", "psuTopology": "auto" }
+}

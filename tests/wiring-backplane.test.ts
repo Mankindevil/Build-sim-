@@ -56,6 +56,7 @@ describe("backplane harness audit", () => {
   it("fails the SF750 on its official cable table: 2 SATA leads but only 1 Molex", () => {
     const check = checkBackplaneHarness(config(), catalog);
     expect(check.confirmed).toEqual({ sata: 2, molex: 1 });
+    expect(check.uniquePeripheralLeads).toBe(3);
     expect(check.verdict).toBe("bad");
     expect(check.oneLeadPerInlet).toBe(false);
     // Three Molex plugs on that one cable can reach both inlets — by chaining.
@@ -91,25 +92,29 @@ describe("backplane harness audit", () => {
     expect(check.connectors).toEqual({ sata: 8, molex: 3 });
   });
 
-  it("fails the ATX unit too: four sockets but only one Molex lead in the box", () => {
+  it("fails the V5 ATX unit on its official three-socket ceiling", () => {
     const check = checkBackplaneHarness(
       config({ psuId: "psu.seasonic-focus-gx-850-v5", psuTopology: "auto" }),
       catalog,
     );
-    expect(check.socketLimited).toBe(false);
+    expect(check.peripheralSockets).toBe(3);
+    expect(check.socketLimited).toBe(true);
+    expect(check.uniquePeripheralLeads).toBe(3);
     expect(check.confirmed).toEqual({ sata: 2, molex: 1 });
     expect(check.verdict).toBe("bad");
-    // Inlets are physically typed, so spare SATA leads cannot cover a Molex inlet.
-    expect(check.notes.join()).toContain("缺的是 Molex 口");
-    expect(check.notes.join()).toContain("加购同型号原厂");
+    expect(check.notes.join()).toContain("加购线也没有插座可插");
   });
 
-  it("qualifies the buy-a-cable route whenever the socket count is only inferred", () => {
+  it("does not double-count FSP's two SATA+Molex mixed cables", () => {
     const check = checkBackplaneHarness(
-      config({ psuId: "psu.seasonic-focus-gx-850-v5", psuTopology: "auto" }),
+      config({ psuId: "psu.fsp-dagger-pro-850-atx31", psuTopology: "bottom" }),
       catalog,
     );
-    expect(check.notes.join()).toContain("是按原盒线材清单推算的");
+    expect(check.confirmed).toEqual({ sata: 2, molex: 2 });
+    expect(check.uniquePeripheralLeads).toBe(2);
+    expect(check.peripheralSockets).toBe(2);
+    expect(check.socketLimited).toBe(true);
+    expect(check.verdict).toBe("bad");
   });
 
   it("stays unknown when neither the cable count nor the socket count is published", () => {

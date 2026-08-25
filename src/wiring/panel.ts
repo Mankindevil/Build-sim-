@@ -15,7 +15,7 @@ import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 
 const BP = n6Profile.backplanePower;
 
-export type CableKind = "mb" | "cpu" | "pcie" | "12v2x6" | "sata" | "molex" | "sense";
+export type CableKind = "mb" | "cpu" | "pcie" | "12v2x6" | "sata" | "molex" | "mixed" | "sense";
 
 /** Which panel group a cable kind has to plug into. */
 const KIND_GROUP: Record<CableKind, ModularPanelGroup["id"]> = {
@@ -25,6 +25,7 @@ const KIND_GROUP: Record<CableKind, ModularPanelGroup["id"]> = {
   "12v2x6": "cpu-pcie",
   sata: "peripheral",
   molex: "peripheral",
+  mixed: "peripheral",
   sense: "sense",
 };
 
@@ -35,6 +36,7 @@ const KIND_ZH: Record<CableKind, string> = {
   "12v2x6": "12V-2x6",
   sata: "SATA 供电线",
   molex: "Molex(PATA) 线",
+  mixed: "SATA+Molex 混合外围线",
   sense: "Sense 感测线",
 };
 
@@ -107,7 +109,14 @@ function buildSockets(psu: SkuRecord | undefined): { sockets: PanelSocket[]; kno
 
   // No panel data: imply just enough peripheral sockets to place the bundled
   // cables, and flag the panel as unknown so the UI never draws it as fact.
-  const implied = (psu?.harness?.sataLeads ?? 0) + (psu?.harness?.molexLeads ?? 0);
+  const implied =
+    psu?.harness?.peripheralLeads ??
+    Math.max(
+      0,
+      (psu?.harness?.sataLeads ?? 0) +
+        (psu?.harness?.molexLeads ?? 0) -
+        (psu?.harness?.mixedPeripheralLeads ?? 0),
+    );
   const sockets: PanelSocket[] = [];
   for (let i = 1; i <= implied; i++) {
     sockets.push({
@@ -184,8 +193,22 @@ export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): Panel
   // Peripheral contest: one lead per inlet, per manual §13.
   const sataLeads = psu?.harness?.sataLeads ?? null;
   const molexLeads = psu?.harness?.molexLeads ?? null;
+  const mixedLeads = psu?.harness?.mixedPeripheralLeads ?? 0;
   const inlets: InletAssignment[] = [];
   const perConnector: Record<"sata" | "molex", PlannedCable[]> = { sata: [], molex: [] };
+
+  for (let i = 0; i < mixedLeads; i++) {
+    const cable = addCable(
+      "mixed",
+      2,
+      [],
+      mixedLeads > 1 ? ` ${i + 1}` : "",
+    );
+    if (cable.status === "ok") {
+      perConnector.sata.push(cable);
+      perConnector.molex.push(cable);
+    }
+  }
 
   for (const kind of ["sata", "molex"] as const) {
     const leads = kind === "sata" ? sataLeads : molexLeads;
@@ -193,7 +216,7 @@ export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): Panel
     if (leads === null) {
       notes.push(`${KIND_ZH[kind]}根数未公布，接线图按"至少能插上 1 根"保守绘制。`);
     }
-    const count = leads ?? 1;
+    const count = leads === null ? (mixedLeads > 0 ? 0 : 1) : Math.max(0, leads - mixedLeads);
     for (let i = 0; i < count; i++) {
       const c = addCable(kind, kind === "sata" ? 4 : 3, [], count > 1 ? ` ${i + 1}` : "");
       if (c.status === "ok") perConnector[kind].push(c);
@@ -211,7 +234,7 @@ export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): Panel
     for (let i = 0; i < need; i++) {
       idx += 1;
       const cable = pool[i] ?? pool[pool.length - 1] ?? null;
-      const shared = pool.length > 0 && i >= pool.length;
+      const shared = cable !== null && cable.targets.length > 0;
       if (cable) {
         cable.targets.push(`背板口 ${idx}`);
         if (shared) cable.status = "chained";
