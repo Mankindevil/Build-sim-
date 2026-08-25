@@ -26,6 +26,10 @@ import { initAgentPanel } from "./agent-panel";
 import { buildAdviceInput } from "../advice/validate";
 import { initBuildProgress, type BuildProgressController } from "./build-progress";
 import { initTransactionImport } from "./transaction-import";
+import { WorkspaceApiClient } from "../plans/client";
+import { PlanStore } from "../plans/client-store";
+import { canonicalJson } from "../plans/canonical";
+import { mountPlanShell, type PlanShellController } from "./plan-shell";
 import "./design-system.css";
 
 let catalog = loadBundledCatalog();
@@ -33,6 +37,8 @@ const views = buildLabCatalogs(catalog);
 let priceStamp = bundledPriceSummary();
 let latestEvaluation: BuildEvaluation | null = null;
 let buildProgress: BuildProgressController | null = null;
+let planStore: PlanStore | null = null;
+let planShell: PlanShellController | null = null;
 
 const BOARD_ID = "board.asus-w680m-ace-se";
 
@@ -71,7 +77,7 @@ function val(id: string): string {
   return el?.value ?? "";
 }
 
-function configFromDom(): BuildConfig {
+function configFromDomLegacy(): BuildConfig {
   const topo = (val("psu-position") || "auto") as PsuTopology;
   const boot = (val("boot-select") || "bay") as BootMode;
   const hbaMode = (val("hba-select") || "auto") as HbaMode;
@@ -103,6 +109,11 @@ function configFromDom(): BuildConfig {
     config.selection.dualStart = val("dual-start-select") === "sync" ? "sync" : "none";
   }
   return config;
+}
+
+/** Transitional adapter: active plan is authoritative; raw DOM is only the input bridge. */
+function configFromDom(): BuildConfig {
+  return planStore?.getActiveConfig() ?? configFromDomLegacy();
 }
 
 function adviceInput() {
@@ -844,6 +855,7 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   updateGalleryFromSkus(evaluation.config);
   updatePriceStamp();
   buildProgress?.syncEvaluation(evaluation);
+  planStore?.setEvaluation(evaluation);
 }
 
 function bindConfigChrome(): void {
@@ -861,7 +873,36 @@ function bindConfigChrome(): void {
     if (!file) return;
     const text = await file.text();
     const config = parseConfig(text);
-    applyConfigToDom(config);
+    if (planStore?.getState().activePlan) planStore.replaceDraft(config);
+    else applyConfigToDom(config);
+    window.__N6_LAB_API__?.render();
+  });
+}
+
+const PLAN_CONFIG_INPUT_IDS = new Set([
+  "psu-select", "psu-position", "secondary-psu-select", "dual-start-select", "cooler-select",
+  "gpu-select", "ram-select", "disk-range", "boot-select", "nvme-select", "hba-select",
+]);
+
+function bindPlanStoreToDom(): void {
+  const root = $("n6-lab");
+  if (!root || !planStore) return;
+  const capture = (event: Event) => {
+    const target = event.target as HTMLInputElement | HTMLSelectElement | null;
+    if (!target?.id || !PLAN_CONFIG_INPUT_IDS.has(target.id)) return;
+    planStore?.replaceDraft(configFromDomLegacy());
+  };
+  root.addEventListener("change", capture);
+  root.addEventListener("input", capture);
+
+  let renderedSignature = "";
+  planStore.subscribe((state) => {
+    const plan = state.activePlan;
+    if (!plan) return;
+    const signature = `${plan.id}:${canonicalJson(plan.draft.config)}`;
+    if (signature === renderedSignature) return;
+    renderedSignature = signature;
+    applyConfigToDom(plan.draft.config);
     window.__N6_LAB_API__?.render();
   });
 }
@@ -906,10 +947,18 @@ declare global {
       root: HTMLElement | null;
       $: (sel: string) => HTMLElement | null;
     };
+    __BUILD_SIM_PLAN_STORE__?: PlanStore;
   }
 }
 
 async function boot(): Promise<void> {
+  planStore = new PlanStore({ api: new WorkspaceApiClient(), storage: window.localStorage });
+  await planStore.initialize();
+  window.__BUILD_SIM_PLAN_STORE__ = planStore;
+  const activeConfig = planStore.getState().activePlan?.draft.config;
+  if (activeConfig) applyConfigToDom(activeConfig);
+  const labRoot = $("n6-lab");
+  if (labRoot) planShell = mountPlanShell(labRoot, planStore);
   window.__N6_LAB__ = {
     ...views,
     skuName: (id: string) => requireSku(catalog, id).name,
@@ -951,6 +1000,7 @@ async function boot(): Promise<void> {
     s.onerror = () => reject(new Error("Failed to load v1-runtime.js"));
     document.body.appendChild(s);
   });
+  bindPlanStoreToDom();
 
   // Progress is local and synchronous: make the editable base available as soon
   // as the deterministic evaluation has rendered, without waiting on API panels.

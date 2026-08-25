@@ -1083,3 +1083,17 @@ R3 工作台编辑器  R4 评估版本化
 - 未验证项：真实浏览器 localStorage 的迁移触发由 R2 接入；不阻塞 R1 存储底座
 - 回滚方式：停止 workspace server，移除 `/api/workspace` proxy 与独立 `runtime/plans/`；软删除数据位于 repository `.trash/`
 - Push：未授权
+
+### R2 执行记录
+
+- 状态：完成
+- 起始 HEAD：`b238b7e`
+- 完成提交：`feat(workspace): connect app shell to active plan store`（SHA 见 Git log）
+- 修改文件：workspace API client、客户端 PlanStore、路由、动态应用壳/CSS、`boot.ts` DOM 过渡 adapter、workspace browser smoke 与 R2 tests
+- 聚焦测试：`npx vitest run tests/plan-store-ui.test.ts tests/plan-routing.test.ts tests/plan-autosave.test.ts`，3 files / 7 tests passed
+- 全量门禁：Vitest 57 files / 384 tests passed；typecheck passed；client + Agent + workspace production build passed；legacy model 85 assertions passed；legacy static 23 assertions passed；secret scan 282 files / 0 findings；`git diff --check` passed
+- 浏览器证据：G1 passed；G7 passed；workspace E2E passed（自动保存、dirty 刷新确认、刷新恢复、创建第二方案、保存版本、切换隔离、active plan 再恢复）
+- 数据迁移：PlanStore 初始化时幂等触发 R1 legacy progress reader；正式方案仍来自服务端，localStorage 仅保存 active id 与短期 cache
+- 未验证项：R3 才交付完整新建/导入向导、版本历史 UI 和危险操作对话框
+- 回滚方式：移除动态 Plan shell/PlanStore boot 接入后，`configFromDomLegacy()` 仍可恢复原页面；服务端方案数据不需删除
+- Push：未授权
