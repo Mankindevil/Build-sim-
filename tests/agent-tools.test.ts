@@ -47,21 +47,21 @@ describe("A3 Build Sim Tool registry", () => {
     expect(prices.result.content).toMatchObject({ asOf: "2026-08-21", quotes: [{ skuId: "case.jonsbo-n6", evidence: "audited" }] });
   });
 
-  it("routes external reads only through the fixed local service", async () => {
+  it("routes external reads only through the configured local service", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
       return new Response(JSON.stringify({ status: "queued", candidates: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
-    const registry = new AgentToolRegistry(createBuildSimTools());
+    const registry = new AgentToolRegistry(createBuildSimTools({ priceServiceUrl: "http://127.0.0.1:6174" }));
     expect((await registry.dispatch("search_official_catalog", { query: "ASUS W680M", limit: 3 }, context())).result.ok).toBe(true);
     expect((await registry.dispatch("list_official_domain_proposals", {}, context())).result.ok).toBe(true);
     expect((await registry.dispatch("inspect_catalog_candidate", { url: "http://127.0.0.1/private" }, context())).result).toMatchObject({ ok: false, errorCode: "tool_input_invalid" });
     expect((await registry.dispatch("search_price_candidates", { skuIds: ["case.jonsbo-n6"], channels: ["official"], limit: 1 }, context())).result.ok).toBe(true);
     expect(calls).toEqual([
-      { url: "http://127.0.0.1:5174/api/catalog/search", body: { query: "ASUS W680M", limit: 3, officialOnly: true } },
-      { url: "http://127.0.0.1:5174/api/catalog/domain-proposals", body: null },
-      { url: "http://127.0.0.1:5174/api/price/collect", body: { skuIds: ["case.jonsbo-n6"], channels: ["official"], limit: 1 } },
+      { url: "http://127.0.0.1:6174/api/catalog/search", body: { query: "ASUS W680M", limit: 3, officialOnly: true } },
+      { url: "http://127.0.0.1:6174/api/catalog/domain-proposals", body: null },
+      { url: "http://127.0.0.1:6174/api/price/collect", body: { skuIds: ["case.jonsbo-n6"], channels: ["official"], limit: 1 } },
     ]);
     vi.unstubAllGlobals();
   });

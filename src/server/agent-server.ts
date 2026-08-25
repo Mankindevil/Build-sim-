@@ -1,5 +1,4 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentRuntime, AgentRuntimeError } from "../agent/runtime";
 import { DeepSeekProviderAdapter } from "../agent/providers/deepseek";
@@ -14,7 +13,6 @@ import { createBuildSimTools } from "./domain-tools";
 import type { AgentWriteApprovalEnvelope } from "../agent/contracts";
 
 const HOST = "127.0.0.1";
-const DEFAULT_PORT = 5175;
 const MAX_BODY_BYTES = 1_000_000;
 
 export interface AgentRouteResponse {
@@ -31,13 +29,13 @@ function send(res: ServerResponse, status: number, payload: unknown): void {
   res.end(JSON.stringify(payload));
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, maxBodyBytes = MAX_BODY_BYTES): Promise<unknown> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > MAX_BODY_BYTES) throw new Error("request body too large");
+    if (bytes > maxBodyBytes) throw new Error("request body too large");
     chunks.push(buffer);
   }
   if (chunks.length === 0) return {};
@@ -75,7 +73,7 @@ function terminal(status: string): boolean {
   return ["completed", "failed", "cancelled", "limit_exceeded"].includes(status);
 }
 
-async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url: URL, runtime: AgentRuntime): Promise<boolean> {
+async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url: URL, runtime: AgentRuntime, maxBodyBytes: number): Promise<boolean> {
   const route = `${req.method} ${url.pathname}`;
   if (route === "GET /api/agent/models") {
     send(res, 200, { models: runtime.getModels() });
@@ -90,7 +88,7 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
     return true;
   }
   if (route === "POST /api/agent/sessions") {
-    const body = await readJson(req) as { provider?: "deepseek" | "claude"; model?: string };
+    const body = await readJson(req, maxBodyBytes) as { provider?: "deepseek" | "claude"; model?: string };
     send(res, 201, await runtime.createSession(body));
     return true;
   }
@@ -101,7 +99,7 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
   }
   const messageMatch = url.pathname.match(/^\/api\/agent\/sessions\/([^/]+)\/messages$/);
   if (req.method === "POST" && messageMatch?.[1]) {
-    const body = await readJson(req) as { content?: string; buildConfig?: unknown; skillId?: string; approvals?: AgentWriteApprovalEnvelope[] };
+    const body = await readJson(req, maxBodyBytes) as { content?: string; buildConfig?: unknown; skillId?: string; approvals?: AgentWriteApprovalEnvelope[] };
     const result = await runtime.startRun(decodeURIComponent(messageMatch[1]), {
       content: body.content ?? "",
       ...(body.buildConfig !== undefined ? { buildConfig: parseAuthoritativeBuildConfig(body.buildConfig) } : {}),
@@ -169,12 +167,13 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
   return false;
 }
 
-export function createAgentServer(options: { runtime?: AgentRuntime } = {}): http.Server {
+export function createAgentServer(options: { runtime?: AgentRuntime; maxBodyBytes?: number } = {}): http.Server {
+  const maxBodyBytes = options.maxBodyBytes ?? MAX_BODY_BYTES;
   return http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${HOST}`);
     try {
-      if (options.runtime && await handleRuntimeRoute(req, res, url, options.runtime)) return;
-      const body = req.method === "POST" ? await readJson(req) : {};
+      if (options.runtime && await handleRuntimeRoute(req, res, url, options.runtime, maxBodyBytes)) return;
+      const body = req.method === "POST" ? await readJson(req, maxBodyBytes) : {};
       const response = handleAgentRoute(req.method, url.pathname, body);
       return send(res, response.status, response.payload);
     } catch (error) {
@@ -187,14 +186,14 @@ const isMain = process.argv[1] !== undefined && fileURLToPath(import.meta.url) =
 if (isMain) {
   void (async () => {
     const config = await loadAgentRuntimeConfig();
-    const toolRegistry = new AgentToolRegistry(createBuildSimTools());
+    const toolRegistry = new AgentToolRegistry(createBuildSimTools({ priceServiceUrl: config.priceServiceUrl }));
     const adapters = [
       new DeepSeekProviderAdapter(config.deepseek),
       ...(config.claude.enabled ? [new ClaudeProviderAdapter(config.claude)] : []),
     ];
     const runtime = new AgentRuntime(
       adapters,
-      new FileAgentSessionStore(),
+      new FileAgentSessionStore(config.sessionRoot),
       {
         maxTokens: config.deepseek.maxTokens,
         temperature: config.deepseek.temperature,
@@ -203,13 +202,14 @@ if (isMain) {
           claude: { maxTokens: config.claude.maxTokens, temperature: config.claude.temperature },
         },
         toolRegistry,
-        skillLoader: new AgentSkillLoader(path.resolve("skills"), toolRegistry),
-        auditStore: new FileAgentRunAuditStore(),
+        skillLoader: new AgentSkillLoader(config.skillsRoot, toolRegistry),
+        auditStore: new FileAgentRunAuditStore(config.auditRoot),
+        limits: config.limits,
+        maxMessageChars: config.maxMessageChars,
       },
     );
-    const port = config.port ?? DEFAULT_PORT;
-    createAgentServer({ runtime }).listen(port, HOST, () => {
-      console.log(`Build Sim Agent server listening on http://${HOST}:${port} (${config.enabled ? "enabled" : "disabled"})`);
+    createAgentServer({ runtime, maxBodyBytes: config.requestBodyMaxBytes }).listen(config.port, HOST, () => {
+      console.log(`Build Sim Agent server listening on http://${HOST}:${config.port} (${config.enabled ? "enabled" : "disabled"})`);
     });
   })().catch((error) => {
     console.error(error instanceof Error ? error.message : "Agent server failed to start");

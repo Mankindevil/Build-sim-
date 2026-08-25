@@ -4,7 +4,7 @@ import type { BuildConfig, BuildSelection } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
 import { evaluateBuildAuthoritatively } from "./evaluation-service";
 
-const PRICE_SERVICE = "http://127.0.0.1:5174";
+const DEFAULT_PRICE_SERVICE = "http://127.0.0.1:5174";
 const SECTION_NAMES = ["findings", "bom", "occupancy", "wiring", "routing", "assembly", "power", "price", "noise", "physical", "calibration", "thermal"] as const;
 type Section = typeof SECTION_NAMES[number];
 
@@ -36,9 +36,9 @@ function selectedSections(input: unknown): Section[] {
   return requested?.length ? requested : ["findings", "bom", "power", "price", "noise", "physical", "calibration"];
 }
 
-async function localService(pathname: string, body: unknown, signal: AbortSignal, method: "GET" | "POST" = "POST"): Promise<AgentToolResult> {
+async function localService(baseUrl: string, pathname: string, body: unknown, signal: AbortSignal, method: "GET" | "POST" = "POST"): Promise<AgentToolResult> {
   try {
-    const response = await fetch(`${PRICE_SERVICE}${pathname}`, {
+    const response = await fetch(`${baseUrl}${pathname}`, {
       method,
       headers: { "Content-Type": "application/json" },
       ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
@@ -181,78 +181,89 @@ const getPriceSnapshot: AgentToolSpec = {
   },
 };
 
-const searchOfficialCatalog: AgentToolSpec = {
-  contractVersion: AGENT_CONTRACT_VERSION,
-  name: "search_official_catalog",
-  title: "搜索官方型号候选",
-  description: "Queue an allowlisted official-domain model search through the existing local catalog service. Results are candidates only and cannot enter the formal SKU catalog without separate human confirmation.",
-  effect: "external-read",
-  approval: "never",
-  timeoutMs: 30_000,
-  maxResultBytes: 80_000,
-  inputSchema: schema({ query: { type: "string", minLength: 2, maxLength: 240 }, brand: { type: "string", minLength: 1, maxLength: 80 }, category: { type: "string", maxLength: 40 }, limit: { type: "integer", minimum: 1, maximum: 20 } }, ["query"]),
-  async execute(input, context) { return localService("/api/catalog/search", { ...input as object, officialOnly: true }, context.signal); },
-};
+function createSearchOfficialCatalog(priceServiceUrl: string): AgentToolSpec {
+  return {
+    contractVersion: AGENT_CONTRACT_VERSION,
+    name: "search_official_catalog",
+    title: "搜索官方型号候选",
+    description: "Queue an allowlisted official-domain model search through the existing local catalog service. Results are candidates only and cannot enter the formal SKU catalog without separate human confirmation.",
+    effect: "external-read",
+    approval: "never",
+    timeoutMs: 30_000,
+    maxResultBytes: 80_000,
+    inputSchema: schema({ query: { type: "string", minLength: 2, maxLength: 240 }, brand: { type: "string", minLength: 1, maxLength: 80 }, category: { type: "string", maxLength: 40 }, limit: { type: "integer", minimum: 1, maximum: 20 } }, ["query"]),
+    async execute(input, context) { return localService(priceServiceUrl, "/api/catalog/search", { ...input as object, officialOnly: true }, context.signal); },
+  };
+}
 
-const inspectCatalogCandidate: AgentToolSpec = {
-  contractVersion: AGENT_CONTRACT_VERSION,
-  name: "inspect_catalog_candidate",
-  title: "检查官方商品页",
-  description: "Inspect one explicit official product URL through the existing canonical-URL, allowlist, redirect, private-IP, response-size, conflict, and field-provenance safeguards.",
-  effect: "external-read",
-  approval: "never",
-  timeoutMs: 30_000,
-  maxResultBytes: 100_000,
-  inputSchema: schema({ url: { type: "string", minLength: 10, maxLength: 2_000, pattern: "^https://" }, query: { type: "string", maxLength: 240 }, brand: { type: "string", maxLength: 80 }, category: { type: "string", maxLength: 40 } }, ["url"]),
-  async execute(input, context) { return localService("/api/catalog/inspect", input, context.signal); },
-};
+function createInspectCatalogCandidate(priceServiceUrl: string): AgentToolSpec {
+  return {
+    contractVersion: AGENT_CONTRACT_VERSION,
+    name: "inspect_catalog_candidate",
+    title: "检查官方商品页",
+    description: "Inspect one explicit official product URL through the existing canonical-URL, allowlist, redirect, private-IP, response-size, conflict, and field-provenance safeguards.",
+    effect: "external-read",
+    approval: "never",
+    timeoutMs: 30_000,
+    maxResultBytes: 100_000,
+    inputSchema: schema({ url: { type: "string", minLength: 10, maxLength: 2_000, pattern: "^https://" }, query: { type: "string", maxLength: 240 }, brand: { type: "string", maxLength: 80 }, category: { type: "string", maxLength: 40 } }, ["url"]),
+    async execute(input, context) { return localService(priceServiceUrl, "/api/catalog/inspect", input, context.signal); },
+  };
+}
 
-const listOfficialDomainProposals: AgentToolSpec = {
-  contractVersion: AGENT_CONTRACT_VERSION,
-  name: "list_official_domain_proposals",
-  title: "列出待治理官网域名",
-  description: "List governed domain proposals from the fixed local catalog service. Proposed and rejected domains remain non-official and cannot be inspected as trusted sources.",
-  effect: "external-read",
-  approval: "never",
-  timeoutMs: 10_000,
-  maxResultBytes: 80_000,
-  inputSchema: schema({}),
-  async execute(_input, context) { return localService("/api/catalog/domain-proposals", null, context.signal, "GET"); },
-};
+function createListOfficialDomainProposals(priceServiceUrl: string): AgentToolSpec {
+  return {
+    contractVersion: AGENT_CONTRACT_VERSION,
+    name: "list_official_domain_proposals",
+    title: "列出待治理官网域名",
+    description: "List governed domain proposals from the fixed local catalog service. Proposed and rejected domains remain non-official and cannot be inspected as trusted sources.",
+    effect: "external-read",
+    approval: "never",
+    timeoutMs: 10_000,
+    maxResultBytes: 80_000,
+    inputSchema: schema({}),
+    async execute(_input, context) { return localService(priceServiceUrl, "/api/catalog/domain-proposals", null, context.signal, "GET"); },
+  };
+}
 
-const enrichOfficialCatalog: AgentToolSpec = {
-  contractVersion: AGENT_CONTRACT_VERSION,
-  name: "enrich_official_catalog",
-  title: "按已核验候选补齐目录",
-  description: "Write only one already-inspected candidate id and its expected immutable hash through the governed local enrichment policy. The Tool cannot submit fields, URLs, trust decisions, or model-authored values and always requires an out-of-band approval envelope.",
-  effect: "write",
-  approval: "required",
-  timeoutMs: 30_000,
-  maxResultBytes: 100_000,
-  inputSchema: schema({ candidateId: { type: "string", minLength: 10, maxLength: 160 }, expectedHash: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["candidateId", "expectedHash"]),
-  async execute(input, context) {
-    const value = input as { candidateId: string; expectedHash: string };
-    return localService(`/api/catalog/candidates/${encodeURIComponent(value.candidateId)}/enrich`, { expectedHash: value.expectedHash }, context.signal);
-  },
-};
+function createEnrichOfficialCatalog(priceServiceUrl: string): AgentToolSpec {
+  return {
+    contractVersion: AGENT_CONTRACT_VERSION,
+    name: "enrich_official_catalog",
+    title: "按已核验候选补齐目录",
+    description: "Write only one already-inspected candidate id and its expected immutable hash through the governed local enrichment policy. The Tool cannot submit fields, URLs, trust decisions, or model-authored values and always requires an out-of-band approval envelope.",
+    effect: "write",
+    approval: "required",
+    timeoutMs: 30_000,
+    maxResultBytes: 100_000,
+    inputSchema: schema({ candidateId: { type: "string", minLength: 10, maxLength: 160 }, expectedHash: { type: "string", pattern: "^[a-f0-9]{64}$" } }, ["candidateId", "expectedHash"]),
+    async execute(input, context) {
+      const value = input as { candidateId: string; expectedHash: string };
+      return localService(priceServiceUrl, `/api/catalog/candidates/${encodeURIComponent(value.candidateId)}/enrich`, { expectedHash: value.expectedHash }, context.signal);
+    },
+  };
+}
 
-const searchPriceCandidates: AgentToolSpec = {
-  contractVersion: AGENT_CONTRACT_VERSION,
-  name: "search_price_candidates",
-  title: "搜索价格候选",
-  description: "Collect bounded marketplace and official-page price candidates through the existing local service. Every returned card remains unaudited and must not be used as a confirmed price until a human validates the exact variant.",
-  effect: "external-read",
-  approval: "never",
-  timeoutMs: 60_000,
-  maxResultBytes: 120_000,
-  inputSchema: schema({
-    skuIds: { type: "array", items: { type: "string", minLength: 1, maxLength: 120 }, minItems: 1, maxItems: 12, uniqueItems: true },
-    channels: { type: "array", items: { type: "string", enum: ["jd", "taobao", "pdd", "amazon", "official"] }, minItems: 1, maxItems: 5, uniqueItems: true },
-    limit: { type: "integer", minimum: 1, maximum: 10 },
-  }, ["skuIds"]),
-  async execute(input, context) { return localService("/api/price/collect", input, context.signal); },
-};
+function createSearchPriceCandidates(priceServiceUrl: string): AgentToolSpec {
+  return {
+    contractVersion: AGENT_CONTRACT_VERSION,
+    name: "search_price_candidates",
+    title: "搜索价格候选",
+    description: "Collect bounded marketplace and official-page price candidates through the existing local service. Every returned card remains unaudited and must not be used as a confirmed price until a human validates the exact variant.",
+    effect: "external-read",
+    approval: "never",
+    timeoutMs: 60_000,
+    maxResultBytes: 120_000,
+    inputSchema: schema({
+      skuIds: { type: "array", items: { type: "string", minLength: 1, maxLength: 120 }, minItems: 1, maxItems: 12, uniqueItems: true },
+      channels: { type: "array", items: { type: "string", enum: ["jd", "taobao", "pdd", "amazon", "official"] }, minItems: 1, maxItems: 5, uniqueItems: true },
+      limit: { type: "integer", minimum: 1, maximum: 10 },
+    }, ["skuIds"]),
+    async execute(input, context) { return localService(priceServiceUrl, "/api/price/collect", input, context.signal); },
+  };
+}
 
-export function createBuildSimTools(): AgentToolSpec[] {
-  return [getBuildEvaluation, compareBuilds, getSkuFacts, getPriceSnapshot, searchOfficialCatalog, inspectCatalogCandidate, listOfficialDomainProposals, enrichOfficialCatalog, searchPriceCandidates];
+export function createBuildSimTools(options: { priceServiceUrl?: string } = {}): AgentToolSpec[] {
+  const priceServiceUrl = options.priceServiceUrl ?? DEFAULT_PRICE_SERVICE;
+  return [getBuildEvaluation, compareBuilds, getSkuFacts, getPriceSnapshot, createSearchOfficialCatalog(priceServiceUrl), createInspectCatalogCandidate(priceServiceUrl), createListOfficialDomainProposals(priceServiceUrl), createEnrichOfficialCatalog(priceServiceUrl), createSearchPriceCandidates(priceServiceUrl)];
 }
