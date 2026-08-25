@@ -983,8 +983,9 @@ async function boot(): Promise<void> {
   const activeConfig = planStore.getState().activePlan?.draft.config;
   if (activeConfig) applyConfigToDom(activeConfig);
   const labRoot = $("n6-lab");
+  let router: WorkspaceRouter | null = null;
   if (labRoot) {
-    const router = new WorkspaceRouter();
+    router = new WorkspaceRouter();
     planShell = mountPlanShell(labRoot, planStore, router);
     workspacePages = mountWorkspacePages(labRoot, planStore, router);
   }
@@ -1032,7 +1033,7 @@ async function boot(): Promise<void> {
   bindPlanStoreToDom();
   const spatialStage = $("spatial-stage");
   if (spatialStage && planStore) {
-    spatialView = mountSpatialView(spatialStage, planStore, () => catalog);
+    spatialView = mountSpatialView(spatialStage, planStore, () => catalog, router ?? undefined);
     window.__BUILD_SIM_SPATIAL__ = spatialView;
   }
 

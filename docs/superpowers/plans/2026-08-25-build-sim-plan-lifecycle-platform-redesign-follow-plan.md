@@ -729,16 +729,16 @@ R5 完成。
 
 ### 任务
 
-- [ ] 冲突图层：根据 evaluation physical findings 高亮部件和碰撞体。
-- [ ] 间隙图层：显示 clearance envelope，并标明 official/standard/inferred。
-- [ ] 尺寸工具：预设关键尺寸，不提供伪精确任意 CAD 测量。
-- [ ] 走线图层：复用 routing paths，区分 power/data、warn/unknown/bad。
-- [ ] 风道/热图层：复用 thermal field；明确“规划热场，非 CFD”。
-- [ ] 装机顺序图层：按 assembly steps 隔离/高亮当前部件。
-- [ ] 3D finding 点击后打开问题说明和配置修复入口。
-- [ ] 配置字段 hover/selection 可反向高亮 3D 部件。
-- [ ] “询问 Agent”携带当前 partId、findingId 和 camera/view context。
-- [ ] 截图/分享仅导出当前视图和事实说明，不嵌入敏感交易信息。
+- [x] 冲突图层：根据 evaluation physical findings 高亮部件和碰撞体。
+- [x] 间隙图层：显示 clearance envelope，并标明 official/standard/inferred。
+- [x] 尺寸工具：预设关键尺寸，不提供伪精确任意 CAD 测量。
+- [x] 走线图层：复用 routing paths，区分 power/data、warn/unknown/bad。
+- [x] 风道/热图层：复用 thermal field；明确“规划热场，非 CFD”。
+- [x] 装机顺序图层：按 assembly steps 隔离/高亮当前部件。
+- [x] 3D finding 点击后打开问题说明和配置修复入口。
+- [x] 配置字段 hover/selection 可反向高亮 3D 部件。
+- [x] “询问 Agent”携带当前 partId、findingId 和 camera/view context。
+- [x] 截图/分享仅导出当前视图和事实说明，不嵌入敏感交易信息。
 
 ### 聚焦验证
 
@@ -1139,4 +1139,20 @@ R3 工作台编辑器  R4 评估版本化
 - 数据迁移：无；场景只消费 active plan 的 BuildEvaluation，未新增持久化格式
 - 未验证项：R6 将加入正式冲突/间隙/走线/热场/装机步骤图层和反向编辑联动
 - 回滚方式：移除 `mountSpatialView` 接入、Three/spatial 模块与依赖即可恢复原 SVG；方案、版本和评估数据格式不变
+- Push：未授权
+
+### R6 执行记录
+
+- 状态：完成
+- 起始 HEAD：`39a455a`
+- 完成提交：`feat(spatial): connect findings routing and plan editing`（SHA 见 Git log）
+- 修改文件：SpatialOverlayModel（finding/route/dimension/thermal/assembly）、Three overlay groups/workflow controls、workspace finding/editor reverse sync、Agent spatial context event、current-view PNG export、R6 tests/E2E
+- 聚焦测试：`npx vitest run tests/spatial-findings.test.ts tests/spatial-routing.test.ts tests/spatial-plan-sync.test.ts`，3 files / 4 tests passed；finding navigation regression passed
+- 全量门禁：Vitest 70 files / 405 tests passed；typecheck passed；client + Agent + workspace production build passed；legacy model 85 assertions passed；legacy static 23 assertions passed；secret scan 310 files / 0 findings；`git diff --check` passed
+- 浏览器证据：spatial E2E passed；route 数量与 `BuildEvaluation.routing.cables` 一致；热场标注“非 CFD”；装机步骤、finding 选择、配置反向高亮、Agent plan/revision/evaluation/camera context 与 PNG 下载 passed
+- Bundle/性能：Three 动态 chunk 552.39 kB / gzip 140.07 kB；主入口 299.55 kB / gzip 102.96 kB；overlay 仍按需随 R5 renderer 加载
+- 闭环证据：构造 `n6.bay9-boot-vs-9hdd` 真实 bad fixture，工作台 → 3D 盘阵高亮 → `selection.diskCount` 修复为 8 → 同一 evaluation finding 消失 passed
+- 数据迁移：无；overlay 不持久化 verdict，刷新后从 active evaluation 重建
+- 未验证项：R7 将消费已发出的 spatial Agent context，并实现可审阅/人工批准 proposal
+- 回滚方式：移除 overlay model、renderer overlay groups 与 workspace custom events；R5 基础 3D 和 SVG fallback 保持可用
 - Push：未授权

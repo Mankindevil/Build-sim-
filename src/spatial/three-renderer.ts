@@ -2,17 +2,27 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { SpatialLayer, SpatialSceneModel, SpatialSceneNode } from "./model";
 import type { SpatialSelectionController } from "./selection";
+import type { SpatialOverlayModel } from "./overlays";
 
 export interface ThreeSpatialOptions {
   host: HTMLElement;
   root: HTMLElement;
   model: SpatialSceneModel;
+  overlays: SpatialOverlayModel;
   selection: SpatialSelectionController;
   onContextLost: () => void;
 }
 
 export interface ThreeSpatialRenderer {
-  update(model: SpatialSceneModel): void;
+  update(model: SpatialSceneModel, overlays: SpatialOverlayModel): void;
+  focus(partId: string | null): void;
+  setFinding(findingId: string | null): void;
+  setRoutesVisible(visible: boolean): void;
+  setDimensionsVisible(visible: boolean): void;
+  setThermalVisible(visible: boolean): void;
+  setAssemblyStep(index: number | null): void;
+  capture(filename: string): void;
+  getViewContext(): Record<string, unknown>;
   reset(): void;
   dispose(): void;
 }
@@ -70,6 +80,9 @@ export function createThreeSpatialRenderer(options: ThreeSpatialOptions): ThreeS
   const key = new THREE.DirectionalLight(0xffffff, 2.1); key.position.set(-260, 400, -300); scene.add(key);
   const fill = new THREE.DirectionalLight(0x7ab4ff, 1.1); fill.position.set(280, 120, 260); scene.add(fill);
   const rootGroup = new THREE.Group(); scene.add(rootGroup);
+  const routeGroup = new THREE.Group(); scene.add(routeGroup);
+  const dimensionGroup = new THREE.Group(); scene.add(dimensionGroup);
+  const thermalGroup = new THREE.Group(); scene.add(thermalGroup);
   const grid = new THREE.GridHelper(620, 20, 0x607080, 0x344252); grid.position.y = -164; scene.add(grid);
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
@@ -77,10 +90,16 @@ export function createThreeSpatialRenderer(options: ThreeSpatialOptions): ThreeS
   const visibleLayers = new Set<SpatialLayer>(LAYERS);
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let model = options.model;
+  let overlays = options.overlays;
   let cameraMode: "perspective" | "orthographic" = "perspective";
   let camera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
   let controls: OrbitControls;
   let explode = false;
+  let routesVisible = false;
+  let dimensionsVisible = false;
+  let thermalVisible = false;
+  let activeFindingId: string | null = null;
+  let assemblyStepIndex: number | null = null;
   let hovered: { object: THREE.Object3D; instanceId: number | null } | null = null;
   let selected: { object: THREE.Object3D; instanceId: number | null } | null = null;
   let disposed = false;
@@ -121,17 +140,60 @@ export function createThreeSpatialRenderer(options: ThreeSpatialOptions): ThreeS
     mesh.instanceMatrix.needsUpdate = true;
   };
 
-  const rebuild = () => {
-    pickRecords.clear(); hovered = null; selected = null;
-    while (rootGroup.children.length) {
-      const object = rootGroup.children.pop()!;
+  const disposeGroup = (group: THREE.Group) => {
+    while (group.children.length) {
+      const object = group.children[0]!;
+      group.remove(object);
       object.traverse((child) => {
-        const mesh = child as THREE.Mesh;
-        mesh.geometry?.dispose();
-        const material = mesh.material;
+        const drawable = child as THREE.Mesh | THREE.Line;
+        drawable.geometry?.dispose();
+        const material = drawable.material;
         if (Array.isArray(material)) material.forEach((item) => item.dispose()); else material?.dispose();
       });
     }
+  };
+
+  const lineObject = (points: [number, number, number][], color: number, dashed = false) => {
+    const geometry = new THREE.BufferGeometry().setFromPoints(points.map((point) => new THREE.Vector3(point[0], point[1], point[2])));
+    const material = dashed ? new THREE.LineDashedMaterial({ color, dashSize: 8, gapSize: 5, transparent: true, opacity: 0.86 }) : new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 });
+    const line = new THREE.Line(geometry, material);
+    if (dashed) line.computeLineDistances();
+    return line;
+  };
+
+  const rebuildOverlays = () => {
+    disposeGroup(routeGroup); disposeGroup(dimensionGroup); disposeGroup(thermalGroup);
+    for (const route of overlays.routes) {
+      const color = route.verdict === "bad" ? 0xef4c5b : route.verdict === "warn" ? 0xe4a53e : route.kind === "power" ? 0xf06d6d : 0x4f9ee8;
+      const line = lineObject(route.points, color, !route.pathAvailable || route.evidence === "unknown");
+      line.name = route.id; line.userData.routeId = route.id; routeGroup.add(line);
+    }
+    for (const dimension of overlays.dimensions) {
+      const color = dimension.evidence === "official" ? 0x4f9ee8 : dimension.evidence === "standard" ? 0x42b88d : dimension.evidence === "inferred" ? 0xe4a53e : 0x8b97a5;
+      const line = lineObject([dimension.from, dimension.to], color, dimension.evidence !== "official");
+      line.name = dimension.id; line.userData.label = dimension.label; dimensionGroup.add(line);
+    }
+    for (const source of overlays.thermal.sources) {
+      const normalized = THREE.MathUtils.clamp((source.tempC.hi - 25) / 65, 0, 1);
+      const color = new THREE.Color(0x3d8be8).lerp(new THREE.Color(0xef4c5b), normalized);
+      const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.15, depthWrite: false, wireframe: true });
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), material);
+      mesh.position.set(source.at[0], source.at[1], source.at[2]);
+      mesh.scale.set(source.sigmaMm[0], source.sigmaMm[1], source.sigmaMm[2]);
+      mesh.name = `heat:${source.id}`; mesh.userData.note = overlays.thermal.note; thermalGroup.add(mesh);
+    }
+    for (const fan of model.nodes.filter((node) => node.kind === "fan")) {
+      const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...fan.box.c), 52, 0x55c8b1, 12, 7);
+      arrow.name = `airflow:${fan.partId}`; thermalGroup.add(arrow);
+    }
+    routeGroup.visible = routesVisible;
+    dimensionGroup.visible = dimensionsVisible;
+    thermalGroup.visible = thermalVisible && overlays.thermal.available;
+  };
+
+  const rebuild = () => {
+    pickRecords.clear(); hovered = null; selected = null;
+    disposeGroup(rootGroup);
     const groups = new Map<string, SpatialSceneNode[]>();
     model.nodes.filter((node) => visibleLayers.has(node.layer)).forEach((node) => {
       const key = groupKey(node); const current = groups.get(key) ?? []; current.push(node); groups.set(key, current);
@@ -148,7 +210,7 @@ export function createThreeSpatialRenderer(options: ThreeSpatialOptions): ThreeS
         rootGroup.add(mesh); pickRecords.set(mesh.uuid, { object: mesh, nodes });
       }
     }
-    render();
+    rebuildOverlays(); recolor();
   };
 
   const nodeAt = (event: PointerEvent) => {
@@ -166,19 +228,29 @@ export function createThreeSpatialRenderer(options: ThreeSpatialOptions): ThreeS
   };
 
   const recolor = () => {
+    const findingParts = new Set(overlays.findings.find((finding) => finding.id === activeFindingId)?.partIds ?? []);
+    const assemblyParts = assemblyStepIndex === null ? null : new Set(overlays.assembly[assemblyStepIndex]?.partIds ?? []);
     for (const record of pickRecords.values()) {
       const mesh = record.object as THREE.Mesh | THREE.InstancedMesh;
       if (mesh instanceof THREE.InstancedMesh) {
         record.nodes.forEach((node, index) => {
-          const active = (selected?.object === mesh && selected.instanceId === index) || (hovered?.object === mesh && hovered.instanceId === index);
-          mesh.setColorAt(index, new THREE.Color(active ? 0xffd166 : COLORS[node.kind] ?? 0x8796a5));
+          const active = (selected?.object === mesh && selected.instanceId === index) || (hovered?.object === mesh && hovered.instanceId === index) || findingParts.has(node.partId) || assemblyParts?.has(node.partId);
+          const color = new THREE.Color(active ? findingParts.has(node.partId) ? 0xef4c5b : 0xffd166 : COLORS[node.kind] ?? 0x8796a5);
+          if (assemblyParts && !assemblyParts.has(node.partId)) color.multiplyScalar(0.18);
+          mesh.setColorAt(index, color);
         });
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       } else {
         const material = mesh.material as THREE.MeshStandardMaterial;
         const node = record.nodes[0]!;
-        material.emissive.set((selected?.object === mesh || hovered?.object === mesh) ? 0x5f4200 : 0x000000);
+        const emphasized = selected?.object === mesh || hovered?.object === mesh || findingParts.has(node.partId) || assemblyParts?.has(node.partId);
+        material.emissive.set(findingParts.has(node.partId) ? 0x6f1017 : emphasized ? 0x5f4200 : 0x000000);
         material.color.set(COLORS[node.kind] ?? 0x8796a5);
+        const baseTransparent = node.layer === "shell" || node.layer === "clearance" || node.kind === "empty";
+        const baseOpacity = node.kind === "shell" ? 0.12 : node.kind === "interior" ? 0.025 : node.kind === "empty" ? 0.08 : node.layer === "clearance" ? 0.14 : 0.82;
+        material.transparent = baseTransparent || Boolean(assemblyParts);
+        material.opacity = assemblyParts && node.layer !== "shell" && !assemblyParts.has(node.partId) ? 0.08 : baseOpacity;
+        material.depthWrite = !material.transparent;
       }
     }
     render();
@@ -195,6 +267,16 @@ export function createThreeSpatialRenderer(options: ThreeSpatialOptions): ThreeS
     const hit = nodeAt(event);
     selected = hit ? { object: hit.object, instanceId: hit.instanceId } : null;
     options.selection.select(hit?.node.partId ?? null); recolor();
+  };
+  const focus = (partId: string | null) => {
+    selected = null;
+    if (partId) {
+      for (const record of pickRecords.values()) {
+        const index = record.nodes.findIndex((node) => node.partId === partId);
+        if (index >= 0) { selected = { object: record.object, instanceId: record.object instanceof THREE.InstancedMesh ? index : null }; break; }
+      }
+    }
+    recolor();
   };
   renderer.domElement.addEventListener("pointermove", onMove);
   renderer.domElement.addEventListener("click", onClick);
@@ -227,15 +309,43 @@ export function createThreeSpatialRenderer(options: ThreeSpatialOptions): ThreeS
   resize(); rebuild(); setView("iso");
 
   return {
-    update(nextModel) { model = nextModel; options.selection.setModel(model); rebuild(); },
+    update(nextModel, nextOverlays) { model = nextModel; overlays = nextOverlays; options.selection.setModel(model); rebuild(); },
+    focus,
+    setFinding(findingId) {
+      activeFindingId = findingId;
+      const partId = overlays.findings.find((finding) => finding.id === findingId)?.partIds[0] ?? null;
+      options.selection.select(partId, false); focus(partId);
+    },
+    setRoutesVisible(visible) { routesVisible = visible; routeGroup.visible = visible; render(); },
+    setDimensionsVisible(visible) { dimensionsVisible = visible; dimensionGroup.visible = visible; render(); },
+    setThermalVisible(visible) { thermalVisible = visible; thermalGroup.visible = visible && overlays.thermal.available; render(); },
+    setAssemblyStep(index) { assemblyStepIndex = index; recolor(); },
+    capture(filename) {
+      render();
+      renderer.domElement.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob); const anchor = document.createElement("a");
+        anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url);
+      }, "image/png");
+    },
+    getViewContext() {
+      return {
+        cameraMode,
+        cameraPositionMm: camera.position.toArray(),
+        targetMm: controls.target.toArray(),
+        explode,
+        routesVisible,
+        dimensionsVisible,
+        thermalVisible,
+        activeFindingId,
+        assemblyStepId: assemblyStepIndex === null ? null : overlays.assembly[assemblyStepIndex]?.id ?? null,
+      };
+    },
     reset() { setView("iso"); },
     dispose() {
       disposed = true; resizeObserver.disconnect(); controls.dispose();
       renderer.domElement.removeEventListener("pointermove", onMove); renderer.domElement.removeEventListener("click", onClick);
-      while (rootGroup.children.length) {
-        const object = rootGroup.children.pop()! as THREE.Mesh; object.geometry?.dispose();
-        const material = object.material; if (Array.isArray(material)) material.forEach((item) => item.dispose()); else material?.dispose();
-      }
+      disposeGroup(rootGroup); disposeGroup(routeGroup); disposeGroup(dimensionGroup); disposeGroup(thermalGroup);
       renderer.dispose(); options.host.replaceChildren();
     },
   };

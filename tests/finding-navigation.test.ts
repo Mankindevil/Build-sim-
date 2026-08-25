@@ -6,5 +6,6 @@ describe("R4 finding navigation", () => {
     expect(targetForFinding("physical.psu-clearance")).toEqual({ section: "power", field: "selection.psuId", spatialPartId: "psu-primary", taskRef: "verification:physical.psu-clearance" });
     expect(targetForFinding("wiring.sata-capacity")).toMatchObject({ section: "storage", field: "selection.diskCount", spatialPartId: "drive-array" });
     expect(targetForFinding("physical.gpu-hba-overlap")).toMatchObject({ section: "expansion", field: "selection.hbaMode", spatialPartId: "hba" });
+    expect(targetForFinding("n6.bay9-boot-vs-9hdd")).toMatchObject({ section: "storage", field: "selection.diskCount", spatialPartId: "drive-array" });
   });
 });
