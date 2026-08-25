@@ -60,7 +60,7 @@ describe("A4 Skill-scoped Tool runtime", () => {
         requests.push(request);
         if (requests.length === 1) {
           expect(request.system).toContain("Active Skill (build-diagnosis@1.0.0)");
-          expect(request.tools.map((tool) => tool.name).sort()).toEqual(["get_build_evaluation", "get_sku_facts"]);
+          expect(request.tools.map((tool) => tool.name).sort()).toEqual(["get_build_evaluation", "get_sku_facts", "propose_plan_change"]);
           return { provider: "deepseek", providerRequestId: "p1", model: request.model, content: "", toolCalls: [{ id: "forbidden", name: "search_price_candidates", input: { skuIds: ["case.jonsbo-n6"] } }], stopReason: "tool_use", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, latencyMs: 1 };
         }
         expect(JSON.parse(request.messages.at(-1)?.content ?? "{}")).toMatchObject({ ok: false, errorCode: "tool_not_allowed" });

@@ -5,6 +5,8 @@ import { FilePlanRepository } from "../plans/file-repository";
 import type { PlanRepository } from "../plans/contracts";
 import { ensureDefaultPlan } from "../plans/seed";
 import { handleWorkspaceRoute } from "./workspace-routes";
+import { PlanProposalService } from "../plans/proposals";
+import { FilePlanAgentContextAuditStore, MemoryPlanAgentContextAuditStore, type PlanAgentContextAuditStore } from "../plans/agent-context-audit";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 5176;
@@ -32,7 +34,9 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-export function createWorkspaceServer(repository: PlanRepository): http.Server {
+export function createWorkspaceServer(repository: PlanRepository, options: { agentContextAuditStore?: PlanAgentContextAuditStore } = {}): http.Server {
+  const agentContextAuditStore = options.agentContextAuditStore ?? new MemoryPlanAgentContextAuditStore();
+  const proposalService = new PlanProposalService(repository);
   return http.createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${HOST}`);
     let body: unknown = {};
@@ -42,7 +46,7 @@ export function createWorkspaceServer(repository: PlanRepository): http.Server {
       send(response, 400, { error: "invalid_request", message: error instanceof Error ? error.message : "Invalid request" });
       return;
     }
-    const result = await handleWorkspaceRoute(request.method, url.pathname, body, repository);
+    const result = await handleWorkspaceRoute(request.method, url.pathname, body, repository, { proposalService, agentContextAuditStore });
     send(response, result.status, result.payload);
   });
 }
@@ -54,7 +58,8 @@ if (isMain) {
     const root = path.resolve(process.env.PLAN_REPOSITORY_ROOT ?? "runtime/plans");
     const repository = new FilePlanRepository({ root });
     await ensureDefaultPlan(repository);
-    createWorkspaceServer(repository).listen(port, HOST, () => {
+    const agentContextAuditStore = new FilePlanAgentContextAuditStore(path.join(root, ".agent-context-audit"));
+    createWorkspaceServer(repository, { agentContextAuditStore }).listen(port, HOST, () => {
       console.log(`Build Sim workspace server listening on http://${HOST}:${port}`);
     });
   })().catch((error) => {

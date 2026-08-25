@@ -1642,6 +1642,16 @@ body:has(#n6-lab#n6-lab) {
   padding: 18px;
 }
 
+#n6-lab#n6-lab .agent-plan-context { margin:6px 0 0;padding:7px 9px;border:1px solid color-mix(in srgb,var(--ok) 34%,var(--border));border-radius:8px;background:color-mix(in srgb,var(--ok) 7%,transparent);color:var(--muted-foreground);font-size:10px }
+#n6-lab#n6-lab .agent-plan-context[data-stale="true"] { border-color:color-mix(in srgb,var(--warn) 45%,var(--border));background:color-mix(in srgb,var(--warn) 8%,transparent) }
+#n6-lab#n6-lab .agent-plan-proposals { display:grid;gap:10px;margin:12px 0 }
+#n6-lab#n6-lab .agent-plan-proposal { padding:12px;border:1px solid color-mix(in srgb,var(--primary) 34%,var(--border));border-radius:10px;background:color-mix(in srgb,var(--primary) 4%,var(--card)) }
+#n6-lab#n6-lab .agent-plan-proposal h4,#n6-lab#n6-lab .agent-plan-proposal p { margin:0 0 7px }
+#n6-lab#n6-lab .agent-plan-proposal ol { display:grid;gap:5px;margin:8px 0;padding-left:24px;font:11px/1.45 var(--font-mono,monospace) }
+#n6-lab#n6-lab .agent-plan-proposal>label { display:block;margin:9px 0;font-size:11px }
+#n6-lab#n6-lab .agent-plan-proposal>div { display:flex;gap:7px }
+#n6-lab#n6-lab .agent-proposal-impact { color:var(--muted-foreground);font-size:11px }
+
 #n6-lab#n6-lab .agent-run-log {
   padding: 18px;
   background: color-mix(in srgb, var(--background) 42%, transparent);

@@ -3,6 +3,8 @@ import { loadBundledCatalog, loadBundledPriceSnapshot } from "../sku/catalog";
 import type { BuildConfig, BuildSelection } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
 import { evaluateBuildAuthoritatively } from "./evaluation-service";
+import { PLAN_PATCH_PATHS, type PlanPatchOperation } from "../plans/contracts";
+import { previewPlanProposal } from "../plans/proposals";
 
 const DEFAULT_PRICE_SERVICE = "http://127.0.0.1:5174";
 const SECTION_NAMES = ["findings", "bom", "occupancy", "wiring", "routing", "assembly", "power", "price", "noise", "physical", "calibration", "thermal"] as const;
@@ -127,6 +129,37 @@ const compareBuilds: AgentToolSpec = {
         },
       },
       provenance: ["BuildEvaluation:baseline", "BuildEvaluation:candidate", baseline.catalogVersion, baseline.priceSnapshotVersion],
+    };
+  },
+};
+
+const proposePlanChange: AgentToolSpec = {
+  contractVersion: AGENT_CONTRACT_VERSION,
+  name: "propose_plan_change",
+  title: "生成方案修改提案",
+  description: "Create a structured, non-mutating plan change proposal against the exact plan id, draft revision, and config hash supplied in PlanAgentContext. The server validates allowlisted paths, SKU/type constraints, and recomputes deterministic before/after BuildEvaluation. This tool never applies the proposal; only a separate explicit human approval can modify the draft.",
+  effect: "read",
+  approval: "never",
+  timeoutMs: 8_000,
+  maxResultBytes: 120_000,
+  inputSchema: schema({
+    planId: { type: "string", minLength: 1, maxLength: 180 },
+    expectedDraftRevision: { type: "integer", minimum: 0 },
+    expectedConfigHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+    summary: { type: "string", minLength: 1, maxLength: 500 },
+    rationale: { type: "array", items: { type: "string", maxLength: 500 }, minItems: 1, maxItems: 12 },
+    operations: {
+      type: "array", minItems: 1, maxItems: 24,
+      items: { type: "object", properties: { op: { type: "string", enum: ["add", "replace", "remove"] }, path: { type: "string", enum: PLAN_PATCH_PATHS }, value: {} }, required: ["op", "path"], additionalProperties: false },
+    },
+  }, ["planId", "expectedDraftRevision", "expectedConfigHash", "summary", "rationale", "operations"]),
+  async execute(input, context) {
+    const value = input as { planId: string; expectedDraftRevision: number; expectedConfigHash: string; summary: string; rationale: string[]; operations: PlanPatchOperation[] };
+    const preview = await previewPlanProposal(requireConfig(context), value);
+    return {
+      ok: true,
+      content: { proposal: preview.proposal, confirmation: { required: true, effect: "update-active-draft", automaticApply: false } },
+      provenance: ["PlanAgentContext.configHash", "BuildEvaluation:before", "BuildEvaluation:after", "PLAN_PATCH_PATHS"],
     };
   },
 };
@@ -265,5 +298,5 @@ function createSearchPriceCandidates(priceServiceUrl: string): AgentToolSpec {
 
 export function createBuildSimTools(options: { priceServiceUrl?: string } = {}): AgentToolSpec[] {
   const priceServiceUrl = options.priceServiceUrl ?? DEFAULT_PRICE_SERVICE;
-  return [getBuildEvaluation, compareBuilds, getSkuFacts, getPriceSnapshot, createSearchOfficialCatalog(priceServiceUrl), createInspectCatalogCandidate(priceServiceUrl), createListOfficialDomainProposals(priceServiceUrl), createEnrichOfficialCatalog(priceServiceUrl), createSearchPriceCandidates(priceServiceUrl)];
+  return [getBuildEvaluation, compareBuilds, proposePlanChange, getSkuFacts, getPriceSnapshot, createSearchOfficialCatalog(priceServiceUrl), createInspectCatalogCandidate(priceServiceUrl), createListOfficialDomainProposals(priceServiceUrl), createEnrichOfficialCatalog(priceServiceUrl), createSearchPriceCandidates(priceServiceUrl)];
 }

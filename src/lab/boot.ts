@@ -34,6 +34,8 @@ import { WorkspaceRouter } from "./workspace-router";
 import { mountWorkspacePages, type WorkspacePagesController } from "./workspace-pages";
 import { EvaluationCoordinator } from "../plans/evaluation";
 import { mountSpatialView, type SpatialViewController } from "./spatial-view";
+import { createPlanAgentContext } from "../agent/plan-context";
+import type { PlanAgentContext } from "../plans/contracts";
 import "./design-system.css";
 
 let catalog = loadBundledCatalog();
@@ -161,6 +163,23 @@ function adviceInput() {
     buildConfig: evaluation.config,
     evaluation,
     selectedSkuFacts,
+  });
+}
+
+function currentPlanAgentContext(): PlanAgentContext | null {
+  const state = planStore?.getState();
+  if (!state?.activePlan || !state.evaluationSnapshot) return null;
+  return createPlanAgentContext({
+    plan: state.activePlan,
+    snapshot: state.evaluationSnapshot,
+    selection: state.selection,
+    spatialViewContext: spatialView?.getContext() ?? null,
+    purchaseSummary: {
+      bom: state.evaluationSnapshot.evaluation.bom.map((line) => ({ skuId: line.skuId, qty: line.qty, bucket: line.bucket })),
+      price: state.evaluationSnapshot.evaluation.price,
+      note: "汇总不含交易截图、凭据或支付信息。",
+    },
+    buildTaskSummary: { status: "pending-reconcile", note: "R9 前仅提供当前 evaluation assembly 摘要。", assemblySteps: state.evaluationSnapshot.evaluation.assembly.steps.map((step) => ({ id: step.id, label: step.label, kind: step.kind })) },
   });
 }
 
@@ -1048,7 +1067,12 @@ async function boot(): Promise<void> {
 
   await initPricePanel({ catalog, onAudited: () => reapplyLocalPrices() });
   initAdvicePanel({ getInput: adviceInput });
-  await initAgentPanel({ getBuildConfig: configFromDom });
+  await initAgentPanel({
+    getBuildConfig: configFromDom,
+    getPlanContext: currentPlanAgentContext,
+    subscribePlanContext: (listener) => planStore?.subscribe(() => listener()) ?? (() => undefined),
+    acceptServerPlan: (plan) => planStore?.acceptServerPlan(plan),
+  });
 }
 
 void boot();

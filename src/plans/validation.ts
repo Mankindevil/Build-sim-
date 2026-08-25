@@ -123,6 +123,7 @@ export function validatePlanAgentContext(value: unknown): string[] {
     const spatial = record(selection);
     if (!spatial || typeof spatial.partId !== "string" || !spatial.partId || typeof spatial.view !== "string" || !spatial.view) errors.push("spatialSelection invalid");
   }
+  if ("spatialViewContext" in input && input.spatialViewContext !== null && !record(input.spatialViewContext)) errors.push("spatialViewContext invalid");
   if (!("purchaseSummary" in input)) errors.push("purchaseSummary missing");
   if (!("buildTaskSummary" in input)) errors.push("buildTaskSummary missing");
   return errors;

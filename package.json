@@ -14,6 +14,7 @@
     "test:g7:browser": "node scripts/g7-browser-smoke.mjs",
     "test:workspace:browser": "node scripts/workspace-browser-smoke.mjs",
     "test:spatial:browser": "node scripts/spatial-browser-smoke.mjs",
+    "test:agent-plan:browser": "node scripts/agent-plan-browser-smoke.mjs",
     "test:c7:browser": "node scripts/c7-catalog-agent-browser-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "price:refresh": "node scripts/price-refresh/refresh.mjs",

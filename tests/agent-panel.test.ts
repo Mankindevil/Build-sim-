@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatCatalogToolResult, initAgentPanel } from "../src/lab/agent-panel";
+import type { PlanAgentContext, PlanChangeProposal } from "../src/plans/contracts";
+import { makePlan } from "./helpers/workspace-ui";
 
 class FakeEventSource {
   readonly listeners = new Map<string, Array<(event: Event) => void>>();
@@ -136,5 +138,75 @@ describe("A5 Agent panel", () => {
     await vi.waitFor(() => expect((document.querySelector("#agent-cancel") as HTMLButtonElement).disabled).toBe(false));
     (document.querySelector("#agent-cancel") as HTMLButtonElement).click();
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledWith("/api/agent/runs/run-cancel/cancel", expect.objectContaining({ method: "POST" })));
+  });
+
+  it("binds run context and applies a structured proposal only after explicit human approval", async () => {
+    const stream = new FakeEventSource();
+    const active = makePlan("plan-agent-12345678", "Agent plan");
+    const configHash = "1".repeat(64);
+    const evaluationHash = "2".repeat(64);
+    const context = {
+      schemaVersion: "1.0.0",
+      planId: active.id,
+      planVersionId: active.activeVersionId,
+      draftRevision: active.draftRevision,
+      configHash,
+      evaluationHash,
+      buildConfig: active.draft.config,
+      evaluation: { config: active.draft.config, findings: [], price: { knownCny: 0 } },
+      spatialSelection: { partId: "psu.primary", view: "spatial", findingId: "physical.psu-clearance" },
+      spatialViewContext: { cameraMode: "perspective" },
+      purchaseSummary: { linked: 0 },
+      buildTaskSummary: { todo: 1 },
+    } as unknown as PlanAgentContext;
+    const proposal: PlanChangeProposal = {
+      schemaVersion: "1.0.0", id: "proposal-panel", planId: active.id, expectedDraftRevision: active.draftRevision, expectedConfigHash: configHash,
+      createdAt: "2026-08-25T00:00:00.000Z", summary: "改为两块硬盘", rationale: ["用户要求"],
+      operations: [{ op: "replace", path: "/selection/diskCount", value: 2 }],
+      predictedImpact: { resolvedFindingIds: ["storage.fixture"], introducedFindingIds: [], budgetDeltaCny: 100 }, status: "proposed",
+    };
+    const appliedPlan = structuredClone(active);
+    appliedPlan.draftRevision += 1;
+    appliedPlan.draft.config.selection.diskCount = 2;
+    const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    const acceptServerPlan = vi.fn();
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+      requests.push({ url, body });
+      if (url.endsWith("/models")) return payload({ models: [model] });
+      if (url.endsWith("/skills")) return payload({ skills: [{ ...skill, manifest: { ...skill.manifest, allowedTools: [...skill.manifest.allowedTools, "propose_plan_change"] } }] });
+      if (url.endsWith("/sessions") && init?.method === "POST") return payload(session, 201);
+      if (url.endsWith("/messages")) return payload({ runId: "run-plan", status: "queued" }, 202);
+      if (url.endsWith("/agent-context")) return payload({ runId: "run-plan", contextHash: "3".repeat(64) }, 201);
+      if (url.endsWith("/proposals/validate")) return payload({ proposal });
+      if (url.endsWith("/proposals/apply")) return payload({ proposal: { ...proposal, status: "applied" }, plan: appliedPlan, audit: { approvalId: "approval-panel" } });
+      throw new Error(`unexpected ${url}`);
+    });
+    await initAgentPanel({ getBuildConfig: () => active.draft.config, getPlanContext: () => context, acceptServerPlan, fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => stream });
+    expect(document.querySelector("[data-agent-plan-context]")?.textContent).toContain(evaluationHash.slice(0, 12));
+    (document.querySelector("#agent-input") as HTMLTextAreaElement).value = "根据当前 PSU 提出修复";
+    document.querySelector("#agent-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(requests.some((entry) => entry.url.endsWith("/agent-context"))).toBe(true));
+    const messageBody = requests.find((entry) => entry.url.endsWith("/messages"))?.body;
+    expect(messageBody?.content).toContain("<plan_agent_context");
+    expect(messageBody?.content).toContain(evaluationHash);
+    expect(messageBody?.content).toContain("psu.primary");
+    expect(messageBody?.content).not.toContain("approvalToken");
+    expect(requests.find((entry) => entry.url.endsWith("/agent-context"))?.body).toMatchObject({ sessionId: session.id, runId: "run-plan", context: { planId: active.id, evaluationHash } });
+
+    stream.emit("text_delta", { type: "text_delta", runId: "run-plan", text: "我已经修复。", at: "now" });
+    expect(acceptServerPlan).not.toHaveBeenCalled();
+    stream.emit("tool_result", { type: "tool_result", runId: "run-plan", callId: "proposal", toolName: "propose_plan_change", result: { ok: true, content: { proposal }, provenance: [] }, at: "now" });
+    await vi.waitFor(() => expect(document.querySelector("[data-plan-proposal='proposal-panel']")).not.toBeNull());
+    const apply = document.querySelector<HTMLButtonElement>("[data-apply-proposal]")!;
+    expect(apply.disabled).toBe(true);
+    expect(acceptServerPlan).not.toHaveBeenCalled();
+    const approval = document.querySelector<HTMLInputElement>("[data-proposal-approval]")!;
+    approval.checked = true;
+    approval.dispatchEvent(new Event("change"));
+    apply.click();
+    await vi.waitFor(() => expect(acceptServerPlan).toHaveBeenCalledWith(expect.objectContaining({ draftRevision: active.draftRevision + 1 })));
+    expect(requests.find((entry) => entry.url.endsWith("/proposals/apply"))?.body).toMatchObject({ operationIndexes: [0], approvalConfirmed: true, approvedBy: "local-human" });
   });
 });

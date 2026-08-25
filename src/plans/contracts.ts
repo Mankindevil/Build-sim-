@@ -85,6 +85,7 @@ export interface PlanAgentContext {
     view: string;
     findingId?: string;
   } | null;
+  spatialViewContext?: unknown;
   purchaseSummary: unknown;
   buildTaskSummary: unknown;
 }

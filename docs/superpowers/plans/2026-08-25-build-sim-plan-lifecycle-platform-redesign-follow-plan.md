@@ -772,17 +772,17 @@ R4、R6 完成。
 
 ### 任务
 
-- [ ] Agent session 绑定 `planId`；每次 run 记录 version/revision/config/evaluation hash。
-- [ ] 发送完整 `PlanAgentContext`，包含当前 3D selection、finding、采购和任务摘要。
-- [ ] UI 明确显示 Agent 当前绑定的方案和上下文是否 stale。
-- [ ] 新增 `propose_plan_change` 结构化结果契约；只允许 allowlist patch。
-- [ ] 服务端验证 SKU、字段类型、expected revision/hash 和工具 definition hash。
-- [ ] 提案先在隔离配置副本上运行 `BuildEvaluation`，生成确定性 before/after diff。
-- [ ] UI 提案卡展示字段 diff、解决/新增 findings、预算变化和 unknown。
-- [ ] 支持全部应用、逐项应用、拒绝；部分应用后重新验证 patch。
-- [ ] 应用动作进入 active draft，默认不直接保存版本。
-- [ ] 复用现有 approval/audit/idempotency 边界；写 effect 不得伪装只读。
-- [ ] 旧 Agent 普通对话继续可用，但回答不得被解析为隐式配置修改。
+- [x] Agent session 绑定 `planId`；每次 run 记录 version/revision/config/evaluation hash。
+- [x] 发送完整 `PlanAgentContext`，包含当前 3D selection、finding、采购和任务摘要。
+- [x] UI 明确显示 Agent 当前绑定的方案和上下文是否 stale。
+- [x] 新增 `propose_plan_change` 结构化结果契约；只允许 allowlist patch。
+- [x] 服务端验证 SKU、字段类型、expected revision/hash 和工具 definition hash。
+- [x] 提案先在隔离配置副本上运行 `BuildEvaluation`，生成确定性 before/after diff。
+- [x] UI 提案卡展示字段 diff、解决/新增 findings、预算变化和 unknown。
+- [x] 支持全部应用、逐项应用、拒绝；部分应用后重新验证 patch。
+- [x] 应用动作进入 active draft，默认不直接保存版本。
+- [x] 复用现有 approval/audit/idempotency 边界；写 effect 不得伪装只读。
+- [x] 旧 Agent 普通对话继续可用，但回答不得被解析为隐式配置修改。
 
 ### 聚焦验证
 
@@ -1155,4 +1155,20 @@ R3 工作台编辑器  R4 评估版本化
 - 数据迁移：无；overlay 不持久化 verdict，刷新后从 active evaluation 重建
 - 未验证项：R7 将消费已发出的 spatial Agent context，并实现可审阅/人工批准 proposal
 - 回滚方式：移除 overlay model、renderer overlay groups 与 workspace custom events；R5 基础 3D 和 SVG fallback 保持可用
+- Push：未授权
+
+### R7 执行记录
+
+- 状态：完成
+- 起始 HEAD：`3ee88a1`
+- 完成提交：`feat(agent): add plan-aware reviewed change proposals`（SHA 见 Git log）
+- 修改文件：完整 PlanAgentContext/envelope、run context audit store/routes、`propose_plan_change` 只读结构化 Tool、服务器确定性 proposal preview/validate/apply、人工批准提案卡、PlanStore server draft 接收、Agent 深链接可见性、R7 tests/E2E
+- 聚焦测试：`npx vitest run tests/agent-plan-context.test.ts tests/agent-plan-proposal.test.ts tests/agent-approval.test.ts tests/agent-runtime.test.ts`，4 files / 18 tests passed
+- 全量门禁：Vitest 72 files / 415 tests passed；typecheck passed；client + Agent + workspace production build passed；legacy model 85 assertions passed；legacy static 23 assertions passed；secret scan 316 files / 0 findings；`git diff --check` passed
+- 浏览器证据：Agent proposal E2E passed（服务器重算影响、批准前不变、批准后 active draft 更新且 evaluation hash 改变、拒绝/stale 不变）；workspace 与 spatial browser regression passed
+- 安全边界：普通 assistant 文本不解析为写入；proposal Tool 不写数据；apply 需 UI 显式勾选人工批准，服务端再次校验 plan/revision/hash/SKU/allowlist，部分应用重新预览；批准结果幂等；approval token 不进入模型上下文、会话文本或浏览器持久化
+- 数据迁移：无 schema 迁移；运行上下文审计写入方案仓库下 `.agent-context-audit`，不包含交易截图、支付信息或 approval token
+- Bundle/性能：Three 动态 chunk 552.39 kB / gzip 140.07 kB；主入口 308.62 kB / gzip 106.01 kB；Agent/workspace SSR 分别 305.45/248.68 kB
+- 未验证项：R8/R9 将把真实方案交易链接和 reconcile 后装机任务摘要替换当前受限 purchase/task summary
+- 回滚方式：移除 proposal/audit workspace routes、Agent proposal card/context envelope 与 `acceptServerPlan`；方案、版本、evaluation 和 Three 场景格式保持不变
 - Push：未授权

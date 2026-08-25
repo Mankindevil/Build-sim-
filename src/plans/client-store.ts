@@ -412,6 +412,21 @@ export class PlanStore {
     this.emit();
   }
 
+  /** Accept a server-authoritative draft returned by an explicitly approved proposal. */
+  acceptServerPlan(plan: BuildPlan): void {
+    if (plan.id !== this.state.activePlan?.id) throw new Error("Approved proposal returned another plan");
+    this.cancelAutosave();
+    this.state.activePlan = clone(plan);
+    this.state.saveStatus = "saved";
+    this.state.offline = false;
+    this.state.error = null;
+    this.state.localRevision = 0;
+    this.changeToken += 1;
+    this.replaceSummary(plan);
+    this.cache(plan);
+    this.emit();
+  }
+
   shouldWarnBeforeUnload(): boolean {
     return Boolean(this.state.activePlan?.draft.dirty || ["dirty", "saving", "failed", "conflict", "offline"].includes(this.state.saveStatus));
   }

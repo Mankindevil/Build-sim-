@@ -24,6 +24,12 @@ function statusLabel(state: PlanStoreState): string {
   return "已保存版本";
 }
 
+function showLegacyPanel(root: HTMLElement, route: WorkspaceRoute): void {
+  const panel = route === "agent" ? "agent" : "overview";
+  for (const tab of root.querySelectorAll<HTMLElement>(".lab-tab[data-tab]")) tab.setAttribute("aria-selected", String(tab.dataset.tab === panel));
+  for (const candidate of root.querySelectorAll<HTMLElement>(".lab-panel[data-panel]")) candidate.classList.toggle("is-hidden", candidate.dataset.panel !== panel);
+}
+
 export interface PlanShellController { dispose(): void; }
 
 export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new WorkspaceRouter()): PlanShellController {
@@ -91,6 +97,7 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
   }
   const unsubscribeRoute = router.subscribe((route) => {
     for (const link of routeLinks) link.setAttribute("aria-current", link.dataset.route === route ? "page" : "false");
+    showLegacyPanel(root, route);
     const target = document.getElementById(router.target(route));
     if (target && route !== "workspace") target.scrollIntoView({ block: "start" });
     if (route === "purchases") document.querySelector<HTMLDialogElement>("#build-base-dialog")?.showModal?.();
@@ -114,4 +121,3 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
     },
   };
 }
-

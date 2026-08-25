@@ -1,4 +1,6 @@
 import type { AgentMessage, AgentRunAuditRecord, AgentRunEvent, AgentSession, ProviderModel } from "../agent/contracts";
+import type { BuildPlan, PlanAgentContext, PlanChangeProposal } from "../plans/contracts";
+import { isPlanAgentContextStale, planAgentContextEnvelope } from "../agent/plan-context";
 
 const API = "/api/agent";
 
@@ -14,6 +16,9 @@ interface EventStream {
 
 export interface AgentPanelOptions {
   getBuildConfig: () => unknown;
+  getPlanContext?: () => PlanAgentContext | null;
+  subscribePlanContext?: (listener: () => void) => () => void;
+  acceptServerPlan?: (plan: BuildPlan) => void;
   fetchImpl?: typeof fetch;
   eventSourceFactory?: (url: string) => EventStream;
 }
@@ -58,6 +63,13 @@ async function json<T>(fetchImpl: typeof fetch, path: string, init?: RequestInit
   return payload;
 }
 
+async function workspaceJson<T>(fetchImpl: typeof fetch, path: string, init?: RequestInit): Promise<T> {
+  const response = await fetchImpl(`/api/workspace${path}`, { headers: { "Content-Type": "application/json" }, ...init });
+  const payload = await response.json().catch(() => ({ error: "invalid_json", message: `HTTP ${response.status}` })) as T & { error?: string; message?: string };
+  if (!response.ok) throw new Error(payload.message ?? payload.error ?? `HTTP ${response.status}`);
+  return payload;
+}
+
 function messageNode(role: "user" | "assistant" | "notice", content: string): HTMLDivElement {
   const row = document.createElement("div");
   row.className = `agent-message agent-message-${role}`;
@@ -70,6 +82,45 @@ function messageNode(role: "user" | "assistant" | "notice", content: string): HT
   body.textContent = content;
   row.append(label, body);
   return row;
+}
+
+function proposalNode(
+  proposal: PlanChangeProposal,
+  onApply: (indexes: number[], card: HTMLElement) => Promise<void>,
+  onReject: (card: HTMLElement) => void,
+): HTMLElement {
+  const card = document.createElement("article");
+  card.className = "agent-plan-proposal";
+  card.dataset.planProposal = proposal.id;
+  const heading = document.createElement("h4"); heading.textContent = proposal.summary;
+  const meta = document.createElement("p"); meta.textContent = `方案 ${proposal.planId} · revision ${proposal.expectedDraftRevision} · config ${proposal.expectedConfigHash.slice(0, 12)}`;
+  const list = document.createElement("ol");
+  proposal.operations.forEach((operation, index) => {
+    const item = document.createElement("li");
+    const label = document.createElement("label"); const checkbox = document.createElement("input");
+    checkbox.type = "checkbox"; checkbox.checked = true; checkbox.dataset.proposalOperation = String(index);
+    const value = operation.op === "remove" ? "移除" : JSON.stringify(operation.value);
+    label.append(checkbox, ` ${operation.op} ${operation.path} → ${value.length > 120 ? `${value.slice(0, 120)}…` : value}`); item.append(label); list.append(item);
+  });
+  const impact = document.createElement("p");
+  impact.className = "agent-proposal-impact";
+  impact.textContent = `确定性预览：解决 ${proposal.predictedImpact.resolvedFindingIds.length} · 新增 ${proposal.predictedImpact.introducedFindingIds.length} · 预算 ${proposal.predictedImpact.budgetDeltaCny === null ? "unknown" : `${proposal.predictedImpact.budgetDeltaCny >= 0 ? "+" : ""}${proposal.predictedImpact.budgetDeltaCny} CNY`}`;
+  const approvalLabel = document.createElement("label"); const approval = document.createElement("input");
+  approval.type = "checkbox"; approval.dataset.proposalApproval = ""; approvalLabel.append(approval, " 我已审阅所选字段并批准写入当前草稿");
+  const actions = document.createElement("div"); const apply = document.createElement("button"); const reject = document.createElement("button");
+  apply.type = "button"; apply.textContent = "应用所选项"; apply.disabled = true; apply.dataset.applyProposal = "";
+  reject.type = "button"; reject.textContent = "拒绝"; reject.dataset.rejectProposal = "";
+  const state = document.createElement("p"); state.dataset.proposalState = ""; state.textContent = "proposed · 未修改方案";
+  approval.addEventListener("change", () => { apply.disabled = !approval.checked; });
+  apply.addEventListener("click", async () => {
+    const indexes = [...card.querySelectorAll<HTMLInputElement>("[data-proposal-operation]:checked")].map((entry) => Number(entry.dataset.proposalOperation));
+    if (!indexes.length) { state.textContent = "至少选择一项修改。"; return; }
+    apply.disabled = true; reject.disabled = true; state.textContent = "正在重新验证 revision/hash/SKU 并运行确定性评估…";
+    try { await onApply(indexes, card); } catch (error) { state.textContent = `stale/rejected · ${text((error as Error).message)}`; reject.disabled = false; }
+  });
+  reject.addEventListener("click", () => onReject(card));
+  actions.append(apply, reject); card.append(heading, meta, list, impact, approvalLabel, actions, state);
+  return card;
 }
 
 export async function initAgentPanel(options: AgentPanelOptions): Promise<void> {
@@ -86,6 +137,17 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
   const usage = byId<HTMLElement>("agent-usage");
   if (!model || !skill || !status || !transcript || !events || !form || !input || !send || !cancel || !reset || !usage) return;
 
+  const contextBadge = document.createElement("p");
+  contextBadge.className = "agent-plan-context";
+  contextBadge.dataset.agentPlanContext = "";
+  contextBadge.setAttribute("aria-live", "polite");
+  status.insertAdjacentElement("afterend", contextBadge);
+  const proposalHost = document.createElement("section");
+  proposalHost.className = "agent-plan-proposals";
+  proposalHost.dataset.agentPlanProposals = "";
+  proposalHost.setAttribute("aria-label", "Agent 方案修改提案");
+  form.parentElement?.insertBefore(proposalHost, form);
+
   const fetchImpl = options.fetchImpl ?? fetch;
   const eventSourceFactory = options.eventSourceFactory ?? ((url: string) => new EventSource(url));
   let session: AgentSession | null = null;
@@ -93,11 +155,54 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
   let stream: EventStream | null = null;
   let assistantBody: HTMLElement | null = null;
   let catalogReady = false;
+  let boundContext: PlanAgentContext | null = null;
+
+  const currentContext = () => options.getPlanContext?.() ?? null;
+  const refreshContextBadge = () => {
+    const current = currentContext();
+    if (!current) {
+      contextBadge.textContent = "未绑定方案 evaluation；普通对话仍可用，不能生成可应用提案。";
+      contextBadge.dataset.stale = "true";
+      return;
+    }
+    const stale = isPlanAgentContextStale(boundContext, current);
+    contextBadge.dataset.stale = String(stale);
+    contextBadge.textContent = `绑定方案 ${current.planId} · revision ${current.draftRevision} · evaluation ${current.evaluationHash.slice(0, 12)}${boundContext ? stale ? " · context stale，发送时刷新" : " · context current" : " · 尚未发送"}`;
+  };
+  refreshContextBadge();
+  options.subscribePlanContext?.(refreshContextBadge);
 
   const setStatus = (content: string, level: "ok" | "warn" | "bad" = "warn") => {
     status.textContent = content;
     status.dataset.level = level;
   };
+
+  const receiveProposal = async (content: unknown) => {
+    const proposal = content && typeof content === "object" ? (content as { proposal?: PlanChangeProposal }).proposal : undefined;
+    if (!proposal) return;
+    try {
+      const validated = await workspaceJson<{ proposal: PlanChangeProposal }>(fetchImpl, `/plans/${encodeURIComponent(proposal.planId)}/proposals/validate`, { method: "POST", body: JSON.stringify({ proposal }) });
+      const card = proposalNode(validated.proposal, async (indexes, target) => {
+        const result = await workspaceJson<{ proposal: PlanChangeProposal; plan: BuildPlan; audit: { approvalId: string } }>(fetchImpl, `/plans/${encodeURIComponent(validated.proposal.planId)}/proposals/apply`, {
+          method: "POST",
+          body: JSON.stringify({ proposal: validated.proposal, operationIndexes: indexes, approvalConfirmed: true, approvedBy: "local-human" }),
+        });
+        options.acceptServerPlan?.(result.plan);
+        target.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach((control) => { control.disabled = true; });
+        target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = `applied · ${result.audit.approvalId} · 已进入 active draft，未自动保存版本`;
+      }, (target) => {
+        target.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach((control) => { control.disabled = true; });
+        target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = "rejected · 方案未改变";
+      });
+      proposalHost.prepend(card);
+    } catch (error) {
+      const notice = messageNode("notice", `提案验证失败：${text((error as Error).message)}`);
+      proposalHost.prepend(notice);
+    }
+  };
+  proposalHost.addEventListener("build-sim:agent-plan-proposal", (event) => {
+    void receiveProposal((event as CustomEvent<unknown>).detail);
+  });
   const setBusy = (busy: boolean) => {
     send.disabled = busy || !catalogReady;
     cancel.disabled = !busy || !activeRunId;
@@ -132,6 +237,8 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
     events.replaceChildren();
     usage.textContent = "尚无 token usage";
     assistantBody = null;
+    boundContext = null;
+    refreshContextBadge();
   };
 
   const createSession = async (): Promise<AgentSession> => {
@@ -224,6 +331,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
       if (data) {
         const summary = formatCatalogToolResult(data.toolName, data.result.content);
         addEvent(`Tool 结果 · ${data.toolName} · ${data.result.ok ? "ok" : data.result.errorCode ?? "error"}${summary ? ` · ${summary}` : ""}`, data.result.ok ? "ok" : "warn");
+        if (data.result.ok && data.toolName === "propose_plan_change") void receiveProposal(data.result.content);
       }
     });
     source.addEventListener("usage", (event) => {
@@ -308,11 +416,24 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
     transcript.append(messageNode("user", content));
     input.value = "";
     try {
+      const planContext = currentContext();
+      if (session && boundContext && planContext && boundContext.planId !== planContext.planId) clearConversation();
       const current = await createSession();
+      const agentContent = planContext ? planAgentContextEnvelope(content, planContext) : content;
       const run = await json<{ runId: string }>(fetchImpl, `/sessions/${encodeURIComponent(current.id)}/messages`, {
         method: "POST",
-        body: JSON.stringify({ content, buildConfig: options.getBuildConfig(), ...(skill.value ? { skillId: skill.value } : {}) }),
+        body: JSON.stringify({ content: agentContent, buildConfig: planContext?.buildConfig ?? options.getBuildConfig(), ...(skill.value ? { skillId: skill.value } : {}) }),
       });
+      if (planContext) {
+        boundContext = structuredClone(planContext);
+        refreshContextBadge();
+        try {
+          await workspaceJson(fetchImpl, "/agent-context", { method: "POST", body: JSON.stringify({ sessionId: current.id, runId: run.runId, context: planContext }) });
+          addEvent(`方案上下文审计 · ${planContext.planId} r${planContext.draftRevision} · ${planContext.evaluationHash.slice(0, 12)}`);
+        } catch (error) {
+          addEvent(`方案上下文审计失败：${text((error as Error).message)}`, "bad");
+        }
+      }
       activeRunId = run.runId;
       cancel.disabled = false;
       setStatus("请求已提交，等待流式响应…", "ok");
