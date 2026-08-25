@@ -13,6 +13,7 @@ import {
   type PlanVersion,
   type SaveVersionInput,
   type UpdateDraftInput,
+  type UpdatePlanInfoInput,
 } from "./contracts";
 import { PlanRepositoryError } from "./errors";
 import { assertValidBuildPlan, assertValidPlanVersion } from "./validation";
@@ -261,6 +262,35 @@ export class FilePlanRepository implements PlanRepository {
     ));
   }
 
+  async updateInfo(planId: string, input: UpdatePlanInfoInput): Promise<BuildPlan> {
+    return this.serialize(planId, async () => {
+      const plan = await this.readPlan(planId);
+      if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
+      assertExpectedRevision(input.expectedRevision, plan.draftRevision);
+      const name = input.name.trim();
+      if (!name || name.length > 120) throw new PlanRepositoryError("invalid_input", "Plan name must contain 1 to 120 characters", 400);
+      const timestamp = this.now();
+      const config = clone(plan.draft.config);
+      config.name = name;
+      config.updatedAt = timestamp;
+      const updated: BuildPlan = {
+        ...plan,
+        name,
+        ...(input.metadata ? { metadata: clone(input.metadata) } : {}),
+        updatedAt: timestamp,
+        draftRevision: plan.draftRevision + 1,
+        draft: { ...plan.draft, config, dirty: true, updatedAt: timestamp },
+      };
+      if (input.description !== undefined) {
+        if (input.description.trim()) updated.description = input.description.trim();
+        else delete updated.description;
+      }
+      assertValidBuildPlan(updated);
+      await this.atomicWrite(this.planFile(planId), "plan", updated);
+      return clone(updated);
+    });
+  }
+
   async saveVersion(planId: string, input: SaveVersionInput): Promise<PlanVersion> {
     return this.serialize(planId, () => this.idempotent(
       `saveVersion:${planId}`,
@@ -281,6 +311,7 @@ export class FilePlanRepository implements PlanRepository {
           versionNumber: versions.length + 1,
           createdAt: this.now(),
           reason: input.reason,
+          ...(input.summary ? { summary: input.summary } : {}),
           config: plan.draft.config,
           parentVersionId: plan.activeVersionId,
         });

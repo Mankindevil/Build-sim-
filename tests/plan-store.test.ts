@@ -66,6 +66,17 @@ describe("R1 file plan repository", () => {
     expect((await store.get(plan.id)).draftRevision).toBe(1);
   });
 
+  it("renames plan metadata with revision protection and persists version summaries", async () => {
+    const { store } = await repository();
+    const plan = await store.create({ name: "Before", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
+    const renamed = await store.updateInfo(plan.id, { expectedRevision: 0, name: "After", description: "Workstation NAS" });
+    expect(renamed).toMatchObject({ name: "After", description: "Workstation NAS", draftRevision: 1, draft: { config: { name: "After" }, dirty: true } });
+    await expect(store.updateInfo(plan.id, { expectedRevision: 0, name: "Stale" })).rejects.toMatchObject({ code: "stale_revision" });
+    const version = await store.saveVersion(plan.id, { expectedRevision: 1, expectedConfigHash: await sha256Hex(renamed.draft.config), reason: "manual-save", summary: "Rename and document purpose" });
+    expect(version.summary).toBe("Rename and document purpose");
+    expect((await store.listVersions(plan.id))[0]?.summary).toBe("Rename and document purpose");
+  });
+
   it("duplicates into an independent version chain and honors idempotency", async () => {
     const { store } = await repository();
     const source = await store.create({ name: "Source", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z"), idempotencyKey: "create-source" });

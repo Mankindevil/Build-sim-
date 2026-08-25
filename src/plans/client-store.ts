@@ -293,7 +293,7 @@ export class PlanStore {
     return this.saveInFlight;
   }
 
-  async saveVersion(reason: PlanVersionReason = "manual-save"): Promise<PlanVersion> {
+  async saveVersion(reason: PlanVersionReason = "manual-save", summary?: string): Promise<PlanVersion> {
     await this.saveDraftNow();
     const plan = this.state.activePlan;
     if (!plan || this.state.saveStatus === "failed" || this.state.saveStatus === "conflict" || this.state.saveStatus === "offline") throw new Error("Draft must be persisted before saving a version");
@@ -301,6 +301,7 @@ export class PlanStore {
       expectedRevision: plan.draftRevision,
       expectedConfigHash: await sha256Hex(plan.draft.config),
       reason,
+      ...(summary?.trim() ? { summary: summary.trim() } : {}),
       idempotencyKey: `version-${plan.id}-${plan.draftRevision}-${await sha256Hex(plan.draft.config)}`,
     });
     plan.activeVersionId = version.id;
@@ -329,6 +330,23 @@ export class PlanStore {
     return copy;
   }
 
+  async renameActive(name: string, description?: string): Promise<BuildPlan> {
+    const plan = this.state.activePlan;
+    if (!plan) throw new Error("No active plan");
+    await this.saveDraftNow();
+    const updated = await this.options.api.updateInfo(plan.id, {
+      expectedRevision: this.state.activePlan?.draftRevision ?? plan.draftRevision,
+      name,
+      ...(description !== undefined ? { description } : {}),
+    });
+    this.state.activePlan = updated;
+    this.state.saveStatus = "saved";
+    this.replaceSummary(updated);
+    this.cache(updated);
+    this.emit();
+    return updated;
+  }
+
   async archiveActive(): Promise<void> {
     const plan = this.state.activePlan;
     if (!plan) return;
@@ -336,6 +354,38 @@ export class PlanStore {
     plan.status = "archived";
     this.replaceSummary(plan);
     this.emit();
+  }
+
+  async restorePlan(planId: string): Promise<void> {
+    await this.options.api.restore(planId);
+    const restored = await this.options.api.get(planId);
+    this.replaceSummary(restored);
+    await this.activate(planId, true);
+  }
+
+  async deletePlan(planId: string): Promise<void> {
+    await this.options.api.delete(planId);
+    this.state.plans = this.state.plans.filter((plan) => plan.id !== planId);
+    if (this.state.activePlan?.id === planId) {
+      const next = this.state.plans.find((plan) => plan.status === "active") ?? this.state.plans[0];
+      this.state.activePlan = next ? await this.options.api.get(next.id) : null;
+      if (this.state.activePlan) this.cache(this.state.activePlan);
+    }
+    this.emit();
+  }
+
+  async listVersions(): Promise<PlanVersion[]> {
+    const plan = this.state.activePlan;
+    return plan ? this.options.api.listVersions(plan.id) : [];
+  }
+
+  restoreVersion(version: PlanVersion): void {
+    const plan = this.state.activePlan;
+    if (!plan || version.planId !== plan.id) throw new Error("Version does not belong to the active plan");
+    const config = clone(version.config) as BuildConfig;
+    config.id = plan.id;
+    config.name = plan.name;
+    this.replaceDraft(config);
   }
 
   setEvaluation(evaluation: BuildEvaluation | null): void {

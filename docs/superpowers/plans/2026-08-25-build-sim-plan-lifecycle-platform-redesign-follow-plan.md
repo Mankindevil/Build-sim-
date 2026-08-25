@@ -1097,3 +1097,17 @@ R3 工作台编辑器  R4 评估版本化
 - 未验证项：R3 才交付完整新建/导入向导、版本历史 UI 和危险操作对话框
 - 回滚方式：移除动态 Plan shell/PlanStore boot 接入后，`configFromDomLegacy()` 仍可恢复原页面；服务端方案数据不需删除
 - Push：未授权
+
+### R3 执行记录
+
+- 状态：完成
+- 起始 HEAD：`017375e`
+- 完成提交：`feat(workspace): deliver plan dashboard and editor`（SHA 见 Git log）
+- 修改文件：Plan info update/version summary contracts；工作台、创建/复制/导入向导、分组编辑器、影响摘要、版本历史/对比/恢复模块与样式；R3 tests/E2E
+- 聚焦测试：`npx vitest run tests/workspace-dashboard.test.ts tests/plan-editor.test.ts tests/plan-version-history.test.ts tests/config-import-ui.test.ts`，4 files / 4 tests passed；存储/API 扩展测试共 14 tests passed
+- 全量门禁：Vitest 61 files / 389 tests passed；typecheck passed；client + Agent + workspace production build passed；legacy model 85 assertions passed；legacy static 23 assertions passed；secret scan 290 files / 0 findings；`git diff --check` passed
+- 浏览器证据：workspace E2E passed（模板向导、分组编辑、dirty/autosave、版本摘要/历史、复制/切换/刷新）；390×844 手机 viewport 与键盘导航 passed；G1/G7 passed
+- 数据迁移：无新增格式迁移；R1/R2 方案与 active id 数据保持兼容
+- 未验证项：R4 将把当前风险变化摘要升级为 hash-bound evaluation diff 与正式 finding target mapping
+- 回滚方式：移除动态 `workspace-pages` 挂载及 info PATCH route；R2 shell/PlanStore 与 legacy 页面继续可用，已有版本不变
+- Push：未授权

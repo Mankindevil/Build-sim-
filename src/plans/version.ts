@@ -9,6 +9,7 @@ export interface CreatePlanVersionInput {
   versionNumber: number;
   createdAt: string;
   reason: PlanVersionReason;
+  summary?: string;
   config: BuildConfig;
   parentVersionId: string | null;
 }
@@ -22,6 +23,7 @@ export async function createImmutablePlanVersion(input: CreatePlanVersionInput):
     versionNumber: input.versionNumber,
     createdAt: input.createdAt,
     reason: input.reason,
+    ...(input.summary?.trim() ? { summary: input.summary.trim() } : {}),
     config,
     configHash: await sha256Hex(config),
     parentVersionId: input.parentVersionId,
@@ -29,4 +31,3 @@ export async function createImmutablePlanVersion(input: CreatePlanVersionInput):
   assertValidPlanVersion(version);
   return deepReadonly(version) as PlanVersion;
 }
-

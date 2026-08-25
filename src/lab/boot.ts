@@ -30,6 +30,8 @@ import { WorkspaceApiClient } from "../plans/client";
 import { PlanStore } from "../plans/client-store";
 import { canonicalJson } from "../plans/canonical";
 import { mountPlanShell, type PlanShellController } from "./plan-shell";
+import { WorkspaceRouter } from "./workspace-router";
+import { mountWorkspacePages, type WorkspacePagesController } from "./workspace-pages";
 import "./design-system.css";
 
 let catalog = loadBundledCatalog();
@@ -39,6 +41,7 @@ let latestEvaluation: BuildEvaluation | null = null;
 let buildProgress: BuildProgressController | null = null;
 let planStore: PlanStore | null = null;
 let planShell: PlanShellController | null = null;
+let workspacePages: WorkspacePagesController | null = null;
 
 const BOARD_ID = "board.asus-w680m-ace-se";
 
@@ -958,7 +961,11 @@ async function boot(): Promise<void> {
   const activeConfig = planStore.getState().activePlan?.draft.config;
   if (activeConfig) applyConfigToDom(activeConfig);
   const labRoot = $("n6-lab");
-  if (labRoot) planShell = mountPlanShell(labRoot, planStore);
+  if (labRoot) {
+    const router = new WorkspaceRouter();
+    planShell = mountPlanShell(labRoot, planStore, router);
+    workspacePages = mountWorkspacePages(labRoot, planStore, router);
+  }
   window.__N6_LAB__ = {
     ...views,
     skuName: (id: string) => requireSku(catalog, id).name,

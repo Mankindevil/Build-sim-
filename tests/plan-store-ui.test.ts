@@ -29,6 +29,7 @@ function api(plans: BuildPlan[]): WorkspacePlanApi {
     list: vi.fn(async () => plans.map((item) => ({ ...item, dirty: item.draft.dirty } as unknown as BuildPlanSummary))),
     get: vi.fn(async (id) => structuredClone(plans.find((item) => item.id === id)!)),
     create: vi.fn(async () => structuredClone(plans[0]!)),
+    updateInfo: vi.fn(async () => structuredClone(plans[0]!)),
     updateDraft: vi.fn(async (id, input) => {
       const current = structuredClone(plans.find((item) => item.id === id)!);
       current.draftRevision += 1;

@@ -18,6 +18,7 @@ export async function handleWorkspaceRoute(method: string | undefined, pathname:
     const path = planPath(pathname);
     if (!path) return { status: 404, payload: { error: "route_not_found", route: `${method} ${pathname}` } };
     if (method === "GET" && !path.action) return { status: 200, payload: await repository.get(path.planId) };
+    if (method === "PATCH" && !path.action) return { status: 200, payload: await repository.updateInfo(path.planId, body as Parameters<PlanRepository["updateInfo"]>[1]) };
     if (method === "PATCH" && path.action === "draft") return { status: 200, payload: await repository.updateDraft(path.planId, body as Parameters<PlanRepository["updateDraft"]>[1]) };
     if (method === "GET" && path.action === "versions") return { status: 200, payload: { versions: await repository.listVersions(path.planId) } };
     if (method === "POST" && path.action === "versions") return { status: 201, payload: await repository.saveVersion(path.planId, body as Parameters<PlanRepository["saveVersion"]>[1]) };
@@ -39,4 +40,3 @@ export async function handleWorkspaceRoute(method: string | undefined, pathname:
     return repositoryErrorResponse(error);
   }
 }
-

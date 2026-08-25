@@ -12,7 +12,7 @@ function activePlan(): BuildPlan {
 }
 function testApi(updateDraft: WorkspacePlanApi["updateDraft"]): WorkspacePlanApi {
   const plan = activePlan();
-  return { list: async () => [{ ...plan, dirty: true } as unknown as BuildPlanSummary], get: async () => structuredClone(plan), create: async () => plan, updateDraft, saveVersion: async () => ({ id: "version-1" } as PlanVersion), duplicate: async () => plan, archive: async () => undefined, restore: async () => undefined, delete: async () => undefined, listVersions: async () => [] };
+  return { list: async () => [{ ...plan, dirty: true } as unknown as BuildPlanSummary], get: async () => structuredClone(plan), create: async () => plan, updateInfo: async () => plan, updateDraft, saveVersion: async () => ({ id: "version-1" } as PlanVersion), duplicate: async () => plan, archive: async () => undefined, restore: async () => undefined, delete: async () => undefined, listVersions: async () => [] };
 }
 
 describe("R2 plan autosave", () => {

@@ -52,6 +52,7 @@ export interface PlanVersion {
   readonly versionNumber: number;
   readonly createdAt: string;
   readonly reason: PlanVersionReason;
+  readonly summary?: string;
   readonly config: Readonly<BuildConfig>;
   readonly configHash: string;
   readonly parentVersionId: string | null;
@@ -170,7 +171,15 @@ export interface SaveVersionInput {
   expectedRevision: number;
   expectedConfigHash: string;
   reason: PlanVersionReason;
+  summary?: string;
   idempotencyKey?: string;
+}
+
+export interface UpdatePlanInfoInput {
+  expectedRevision: number;
+  name: string;
+  description?: string;
+  metadata?: BuildPlan["metadata"];
 }
 
 export interface DuplicatePlanInput {
@@ -182,6 +191,7 @@ export interface PlanRepository {
   list(): Promise<BuildPlanSummary[]>;
   get(planId: string): Promise<BuildPlan>;
   create(input: CreatePlanInput): Promise<BuildPlan>;
+  updateInfo(planId: string, input: UpdatePlanInfoInput): Promise<BuildPlan>;
   updateDraft(planId: string, input: UpdateDraftInput): Promise<BuildPlan>;
   saveVersion(planId: string, input: SaveVersionInput): Promise<PlanVersion>;
   duplicate(planId: string, input: DuplicatePlanInput): Promise<BuildPlan>;
@@ -190,4 +200,3 @@ export interface PlanRepository {
   delete(planId: string): Promise<void>;
   listVersions(planId: string): Promise<PlanVersion[]>;
 }
-

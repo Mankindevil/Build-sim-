@@ -80,6 +80,7 @@ export function validatePlanVersion(value: unknown): string[] {
   if (!Number.isSafeInteger(input.versionNumber) || Number(input.versionNumber) < 1) errors.push("versionNumber invalid");
   isoDate(input, "createdAt", errors);
   if (!["initial", "manual-save", "agent-proposal", "import", "restore"].includes(String(input.reason))) errors.push("reason invalid");
+  if (input.summary !== undefined && (typeof input.summary !== "string" || input.summary.length > 500)) errors.push("summary invalid");
   if (!validConfig(input.config)) errors.push("config must be a valid BuildConfig");
   if (typeof input.configHash !== "string" || !HASH.test(input.configHash)) errors.push("configHash must be a sha256 hex digest");
   if (input.parentVersionId !== null && (typeof input.parentVersionId !== "string" || !input.parentVersionId)) errors.push("parentVersionId invalid");

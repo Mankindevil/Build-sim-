@@ -6,6 +6,7 @@ import type {
   PlanVersion,
   SaveVersionInput,
   UpdateDraftInput,
+  UpdatePlanInfoInput,
 } from "./contracts";
 
 export class WorkspaceApiError extends Error {
@@ -19,6 +20,7 @@ export interface WorkspacePlanApi {
   list(): Promise<BuildPlanSummary[]>;
   get(planId: string): Promise<BuildPlan>;
   create(input: CreatePlanInput): Promise<BuildPlan>;
+  updateInfo(planId: string, input: UpdatePlanInfoInput): Promise<BuildPlan>;
   updateDraft(planId: string, input: UpdateDraftInput): Promise<BuildPlan>;
   saveVersion(planId: string, input: SaveVersionInput): Promise<PlanVersion>;
   duplicate(planId: string, input: DuplicatePlanInput): Promise<BuildPlan>;
@@ -58,6 +60,9 @@ export class WorkspaceApiClient implements WorkspacePlanApi {
   }
   async create(input: CreatePlanInput): Promise<BuildPlan> {
     return payload(await this.request("", { method: "POST", body: JSON.stringify(input) }));
+  }
+  async updateInfo(planId: string, input: UpdatePlanInfoInput): Promise<BuildPlan> {
+    return payload(await this.request(`/${encodeURIComponent(planId)}`, { method: "PATCH", body: JSON.stringify(input) }));
   }
   async updateDraft(planId: string, input: UpdateDraftInput): Promise<BuildPlan> {
     return payload(await this.request(`/${encodeURIComponent(planId)}/draft`, { method: "PATCH", body: JSON.stringify(input) }));
