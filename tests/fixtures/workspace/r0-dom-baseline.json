@@ -1,0 +1,13 @@
+{
+  "capturedAt": "2026-08-25T00:00:00.000Z",
+  "head": "541614be8bfdc757aeb4b6cd770d581d04fb86e0",
+  "note": "The existing index.html workspace/transaction draft is baseline evidence only, not an accepted implementation.",
+  "paths": {
+    "configuration": ["lab-config-title", "psu-select", "cooler-select", "gpu-select", "ram-select", "disk-range", "boot-select", "hba-select"],
+    "overview": ["fit-chip", "workspace-results", "verdict-title", "verdict-list", "build-progress-summary"],
+    "spatial": ["spatial-stage", "iso-svg", "rear-svg", "case-svg", "spatial-routes", "spatial-reset"],
+    "transactions": ["build-base-dialog", "transaction-screenshot-input", "transaction-screenshot-status", "transaction-history-list"],
+    "agent": ["agent-title", "agent-status", "agent-model", "agent-skill", "agent-transcript", "agent-input"]
+  }
+}
+
