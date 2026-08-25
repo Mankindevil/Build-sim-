@@ -90,6 +90,8 @@ export interface BuildProgressController {
   stageTransaction: (record: TransactionImportRecord, screenshot?: File) => void;
   importTransaction: (record: TransactionImportRecord) => void;
   summary: () => BuildProgressSummary;
+  purchaseFacts: () => Array<{ skuId: string; stage: BuildStage; receiptId?: string; planId?: string | null; planItemId?: string | null; linkStatus?: PlanTransactionLink["linkStatus"] }>;
+  subscribe: (listener: () => void) => () => void;
 }
 
 const stageRank = new Map(BUILD_STAGES.map((stage, index) => [stage, index]));
@@ -254,6 +256,7 @@ export function initBuildProgress(args: {
   const pendingArchiveDeletes = new Set<string>();
   const screenshotArchive = args.screenshotArchive ?? createTransactionScreenshotArchive();
   const screenshotObjectUrls = new Set<string>();
+  const listeners = new Set<() => void>();
   let transactionRenderToken = 0;
 
   const dialog = $("build-base-dialog") as HTMLDialogElement | null;
@@ -332,6 +335,7 @@ export function initBuildProgress(args: {
     renderHero();
     renderProgressSummary();
     renderBom();
+    for (const listener of listeners) listener();
   };
 
   const effectiveItems = (): BuildProgressItem[] => {
@@ -753,5 +757,14 @@ export function initBuildProgress(args: {
       render();
     },
     summary() { return summarizeProgress(currentItems()); },
+    purchaseFacts() {
+      return currentCatalogItems().filter((item): item is BuildProgressItem & { skuId: string } => Boolean(item.skuId)).map((item) => ({
+        skuId: item.skuId,
+        stage: item.stage,
+        ...(item.transaction?.receiptId ? { receiptId: item.transaction.receiptId } : {}),
+        ...(item.planLink ? { planId: item.planLink.planId, planItemId: item.planLink.planItemId, linkStatus: item.planLink.linkStatus } : {}),
+      }));
+    },
+    subscribe(listener) { listeners.add(listener); listener(); return () => listeners.delete(listener); },
   };
 }

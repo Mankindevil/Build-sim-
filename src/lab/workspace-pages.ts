@@ -5,6 +5,9 @@ import { createDefaultN6Config } from "../plans/default-plan";
 import { diffBuildConfigs } from "../plans/diff";
 import { targetForFinding } from "../plans/finding-targets";
 import type { PlanVersion } from "../plans/contracts";
+import type { BuildTask } from "../plans/contracts";
+import type { BuildTaskStore, BuildTaskStoreState } from "../plans/build-task-store";
+import { summarizeBuildTasks } from "../plans/build-tasks";
 import { WorkspaceRouter } from "./workspace-router";
 import "./workspace-pages.css";
 
@@ -100,7 +103,27 @@ function updateConfigField(config: BuildConfig, path: string, value: string): vo
 
 export interface WorkspacePagesController { dispose(): void; }
 
-export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router: WorkspaceRouter): WorkspacePagesController {
+function taskStatusLabel(status: BuildTask["status"]): string {
+  return ({ todo: "待处理", doing: "进行中", done: "已完成", blocked: "阻断", obsolete: "已过期" } as const)[status];
+}
+
+function taskKindLabel(kind: BuildTask["kind"]): string {
+  return ({ purchase: "采购", assembly: "装配", wiring: "接线", verification: "验证" } as const)[kind];
+}
+
+function taskRows(tasks: BuildTask[]): string {
+  if (!tasks.length) return `<div class="workspace-empty">当前方案尚未生成装机任务。</div>`;
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  return tasks.map((task) => `<article class="workspace-build-task" data-task-id="${escapeHtml(task.id)}" data-task-kind="${task.kind}" data-task-status-value="${task.status}">
+    <header><div><small>${taskKindLabel(task.kind)} · ${escapeHtml(task.sourceRef)}</small><h3>${escapeHtml(task.title)}</h3></div><span data-status="${task.status}">${taskStatusLabel(task.status)}</span></header>
+    ${task.staleReason ? `<p class="workspace-task-blocker">${escapeHtml(task.staleReason)}</p>` : ""}
+    ${task.dependsOn?.length ? `<p>依赖：${task.dependsOn.map((id) => escapeHtml(byId.get(id)?.title ?? id)).join(" · ")}</p>` : ""}
+    <div class="workspace-task-controls">${task.status === "obsolete" ? "" : `<label>检查状态<select data-task-status><option value="todo"${task.status === "todo" ? " selected" : ""}>待处理</option><option value="doing"${task.status === "doing" ? " selected" : ""}>进行中</option><option value="done"${task.status === "done" ? " selected" : ""}>已完成</option><option value="blocked"${task.status === "blocked" ? " selected" : ""}>阻断</option></select></label>`}<label>备注<input data-task-note value="${escapeHtml(task.note ?? "")}" placeholder="添加装机备注"></label>${task.relatedPartId || task.cableId ? `<button type="button" data-task-spatial>在 3D 中打开</button>` : ""}</div>
+    <footer>${(task.evidenceRefs ?? []).map((ref) => `<button type="button" data-task-evidence="${escapeHtml(ref)}">${escapeHtml(ref)}</button>`).join("") || "<span>无额外证据链接</span>"}</footer>
+  </article>`).join("");
+}
+
+export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router: WorkspaceRouter, taskStore?: BuildTaskStore): WorkspacePagesController {
   const host = document.createElement("main");
   host.className = "workspace-pages";
   host.innerHTML = `
@@ -116,6 +139,11 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
       <nav class="workspace-editor-toc" aria-label="方案编辑目录"><a href="#editor-platform">基础平台</a><a href="#editor-power">电源与散热</a><a href="#editor-storage">存储</a><a href="#editor-expansion">GPU 与扩展</a></nav>
       <div data-editor-fields></div>
     </section>
+    <section data-workspace-page="build" hidden aria-labelledby="workspace-build-title">
+      <header class="workspace-page-head"><div><p>BUILD EXECUTION</p><h2 id="workspace-build-title">装机任务</h2><span>采购、装配、接线与验证共享当前方案的任务状态。</span></div><button type="button" data-export-saved-checklist>导出已保存版本清单</button></header>
+      <div class="workspace-task-summary" data-task-summary aria-live="polite"></div>
+      <div class="workspace-task-board" data-task-board></div>
+    </section>
     <dialog data-create-dialog aria-labelledby="create-plan-title"><form method="dialog" class="workspace-dialog-card"><header><div><p>NEW PLAN</p><h2 id="create-plan-title">新建方案</h2></div><button value="cancel" aria-label="关闭">×</button></header><label>创建方式<select data-create-mode><option value="template">推荐 N6 模板</option><option value="blank">空白 N6 草稿</option><option value="duplicate">复制当前方案</option><option value="import">导入 JSON</option></select></label><label>方案名称<input data-create-name required maxlength="120" value="我的 N6 方案"></label><label data-import-field hidden>JSON 文件<input type="file" data-import-file accept="application/json,.json"></label><p data-create-error role="alert"></p><footer><button value="cancel">取消</button><button type="button" data-create-submit>创建并编辑</button></footer></form></dialog>
     <dialog data-version-dialog aria-labelledby="save-version-title"><form method="dialog" class="workspace-dialog-card"><header><div><p>IMMUTABLE VERSION</p><h2 id="save-version-title">保存新版本</h2></div><button value="cancel" aria-label="关闭">×</button></header><p data-version-parent></p><label>版本摘要<textarea data-version-summary maxlength="500" rows="3" placeholder="本次修改了什么、为什么"></textarea></label><p data-version-error role="alert"></p><footer><button value="cancel">取消</button><button type="button" data-version-submit>保存版本</button></footer></form></dialog>
     <dialog data-history-dialog aria-labelledby="version-history-title"><section class="workspace-dialog-card workspace-history-card"><header><div><p>VERSION HISTORY</p><h2 id="version-history-title">版本历史</h2></div><button type="button" data-close-history aria-label="关闭">×</button></header><div data-version-list></div><div data-version-diff aria-live="polite"></div></section></dialog>`;
@@ -125,6 +153,7 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   let baselineEvaluation: BuildEvaluation | null = null;
   let editorPlanSignature = "";
   let search = "";
+  let taskState: BuildTaskStoreState = taskStore?.getState() ?? { planId: null, sourceVersionId: null, tasks: [] };
 
   const currentHost = host.querySelector<HTMLElement>("[data-current-plan]")!;
   const grid = host.querySelector<HTMLElement>("[data-plan-grid]")!;
@@ -133,6 +162,18 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   const createDialog = host.querySelector<HTMLDialogElement>("[data-create-dialog]")!;
   const versionDialog = host.querySelector<HTMLDialogElement>("[data-version-dialog]")!;
   const historyDialog = host.querySelector<HTMLDialogElement>("[data-history-dialog]")!;
+  const taskSummaryHost = host.querySelector<HTMLElement>("[data-task-summary]")!;
+  const taskBoard = host.querySelector<HTMLElement>("[data-task-board]")!;
+  const currentTasks = () => taskState.planId === state.activePlan?.id ? taskState.tasks : [];
+  const currentTaskSummary = () => summarizeBuildTasks(currentTasks());
+
+  const renderTasks = () => {
+    const activeTasks = currentTasks();
+    const summary = currentTaskSummary();
+    taskSummaryHost.innerHTML = `<strong>${summary.done}/${Math.max(0, summary.total - summary.obsolete)} 已完成</strong><span>${summary.doing} 进行中</span><span>${summary.blocked} 阻断</span><span>${summary.obsolete} 已过期</span>`;
+    const phases: BuildTask["kind"][] = ["purchase", "assembly", "wiring", "verification"];
+    taskBoard.innerHTML = phases.map((kind) => `<section data-task-phase="${kind}"><header><h3>${taskKindLabel(kind)}</h3><span>${activeTasks.filter((task) => task.kind === kind && task.status !== "obsolete").length} 项当前任务</span></header>${taskRows(activeTasks.filter((task) => task.kind === kind))}</section>`).join("");
+  };
 
   const renderImpact = () => {
     const current = evaluationSummary(state.evaluation);
@@ -148,7 +189,8 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     const active = state.activePlan;
     const evalSummary = evaluationSummary(state.evaluation);
     const findings = state.evaluation?.findings.filter((finding) => finding.verdict === "bad" || finding.verdict === "warn").slice(0, 3) ?? [];
-    currentHost.innerHTML = active ? `<article><div><p>CURRENT PLAN</p><h3>${escapeHtml(active.name)}</h3><span>${active.activeVersionId ? `版本 ${escapeHtml(active.activeVersionId.slice(-8))}` : "尚无版本"} · ${state.saveStatus}</span></div><div class="workspace-current-metrics"><strong data-level="${evalSummary.bad ? "bad" : evalSummary.warn ? "warn" : "ok"}">${evalSummary.bad} 阻断</strong><span>${evalSummary.warn} 警告</span><span>预算 ${formatCny(active.metadata.budgetCny ?? evalSummary.budget)}</span></div><ul class="workspace-current-findings">${findings.map((finding) => `<li data-level="${finding.verdict}"><button data-finding-id="${escapeHtml(finding.id)}" data-finding-field="${targetForFinding(finding.id).field}">${escapeHtml(finding.message.slice(0, 72))}</button></li>`).join("") || "<li>当前没有阻断或警告。</li>"}</ul><div><button data-route-action="editor">继续编辑</button><button data-route-action="spatial">打开 3D</button><button data-route-action="purchases">上传交易</button><button data-route-action="agent">询问 Agent</button></div></article>` : `<article class="workspace-empty"><h3>还没有方案</h3><p>创建第一套 N6 方案后开始评估。</p><button data-open-create>新建方案</button></article>`;
+    const taskSummary = currentTaskSummary();
+    currentHost.innerHTML = active ? `<article><div><p>CURRENT PLAN</p><h3>${escapeHtml(active.name)}</h3><span>${active.activeVersionId ? `版本 ${escapeHtml(active.activeVersionId.slice(-8))}` : "尚无版本"} · ${state.saveStatus}</span></div><div class="workspace-current-metrics"><strong data-level="${evalSummary.bad ? "bad" : evalSummary.warn ? "warn" : "ok"}">${evalSummary.bad} 阻断</strong><span>${evalSummary.warn} 警告</span><span>预算 ${formatCny(active.metadata.budgetCny ?? evalSummary.budget)}</span></div><div><h4>下一步任务</h4><ol class="workspace-current-next">${taskSummary?.next.slice(0, 5).map((task) => `<li><button data-open-task="${escapeHtml(task.id)}">${escapeHtml(task.title)}</button><span data-status="${task.status}">${taskStatusLabel(task.status)}</span></li>`).join("") || "<li>等待当前方案评估。</li>"}</ol>${taskSummary?.blockers.length ? `<p class="workspace-task-blocker">${taskSummary.blockers.length} 个阻断：${escapeHtml(taskSummary.blockers[0]?.staleReason ?? taskSummary.blockers[0]?.title ?? "需处理")}</p>` : ""}</div><ul class="workspace-current-findings">${findings.map((finding) => `<li data-level="${finding.verdict}"><button data-finding-id="${escapeHtml(finding.id)}" data-finding-field="${targetForFinding(finding.id).field}">${escapeHtml(finding.message.slice(0, 72))}</button></li>`).join("") || "<li>当前没有阻断或警告。</li>"}</ul><div><button data-route-action="editor">继续编辑</button><button data-route-action="build">装机任务</button><button data-route-action="spatial">打开 3D</button><button data-route-action="purchases">上传交易</button><button data-route-action="agent">询问 Agent</button></div></article>` : `<article class="workspace-empty"><h3>还没有方案</h3><p>创建第一套 N6 方案后开始评估。</p><button data-open-create>新建方案</button></article>`;
     grid.innerHTML = state.plans.filter((plan) => plan.name.toLowerCase().includes(search.toLowerCase())).map((plan) => `<article data-plan-card="${escapeHtml(plan.id)}"${plan.id === active?.id ? " data-active=true" : ""}><div><small>${plan.status === "archived" ? "已归档" : plan.id === active?.id ? "当前方案" : "方案"}</small><h3>${escapeHtml(plan.name)}</h3><p>${plan.activeVersionId ? `版本 ${escapeHtml(plan.activeVersionId.slice(-8))}` : "尚无版本"} · ${formatDate(plan.updatedAt)}</p><span>${plan.dirty ? "有未版本化草稿" : "版本已保存"}</span></div><footer>${plan.status === "archived" ? `<button data-restore-plan="${escapeHtml(plan.id)}">恢复</button>` : `<button data-activate-plan="${escapeHtml(plan.id)}">打开</button>`}<button data-delete-plan="${escapeHtml(plan.id)}">删除</button></footer></article>`).join("") || `<div class="workspace-empty"><p>没有匹配的方案。</p></div>`;
     if (active) {
       const signature = `${active.id}:${active.draftRevision}:${state.localRevision}`;
@@ -160,8 +202,10 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     host.querySelector<HTMLButtonElement>("[data-undo]")!.disabled = !state.canUndo;
     host.querySelector<HTMLButtonElement>("[data-redo]")!.disabled = !state.canRedo;
     renderImpact();
+    renderTasks();
   };
   const unsubscribeStore = store.subscribe(render);
+  const unsubscribeTasks = taskStore?.subscribe((next) => { taskState = next; render(state); }) ?? (() => undefined);
 
   const unsubscribeRoute = router.subscribe((route) => {
     for (const page of host.querySelectorAll<HTMLElement>("[data-workspace-page]")) page.hidden = page.dataset.workspacePage !== route;
@@ -171,6 +215,26 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     const target = event.target as HTMLElement;
     const route = target.closest<HTMLElement>("[data-route-action]")?.dataset.routeAction;
     if (route) router.navigate(route as Parameters<WorkspaceRouter["navigate"]>[0]);
+    const openTaskId = target.closest<HTMLElement>("[data-open-task]")?.dataset.openTask;
+    if (openTaskId) router.navigate("build");
+    const spatialTaskId = target.closest<HTMLElement>("[data-task-spatial]")?.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
+    if (spatialTaskId) {
+      const selected = taskState.tasks.find((item) => item.id === spatialTaskId);
+      const partId = selected?.relatedPartId ?? selected?.cableId;
+      if (partId) store.setSelection({ partId, view: selected?.cableId ? "routing" : "spatial", ...(selected?.findingId ? { findingId: selected.findingId } : {}) });
+      document.dispatchEvent(new CustomEvent("build-sim:task-focus", { detail: { taskId: spatialTaskId, partId: selected?.relatedPartId, cableId: selected?.cableId } }));
+      router.navigate("spatial");
+    }
+    const evidenceRef = target.closest<HTMLElement>("[data-task-evidence]")?.dataset.taskEvidence;
+    if (evidenceRef?.startsWith("transaction:")) router.navigate("purchases");
+    if (evidenceRef?.startsWith("bom:") || evidenceRef?.startsWith("purchase-hint:")) router.navigate("purchases");
+    if (evidenceRef?.startsWith("evidence:")) router.navigate("evaluation");
+    if (evidenceRef?.startsWith("assembly:")) router.navigate("spatial");
+    if (evidenceRef?.startsWith("finding:")) {
+      document.dispatchEvent(new CustomEvent("build-sim:finding-focus", { detail: { findingId: evidenceRef.slice("finding:".length) } }));
+      router.navigate("spatial");
+    }
+    if (target.closest("[data-export-saved-checklist]")) document.getElementById("cfg-export-checklist")?.click();
     const findingId = target.closest<HTMLElement>("[data-finding-id]")?.dataset.findingId;
     const findingTarget = target.closest<HTMLElement>("[data-finding-field]")?.dataset.findingField;
     if (findingId) {
@@ -276,6 +340,15 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     baselineEvaluation = state.evaluation;
     store.patchDraft((config) => updateConfigField(config, control.dataset.configField!, control.value));
   });
+  taskBoard.addEventListener("change", (event) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-task-id]");
+    const id = row?.dataset.taskId;
+    if (!id || !taskStore) return;
+    const status = (event.target as HTMLElement).closest<HTMLSelectElement>("[data-task-status]")?.value as "todo" | "doing" | "done" | "blocked" | undefined;
+    if (status) taskStore.setStatus(id, status);
+    const note = (event.target as HTMLElement).closest<HTMLInputElement>("[data-task-note]");
+    if (note) taskStore.setNote(id, note.value);
+  });
 
-  return { dispose() { unsubscribeStore(); unsubscribeRoute(); host.remove(); } };
+  return { dispose() { unsubscribeStore(); unsubscribeTasks(); unsubscribeRoute(); host.remove(); } };
 }

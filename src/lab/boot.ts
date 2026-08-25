@@ -28,7 +28,9 @@ import { initBuildProgress, type BuildProgressController } from "./build-progres
 import { initTransactionImport } from "./transaction-import";
 import { WorkspaceApiClient } from "../plans/client";
 import { PlanStore } from "../plans/client-store";
-import { canonicalJson } from "../plans/canonical";
+import { canonicalJson, sha256Hex } from "../plans/canonical";
+import { BuildTaskStore } from "../plans/build-task-store";
+import { deriveBuildTasks, reconcileBuildTasks } from "../plans/build-tasks";
 import { mountPlanShell, type PlanShellController } from "./plan-shell";
 import { WorkspaceRouter } from "./workspace-router";
 import { mountWorkspacePages, type WorkspacePagesController } from "./workspace-pages";
@@ -43,6 +45,7 @@ const views = buildLabCatalogs(catalog);
 let priceStamp = bundledPriceSummary();
 let latestEvaluation: BuildEvaluation | null = null;
 let buildProgress: BuildProgressController | null = null;
+let buildTaskStore: BuildTaskStore | null = null;
 let planStore: PlanStore | null = null;
 let planShell: PlanShellController | null = null;
 let workspacePages: WorkspacePagesController | null = null;
@@ -180,7 +183,11 @@ function currentPlanAgentContext(): PlanAgentContext | null {
       progress: buildProgress?.summary() ?? null,
       note: "汇总不含交易截图、凭据或支付信息。",
     },
-    buildTaskSummary: { status: "pending-reconcile", note: "R9 前仅提供当前 evaluation assembly 摘要。", assemblySteps: state.evaluationSnapshot.evaluation.assembly.steps.map((step) => ({ id: step.id, label: step.label, kind: step.kind })) },
+    buildTaskSummary: {
+      ...buildTaskStore?.summary(),
+      tasks: buildTaskStore?.getState().tasks.filter((task) => task.status !== "obsolete").slice(0, 20).map(({ id, kind, sourceRef, title, status, staleReason, dependsOn, relatedPartId, cableId }) => ({ id, kind, sourceRef, title, status, staleReason, dependsOn, relatedPartId, cableId })) ?? [],
+      policy: "Agent 可读取任务并提出建议；任务状态只能由用户在装机页明确确认。",
+    },
   });
 }
 
@@ -907,7 +914,31 @@ function bindConfigChrome(): void {
     const config = configFromDom();
     downloadText(`${config.id}.json`, serializeConfig(config));
   });
-  $("cfg-export-checklist")?.addEventListener("click", () => {
+  $("cfg-export-checklist")?.addEventListener("click", async () => {
+    const state = planStore?.getState();
+    const active = state?.activePlan;
+    if (active && !active.activeVersionId) {
+      window.alert("当前方案尚无已保存版本，请先保存版本后再导出可追溯清单。");
+      return;
+    }
+    if (active?.activeVersionId && planStore) {
+      const versions = await planStore.listVersions();
+      const version = versions.find((candidate) => candidate.id === active.activeVersionId);
+      if (version) {
+        const config = structuredClone(version.config) as BuildConfig;
+        const result = evaluateBuild(config, catalog);
+        const generatedAt = new Date().toISOString();
+        const derived = deriveBuildTasks({ planId: active.id, sourceVersionId: version.id, evaluation: result, purchaseFacts: buildProgress?.purchaseFacts() ?? [] });
+        const tasks = reconcileBuildTasks(buildTaskStore?.getState().tasks ?? [], derived, generatedAt);
+        downloadText(`${config.id}-v${version.versionNumber}-checklist.md`, exportChecklist(config, result.bom, result, {
+          planId: active.id, planVersionId: version.id, planVersionNumber: version.versionNumber, generatedAt,
+          configHash: version.configHash,
+          evaluationHash: version.evaluationHash ?? await sha256Hex(result),
+          tasks,
+        }));
+        return;
+      }
+    }
     const config = configFromDom();
     const result = evaluateBuild(config, catalog);
     downloadText(`${config.id}-checklist.md`, exportChecklist(config, result.bom, result));
@@ -999,6 +1030,7 @@ declare global {
 async function boot(): Promise<void> {
   planStore = new PlanStore({ api: new WorkspaceApiClient(), storage: window.localStorage });
   await planStore.initialize();
+  buildTaskStore = new BuildTaskStore(window.localStorage);
   window.__BUILD_SIM_PLAN_STORE__ = planStore;
   const activeConfig = planStore.getState().activePlan?.draft.config;
   if (activeConfig) applyConfigToDom(activeConfig);
@@ -1007,7 +1039,7 @@ async function boot(): Promise<void> {
   if (labRoot) {
     router = new WorkspaceRouter();
     planShell = mountPlanShell(labRoot, planStore, router);
-    workspacePages = mountWorkspacePages(labRoot, planStore, router);
+    workspacePages = mountWorkspacePages(labRoot, planStore, router, buildTaskStore);
   }
   window.__N6_LAB__ = {
     ...views,
@@ -1068,6 +1100,17 @@ async function boot(): Promise<void> {
     },
     getPlans: () => planStore?.getState().plans.map((plan) => ({ id: plan.id, name: plan.name })) ?? [],
   });
+  const syncBuildTasks = () => {
+    const state = planStore?.getState();
+    if (!state?.activePlan || !state.evaluation || !buildTaskStore) return;
+    buildTaskStore.reconcile({
+      planId: state.activePlan.id,
+      sourceVersionId: state.activePlan.draft.dirty || !state.activePlan.activeVersionId ? `draft:${state.activePlan.draftRevision}` : state.activePlan.activeVersionId,
+      evaluation: state.evaluation,
+      purchaseFacts: buildProgress?.purchaseFacts() ?? [],
+    });
+  };
+  buildProgress.subscribe(syncBuildTasks);
   initTransactionImport({
     onImport: (record, screenshot) => buildProgress?.stageTransaction(record, screenshot),
     getPlanContext: () => {

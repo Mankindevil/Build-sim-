@@ -250,8 +250,28 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
     const partId = configFieldPartIds(field, model)[0];
     if (partId) store.setSelection({ partId, view: "editor" });
   };
+  const onTaskFocus = (event: Event) => {
+    const detail = (event as CustomEvent<{ partId?: string; cableId?: string }>).detail;
+    if (!detail || !overlays) return;
+    if (detail.cableId) {
+      const routesToggle = root.querySelector<HTMLInputElement>("[data-routes]");
+      if (routesToggle) routesToggle.checked = true;
+      renderer?.setRoutesVisible(true);
+      const stepIndex = overlays.assembly.findIndex((step) => step.cableId === detail.cableId);
+      if (stepIndex >= 0) setAssembly(stepIndex);
+      const route = overlays.routes.find((candidate) => candidate.id === detail.cableId || candidate.id.includes(detail.cableId!));
+      const endpoint = route?.endpointPartIds.find((partId) => model?.nodes.some((node) => node.partId === partId));
+      if (endpoint) store.setSelection({ partId: endpoint, view: "routing" });
+    }
+    if (detail.partId && model?.nodes.some((node) => node.partId === detail.partId)) {
+      selection.select(detail.partId, false);
+      renderer?.focus(detail.partId);
+      store.setSelection({ partId: detail.partId, view: detail.cableId ? "routing" : "spatial" });
+    }
+  };
   document.addEventListener("build-sim:finding-focus", onFindingFocus);
   document.addEventListener("build-sim:editor-field-focus", onEditorFieldFocus);
+  document.addEventListener("build-sim:task-focus", onTaskFocus);
 
   const controller: SpatialViewController = {
     getModel: () => model ? structuredClone(model) : null,
@@ -264,6 +284,7 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
       unsubscribe();
       document.removeEventListener("build-sim:finding-focus", onFindingFocus);
       document.removeEventListener("build-sim:editor-field-focus", onEditorFieldFocus);
+      document.removeEventListener("build-sim:task-focus", onTaskFocus);
       resetButton?.removeEventListener("click", onReset);
       renderer?.dispose();
       root.remove(); fallback.remove();

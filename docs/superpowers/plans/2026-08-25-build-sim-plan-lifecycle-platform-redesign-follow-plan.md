@@ -1188,3 +1188,19 @@ R3 工作台编辑器  R4 评估版本化
 - 未验证项：R9 将把 plan-linked purchase 状态接入稳定 BuildTask sourceRef/reconcile；R10 将覆盖大批量/离线/损坏归档与性能门禁
 - 回滚方式：回退 transaction schema v2 writer/PATCH 与 plan-scoped progress；v1 兼容读取和原始归档文件可继续保留，不需删除交易数据
 - Push：未授权
+
+### R9 执行记录
+
+- 状态：完成
+- 起始 HEAD：`75ed4d3`
+- 完成提交：`feat(build): reconcile purchase assembly and wiring tasks`（SHA 见 Git log）
+- 修改文件：稳定 `sourceRef` 的 BuildTask 派生/reconcile、按方案隔离的 BuildTaskStore、采购进度事实订阅、工作台下一步/阻断摘要、分阶段装机任务页、备注/人工状态/证据入口、任务到 3D 部件与走线联动、Agent 任务摘要、已保存版本 checklist trace、R9 tests/E2E
+- 聚焦测试：`npx vitest run tests/build-task-reconcile.test.ts tests/build-progress.test.ts tests/build-progress-ui.test.ts tests/checklist-export.test.ts tests/build-task-ui.test.ts`，5 files / 15 tests passed
+- 全量门禁：Vitest 77 files / 426 tests passed；typecheck passed；client + Agent + workspace production build passed；legacy model 85 assertions passed；legacy static 23 assertions passed；secret scan 325 files / 0 findings；`git diff --check` passed
+- 浏览器证据：build task E2E passed（精确 plan-linked PSU 交易归档 → purchase task done → 人工纠正 → workspace/build 同一 doing 状态 → 任务打开 3D → 换 PSU 后旧任务持续 obsolete、新任务 todo → 保存 v2 → 导出含 config/evaluation hash）；workspace、spatial、transaction 浏览器回归连续 passed
+- 数据与迁移：任务写 `build-sim.tasks.v1:<planId>`，每次从当前 BOM/assembly/wiring/findings 确定性重建并按 `kind + sourceRef` reconcile；删除来源保留 obsolete 历史；旧任务状态不按标题或相似名称迁移；旧采购 progress 格式保持兼容
+- Agent 与人工边界：Agent 上下文仅收到有界任务摘要和“只可建议”策略；没有提供任务写 Tool；任务完成必须由用户在装机页明确选择，且人工状态优先于交易自动状态
+- Bundle/性能：Three 动态 chunk 552.39 kB / gzip 140.07 kB；主入口 333.68 kB / gzip 114.01 kB；任务派生与 reconcile 为当前方案本地有界线性操作
+- 未验证项：R10 将覆盖任务大批量/损坏 localStorage/离线切换、最终性能预算、无障碍、安全和回滚演练
+- 回滚方式：移除 BuildTaskStore boot/页面/Agent/export 接入与 `build-sim.tasks.v1:<planId>` 本地键；Plan/Version、交易归档、BuildEvaluation 和既有采购进度数据格式不变
+- Push：未授权

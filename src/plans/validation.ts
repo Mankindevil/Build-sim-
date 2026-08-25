@@ -177,6 +177,14 @@ export function validateBuildTask(value: unknown): string[] {
   for (const key of ["id", "planId", "sourceVersionId", "sourceRef", "title"]) requiredString(input, key, errors);
   if (!["purchase", "assembly", "wiring", "verification"].includes(String(input.kind))) errors.push("kind invalid");
   if (!["todo", "doing", "done", "blocked", "obsolete"].includes(String(input.status))) errors.push("status invalid");
+  if (input.statusSource !== undefined && input.statusSource !== "derived" && input.statusSource !== "manual") errors.push("statusSource invalid");
+  if (input.order !== undefined && (!Number.isSafeInteger(input.order) || Number(input.order) < 0)) errors.push("order invalid");
+  if (input.dependsOn !== undefined && (!Array.isArray(input.dependsOn) || input.dependsOn.some((item) => typeof item !== "string" || !item))) errors.push("dependsOn invalid");
+  for (const key of ["relatedPartId", "cableId", "findingId", "note", "staleReason"]) {
+    if (input[key] !== undefined && typeof input[key] !== "string") errors.push(`${key} invalid`);
+  }
+  if (input.evidenceRefs !== undefined && (!Array.isArray(input.evidenceRefs) || input.evidenceRefs.some((item) => typeof item !== "string" || !item))) errors.push("evidenceRefs invalid");
+  for (const key of ["updatedAt", "completedAt"]) if (input[key] !== undefined) isoDate(input, key, errors);
   return errors;
 }
 

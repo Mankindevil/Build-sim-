@@ -1,6 +1,7 @@
 import type { BuildConfig, BuildLineItem, BuildSelection } from "./types";
 import { parseConfig, serializeConfig } from "./types";
 import type { BuildEvaluation } from "../core/evaluate";
+import type { BuildTask } from "../plans/contracts";
 
 export { parseConfig, serializeConfig };
 
@@ -26,7 +27,17 @@ export function createConfig(partial: {
   return config;
 }
 
-export function exportChecklist(config: BuildConfig, bom: BuildLineItem[], evaluation?: BuildEvaluation): string {
+export interface ChecklistExportContext {
+  planId: string;
+  planVersionId: string;
+  planVersionNumber?: number;
+  generatedAt: string;
+  configHash: string;
+  evaluationHash: string;
+  tasks: BuildTask[];
+}
+
+export function exportChecklist(config: BuildConfig, bom: BuildLineItem[], evaluation?: BuildEvaluation, context?: ChecklistExportContext): string {
   const lines = [
     `# Install checklist — ${config.name}`,
     "",
@@ -61,6 +72,22 @@ export function exportChecklist(config: BuildConfig, bom: BuildLineItem[], evalu
       `- Calibration unknown: ${evaluation.calibration.unknown.join(", ") || "none"}`,
       `- Physical findings: ${evaluation.physical.findings.map((finding) => `${finding.verdict}:${finding.id}`).join(", ") || "none"}`,
     );
+  }
+  if (context) {
+    lines.push(
+      "",
+      "## Saved plan trace",
+      `- Plan: ${context.planId}`,
+      `- Saved version: ${context.planVersionId}${context.planVersionNumber ? ` (v${context.planVersionNumber})` : ""}`,
+      `- Generated at: ${context.generatedAt}`,
+      `- Config hash: ${context.configHash}`,
+      `- Evaluation hash: ${context.evaluationHash}`,
+      "",
+      "## Reconciled tasks",
+    );
+    for (const item of context.tasks) {
+      lines.push(`- [${item.status === "done" ? "x" : " "}] [${item.status}] ${item.title} <!-- ${item.sourceRef} -->${item.note ? ` — ${item.note}` : ""}`);
+    }
   }
   lines.push("", "## Notes");
   for (const n of config.notes ?? []) lines.push(`- ${n}`);

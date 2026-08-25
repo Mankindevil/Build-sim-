@@ -154,6 +154,16 @@ export interface BuildTask {
   title: string;
   status: "todo" | "doing" | "done" | "blocked" | "obsolete";
   staleReason?: string;
+  order?: number;
+  dependsOn?: string[];
+  relatedPartId?: string;
+  cableId?: string;
+  findingId?: string;
+  note?: string;
+  evidenceRefs?: string[];
+  statusSource?: "derived" | "manual";
+  updatedAt?: string;
+  completedAt?: string;
 }
 
 export interface CreatePlanInput {
