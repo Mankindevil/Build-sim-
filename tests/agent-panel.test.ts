@@ -43,12 +43,41 @@ describe("A5 Agent panel", () => {
   beforeEach(fixtureHtml);
 
   it("shows provider-neutral model and metadata-only Skill catalogs", async () => {
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/models") ? payload({ models: [model] }) : payload({ skills: [skill] }));
+    const pro = { ...model, id: "deepseek-v4-pro", label: "DeepSeek V4 Pro · 深度推理" };
+    const vision = { ...model, id: "deepseek-v4-flash-vision-exp", label: "DeepSeek V4 Flash Vision Exp · 视觉" };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/models") ? payload({ models: [model, pro, vision] }) : payload({ skills: [skill] }));
     await initAgentPanel({ getBuildConfig: () => ({}), fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => new FakeEventSource() });
     expect((document.querySelector("#agent-model") as HTMLSelectElement).value).toBe(model.id);
     expect((document.querySelector("#agent-skill") as HTMLSelectElement).value).toBe("build-diagnosis");
-    expect(document.querySelector("#agent-status")?.textContent).toContain("1 模型 · 1 Skills");
+    expect((document.querySelector("#agent-model") as HTMLSelectElement).options).toHaveLength(3);
+    expect(document.querySelector("#agent-status")?.textContent).toContain("3 模型 · 1 Skills");
     expect(document.body.textContent).not.toContain("装机诊断工作流");
+  });
+
+  it("refreshes a stale model catalog and retries session creation once", async () => {
+    const current = { ...model, id: "deepseek-v4-pro", label: "DeepSeek V4 Pro · 深度推理" };
+    let modelReads = 0;
+    let sessionCreates = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/models")) return payload({ models: modelReads++ === 0 ? [model] : [current] });
+      if (url.endsWith("/skills")) return payload({ skills: [skill] });
+      if (url.endsWith("/sessions") && init?.method === "POST") {
+        sessionCreates += 1;
+        if (sessionCreates === 1) return payload({ error: "model_not_found", message: `Unknown Agent model: ${model.id}` }, 404);
+        return payload({ ...session, model: current.id }, 201);
+      }
+      if (url.endsWith("/messages")) return payload({ runId: "run-refreshed", status: "queued" }, 202);
+      throw new Error(`unexpected ${url}`);
+    });
+    await initAgentPanel({ getBuildConfig: () => ({}), fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => new FakeEventSource() });
+    expect(document.querySelector("#agent-status")?.textContent).toContain("1 模型");
+    expect((document.querySelector("#agent-model") as HTMLSelectElement).value).toBe(model.id);
+    (document.querySelector("#agent-input") as HTMLTextAreaElement).value = "刷新模型";
+    document.querySelector("#agent-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(sessionCreates).toBe(2));
+    expect((document.querySelector("#agent-model") as HTMLSelectElement).value).toBe(current.id);
+    expect(document.querySelector("#agent-events")?.textContent).toContain("模型目录已自动刷新");
   });
 
   it("streams text, Tool audit events, usage, and the persisted final assistant message", async () => {
@@ -77,7 +106,7 @@ describe("A5 Agent panel", () => {
     stream.emit("tool_call", { type: "tool_call", runId: "run-fixture", call: { id: "c1", name: "get_build_evaluation", input: {} }, toolDefinitionHash: "b".repeat(64), at: "now" });
     stream.emit("tool_result", { type: "tool_result", runId: "run-fixture", callId: "c1", toolName: "get_build_evaluation", result: { ok: true, content: {}, provenance: ["BuildEvaluation"] }, at: "now" });
     stream.emit("text_delta", { type: "text_delta", runId: "run-fixture", text: "流式回答", at: "now" });
-    stream.emit("usage", { type: "usage", runId: "run-fixture", provider: "deepseek", model: model.id, usage: { inputTokens: 10, outputTokens: 3, totalTokens: 13, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, at: "now" });
+    stream.emit("usage", { type: "usage", runId: "run-fixture", provider: "deepseek", model: model.id, usage: { inputTokens: 10, outputTokens: 3, totalTokens: 13, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, billing: { status: "priced", pricing: { billedModel: model.id, pricingVersion: "fixture", sourceUrl: "https://api-docs.deepseek.com", pricingBand: { id: "off-peak", label: "空闲时段" }, rates: { cacheHit: 0.05, cacheMiss: 1.5, output: 4.5 } }, cost: { cacheHitCny: 0, cacheMissCny: 0.000015, outputCny: 0.0000135, totalCny: 0.0000285, currency: "CNY", estimated: true } }, at: "now" });
     stream.emit("run_status", { type: "run_status", runId: "run-fixture", status: "completed", at: "now" });
 
     await vi.waitFor(() => expect(document.querySelector("#agent-transcript")?.textContent).toContain("最终持久化回答"));
@@ -85,6 +114,8 @@ describe("A5 Agent panel", () => {
     expect(document.querySelector("#agent-events")?.textContent).toContain("Tool 结果 · get_build_evaluation · ok");
     expect(document.querySelector("#agent-events")?.textContent).toContain("审计记录 · completed · cccccccccccc");
     expect(document.querySelector("#agent-usage")?.textContent).toContain("total 13");
+    expect(document.querySelector("#agent-usage")?.textContent).toContain("估算费用");
+    expect(document.querySelector("#agent-usage")?.textContent).toContain("非余额账单");
     expect(stream.closed).toBe(true);
   });
 

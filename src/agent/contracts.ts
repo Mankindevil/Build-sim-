@@ -40,6 +40,25 @@ export interface ProviderUsage {
   reasoningTokens: number | null;
 }
 
+export interface ProviderBillingEstimate {
+  status: "priced" | "priced-with-warning" | "usage-unavailable" | "unknown-model" | "usage-incomplete";
+  pricing: {
+    billedModel: string | null;
+    pricingVersion: string;
+    sourceUrl: string;
+    pricingBand: { id: "peak" | "off-peak"; label: string } | null;
+    rates: { cacheHit: number; cacheMiss: number; output: number } | null;
+  };
+  cost: {
+    cacheHitCny: number;
+    cacheMissCny: number;
+    outputCny: number;
+    totalCny: number;
+    currency: "CNY";
+    estimated: true;
+  } | null;
+}
+
 export interface ProviderToolDefinition {
   name: string;
   description: string;
@@ -66,6 +85,7 @@ export interface ProviderTurnResult {
   toolCalls: AgentToolCall[];
   stopReason: "end_turn" | "tool_use" | "max_tokens" | "content_filter" | "cancelled" | "error";
   usage: ProviderUsage;
+  billing?: ProviderBillingEstimate;
   latencyMs: number;
 }
 
@@ -144,7 +164,7 @@ export type AgentRunEvent =
   | { type: "text_delta"; runId: string; text: string; at: string }
   | { type: "tool_call"; runId: string; call: AgentToolCall; toolDefinitionHash: string; at: string }
   | { type: "tool_result"; runId: string; callId: string; toolName: string; result: AgentToolResult; at: string }
-  | { type: "usage"; runId: string; provider: AgentProviderId; model: string; usage: ProviderUsage; at: string }
+  | { type: "usage"; runId: string; provider: AgentProviderId; model: string; usage: ProviderUsage; billing?: ProviderBillingEstimate; at: string }
   | { type: "error"; runId: string; code: string; message: string; at: string };
 
 export interface AgentSession {
@@ -197,6 +217,7 @@ export interface AgentRunAuditRecord {
     model: string;
     stopReason: ProviderTurnResult["stopReason"];
     usage: ProviderUsage;
+    billing: ProviderBillingEstimate | null;
     latencyMs: number;
   }>;
   toolCalls: Array<{

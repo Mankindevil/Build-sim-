@@ -24,10 +24,41 @@ function fakeProvider(turns: ProviderTurnRequest[]): ProviderAdapter {
 
 describe("A2 Agent runtime", () => {
   it("keeps the provider disabled unless both Agent and DeepSeek flags are enabled", () => {
-    expect(parseAgentRuntimeConfig({}).deepseek.enabled).toBe(false);
+    expect(parseAgentRuntimeConfig({}).deepseek).toMatchObject({ enabled: false, models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"] });
     expect(parseAgentRuntimeConfig({ DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture" }).deepseek.enabled).toBe(false);
-    expect(parseAgentRuntimeConfig({ BUILD_SIM_AGENT_ENABLED: "true", DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture", AGENT_SERVER_PORT: "5176" })).toMatchObject({ enabled: true, port: 5176, deepseek: { enabled: true } });
+    expect(parseAgentRuntimeConfig({
+      BUILD_SIM_AGENT_ENABLED: "true",
+      DEEPSEEK_ENABLED: "true",
+      DEEPSEEK_API_KEY: "fixture",
+      AGENT_SERVER_PORT: "5176",
+      PRICE_SERVER_PORT: "6174",
+      AGENT_MAX_MODEL_TURNS: "4",
+      AGENT_MAX_TOOL_CALLS: "6",
+      AGENT_MAX_REPEATED_TOOL_CALLS: "1",
+      AGENT_MAX_TOOL_RESULT_BYTES: "64000",
+      AGENT_MAX_MESSAGE_CHARS: "9000",
+      AGENT_REQUEST_BODY_MAX_BYTES: "750000",
+      AGENT_SESSION_ROOT: "var/sessions",
+      AGENT_AUDIT_ROOT: "var/audit",
+      BUILD_SIM_SKILLS_ROOT: "var/skills",
+    })).toMatchObject({
+      enabled: true,
+      port: 5176,
+      priceServiceUrl: "http://127.0.0.1:6174",
+      requestBodyMaxBytes: 750000,
+      maxMessageChars: 9000,
+      limits: { maxModelTurns: 4, maxToolCalls: 6, maxRepeatedToolCalls: 1, maxToolResultBytes: 64000 },
+      sessionRoot: path.resolve("var/sessions"),
+      auditRoot: path.resolve("var/audit"),
+      skillsRoot: path.resolve("var/skills"),
+      deepseek: { enabled: true },
+    });
     expect(() => parseAgentRuntimeConfig({ AGENT_SERVER_PORT: "70000" })).toThrow(/AGENT_SERVER_PORT/);
+    expect(() => parseAgentRuntimeConfig({ PRICE_SERVER_PORT: "0" })).toThrow(/PRICE_SERVER_PORT/);
+    expect(() => parseAgentRuntimeConfig({ AGENT_MAX_MODEL_TURNS: "33" })).toThrow(/AGENT_MAX_MODEL_TURNS/);
+    expect(() => parseAgentRuntimeConfig({ AGENT_REQUEST_BODY_MAX_BYTES: "999999999" })).toThrow(/AGENT_REQUEST_BODY_MAX_BYTES/);
+    expect(parseAgentRuntimeConfig({ DEEPSEEK_AGENT_MODELS: "deepseek-v4-pro,custom/model" }).deepseek.models).toEqual(["deepseek-v4-pro", "custom/model"]);
+    expect(() => parseAgentRuntimeConfig({ DEEPSEEK_AGENT_MODELS: "bad model" })).toThrow(/DEEPSEEK_AGENT_MODELS/);
     expect(parseAgentRuntimeConfig({ BUILD_SIM_AGENT_ENABLED: "true", CLAUDE_ENABLED: "false" }).claude.enabled).toBe(false);
     expect(parseAgentRuntimeConfig({ BUILD_SIM_AGENT_ENABLED: "true", CLAUDE_ENABLED: "true", CLAUDE_API_KEY: "fixture" })).toMatchObject({ claude: { enabled: true, model: "claude-sonnet-4-20250514" } });
     expect(() => parseAgentRuntimeConfig({ CLAUDE_ENABLED: "true" })).toThrow("CLAUDE_API_KEY");

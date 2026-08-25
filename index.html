@@ -29,21 +29,57 @@
 <body>
 <div id="n6-lab">
   <header class="lab-hero">
-    <div>
-      <p class="lab-eyebrow">JONSBO N6 · BUILD LAB · V2 EXTENDS V1</p>
-      <h2>NAS 模拟装机台</h2>
-      <p class="lab-subtitle">在 V1 互动预览上扩展：精确 SKU、统一冲突引擎、完整接线与配置 JSON。锁定已购 N6、W680M-ACE SE 与 i5-14500；证据不足一律标 unknown。</p>
+    <div class="lab-hero-copy">
+      <p class="lab-eyebrow"><span class="lab-brand-mark">N6</span> BUILD / SIM</p>
+      <h2>把 NAS 装机从清单<br>变成一套可验证的方案</h2>
+      <p class="lab-subtitle">配置硬件、检查物理冲突、核对接线和采购顺序。所有结论来自统一评估引擎；证据不足的字段保持 unknown。</p>
+      <div class="lab-hero-meta" aria-label="系统能力">
+        <span>统一评估</span><span>证据可追溯</span><span>9 盘位拓扑</span>
+      </div>
     </div>
-    <div class="lab-owned" aria-label="已购组件">
-      <span>N6 <b>¥629</b></span><span>W680M-ACE SE <b>¥2,799</b></span><span>i5-14500 <b>¥1,380</b></span>
-      <strong>已投入 ¥4,808</strong>
+    <div class="lab-owned" aria-label="装机档案进度">
+      <div class="lab-owned-head"><p class="lab-kicker">装机档案</p><button id="build-base-edit" type="button" class="case-view-btn">编辑基座</button></div>
+      <div id="build-base-summary" class="build-base-summary" aria-live="polite">
+        <p class="text-muted">正在读取装机进度…</p>
+      </div>
+      <div id="build-hero-progress" class="build-hero-progress"></div>
     </div>
   </header>
 
+  <dialog id="build-base-dialog" class="build-dialog" aria-labelledby="build-base-dialog-title">
+    <div class="build-dialog-shell">
+      <header class="build-dialog-head">
+        <div><p class="lab-kicker">BUILD RECORD</p><h3 id="build-base-dialog-title">编辑装机档案</h3><p>正式 SKU 参与确定性评估；用户记录部件只跟踪采购与组装，不进入兼容性计算。</p></div>
+        <button id="build-base-close" type="button" class="case-view-btn" aria-label="关闭编辑装机档案">关闭</button>
+      </header>
+      <section class="transaction-import" aria-labelledby="transaction-import-title">
+        <div class="transaction-import-copy">
+          <p class="lab-kicker">TRANSACTION AGENT</p>
+          <h4 id="transaction-import-title">从交易截图补充装机档案</h4>
+          <p>上传后先检查并修改识别结果，再加入下方基座；点击“保存基座”后才会写入当前浏览器。</p>
+        </div>
+        <label id="transaction-screenshot-drop" class="transaction-drop" for="transaction-screenshot-input">
+          <input id="transaction-screenshot-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+          <img id="transaction-screenshot-preview" alt="待识别交易截图预览" hidden>
+          <span><b>上传交易截图</b><small>点击选择或拖入 PNG / JPEG / WebP · 最大 5MB</small></span>
+        </label>
+        <p id="transaction-screenshot-status" class="transaction-status" data-level="idle" aria-live="polite">截图仅发送到服务端配置的 DeepSeek 视觉 OCR，不保存原图；基座只保留脱敏摘要和内容哈希，界面展示本地费用估算。</p>
+        <div id="transaction-screenshot-result" class="transaction-result" aria-live="polite" hidden></div>
+      </section>
+      <div id="build-base-editor" class="build-base-editor"></div>
+      <button id="build-add-custom" type="button" class="case-view-btn">添加用户记录部件</button>
+      <footer class="build-dialog-actions">
+        <p id="build-base-save-status" data-level="idle" aria-live="polite">修改只会在点击“保存基座”后生效。</p>
+        <button id="build-base-cancel" type="button" class="case-view-btn">取消</button>
+        <button id="build-base-save" type="button">保存基座</button>
+      </footer>
+    </div>
+  </dialog>
+
   <section class="card lab-config" aria-labelledby="lab-config-title">
     <div class="lab-section-head">
-      <div><p class="lab-kicker">01 / CONFIGURE</p><h3 id="lab-config-title">选择装机变量</h3></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <div><p class="lab-kicker">01 / CONFIGURE</p><h3 id="lab-config-title">配置当前方案</h3><p class="lab-section-copy">按功能分组调整硬件，右侧状态会实时重新评估。</p></div>
+      <div class="lab-actions">
         <div id="fit-chip" class="lab-chip" data-level="ok">兼容：推荐组合</div>
         <button type="button" id="cfg-export-json" class="case-view-btn">导出 JSON</button>
         <button type="button" id="cfg-export-checklist" class="case-view-btn">导出清单</button>
@@ -51,6 +87,8 @@
       </div>
     </div>
     <div class="lab-control-grid">
+      <section class="control-group" aria-labelledby="control-core-title">
+        <header><span>01</span><div><h4 id="control-core-title">核心硬件</h4><p>电源、散热、显卡与内存</p></div></header>
       <label>电源
         <select id="psu-select" class="form-select">
           <option value="psu.seasonic-focus-gx-850-v5">Seasonic FOCUS GX-850 V5 · ATX</option>
@@ -129,6 +167,9 @@
           <option value="memory.corsair-cmt32gx5m2x6400c38">Corsair CMT32GX5M2X6400C38 · 2×16 QVL（高马甲）</option>
         </select>
       </label>
+      </section>
+      <section class="control-group" aria-labelledby="control-storage-title">
+        <header><span>02</span><div><h4 id="control-storage-title">存储拓扑</h4><p>盘位、启动介质与控制器</p></div></header>
       <label>数据硬盘 <output id="disk-output" for="disk-range">1 块</output>
         <input id="disk-range" type="range" min="1" max="9" step="1" value="1">
       </label>
@@ -151,6 +192,9 @@
           <option value="always">LSI 9300-8i IT Mode 常驻</option>
         </select>
       </label>
+      </section>
+      <section class="control-group" aria-labelledby="control-thermal-title">
+        <header><span>03</span><div><h4 id="control-thermal-title">运行工况</h4><p>负载、环境与性能边界</p></div></header>
       <label>风扇策略
         <select id="fan-select" class="form-select">
           <option value="quiet">安静 · 低转速</option>
@@ -178,6 +222,9 @@
           <option value="125-154">PL1 125W / PL2 154W · 性能优先</option>
         </select>
       </label>
+      </section>
+      <section class="control-group control-group-switches" aria-labelledby="control-fans-title">
+        <header><span>04</span><div><h4 id="control-fans-title">风道与扩展</h4><p>按实际安装状态启用</p></div></header>
       <div class="lab-toggles" role="group" aria-label="额外风扇与扩展保留">
         <label><input id="front-fans" type="checkbox" checked> <span id="front-fans-label">2×140mm 前进风</span></label>
         <label><input id="rear-fan" type="checkbox"> <span id="rear-fan-label">1×120mm 后排风</span></label>
@@ -185,17 +232,19 @@
         <label><input id="side-fans" type="checkbox"> 2×120mm GPU 侧风扇（右侧位）</label>
         <label><input id="preserve-hba" type="checkbox" checked> 保留底部 HBA 插槽</label>
       </div>
+      </section>
     </div>
     <div id="ram-compat-note" class="lab-callout" data-level="ok">W680M-ACE SE 是 DDR5 UDIMM 主板；不兼容 DDR4、RDIMM 或 LRDIMM。i5-14500 官方 DDR5 基线为 4800 MT/s。</div>
   </section>
 
   <nav class="lab-tabs" aria-label="模拟器视图">
-    <button class="lab-tab" data-tab="overview" aria-selected="true">装机预览</button>
-    <button class="lab-tab" data-tab="thermal" aria-selected="false">热量与噪音</button>
-    <button class="lab-tab" data-tab="wiring" aria-selected="false">1–9 盘接线</button>
-    <button class="lab-tab" data-tab="gpu" aria-selected="false">GPU 适配</button>
-    <button class="lab-tab" data-tab="price" aria-selected="false">价格与配件</button>
-    <button class="lab-tab" data-tab="checklist" aria-selected="false">装机顺序</button>
+    <button class="lab-tab" data-tab="overview" aria-selected="true"><span>概览</span><small>方案与结论</small></button>
+    <button class="lab-tab" data-tab="thermal" aria-selected="false"><span>热设计</span><small>温度与噪音</small></button>
+    <button class="lab-tab" data-tab="wiring" aria-selected="false"><span>接线</span><small>1–9 盘拓扑</small></button>
+    <button class="lab-tab" data-tab="gpu" aria-selected="false"><span>GPU</span><small>空间与供电</small></button>
+    <button class="lab-tab" data-tab="price" aria-selected="false"><span>采购</span><small>价格与配件</small></button>
+    <button class="lab-tab" data-tab="checklist" aria-selected="false"><span>装机</span><small>顺序与检查</small></button>
+    <button class="lab-tab" data-tab="agent" aria-selected="false"><span>Agent</span><small>对话式诊断</small></button>
   </nav>
 
   <main>
@@ -334,21 +383,34 @@
         </section>
 
         <aside class="lab-verdicts">
-          <article class="card"><p class="lab-kicker">FIT VERDICT</p><h3 id="verdict-title">推荐：可直接装</h3><ul id="verdict-list"></ul></article>
-          <article class="card"><p class="lab-kicker">YOUR BEST ROUTE</p><h3 id="route-title">ATX 850W + AXP90</h3><p id="route-copy"></p></article>
-          <article class="card"><p class="lab-kicker">NEXT PURCHASE</p><ol id="next-buy-list"></ol></article>
+          <article class="card verdict-card"><p class="lab-kicker">FIT VERDICT</p><h3 id="verdict-title">推荐：可直接装</h3><ul id="verdict-list"></ul></article>
+          <article class="card route-card"><p class="lab-kicker">PRIMARY FINDING</p><h3 id="route-title">ATX 850W + AXP90</h3><p id="route-copy"></p></article>
+          <article class="card purchase-card">
+            <div class="lab-section-head"><div><p class="lab-kicker">BUILD PROGRESS</p><h3>部件、采购与组装状态</h3></div><button id="build-lock-current" type="button">锁定当前方案</button></div>
+            <div id="build-progress-summary" class="build-progress-summary" aria-live="polite"></div>
+            <ol id="next-buy-list"></ol>
+          </article>
           <article class="card advice-card" aria-labelledby="advice-title">
             <div class="lab-section-head"><div><p class="lab-kicker">DEEPSEEK ADVICE</p><h3 id="advice-title">结构化装机建议</h3></div><button id="advice-generate" type="button">生成建议</button></div>
             <p id="advice-status" class="lab-callout" data-level="warn">AI 建议默认关闭；确定性引擎评估不依赖 DeepSeek。</p>
-            <div><h4>确定性引擎判定</h4><div id="advice-deterministic"></div></div>
-            <div><h4>DeepSeek 建议</h4><div id="advice-output" aria-live="polite"><p class="text-muted">点击“生成建议”后显示结构化建议；失败时保留上方确定性事实。</p></div></div>
-            <div class="advice-billing-section">
-              <div class="lab-section-head"><div><h4>Token 与费用</h4><small id="advice-billing-status">读取 billing…</small></div><button id="advice-billing-refresh" type="button" class="case-view-btn">刷新</button></div>
+            <div class="advice-columns"><section><h4>确定性引擎判定</h4><div id="advice-deterministic"></div></section>
+            <section><h4>DeepSeek 建议</h4><div id="advice-output" aria-live="polite"><p class="text-muted">点击“生成建议”后显示结构化建议；失败时保留左侧确定性事实。</p></div></section></div>
+            <details class="advice-billing-section">
+              <summary><span>Token 与费用审计</span><small id="advice-billing-status">读取 billing…</small></summary>
+              <div class="lab-section-head advice-billing-head"><p>本地脱敏调用记录</p><button id="advice-billing-refresh" type="button" class="case-view-btn">刷新</button></div>
               <div id="advice-billing" aria-live="polite"><p class="text-muted">正在读取本地脱敏调用审计。</p></div>
-            </div>
+            </details>
           </article>
         </aside>
       </div>
+      <section class="card product-reference" aria-labelledby="product-reference-title">
+        <div class="lab-section-head"><div><p class="lab-kicker">OFFICIAL APPEARANCE</p><h3 id="product-reference-title">真实产品外观与当前部件</h3></div><span>官方产品图 ≠ 官方 CAD</span></div>
+        <div id="product-gallery" class="product-grid" aria-live="polite"></div>
+        <p class="lab-note">实物图来自厂商官方页并已本地缓存，只用于识别产品外观；内部锚点、净空、气流与冲突区仍以“官方 / 标准 / 结构推算”三级标注为准。</p>
+      </section>
+    </section>
+
+    <section class="lab-panel is-hidden" data-panel="agent">
       <section class="card agent-card" aria-labelledby="agent-title" data-testid="agent-panel">
         <div class="lab-section-head agent-head">
           <div><p class="lab-kicker">AGENT CHAT · PROVIDER NEUTRAL</p><h3 id="agent-title">装机 Agent</h3><p id="agent-status" class="agent-status" data-level="warn" aria-live="polite">正在连接本地 Agent 服务…</p></div>
@@ -374,11 +436,6 @@
           <textarea id="agent-input" class="form-control" rows="3" maxlength="20000" placeholder="例如：诊断当前配置最先需要解决的阻断项。Cmd/Ctrl + Enter 发送。"></textarea>
           <div><button id="agent-cancel" type="button" class="case-view-btn" disabled>取消</button><button id="agent-send" type="submit">发送</button></div>
         </form>
-      </section>
-      <section class="card product-reference" aria-labelledby="product-reference-title">
-        <div class="lab-section-head"><div><p class="lab-kicker">OFFICIAL APPEARANCE</p><h3 id="product-reference-title">真实产品外观与当前部件</h3></div><span>官方产品图 ≠ 官方 CAD</span></div>
-        <div id="product-gallery" class="product-grid" aria-live="polite"></div>
-        <p class="lab-note">实物图来自厂商官方页并已本地缓存，只用于识别产品外观；内部锚点、净空、气流与冲突区仍以“官方 / 标准 / 结构推算”三级标注为准。</p>
       </section>
     </section>
 

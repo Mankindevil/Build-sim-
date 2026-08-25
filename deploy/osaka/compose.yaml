@@ -1,0 +1,55 @@
+name: build-sim-osaka
+
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/osaka/Dockerfile
+      target: web
+    image: build-sim-web:osaka
+    ports:
+      - "127.0.0.1:15176:80"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+  price:
+    build:
+      context: ../..
+      dockerfile: deploy/osaka/Dockerfile
+      target: runtime
+    image: build-sim-runtime:osaka
+    command: ["node", "scripts/price-server/server.mjs"]
+    network_mode: host
+    env_file:
+      - ../../.env.remote
+    volumes:
+      - ../../runtime:/app/runtime
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  agent:
+    image: build-sim-runtime:osaka
+    command: ["node", "dist-agent/agent-server.js"]
+    network_mode: host
+    env_file:
+      - ../../.env.remote
+    volumes:
+      - ../../runtime:/app/runtime
+    depends_on:
+      - price
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  searxng:
+    image: docker.io/searxng/searxng@sha256:11a9b34cdc0b1ec2b991470a2762ecb5a1a531898289fb51dcd015260450729e
+    ports:
+      - "127.0.0.1:18080:8080"
+    env_file:
+      - ../../.env.remote
+    volumes:
+      - ../../infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true

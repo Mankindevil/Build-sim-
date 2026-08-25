@@ -38,9 +38,20 @@ import { acceptOfficial, confirmDraft, createDraft, rejectDraft } from "./catalo
 import { loadRuntimeFlags } from "../runtime/flags.mjs";
 import { buildAuditedQuote } from "./price-audit.mjs";
 import { createAdviceJob, getAdviceBillingSummary, getAdviceJob } from "../deepseek/advice.mjs";
+import { intEnv, loadEnv } from "./env.mjs";
+import { analyzeTransactionScreenshot } from "./transactions/receipt.mjs";
+import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./catalog/discovery.mjs";
+import { createSearXngDiscoveryProvider } from "./catalog/searxng-discovery.mjs";
 
 const HOST = "127.0.0.1";
-const PORT = Number(process.env.PRICE_SERVER_PORT ?? 5174);
+const env = await loadEnv();
+const PORT = intEnv(env, "PRICE_SERVER_PORT", 5174, { min: 1, max: 65_535 });
+const MAX_BODY_BYTES = intEnv(env, "PRICE_REQUEST_BODY_MAX_BYTES", 1_000_000, { min: 1_024, max: 10_000_000 });
+const TRANSACTION_BODY_MAX_BYTES = intEnv(env, "TRANSACTION_SCREENSHOT_BODY_MAX_BYTES", 7_000_000, { min: 500_000, max: 12_000_000 });
+const TRANSACTION_OCR_TIMEOUT_MS = intEnv(env, "TRANSACTION_SCREENSHOT_OCR_TIMEOUT_MS", 60_000, { min: 5_000, max: 120_000 });
+const TRANSACTION_OCR_PROVIDER = env.TRANSACTION_OCR_PROVIDER || "deepseek-ocr";
+const DEEPSEEK_OCR_MAX_TOKENS = intEnv(env, "DEEPSEEK_OCR_MAX_TOKENS", 2_048, { min: 128, max: 8_192 });
+if (!["deepseek-ocr", "tesseract"].includes(TRANSACTION_OCR_PROVIDER)) throw new Error("TRANSACTION_OCR_PROVIDER must be deepseek-ocr or tesseract");
 
 function send(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -51,12 +62,12 @@ function send(res, status, payload) {
   res.end(body);
 }
 
-async function readBody(req) {
+async function readBody(req, maxBytes = MAX_BODY_BYTES) {
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 1_000_000) throw new Error("Request body too large");
+    if (size > maxBytes) throw new Error("Request body too large");
     chunks.push(chunk);
   }
   if (chunks.length === 0) return {};
@@ -196,9 +207,33 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (route === "GET /api/price/health") return send(res, 200, { ok: true, port: PORT });
+    if (route === "POST /api/price/transactions/analyze") {
+      const body = await readBody(req, TRANSACTION_BODY_MAX_BYTES);
+      const catalog = await loadCatalog();
+      const analysis = await analyzeTransactionScreenshot(body, {
+        catalog,
+        provider: TRANSACTION_OCR_PROVIDER,
+        timeoutMs: TRANSACTION_OCR_TIMEOUT_MS,
+        apiUrl: env.DEEPSEEK_OCR_API_URL || env.DEEPSEEK_API_URL || "https://api.deepseek.com",
+        apiKey: env.DEEPSEEK_OCR_API_KEY || env.DEEPSEEK_API_KEY || "",
+        model: env.DEEPSEEK_OCR_MODEL || "deepseek-v4-flash-vision-exp",
+        maxTokens: DEEPSEEK_OCR_MAX_TOKENS,
+      });
+      const transactionDiscoveryMode = env.TRANSACTION_CATALOG_DISCOVERY_PROVIDER || "searxng";
+      if (!["registry", "searxng"].includes(transactionDiscoveryMode)) throw new Error("TRANSACTION_CATALOG_DISCOVERY_PROVIDER must be registry or searxng");
+      const discoveryProviders = [
+        new CatalogCacheDiscoveryProvider(catalog),
+        ...(transactionDiscoveryMode === "searxng" ? [createSearXngDiscoveryProvider(env)] : []),
+        new RegistrySearchDiscoveryProvider(),
+      ];
+      const catalogSearch = analysis.status === "catalog-search-required" && analysis.searchQuery
+        ? queueSearch({ query: analysis.searchQuery, brand: analysis.detected.brand ?? undefined, category: analysis.detected.category, officialOnly: true, limit: 8 }, { discoveryProviders, catalog, persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd() })
+        : null;
+      return send(res, 200, { ...analysis, catalogSearch: catalogSearch ? { jobId: catalogSearch.jobId, status: catalogSearch.status, stage: catalogSearch.stage } : null });
+    }
     if (route === "POST /api/catalog/search") {
       const body = await readBody(req);
-      return send(res, 202, queueSearch(body, { persistRoot: process.env.CATALOG_CANDIDATES_ROOT ?? process.cwd() }));
+      return send(res, 202, queueSearch(body, { persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd() }));
     }
     if (route === "POST /api/advice/build") {
       const flags = await loadRuntimeFlags();

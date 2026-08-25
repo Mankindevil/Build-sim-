@@ -1,0 +1,13 @@
+.git
+.cache
+node_modules
+dist
+dist-agent
+.env
+.env.local
+.env.remote
+runtime
+data/agent
+data/audit
+tests/model-test-report.json
+tests/static-test-report.json

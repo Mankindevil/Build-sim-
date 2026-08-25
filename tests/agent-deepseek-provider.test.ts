@@ -32,6 +32,16 @@ function request(onTextDelta?: (text: string) => void) {
 }
 
 describe("A2 DeepSeek provider adapter", () => {
+  it("publishes every configured DeepSeek model with distinct labels", () => {
+    const adapter = new DeepSeekProviderAdapter({ ...config, models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp", "private-model"] });
+    expect(adapter.models.map((entry) => [entry.id, entry.label])).toEqual([
+      ["deepseek-v4-flash", "DeepSeek V4 Flash · 快速"],
+      ["deepseek-v4-pro", "DeepSeek V4 Pro · 深度推理"],
+      ["deepseek-v4-flash-vision-exp", "DeepSeek V4 Flash Vision Exp · 视觉"],
+      ["private-model", "private-model"],
+    ]);
+  });
+
   it("normalizes streamed text, stop reason, model id and usage", async () => {
     const deltas: string[] = [];
     let authorization = "";
@@ -48,6 +58,7 @@ describe("A2 DeepSeek provider adapter", () => {
     const result = await adapter.createTurn(request((text) => deltas.push(text)));
     expect(result).toMatchObject({ provider: "deepseek", providerRequestId: "provider-1", model: "deepseek-v4-flash", content: "装机建议", stopReason: "end_turn" });
     expect(result.usage).toEqual({ inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 60, cacheWriteTokens: 40, reasoningTokens: 5 });
+    expect(result.billing).toMatchObject({ status: "priced", pricing: { billedModel: "deepseek-v4-flash" }, cost: { estimated: true } });
     expect(deltas).toEqual(["装机", "建议"]);
     expect(authorization).toBe("Bearer fixture-secret");
     expect(JSON.stringify(result)).not.toContain("fixture-secret");

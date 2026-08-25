@@ -1,106 +1,755 @@
-# PC Build Sim
+# Build Sim
 
-Modular desktop / NAS build simulator.
+[English](./README.md) | [简体中文](./README.zh-CN.md)
 
-**UI rule:** V2 **extends** the V1 interactive Build Lab in place — same spatial preview, thermal field, wiring, and BOM panels. No separate workbench product UI.
+Build Sim is an evidence-aware PC and NAS build simulator. It combines exact-SKU configuration, deterministic compatibility checks, spatial occupancy, cable routing, assembly planning, thermal and noise estimates, auditable price snapshots, governed official-catalog enrichment, and an optional provider-neutral AI agent in one browser application.
 
-**Current focus (v0.2 / V2.0):** JONSBO N6 + ASUS Pro WS W680M-ACE SE + i5-14500  
-**Later:** pluggable cases and general desktop builds
+The current `0.2.0-alpha` release focuses on the JONSBO N6 platform with the ASUS Pro WS W680M-ACE SE and Intel Core i5-14500 reference path. The architecture is designed for additional cases and desktop builds, but those profiles are not shipped yet.
 
-## V2.0 scope
+> Build Sim is a planning tool, not manufacturer CAD, CFD, electrical certification, or a substitute for checking the latest manuals. Reconstructed geometry, estimated airflow, market candidates, OCR output, and AI responses remain visibly separate from official facts.
 
-1. **Exact SKU library** — concrete models; dropdown values are SKU ids from `data/skus/catalog.json`.
-2. **Unified occupancy / conflict engine** — drives the existing FIT chip and wiring panel via `evaluateBuild`. Every millimetre lives in `data/cases/jonsbo-n6/geometry.json`, in one case-local frame (origin at the envelope centre; `x` right, `y` up, `z` rearward), and both the engine and the preview read it. Conflicts are **volumetric**: an overlap is a measured AABB intersection with a drawable box, not a slot-name coincidence, and `mountedOn` pairs are exempt because a cooler is supposed to interpenetrate its CPU. A `bad` verdict needs both anchors evidenced — a reconstructed anchor can only raise `warn`. Frame and per-part evidence split: `docs/PROVENANCE.md`.
-3. **Full wiring plans** — per-bay paths + backplane feeds + cable checklist (same Wiring tab), plus a socket-level **PSU panel diagram**: every modular socket of the selected PSU, which cable occupies it, and which backplane inlet ends up sharing a lead or getting none. Panels are drawn only from counted evidence; uncounted groups are left blank rather than implied. Data paths respect the HBA's real port count — the ninth drive falls back to a board port instead of a port the card does not have — and Mini-SAS HD (SFF-8643) breakouts are billed separately from the board's SlimSAS (SFF-8654) cable.
-   **Lower-chamber structure** (spatial preview) — tray cage, backplane PCB with its four inlets, and either the removable left fan bracket or the shipped bottom-PSU rack that replaces it, so the bottom half reads as occupied space rather than void. Shapes are planning envelopes; only the structural relationships are from the manual.
-   **Air balance** (Thermal tab) — `ΔT = Q /(ρ·cp·V̇)` per chamber, so airflow is a first-class input instead of a fudge offset. Fan CFM, case impedance and drive θ are labelled planning envelopes; the bottom-PSU / drive-bay coupling is bounded, not guessed. See `docs/PROVENANCE.md` for the physics-vs-guess split.
-   **Thermal field** (spatial preview) — the heatmap is sampled from that same result at the same part centroids, so a millimetre on the canvas is a millimetre in the case and every hot spot names the component behind it. It interpolates a 0D model and adds no physics: it cannot exceed its hottest source, the deck blocks diffusion unless a bottom PSU couples the chambers, and both bounds are drawn rather than the optimistic one alone. Not CFD — no velocities, no pressure drop.
-   **Assembly order** (Wiring tab) — derived, not written down: the mounting tree, the corridor each part travels through on its way in (`data/cases/jonsbo-n6/assembly.json`), and the plug clearances the routing solver already found. Whatever stands in a part's corridor goes in later, which is how "install the DIMMs before an IS-55" and "swap the memory afterwards and the cooler comes off again" stop being hand-typed sentences. Rules the manual states outright stay declared with their section number and `official` evidence — §13.1 pulls the left fan bracket before wiring the backplane — because a published instruction beats any reconstruction, and that one is not derivable from the geometry.
-   **Cable routing** (Wiring tab + spatial preview) — connectors are declared as a face plus an offset in `data/cases/jonsbo-n6/routing.json`, so they travel with their part when a PSU gets longer or moves to another bay. Cables are routed over a waypoint graph, which is why the deck stops a run: nothing crosses it except a declared opening. Four checks per run — insertion clearance, required length, connector orientation, blocked access — and every one caps at `warn`, because not one anchor in that file is published. The routing table lists each solved run with its ends, the openings it passes and the length it needs including 15% assembly slack; the `走线折线` toggle draws those same polylines in the isometric view, and clicking a row isolates one run.
-4. **Config save / load** — export/import JSON and checklist from the Configure header.
-5. **Official appearance** — gallery switches with the selected SKU; missing art stays unknown (not V2.1 3D texture mapping).
+## Table of contents
 
-**Price:** auditable snapshots in `data/prices/` (see `docs/PRICE_SNAPSHOTS.md`).  
-`npm run price:serve` starts a local-only collector; the 价格与配件 tab then fetches 京东/淘宝/拼多多/亚马逊/官网 candidates and only writes a quote after you confirm the listing. Part numbers are used where they index (京东/亚马逊/官网) and spec keywords where they don't (淘宝/拼多多). A search card quotes the listing's **cheapest** variant, so a card price is stamped as an opening price and cannot be audited — an auditable number is read from the detail page's variant table, with the option's own wording stored beside it. amazon.com prices carry a declared exchange rate and stay reference-only. `npm run price:search` emits the same links as a clickable cheat sheet; `npm run price:refresh` rebuilds `latest.json`; `npm run price:fixture` captures a real card into `tests/fixtures/` so an extraction fix stays fixed. UI stamps `snapshot YYYY-MM-DD · platform` — never invents live market or history.
+- [Project status](#project-status)
+- [Platform capabilities](#platform-capabilities)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Full local deployment](#full-local-deployment)
+- [Production deployment](#production-deployment)
+- [Configuration](#configuration)
+- [How to use the platform](#how-to-use-the-platform)
+- [API overview](#api-overview)
+- [Data, evidence, and security](#data-evidence-and-security)
+- [Testing](#testing)
+- [Repository layout](#repository-layout)
+- [Known limits and roadmap](#known-limits-and-roadmap)
+- [Contributing and license](#contributing-and-license)
 
-Deferred to **V2.1:** price history series, measured calibration, product textures on 3D envelopes.
+## Project status
+
+Build Sim is usable as a local alpha and is under active development.
+
+| Area | Current status |
+| --- | --- |
+| Deterministic build evaluation | Implemented and shared by the UI, Advice service, and Agent tools |
+| JONSBO N6 geometry, fit, wiring, routing, and assembly | Implemented for the current case profile |
+| Thermal, noise, power, and price planning | Implemented with explicit estimate/provenance boundaries |
+| Price and official-catalog service | Implemented as a loopback-only local service |
+| DeepSeek Advice and Agent adapters | Implemented; bounded live DeepSeek smoke has been verified |
+| Claude adapter | Protocol fixture verified; live provider behavior is not verified |
+| Governed catalog write | One approval-bound write tool is implemented; writes are disabled by default |
+| Public multi-user hosting | Not ready: authentication, tenancy, and application-level rate limiting are not included |
+| Full application container deployment | `deploy/osaka/` includes the Web, Price/Advice, Agent, and SearXNG Compose stack; Kubernetes manifests are not included |
+| License | No `LICENSE` file is present yet; resolve this before advertising a public release |
+
+## Platform capabilities
+
+### Deterministic build model
+
+- Exact SKU catalog backed by `data/skus/catalog.json`.
+- A single `BuildEvaluation` result drives compatibility, power, thermal, noise, pricing, physical, and calibration views.
+- Volumetric AABB occupancy checks use the case-local millimetre coordinate system in `data/cases/jonsbo-n6/geometry.json`.
+- Evidence-aware verdicts prevent reconstructed anchors from being presented as measured manufacturer geometry.
+- Configuration export/import makes a build reproducible and shareable.
+
+### Spatial fit and assembly
+
+- Isometric component envelopes, case chambers, trays, backplane, PSU rack, and removable bracket.
+- GPU, cooler, PSU, memory, drive, and connector clearance checks.
+- Derived assembly order from mounting dependencies, insertion corridors, and connector access.
+- Manual-declared steps remain distinct from geometry-derived steps.
+
+### Wiring and routing
+
+- Per-drive data paths, backplane power feeds, cable checklist, and modular PSU socket plan.
+- Port-count-aware HBA/motherboard routing and separate cable accounting for SFF-8643 and SFF-8654.
+- Waypoint-graph cable routing with length, slack, orientation, opening, and access checks.
+- Selectable routing polylines in the spatial view.
+
+### Thermal, acoustics, and power
+
+- Chamber air-temperature estimate based on heat load and effective airflow.
+- Component heat field interpolated from the same deterministic result used by the UI.
+- Drive-bay and lower-chamber coupling are bounded estimates, not CFD.
+- Power budget, fan planning, and noise estimates are surfaced with their assumptions.
+
+### Price and official catalog
+
+- Auditable dated price snapshots under `data/prices/`.
+- Local collection workflow for JD, Taobao, Pinduoduo, Amazon, and official product pages.
+- Candidate discovery, detail-page variant inspection, plausibility gates, and explicit user confirmation.
+- Trusted-domain registry, SSRF protection, bounded redirects and payloads, HTML/JSON-LD/spec-table/PDF extraction, optional scanned-PDF OCR, and field-level provenance.
+- Unknown official domains become proposals; discovered candidates, review drafts, and committed catalog facts remain separate states.
+
+### Advice and Agent
+
+- Optional DeepSeek-backed structured build advice with local usage and estimated-cost audit records.
+- Provider-neutral, streaming multi-turn Agent service with persistent local sessions, cancellation, Skills, Tools, definition hashes, and tamper-evident audit records.
+- Four deterministic read tools, four external-read tools, and one governed write tool (`enrich_official_catalog`).
+- Built-in Skills: `build-diagnosis`, `upgrade-advisor`, `shopping-research`, and `assembly-and-wiring`.
+- Tool schemas, budgets, allowed-tool restrictions, loopback service boundaries, and out-of-band write approval are enforced server-side.
+
+### Browser interface
+
+The current interface contains six working areas:
+
+1. **Build Preview** — configure exact SKUs, inspect fit, view the spatial build, import/export configuration, and use the optional Agent.
+2. **Thermal & Noise** — inspect chamber temperatures, component estimates, airflow assumptions, and acoustic planning.
+3. **1–9 Drive Wiring** — review storage data paths, PSU sockets, backplane feeds, cable routes, and assembly order.
+4. **GPU Fit** — inspect graphics-card clearance and conflicts.
+5. **Prices & Parts** — view snapshots, collect candidates, inspect variants, and request structured advice.
+6. **Assembly Order** — follow derived and manual-backed installation sequencing.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  B[Browser UI<br/>Vite static app] -->|deterministic local modules| E[BuildEvaluation]
+  B -->|/api/price, /api/advice| P[Price / Catalog / Advice<br/>127.0.0.1:5174]
+  B -->|/api/agent| A[Agent service<br/>127.0.0.1:5175]
+  A --> E
+  A -->|external read tools| P
+  P --> D[(Catalog, prices,<br/>drafts and audit data)]
+  P -. optional discovery .-> S[SearXNG<br/>127.0.0.1:8080]
+  P -. optional provider .-> DS[DeepSeek API]
+  A -. optional providers .-> DS
+  A -. optional provider .-> C[Claude API]
+```
+
+The frontend, price service, and Agent service are separate processes. During development, Vite proxies the API paths. In production, serve `dist/` as static files and proxy selected API routes to the two loopback services.
+
+## Requirements
+
+- Node.js 20 or newer.
+- npm with lockfile-compatible `npm ci` support.
+- A modern browser.
+- Optional for local development, required for the Osaka profile: Docker with Compose.
+- Optional: Playwright Chromium for headed marketplace collection and browser smoke tests.
+- Optional: server-side DeepSeek or Claude credentials. Never expose these through a `VITE_` variable.
 
 ## Quick start
 
 ```bash
-npm install
+git clone <your-fork-or-repository-url> build-sim
+cd build-sim
+npm ci
+cp .env.example .env.local
 npm run dev
 ```
 
-DeepSeek 建议层使用服务端环境变量管理。需要启用时，先复制模板并只在本机填写 key：
+Open `http://127.0.0.1:5176`. The deterministic simulator does not require an AI key.
+
+Run the supporting services in separate terminals when their features are needed:
 
 ```bash
-cp .env.example .env.local
-# 编辑 .env.local：设置 DEEPSEEK_ENABLED=true、BUILD_SIM_ADVICE_ENABLED=true 和 DEEPSEEK_API_KEY
+npm run price:serve
+npm run agent:serve
 ```
 
-`DEEPSEEK_API_KEY`、`DEEPSEEK_API_URL`、模型、超时、token 上限和温度都由 `.env.local` 管理。不要使用 `VITE_` 前缀，也不要把 `.env.local` 提交到 Git；浏览器只接收结构化建议结果，不会读取 key。
+The Agent stays disabled until a provider and `BUILD_SIM_AGENT_ENABLED=true` are configured.
 
-每次真实 provider 调用会从 DeepSeek 响应 `usage` 记录输入缓存命中、输入缓存未命中、输出、推理和总 token，并按带版本和来源的官方 CNY 单价快照计算估算费用。分时计价以请求开始时的北京时间为准：周一至周五 09:00–12:00、14:00–18:00 是高峰，其余时段（含周末全天）为空闲；每条调用记录都会保存命中的计费时段、当时单价与定价版本。页面“Token 与费用”可查看总计、分时段汇总和逐次调用明细，服务端也提供 `GET /api/advice/billing?limit=100`。审计记录不保存 key、prompt 或原始模型输出；本地 advice cache 命中不会重复计费。费用是基于 usage 的本地估算，不等同于 DeepSeek 账户余额账单。
+## Full local deployment
 
-Provider-neutral Agent 服务单独运行在 `127.0.0.1:5175`，默认关闭。启用 DeepSeek 多轮聊天时，还需在 `.env.local` 设置 `BUILD_SIM_AGENT_ENABLED=true`；然后运行：
+### 1. Install and configure
+
+```bash
+npm ci
+cp .env.example .env.local
+```
+
+Configuration is merged per key in this order:
+
+```text
+process.env > .env.local > .env > .env.example
+```
+
+An explicitly empty higher-priority value clears the setting rather than falling back. Keep `.env.local` private; it is ignored by Git.
+
+### 2. Start the price, catalog, and Advice service
+
+```bash
+npm run price:serve
+```
+
+It listens on `127.0.0.1:5174` by default. Price snapshots and deterministic catalog operations work without an AI provider.
+
+To enable DeepSeek Advice, edit `.env.local`:
+
+```dotenv
+DEEPSEEK_ENABLED=true
+BUILD_SIM_ADVICE_ENABLED=true
+DEEPSEEK_API_KEY=<server-side-key>
+```
+
+Do not prefix the key with `VITE_`. Provider calls may incur charges. The application records token usage and a local estimated cost; that estimate is not the provider invoice or account balance.
+
+Transaction screenshots use DeepSeek's public vision model by default. It reuses the server-only `DEEPSEEK_API_URL` and `DEEPSEEK_API_KEY`; optional OCR-specific values override them:
+
+```dotenv
+TRANSACTION_OCR_PROVIDER=deepseek-ocr
+DEEPSEEK_OCR_API_URL=
+DEEPSEEK_OCR_MODEL=deepseek-v4-flash-vision-exp
+DEEPSEEK_OCR_API_KEY=
+```
+
+The screenshot is sent only to the configured DeepSeek endpoint and is not persisted in the catalog; the app retains a content hash, redacted summary, engine id, provider usage, and local cost estimate. OCR failures are explicit and never silently switch engines. A self-hosted vLLM `deepseek-ai/DeepSeek-OCR` endpoint remains supported by setting its URL and model explicitly. Set `TRANSACTION_OCR_PROVIDER=tesseract` only for an intentional rollback to bundled English recognition.
+
+### 3. Start the Agent service
+
+For DeepSeek:
+
+```dotenv
+BUILD_SIM_AGENT_ENABLED=true
+DEEPSEEK_ENABLED=true
+DEEPSEEK_API_KEY=<server-side-key>
+DEEPSEEK_AGENT_MODELS=deepseek-v4-flash,deepseek-v4-pro,deepseek-v4-flash-vision-exp
+```
+
+Then run:
 
 ```bash
 npm run agent:serve
 ```
 
-服务端提供模型/Tool/Skill 目录、持久化会话、消息运行、取消和 SSE 事件接口（`/api/agent/models`、`/api/agent/tools`、`/api/agent/skills`、`/api/agent/sessions`、`/api/agent/runs/:id/events`）。会话文件写入被 Git 忽略的 `data/agent/sessions/`，权限为当前用户读写。浏览器不会直接调用 DeepSeek，也不会接收 API key。当前已用 fixture 验证 DeepSeek SSE、多轮上下文、usage、超时和取消；没有真实 provider 响应证据时，不把 live DeepSeek 标为已验证。
+For Claude, also set `CLAUDE_ENABLED=true` and `CLAUDE_API_KEY`. Claude remains optional and its current validation boundary is protocol fixtures rather than a live-provider acceptance run.
 
-首批 Agent Tool 全部只读：`get_build_evaluation`、`compare_builds`、`get_sku_facts`、`get_price_snapshot`、`search_official_catalog`、`inspect_catalog_candidate`、`search_price_candidates`。前四个直接读取服务端确定性事实；后三个只连接固定的本地价格服务 `127.0.0.1:5174`，沿用官方域名 allowlist、SSRF 防护和未审计候选语义，因此执行外部搜索时还需要同时运行 `npm run price:serve`。Tool Runtime 会校验严格 schema、限制轮次/调用数/重复调用/超时/结果体积，并把 Tool definition hash 写入事件流。
-
-内置 Skill 位于 `skills/*/SKILL.md`：`build-diagnosis`、`upgrade-advisor`、`shopping-research`、`assembly-and-wiring`。目录接口只返回 manifest 和定义哈希；正文仅在消息请求显式传入 `skillId` 后加载进该次运行的系统上下文。Skill 的 `allowedTools` 同时限制模型可见的 Tool 定义与服务端实际派发，模型即使输出越权调用也只会得到结构化 `tool_not_allowed` 结果。
-
-“装机预览”页包含 Provider-neutral Agent 聊天面板，可选择服务端模型与 Skill、保持多轮会话、随每条消息提交当前 BuildConfig、显示流式文本、Skill/Tool 定义哈希、结构化 Tool 结果、usage，并支持取消和新建会话。服务不可用时面板会保持禁用并明确提示，不影响确定性模拟器。`npm run agent:fixture` 只用于本地 DeepSeek SSE 协议和浏览器全链路测试，返回内容明确标注为 fixture，不能作为真实 DeepSeek 可用性证据。
-
-每次运行另写入权限为 `0600` 的 `data/agent/audit/<runId>.json`，并可通过 `GET /api/agent/runs/:id/audit` 读取。审计记录包含配置、Tool 输入/结果/证据的 SHA-256、Skill/Tool definition hash、Provider request id、usage、延迟与终态，不复制 prompt、原始 Tool 结果或模型正文；敏感键、Bearer 值和 key 形态文本会再次脱敏，并用 `recordHash` 检查文件完整性。多轮会话文件为了恢复聊天会包含用户、模型和 Tool 正文，两者用途不同，均只保存在被 Git 忽略的本地目录中。
-
-未来写 Tool 的 `AgentWriteApprovalEnvelope` 要求短时效、精确绑定 Tool/定义/会话/输入哈希、幂等键、人工主体、带外 token、备份目标和回滚策略。这个契约当前只用于前置设计与验证；注册表仍无条件返回 `write_tools_disabled`，审批对象本身不能开启写执行。
-
-Claude 使用同一个 `ProviderAdapter`、会话、Skill、Tool、SSE 和审计契约。适配器按 Anthropic Messages API 的流式 content blocks 映射文本、`tool_use`、`tool_result` 与 usage；只有同时设置 `BUILD_SIM_AGENT_ENABLED=true`、`CLAUDE_ENABLED=true` 和服务端 `CLAUDE_API_KEY` 时才注册 Claude 模型，默认仍只有 DeepSeek。当前 Claude 只通过协议 fixture 验证，没有 live Claude 调用证据；配置示例见 `.env.example`，最终边界见 `docs/agent-implementation-matrix.md`。
-
-Opens the N6 Build Lab. Change PSU/cooler/GPU/etc.; FIT + wiring update from the engine; appearance gallery follows SKU.
+### 4. Start the frontend
 
 ```bash
-npm test
+npm run dev
+```
+
+The Vite development server reads the same service-port configuration and proxies Price/Advice and Agent requests. All application services bind to `127.0.0.1`; a port collision fails explicitly.
+
+### 5. Optional local SearXNG discovery
+
+The bundled Compose file is for SearXNG only, not the full application:
+
+```bash
+npm run searxng:up
+npm run searxng:health
+npm run searxng:smoke
+```
+
+Enable it in `.env.local`:
+
+```dotenv
+CATALOG_DISCOVERY_PROVIDER=searxng
+SEARXNG_BASE_URL=http://127.0.0.1:8080
+```
+
+Stop it with:
+
+```bash
+node scripts/searxng-local.mjs stop
+```
+
+Search titles and snippets are discovery evidence only. A fact is not official until a trusted final URL has been fetched, extracted, reviewed, and accepted through the catalog gates.
+
+### 6. Optional scanned-PDF OCR
+
+OCR is local, English-only, bounded, disabled by default, and never promotes text directly into formal catalog facts:
+
+```dotenv
+CATALOG_PDF_OCR_ENABLED=true
+CATALOG_PDF_OCR_MIN_TEXT_CHARS=80
+CATALOG_PDF_OCR_MAX_PAGES=3
+CATALOG_PDF_OCR_WIDTH=1600
+CATALOG_PDF_OCR_TIMEOUT_MS=60000
+```
+
+OCR-derived fields require review and retain OCR provenance. The code rejects values outside the hard safety limits.
+
+### 7. Optional marketplace browser
+
+Install Chromium if Playwright has not downloaded it:
+
+```bash
+npx playwright install chromium
+npm run price:login
+```
+
+The login profile is stored under `.cache/` and must not be committed. Respect each marketplace's terms, access controls, and rate limits.
+
+## Production deployment
+
+The repository includes a complete single-host Docker Compose profile under `deploy/osaka/`. It builds the static Web image and the shared Node.js runtime image, then runs Web, Price/Catalog/Advice, Agent, and a pinned SearXNG image. Kubernetes manifests and an automated public deployment pipeline are not included.
+
+### Docker Compose on Osaka
+
+The checked-in profile expects the repository at `/home/linuxuser/Code/build-sim`. Application ports remain loopback-only; host Nginx is the TLS and access-control boundary.
+
+#### 1. Prepare the host and environment
+
+```bash
+sudo mkdir -p /home/linuxuser/Code
+sudo chown linuxuser:linuxuser /home/linuxuser/Code
+git clone <your-repository-url> /home/linuxuser/Code/build-sim
+cd /home/linuxuser/Code/build-sim
+
+cp deploy/osaka/env.remote.example .env.remote
+chmod 600 .env.remote
+mkdir -p runtime deploy-backups
+chmod 700 runtime
+```
+
+For a private or uncommitted working tree, synchronize the source over SSH instead of cloning, while excluding `.git`, `.env*`, `node_modules/`, `dist/`, and runtime/audit data. Copy secrets separately with mode `600`.
+
+Edit `.env.remote` on the server. Replace `SEARXNG_SECRET=<generate-on-server>` with a random value and keep all provider keys server-side. The Compose services read `.env.remote`, not `.env.local`. When promoting a local provider configuration, merge only the provider keys; do not overwrite deployment-owned ports, loopback URLs, or runtime paths.
+
+DeepSeek Advice and Agent require all of these values:
+
+```dotenv
+DEEPSEEK_ENABLED=true
+BUILD_SIM_ADVICE_ENABLED=true
+BUILD_SIM_AGENT_ENABLED=true
+DEEPSEEK_API_KEY=<server-side-key>
+```
+
+Provider requests may transfer build/session data externally and incur charges. Copying a key does not validate provider connectivity; use a separately authorized bounded request for that acceptance check.
+
+#### 2. Build and start
+
+Run from the repository root:
+
+```bash
+docker compose -f deploy/osaka/compose.yaml config --quiet
+docker compose -f deploy/osaka/compose.yaml build
+docker compose -f deploy/osaka/compose.yaml up -d
+docker compose -f deploy/osaka/compose.yaml ps
+```
+
+The profile uses these loopback listeners:
+
+| Service | Listener |
+| --- | --- |
+| Web container | `127.0.0.1:15176` |
+| Price / Catalog / Advice | `127.0.0.1:5174` |
+| Agent | `127.0.0.1:5175` |
+| SearXNG | `127.0.0.1:18080` |
+
+#### 3. Configure Nginx and HTTPS
+
+The profile includes a temporary HTTP configuration for certificate issuance and the final TLS reverse proxy:
+
+```bash
+sudo cp deploy/osaka/nginx-build-sim-http.conf /etc/nginx/sites-available/build-sim
+sudo ln -sfn /etc/nginx/sites-available/build-sim /etc/nginx/sites-enabled/build-sim
+sudo nginx -t
+sudo systemctl reload nginx
+
+sudo certbot certonly --nginx -d build-sim.66-245-218-148.sslip.io
+sudo htpasswd -c /etc/nginx/.htpasswd-build-sim buildsim
+sudo chown root:www-data /etc/nginx/.htpasswd-build-sim
+sudo chmod 640 /etc/nginx/.htpasswd-build-sim
+
+sudo cp deploy/osaka/nginx-build-sim.conf /etc/nginx/sites-available/build-sim
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+The final proxy exposes only the UI, Price/Advice/Agent routes, catalog search polling, and candidate enrichment. Other `/api/catalog/` administration routes return `404`. The supplied hostname is specific to the current Osaka address; change the `server_name` and certificate paths together when deploying elsewhere.
+
+#### 4. Verify, update, and stop
+
+```bash
+curl --fail http://127.0.0.1:15176/healthz
+curl --fail http://127.0.0.1:5174/api/price/health
+curl --fail http://127.0.0.1:5175/api/agent/health
+docker compose -f deploy/osaka/compose.yaml logs --tail=100
+```
+
+After syncing a new source tree or changing `.env.remote`:
+
+```bash
+docker compose -f deploy/osaka/compose.yaml build
+docker compose -f deploy/osaka/compose.yaml up -d --force-recreate
+```
+
+Stop the stack without deleting the bind-mounted `runtime/` data:
+
+```bash
+docker compose -f deploy/osaka/compose.yaml down
+```
+
+An HTTP health response proves only the process and proxy layers. Validate the authenticated public origin, one deterministic build evaluation, persistence, and—only when explicitly authorized—one bounded provider request before claiming full provider delivery.
+
+### Manual systemd deployment (alternative)
+
+#### 1. Build artifacts
+
+```bash
+npm ci
+npm run test
 npm run build
 ```
 
-## Layout
+The build creates:
 
+- `dist/` — static frontend assets.
+- `dist-agent/agent-server.js` — bundled Agent server.
+- The Price/Catalog/Advice service runs from `scripts/price-server/server.mjs`.
+
+`npm run preview` is useful for local frontend verification; it is not a production API gateway.
+
+#### 2. Host layout and environment
+
+The examples below use `/opt/build-sim`:
+
+```bash
+sudo mkdir -p /opt/build-sim
+sudo chown "$USER" /opt/build-sim
+git clone <your-repository-url> /opt/build-sim
+cd /opt/build-sim
+npm ci
+cp .env.example .env.local
+npm run build
 ```
-index.html              V1 Build Lab (primary UI)
-src/lab/boot.ts         Boots catalog + engine into the lab
-src/lab/v1-runtime.js   V1 interactive renderer (SKU-keyed)
-src/lab/view-models.ts  SKU → display DTOs for the lab
-data/skus/catalog.json  Exact SKU library (+ appearance)
-data/prices/            Audited retail snapshots (latest + dated) + fx.json
-scripts/price-refresh/  Snapshot rebuild + offline search cheat sheet
-scripts/price-server/   Local-only price collector (APIs + headed browser, variant resolver)
-data/cases/jonsbo-n6/   Case profile + geometry.json (single mm source) + routing.json + assembly.json + assets
-scripts/shot.mjs        Screenshots lab panels from the dev server (local check)
-src/core/               Geometry + occupancy + evaluateBuild + policy + thermal air balance & field + cable routing + assembly order
-src/price/              Snapshot merge, search queries, title matching, plausibility gates
-src/wiring/             Wiring plans + PSU panel socket plan
-src/adapters/jonsbo-n6/ Case geometry + occupancy + routing + assembly adapters
-docs/superpowers/specs/ Designs written before the code (cable routing)
-legacy/v1/              Frozen V1 reference HTML
+
+Set production secrets and feature flags in `/opt/build-sim/.env.local` or in the service manager. The service `WorkingDirectory` must be the project root so the shared environment loader can find the files and relative data paths.
+
+#### 3. systemd services
+
+Price/Catalog/Advice service:
+
+```ini
+# /etc/systemd/system/build-sim-price.service
+[Unit]
+Description=Build Sim Price Catalog and Advice Service
+After=network.target
+
+[Service]
+Type=simple
+User=build-sim
+Group=build-sim
+WorkingDirectory=/opt/build-sim
+ExecStart=/usr/bin/node scripts/price-server/server.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-## Evidence policy
+Agent service:
 
-Never present inferred geometry, heatmaps, or planning prices as manufacturer CAD, CFD, or measured data. If evidence is missing, the UI must say `unknown`.
+```ini
+# /etc/systemd/system/build-sim-agent.service
+[Unit]
+Description=Build Sim Agent Service
+After=network.target build-sim-price.service
 
-## Provenance
+[Service]
+Type=simple
+User=build-sim
+Group=build-sim
+WorkingDirectory=/opt/build-sim
+ExecStart=/usr/bin/node dist-agent/agent-server.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
 
-See `docs/PROVENANCE.md` and `docs/ROADMAP.md`.
+[Install]
+WantedBy=multi-user.target
+```
 
-## Trusted official catalog discovery
+After creating a dedicated `build-sim` user and applying correct ownership:
 
-Official domains live in the versioned `data/catalog/official-domains.json` registry. The default `CATALOG_DISCOVERY_PROVIDER=registry` uses only the bundled catalog and vendor search links. To opt into a local SearXNG JSON service, set `CATALOG_DISCOVERY_PROVIDER=searxng`; the endpoint stays server-only and must be a loopback HTTP URL. SearXNG title/snippet data is retained only as discovery evidence: official fields still require a trusted final URL and deterministic HTML/JSON-LD/spec-table/PDF/rendered extraction with field-level provenance. Provider timeout, invalid JSON, or untrusted candidates degrade the job to warning/partial and do not block the simulator.
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now build-sim-price build-sim-agent
+sudo systemctl status build-sim-price build-sim-agent
+```
 
-Unknown domains are persisted as governed proposals and remain non-official until an explicit expected-hash decision updates the registry. Trusted exact-MPN candidates can produce a draft when `CATALOG_AUTO_ENRICH_TRUSTED_OFFICIAL=true`; formal acceptance additionally requires `CATALOG_AUTO_ACCEPT_EXACT_MPN=true`, `CATALOG_WRITE_ENABLED=true`, all extraction/conflict/provenance gates, and an atomic backup/rollback manifest. `CATALOG_AUTO_TRUST_NEW_DOMAINS=true` is rejected. The Agent exposes proposal listing as external-read and exposes only one write Tool, `enrich_official_catalog`; it accepts only a candidate id plus immutable expected hash and runs only with an out-of-band approval envelope bound to the Tool definition, session, input and idempotency key. Search candidates, snippets, proposals and drafts remain visibly distinct from committed catalog facts.
+If the Agent is disabled, do not start or expose the Agent unit.
+
+#### 4. Nginx static hosting and API proxy
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name build-sim.example.com;
+
+    root /opt/build-sim/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/price/ {
+        proxy_pass http://127.0.0.1:5174;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/advice/ {
+        proxy_pass http://127.0.0.1:5174;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/agent/ {
+        proxy_pass http://127.0.0.1:5175;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Do not expose `/api/catalog/` administration and write routes to an untrusted network. Before public hosting, add authentication, authorization, tenant isolation where needed, request/body limits, rate limiting, TLS, security headers, log rotation, backups, and monitoring at the reverse proxy or a trusted gateway. The application itself is currently designed for a trusted local/single-user environment.
+
+#### 5. Production checks
+
+```bash
+curl --fail http://127.0.0.1:5174/api/price/health
+curl --fail http://127.0.0.1:5175/api/agent/health
+curl --fail https://build-sim.example.com/
+```
+
+Also verify an actual build evaluation and, when enabled, one bounded Agent request through the public origin. A healthy process alone does not prove that proxying, credentials, persistence, or provider calls work.
+
+## Configuration
+
+### Ports
+
+| Variable | Default | Owner |
+| --- | ---: | --- |
+| `WEB_SERVER_PORT` | `5176` | Vite development server |
+| `WEB_PREVIEW_PORT` | `4173` | Vite preview server |
+| `PRICE_SERVER_PORT` | `5174` | Price/Catalog/Advice service and its consumers |
+| `AGENT_SERVER_PORT` | `5175` | Agent service and Vite proxy |
+
+All four defaults are examples, not externally exposed listeners. The application servers bind to loopback.
+
+### Providers and Agent budgets
+
+See [`.env.example`](./.env.example) for the complete list. Important groups include:
+
+- `DEEPSEEK_*`, `CLAUDE_*`, and their server-side API keys.
+- `BUILD_SIM_ADVICE_ENABLED` and `BUILD_SIM_AGENT_ENABLED`.
+- `AGENT_MAX_MODEL_TURNS`, `AGENT_MAX_TOOL_CALLS`, repeated-call, response-size, message-size, and request-body limits.
+- `AGENT_SESSION_ROOT`, `AGENT_AUDIT_ROOT`, and `BUILD_SIM_SKILLS_ROOT`.
+
+### Catalog controls
+
+- `BUILD_SIM_CATALOG_WRITE_ENABLED=false` is the default master write gate.
+- `CATALOG_AUTO_ACCEPT_EXACT_MPN=false` keeps exact-MPN candidates in review unless explicitly enabled.
+- `CATALOG_AUTO_TRUST_NEW_DOMAINS=true` is rejected; new domains require governed approval.
+- `CATALOG_FETCH_*` and `CATALOG_PDF_OCR_*` limits cannot exceed code-defined bounds.
+- `CATALOG_PERSIST_ROOT` controls the persistence root; make it writable and back it up before enabling writes.
+
+### Persistence
+
+| Path | Purpose | Git status |
+| --- | --- | --- |
+| `data/prices/` | Versioned audited price snapshots | Tracked |
+| `data/agent/sessions/` | Local multi-turn message history | Ignored |
+| `data/agent/audit/` | Hash-linked Agent run audit records | Ignored |
+| `data/audit/` | Advice and catalog operational records | Ignored |
+| `.cache/price-browser-profile/` | Marketplace browser profile | Ignored |
+
+Session history contains message and tool content because it supports conversation recovery. Audit files intentionally store hashes and structured metadata rather than copied prompts, model text, or secrets. Protect both paths as application data.
+
+## How to use the platform
+
+### Configure and evaluate a build
+
+1. Open **Build Preview**.
+2. Select exact SKUs for motherboard, CPU, cooler, memory, PSU, GPU, storage, HBA, and fans.
+3. Review the shared FIT verdict and individual conflicts or warnings.
+4. Export the configuration JSON before comparing alternatives; import it later to reproduce the same build.
+
+### Inspect thermal and wiring plans
+
+1. Open **Thermal & Noise** and compare chamber/component estimates against the displayed assumptions.
+2. Open **1–9 Drive Wiring** to inspect every data path, backplane feed, and PSU socket assignment.
+3. Select a cable row to isolate its spatial route.
+4. Follow **Assembly Order** and distinguish official manual steps from derived sequencing.
+
+### Work with prices
+
+1. Start `npm run price:serve`.
+2. Open **Prices & Parts**.
+3. Treat search-card prices as leads, not audited values.
+4. Inspect the detail-page variant and confirm the exact option before a quote is persisted.
+5. Rebuild the latest snapshot with `npm run price:refresh` when needed.
+
+Amazon USD values use a declared exchange rate and remain reference-only. The UI never claims that a snapshot is a live market price or a historical price series.
+
+### Request structured Advice
+
+1. Enable and start the Price/Advice service.
+2. Submit the current `BuildEvaluation` from **Prices & Parts**.
+3. Review suggestions alongside deterministic warnings and provenance; AI text does not replace the evaluator.
+4. Inspect local usage and estimated cost at `GET /api/advice/billing?limit=100` when needed.
+
+### Use the Agent
+
+1. Enable and start the Agent service and, for external-read tools, the Price service.
+2. In **Build Preview**, select an available model and one of the four Skills.
+3. Start a session, ask a build-specific question, and inspect Tool results, evidence, definition hashes, usage, and the per-run local cost estimate.
+4. Cancel a run from the UI if necessary. Sessions persist locally until their files are removed through an appropriate maintenance process.
+
+The browser never receives provider API keys. Fixture output is labeled as fixture evidence and must not be treated as proof of live-provider availability.
+
+### Governed official-catalog enrichment
+
+The enrichment lifecycle is deliberately staged:
+
+```text
+discovery candidate -> trusted final fetch -> extracted fields -> review draft -> approved write
+```
+
+- Search snippets do not become facts.
+- Unknown domains become proposals, not automatically trusted sources.
+- Conflicts, access barriers, sparse PDFs, and OCR output require review.
+- Formal writes require the master write flag plus the relevant acceptance gate.
+- Agent writes additionally require a short-lived, out-of-band approval envelope bound to the exact tool definition, session, input hash, idempotency key, backup target, and rollback policy.
+- Catalog writes use backup and rollback manifests; verify the resulting diff before committing it.
+
+## API overview
+
+### Price, catalog, and Advice service
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/price/health` | Service health |
+| `GET` | `/api/price/state` | Collector and snapshot state |
+| `POST` | `/api/price/collect` | Collect price candidates |
+| `POST` | `/api/price/variants` | Inspect listing variants |
+| `POST` | `/api/price/audit` | Confirm and persist an audited quote |
+| `POST` | `/api/price/rebuild` | Rebuild the latest snapshot |
+| `POST` | `/api/advice/build` | Start structured build advice |
+| `GET` | `/api/advice/build/:id` | Read an Advice job |
+| `GET` | `/api/advice/billing` | Read local usage/cost estimates |
+| `POST` | `/api/catalog/search` | Discover official candidates |
+| `GET` | `/api/catalog/search/:id` | Read a discovery job |
+| `POST` | `/api/catalog/inspect` | Fetch and inspect a candidate |
+| `GET` | `/api/catalog/domain-proposals` | List unknown-domain proposals |
+
+Additional proposal, draft, and acceptance endpoints are administrative interfaces. Keep them private and consult the implementation/tests before integrating automation.
+
+### Agent service
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/agent/health` | Service and provider availability |
+| `POST` | `/api/agent/evaluate` | Deterministic server-side evaluation |
+| `GET` | `/api/agent/models` | Available provider models |
+| `GET` | `/api/agent/tools` | Tool manifest and definition hashes |
+| `GET` | `/api/agent/skills` | Skill manifest and definition hashes |
+| `POST` | `/api/agent/sessions` | Create a local session |
+| `GET` | `/api/agent/sessions/:id` | Read a session |
+| `POST` | `/api/agent/sessions/:id/messages` | Start a message run |
+| `GET` | `/api/agent/runs/:id/events` | Stream SSE run events |
+| `POST` | `/api/agent/runs/:id/cancel` | Cancel a run |
+| `GET` | `/api/agent/runs/:id/audit` | Read the structured audit record |
+
+These APIs are alpha contracts and may change before a stable release.
+
+## Data, evidence, and security
+
+- Official, measured, reconstructed, estimated, synthetic-fixture, OCR, and live-provider evidence are separate categories.
+- Missing or conflicting values remain `unknown`; the application must not invent a precise fact to fill a gap.
+- Official URL fetching enforces trusted domains, DNS/IP checks, redirect limits, payload limits, and SSRF defenses.
+- Provider credentials stay in server environment files and are never browser variables.
+- Agent Tool input/output is schema-checked and bounded; Skill `allowedTools` is enforced at dispatch, not only in the prompt.
+- Audit files redact sensitive key/Bearer patterns and include integrity hashes, but local operators are still responsible for filesystem permissions, backups, retention, and incident response.
+- A registry digest proves a catalog mutation was recorded; it does not prove a deployment, provider, or UI is healthy.
+
+Read [docs/PROVENANCE.md](./docs/PROVENANCE.md), [docs/PRICE_SNAPSHOTS.md](./docs/PRICE_SNAPSHOTS.md), and [docs/agent-implementation-matrix.md](./docs/agent-implementation-matrix.md) before changing evidence or publication semantics.
+
+## Testing
+
+Core checks:
+
+```bash
+npm test
+npm run typecheck
+npm run build
+npm run agent:secret-scan
+```
+
+Browser acceptance checks require their referenced local services and a Playwright browser:
+
+```bash
+npm run test:g1:browser
+npm run test:g7:browser
+npm run test:c7:browser
+```
+
+Provider and discovery checks:
+
+```bash
+npm run agent:fixture
+npm run searxng:smoke
+BUILD_SIM_AGENT_LIVE_SMOKE=1 npm run agent:live-smoke
+```
+
+The live smoke performs a real provider request and may incur cost. Fixture tests establish protocol behavior only.
+
+Price maintenance commands:
+
+```bash
+npm run price:search
+npm run price:refresh
+npm run price:fixture
+```
+
+## Repository layout
+
+```text
+index.html                 Main Build Lab shell
+src/core/                  Evaluation, geometry, policy, thermal, routing, assembly
+src/lab/                   Browser boot and view-model integration
+src/server/                Agent HTTP service and deterministic domain tools
+src/wiring/                Wiring and PSU socket planning
+src/price/                 Snapshot merge, matching, queries, and plausibility gates
+src/adapters/jonsbo-n6/    JONSBO N6 case adapters
+data/skus/                 Exact SKU catalog
+data/cases/jonsbo-n6/      Geometry, routing, assembly, and case assets
+data/prices/               Audited dated and latest price snapshots
+data/catalog/              Trusted official-domain registry and catalog state
+scripts/price-server/      Price, catalog, and Advice loopback service
+scripts/price-refresh/     Snapshot rebuild and offline search helpers
+scripts/searxng-local.mjs  Optional local SearXNG lifecycle helper
+skills/                    Agent Skills and manifests
+infra/searxng/             Optional SearXNG Docker Compose stack
+deploy/osaka/              Full single-host Docker Compose and Nginx profile
+tests/                     Deterministic, protocol, security, and browser tests
+docs/                      Provenance, roadmap, designs, and execution evidence
+legacy/v1/                 Frozen V1 reference
+```
+
+## Known limits and roadmap
+
+- Only the JONSBO N6 case profile is shipped.
+- Planning geometry is not manufacturer CAD; thermal fields are not CFD.
+- Price collection depends on third-party pages, authentication, regional availability, and platform terms.
+- Transaction screenshot OCR uses the experimental public DeepSeek vision model by default; availability and pricing can change, and OCR output remains review-only. Self-hosted DeepSeek-OCR is optional and is not bundled in the Osaka Compose profile.
+- Claude has fixture evidence but no accepted live-provider verification in this repository state.
+- Public authentication, authorization, tenancy, and application-level rate limiting are not implemented.
+- The Osaka Docker profile is single-host and deployment-specific; Kubernetes manifests and an automated public deployment pipeline are not included.
+- Price history series, measured calibration, product texture mapping, and broader hardware profiles remain future work.
+
+See [docs/ROADMAP.md](./docs/ROADMAP.md) for the evolving roadmap.
+
+## Contributing and license
+
+Issues and focused pull requests are welcome after the repository owner publishes contribution and governance policies. Changes should preserve these project rules:
+
+1. Add or update deterministic tests for behavior changes.
+2. Keep one authoritative fact source instead of duplicating values in UI prose.
+3. Preserve provenance and distinguish official, inferred, estimated, OCR, fixture, and live evidence.
+4. Keep provider secrets server-side and write features disabled by default.
+5. Run the core checks and relevant browser/service smoke tests before claiming completion.
+
+This repository currently has **no `LICENSE` file**. Source availability alone does not grant the standard rights associated with open-source software. Before publishing it as an open-source release, the owner should choose an OSI-approved license, add the license text and copyright notice, and align dependency/assets/data licensing and contributor guidance. This README intentionally does not choose a license on the owner's behalf.

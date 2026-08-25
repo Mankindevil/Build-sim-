@@ -26,6 +26,10 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+function cny(value: number): string {
+  return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2, maximumFractionDigits: 8 }).format(value);
+}
+
 export function formatCatalogToolResult(toolName: string, content: unknown): string {
   const value = content && typeof content === "object" ? content as Record<string, unknown> : {};
   if (toolName === "search_official_catalog") {
@@ -102,6 +106,17 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
     reset.disabled = busy || !catalogReady;
     input.setAttribute("aria-busy", String(busy));
   };
+  const populateModels = (models: ProviderModel[], preferred = model.value): void => {
+    model.replaceChildren(...models.map((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.id;
+      option.dataset.provider = entry.provider;
+      option.textContent = `${entry.label} · ${entry.provider}`;
+      option.title = [entry.capabilities.tools ? "Tools" : null, entry.capabilities.thinking ? "推理" : null, entry.capabilities.structuredOutput ? "结构化输出" : null].filter(Boolean).join(" · ");
+      return option;
+    }));
+    model.value = preferred && models.some((entry) => entry.id === preferred) ? preferred : models[0]?.id ?? "";
+  };
   const addEvent = (content: string, level: "ok" | "warn" | "bad" = "ok") => {
     const item = document.createElement("li");
     item.textContent = content;
@@ -121,12 +136,24 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
 
   const createSession = async (): Promise<AgentSession> => {
     if (session) return session;
-    const selected = model.selectedOptions[0];
-    if (!selected?.value) throw new Error("没有可用的 Agent 模型");
-    session = await json<AgentSession>(fetchImpl, "/sessions", {
-      method: "POST",
-      body: JSON.stringify({ provider: selected.dataset.provider, model: selected.value }),
-    });
+    const establish = async (): Promise<AgentSession> => {
+      const selected = model.selectedOptions[0];
+      if (!selected?.value) throw new Error("没有可用的 Agent 模型");
+      return json<AgentSession>(fetchImpl, "/sessions", {
+        method: "POST",
+        body: JSON.stringify({ provider: selected.dataset.provider, model: selected.value }),
+      });
+    };
+    try {
+      session = await establish();
+    } catch (error) {
+      if (!/Unknown Agent model/.test((error as Error).message)) throw error;
+      const refreshed = await json<{ models: ProviderModel[] }>(fetchImpl, "/models");
+      if (!refreshed.models.length) throw error;
+      populateModels(refreshed.models);
+      addEvent("Agent 服务已重启，模型目录已自动刷新；本次请求使用当前可用模型。", "warn");
+      session = await establish();
+    }
     setStatus(`会话已建立 · ${session.model}`, "ok");
     return session;
   };
@@ -147,6 +174,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
 
   const watchRun = (runId: string, sessionId: string) => {
     let finished = false;
+    const totals = { calls: 0, input: 0, output: 0, tokens: 0, cost: 0, unknownCost: 0 };
     const source = eventSourceFactory(`${API}/runs/${encodeURIComponent(runId)}/events`);
     stream = source;
     const finish = async (state: string) => {
@@ -201,7 +229,15 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
     source.addEventListener("usage", (event) => {
       const data = parse<Extract<AgentRunEvent, { type: "usage" }>>(event);
       if (!data) return;
-      usage.textContent = `${data.provider} / ${data.model} · input ${data.usage.inputTokens ?? "unknown"} · output ${data.usage.outputTokens ?? "unknown"} · total ${data.usage.totalTokens ?? "unknown"}`;
+      totals.calls += 1;
+      totals.input += data.usage.inputTokens ?? 0;
+      totals.output += data.usage.outputTokens ?? 0;
+      totals.tokens += data.usage.totalTokens ?? 0;
+      if (data.billing?.cost) totals.cost += data.billing.cost.totalCny;
+      else totals.unknownCost += 1;
+      const band = data.billing?.pricing.pricingBand?.label;
+      const cost = data.billing?.cost ? ` · 估算费用 ${cny(totals.cost)}${band ? `（${band}）` : ""}` : ` · 费用 ${data.billing?.status ?? "unknown"}`;
+      usage.textContent = `${data.provider} / ${data.model} · ${totals.calls} 次调用 · input ${totals.input} · output ${totals.output} · total ${totals.tokens}${cost}${totals.unknownCost ? ` · ${totals.unknownCost} 次未估价` : ""} · 非余额账单`;
     });
     source.addEventListener("error", (event) => {
       const data = parse<Extract<AgentRunEvent, { type: "error" }>>(event);
@@ -221,13 +257,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
       json<{ models: ProviderModel[] }>(fetchImpl, "/models"),
       json<{ skills: SkillEntry[] }>(fetchImpl, "/skills"),
     ]);
-    model.replaceChildren(...modelPayload.models.map((entry) => {
-      const option = document.createElement("option");
-      option.value = entry.id;
-      option.dataset.provider = entry.provider;
-      option.textContent = `${entry.label} · ${entry.provider}`;
-      return option;
-    }));
+    populateModels(modelPayload.models);
     const general = document.createElement("option");
     general.value = "";
     general.textContent = "通用对话 · 全部只读 Tools";
@@ -273,6 +303,8 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
     if (!content || activeRunId) return;
     setBusy(true);
     assistantBody = null;
+    events.replaceChildren();
+    usage.textContent = "等待 provider usage…";
     transcript.append(messageNode("user", content));
     input.value = "";
     try {
@@ -283,7 +315,6 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
       });
       activeRunId = run.runId;
       cancel.disabled = false;
-      events.replaceChildren();
       setStatus("请求已提交，等待流式响应…", "ok");
       watchRun(run.runId, current.id);
     } catch (error) {

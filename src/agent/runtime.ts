@@ -65,6 +65,7 @@ export class AgentRuntime {
       skillLoader?: AgentSkillLoader;
       auditStore?: AgentRunAuditStore;
       limits?: Partial<AgentRunLimits>;
+      maxMessageChars?: number;
     } = {},
   ) {
     for (const adapter of adapters) this.providers.set(adapter.id, adapter);
@@ -113,8 +114,9 @@ export class AgentRuntime {
   }
 
   async startRun(sessionId: string, input: StartAgentRunInput): Promise<{ runId: string; status: AgentRunStatus }> {
-    if (typeof input.content !== "string" || !input.content.trim() || input.content.length > 20_000) {
-      throw new AgentRuntimeError("message_invalid", "Agent message must contain 1-20000 characters");
+    const maxMessageChars = this.options.maxMessageChars ?? 20_000;
+    if (typeof input.content !== "string" || !input.content.trim() || input.content.length > maxMessageChars) {
+      throw new AgentRuntimeError("message_invalid", `Agent message must contain 1-${maxMessageChars} characters`);
     }
     const session = await this.getSession(sessionId);
     const provider = this.providers.get(session.provider);
@@ -218,6 +220,7 @@ export class AgentRuntime {
           model: turn.model,
           stopReason: turn.stopReason,
           usage: turn.usage,
+          billing: turn.billing ?? null,
           latencyMs: turn.latencyMs,
         });
         await persistAudit();
@@ -228,7 +231,15 @@ export class AgentRuntime {
           createdAt: this.now(),
           ...(turn.toolCalls.length ? { toolCalls: turn.toolCalls } : {}),
         });
-        this.emit(run, { type: "usage", runId: run.id, provider: turn.provider, model: turn.model, usage: turn.usage, at: this.now() });
+        this.emit(run, {
+          type: "usage",
+          runId: run.id,
+          provider: turn.provider,
+          model: turn.model,
+          usage: turn.usage,
+          ...(turn.billing ? { billing: turn.billing } : {}),
+          at: this.now(),
+        });
         if (!turn.toolCalls.length) {
           session.updatedAt = this.now();
           await this.store.put(session);

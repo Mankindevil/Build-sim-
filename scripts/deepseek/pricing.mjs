@@ -2,9 +2,9 @@ const OFF_PEAK = "off-peak";
 const PEAK = "peak";
 
 export const DEEPSEEK_PRICING = Object.freeze({
-  schemaVersion: "1.1.0",
-  pricingVersion: "deepseek-pricing-cn-tiered-2026-08-24",
-  capturedAt: "2026-08-24",
+  schemaVersion: "1.2.0",
+  pricingVersion: "deepseek-pricing-cn-tiered-2026-08-25",
+  capturedAt: "2026-08-25",
   currency: "CNY",
   unitTokens: 1_000_000,
   timeZone: "Asia/Shanghai",
@@ -26,6 +26,10 @@ export const DEEPSEEK_PRICING = Object.freeze({
     "deepseek-v4-pro": Object.freeze({
       [OFF_PEAK]: Object.freeze({ cacheHit: 0.15, cacheMiss: 4.5, output: 13.5 }),
       [PEAK]: Object.freeze({ cacheHit: 0.30, cacheMiss: 9, output: 27 }),
+    }),
+    "deepseek-v4-flash-vision-exp": Object.freeze({
+      [OFF_PEAK]: Object.freeze({ cacheHit: 0.05, cacheMiss: 1.5, output: 4.5 }),
+      [PEAK]: Object.freeze({ cacheHit: 0.10, cacheMiss: 3, output: 9 }),
     }),
   }),
   aliases: Object.freeze({}),

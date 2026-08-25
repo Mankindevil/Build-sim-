@@ -2,17 +2,20 @@ import type {
   AgentMessage,
   AgentToolCall,
   ProviderAdapter,
+  ProviderBillingEstimate,
   ProviderModel,
   ProviderTurnRequest,
   ProviderTurnResult,
   ProviderUsage,
 } from "../contracts";
+import { priceDeepSeekUsage } from "../../../scripts/deepseek/pricing.mjs";
 
 export interface DeepSeekAgentConfig {
   enabled: boolean;
   apiKey: string;
   apiUrl: string;
   model: string;
+  models?: string[];
   timeoutMs: number;
   maxTokens: number;
   temperature: number;
@@ -89,12 +92,19 @@ export class DeepSeekProviderAdapter implements ProviderAdapter {
     private readonly config: DeepSeekAgentConfig,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {
-    this.models = [{
+    const ids = [...new Set((config.models?.length ? config.models : [config.model]).map((model) => model.trim()).filter(Boolean))];
+    this.models = ids.map((id) => ({
       provider: "deepseek",
-      id: config.model,
-      label: config.model,
+      id,
+      label: id === "deepseek-v4-flash"
+        ? "DeepSeek V4 Flash · 快速"
+        : id === "deepseek-v4-pro"
+          ? "DeepSeek V4 Pro · 深度推理"
+          : id === "deepseek-v4-flash-vision-exp"
+            ? "DeepSeek V4 Flash Vision Exp · 视觉"
+            : id,
       capabilities: { streaming: true, tools: true, parallelTools: true, structuredOutput: true, thinking: true },
-    }];
+    }));
   }
 
   async createTurn(request: ProviderTurnRequest): Promise<ProviderTurnResult> {
@@ -142,6 +152,7 @@ export class DeepSeekProviderAdapter implements ProviderAdapter {
       let providerModel = request.model;
       let finish: unknown = null;
       let usage = EMPTY_USAGE;
+      let rawUsage: unknown = null;
       const toolParts = new Map<number, ToolAccumulator>();
 
       const consume = (raw: string): void => {
@@ -152,7 +163,10 @@ export class DeepSeekProviderAdapter implements ProviderAdapter {
         const chunk = JSON.parse(data) as Record<string, unknown>;
         if (typeof chunk.id === "string") providerRequestId = chunk.id;
         if (typeof chunk.model === "string") providerModel = chunk.model;
-        if (chunk.usage) usage = normalizeUsage(chunk.usage);
+        if (chunk.usage) {
+          rawUsage = chunk.usage;
+          usage = normalizeUsage(chunk.usage);
+        }
         const choices = Array.isArray(chunk.choices) ? chunk.choices as Array<Record<string, unknown>> : [];
         for (const choice of choices) {
           if (choice.finish_reason !== null && choice.finish_reason !== undefined) finish = choice.finish_reason;
@@ -199,6 +213,7 @@ export class DeepSeekProviderAdapter implements ProviderAdapter {
         toolCalls,
         stopReason: toolCalls.length ? "tool_use" : stopReason(finish),
         usage,
+        billing: priceDeepSeekUsage(providerModel, rawUsage, { occurredAt: new Date(started).toISOString() }) as ProviderBillingEstimate,
         latencyMs: Date.now() - started,
       };
     } catch (error) {

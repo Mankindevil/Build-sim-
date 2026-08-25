@@ -27,13 +27,19 @@ describe("DeepSeek token billing", () => {
     expect(billed.status).toBe("priced");
     expect(billed.usage).toMatchObject({ promptTokens: 3_000, promptCacheHitTokens: 1_000, promptCacheMissTokens: 2_000, completionTokens: 500, reasoningTokens: 125 });
     expect(billed.cost).toEqual({ cacheHitCny: 0.00005, cacheMissCny: 0.003, outputCny: 0.00225, totalCny: 0.0053, currency: "CNY", estimated: true });
-    expect(billed.pricing).toMatchObject({ pricingVersion: "deepseek-pricing-cn-tiered-2026-08-24", sourceUrl: DEEPSEEK_PRICING.sourceUrl, pricingBand: { id: "off-peak", weekday: "Sunday" } });
+    expect(billed.pricing).toMatchObject({ pricingVersion: "deepseek-pricing-cn-tiered-2026-08-25", sourceUrl: DEEPSEEK_PRICING.sourceUrl, pricingBand: { id: "off-peak", weekday: "Sunday" } });
   });
 
   it("charges peak calls at the current official peak rates", () => {
     const billed = priceDeepSeekUsage("deepseek-v4-pro", usage, { occurredAt: MONDAY_PEAK });
     expect(billed.pricing).toMatchObject({ billedModel: "deepseek-v4-pro", rates: { cacheHit: 0.3, cacheMiss: 9, output: 27 }, pricingBand: { id: "peak" } });
     expect(billed.cost).toEqual({ cacheHitCny: 0.0003, cacheMissCny: 0.018, outputCny: 0.0135, totalCny: 0.0318, currency: "CNY", estimated: true });
+  });
+
+  it("prices the public vision model at the official Flash tier", () => {
+    const billed = priceDeepSeekUsage("deepseek-v4-flash-vision-exp", usage, { occurredAt: MONDAY_PEAK });
+    expect(billed.pricing).toMatchObject({ billedModel: "deepseek-v4-flash-vision-exp", rates: { cacheHit: 0.1, cacheMiss: 3, output: 9 } });
+    expect(billed.cost?.totalCny).toBe(0.0106);
   });
 
   it("refuses to invent prices for deprecated aliases or unknown models", () => {

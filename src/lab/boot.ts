@@ -24,11 +24,15 @@ import v1RuntimeUrl from "./v1-runtime.js?url";
 import { initAdvicePanel } from "./advice-panel";
 import { initAgentPanel } from "./agent-panel";
 import { buildAdviceInput } from "../advice/validate";
+import { initBuildProgress, type BuildProgressController } from "./build-progress";
+import { initTransactionImport } from "./transaction-import";
+import "./design-system.css";
 
 let catalog = loadBundledCatalog();
 const views = buildLabCatalogs(catalog);
 let priceStamp = bundledPriceSummary();
 let latestEvaluation: BuildEvaluation | null = null;
+let buildProgress: BuildProgressController | null = null;
 
 const BOARD_ID = "board.asus-w680m-ace-se";
 
@@ -45,6 +49,21 @@ export interface LabEvaluationOptions {
 
 function $(id: string): HTMLElement | null {
   return document.getElementById(id);
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[char] ?? char);
+}
+
+function findingTitle(message: string): string {
+  const lead = message.split(/[：。；]/, 1)[0]?.trim() || message.trim();
+  return lead.length > 46 ? `${lead.slice(0, 46)}…` : lead;
 }
 
 function val(id: string): string {
@@ -152,24 +171,38 @@ function evidenceLabel(level: keyof typeof EVIDENCE_LABELS): string {
 function updateFitFromEngine(result: ReturnType<typeof evaluateBuild>): void {
   const chip = $("fit-chip");
   if (!chip) return;
-  const worst = result.occupancy.verdict;
+  const badCount = result.findings.filter((finding) => finding.verdict === "bad").length;
+  const warnCount = result.findings.filter((finding) => finding.verdict === "warn").length;
+  const worst = badCount > 0 ? "bad" : warnCount > 0 ? "warn" : result.occupancy.verdict;
   chip.setAttribute("data-level", worst === "ok" ? "ok" : worst);
-  const top = result.findings[0];
-  if (!top) {
-    chip.textContent = "兼容：引擎未发现冲突";
-    return;
-  }
-  chip.textContent = `${worst === "ok" ? "兼容" : worst === "warn" ? "警告" : "冲突"}：${top.message}`;
+  chip.textContent = badCount > 0
+    ? `存在阻断 · ${badCount} 项`
+    : warnCount > 0
+      ? `需要确认 · ${warnCount} 项`
+      : "评估通过 · 未发现冲突";
 
   const list = $("verdict-list");
   if (list) {
     list.innerHTML = result.findings
       .slice(0, 8)
       .map(
-        (f) =>
-          `<li><b>${f.verdict}</b> · ${evidenceLabel(f.evidence)} — ${f.message}</li>`,
+        (f) => `<li class="finding-row" data-level="${f.verdict}">
+          <span class="finding-level">${f.verdict === "bad" ? "阻断" : f.verdict === "warn" ? "警告" : "通过"}</span>
+          <span class="finding-evidence">${escapeHtml(evidenceLabel(f.evidence))}</span>
+          <details><summary>${escapeHtml(findingTitle(f.message))}</summary><p>${escapeHtml(f.message)}</p><small>${escapeHtml(f.id)}</small></details>
+        </li>`,
       )
       .join("");
+  }
+
+  const routeCopy = $("route-copy");
+  const primary = result.findings.find((finding) => finding.verdict === "bad")
+    ?? result.findings.find((finding) => finding.verdict === "warn")
+    ?? result.findings[0];
+  if (routeCopy && primary) {
+    const firstSentence = primary.message.split("。", 1)[0] ?? primary.message;
+    routeCopy.textContent = firstSentence.length > 180 ? `${firstSentence.slice(0, 180)}…` : firstSentence;
+    routeCopy.setAttribute("title", primary.message);
   }
 }
 
@@ -810,6 +843,7 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   updateCalibration(evaluation);
   updateGalleryFromSkus(evaluation.config);
   updatePriceStamp();
+  buildProgress?.syncEvaluation(evaluation);
 }
 
 function bindConfigChrome(): void {
@@ -917,6 +951,15 @@ async function boot(): Promise<void> {
     s.onerror = () => reject(new Error("Failed to load v1-runtime.js"));
     document.body.appendChild(s);
   });
+
+  // Progress is local and synchronous: make the editable base available as soon
+  // as the deterministic evaluation has rendered, without waiting on API panels.
+  buildProgress = initBuildProgress({
+    getCatalog: () => catalog,
+    baseSkuIds: ["case.jonsbo-n6", BOARD_ID, "cpu.i5-14500"],
+  });
+  initTransactionImport({ onImport: (record) => buildProgress?.stageTransaction(record) });
+  if (latestEvaluation) buildProgress.syncEvaluation(latestEvaluation);
 
   await initPricePanel({ catalog, onAudited: () => reapplyLocalPrices() });
   initAdvicePanel({ getInput: adviceInput });
