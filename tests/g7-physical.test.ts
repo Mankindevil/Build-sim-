@@ -31,6 +31,12 @@ async function config(name: string): Promise<BuildConfig> {
 }
 
 describe("G7 physical expansion, calibration and cross-layer facts", () => {
+  it("keeps physical hashes stable across non-physical plan metadata updates", () => {
+    const before = evaluateBuild(baseConfig, catalog).physical.hash;
+    const after = evaluateBuild({ ...baseConfig, id: "another-plan", name: "Renamed", updatedAt: "2030-01-01T00:00:00.000Z", notes: ["non-physical note"] }, catalog).physical.hash;
+    expect(after).toBe(before);
+  });
+
   it.each(["baseline.json", "dual-psu.json", "front-240-radiator.json", "nine-hdd-hba.json"])("keeps %s on one physical evaluation", async (name) => {
     const evaluation = evaluateBuild(await config(name), catalog);
     expect(evaluation.physical.rulesetVersion).toBe("physical-rules-1.0.0");

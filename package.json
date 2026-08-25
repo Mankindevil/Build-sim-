@@ -13,6 +13,7 @@
     "test:g1:browser": "node scripts/g1-browser-smoke.mjs",
     "test:g7:browser": "node scripts/g7-browser-smoke.mjs",
     "test:workspace:browser": "node scripts/workspace-browser-smoke.mjs",
+    "test:spatial:browser": "node scripts/spatial-browser-smoke.mjs",
     "test:c7:browser": "node scripts/c7-catalog-agent-browser-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "price:refresh": "node scripts/price-refresh/refresh.mjs",
@@ -44,7 +45,9 @@
   },
   "dependencies": {
     "@tesseract.js-data/eng": "1.0.0",
+    "@types/three": "^0.185.4",
     "pdf-parse": "2.4.5",
-    "tesseract.js": "7.0.0"
+    "tesseract.js": "7.0.0",
+    "three": "^0.185.1"
   }
 }

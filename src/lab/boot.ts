@@ -33,6 +33,7 @@ import { mountPlanShell, type PlanShellController } from "./plan-shell";
 import { WorkspaceRouter } from "./workspace-router";
 import { mountWorkspacePages, type WorkspacePagesController } from "./workspace-pages";
 import { EvaluationCoordinator } from "../plans/evaluation";
+import { mountSpatialView, type SpatialViewController } from "./spatial-view";
 import "./design-system.css";
 
 let catalog = loadBundledCatalog();
@@ -43,6 +44,7 @@ let buildProgress: BuildProgressController | null = null;
 let planStore: PlanStore | null = null;
 let planShell: PlanShellController | null = null;
 let workspacePages: WorkspacePagesController | null = null;
+let spatialView: SpatialViewController | null = null;
 const evaluationCoordinator = new EvaluationCoordinator((config) => evaluateBuild(config, catalog));
 
 const BOARD_ID = "board.asus-w680m-ace-se";
@@ -970,6 +972,7 @@ declare global {
       $: (sel: string) => HTMLElement | null;
     };
     __BUILD_SIM_PLAN_STORE__?: PlanStore;
+    __BUILD_SIM_SPATIAL__?: SpatialViewController;
   }
 }
 
@@ -1027,6 +1030,11 @@ async function boot(): Promise<void> {
     document.body.appendChild(s);
   });
   bindPlanStoreToDom();
+  const spatialStage = $("spatial-stage");
+  if (spatialStage && planStore) {
+    spatialView = mountSpatialView(spatialStage, planStore, () => catalog);
+    window.__BUILD_SIM_SPATIAL__ = spatialView;
+  }
 
   // Progress is local and synchronous: make the editable base available as soon
   // as the deterministic evaluation has rendered, without waiting on API panels.

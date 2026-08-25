@@ -677,17 +677,17 @@ R4 完成。
 
 ### 任务
 
-- [ ] 新增 Three.js 及必要类型依赖；记录 bundle 影响。
-- [ ] 定义 renderer-neutral `SpatialSceneModel`，从 geometry/catalog/evaluation 生成。
-- [ ] 将 N6 外壳、内部空间、主板、CPU、RAM、M.2、PSU、GPU、HBA、硬盘、风扇转换为统一场景节点。
-- [ ] 统一坐标系、毫米单位、旋转和 anchor；不复制 geometry 常量。
-- [ ] 实现透视/正交相机、orbit、pan、zoom、reset 和视角预设。
-- [ ] 实现透明外壳、分层、显示/隐藏、爆炸视图。
-- [ ] 实现 raycast 选择、hover、高亮和部件 inspector。
-- [ ] inspector 展示名称、SKU、尺寸、位置、evidence、provenance 和关联 findings。
-- [ ] 使用实例化网格优化硬盘/风扇等重复部件。
-- [ ] 检测 WebGL 不可用时回退到现有 SVG/2D 视图。
-- [ ] 遵守 reduced-motion，处理 resize、DPR、context lost 和资源 dispose。
+- [x] 新增 Three.js 及必要类型依赖；记录 bundle 影响。
+- [x] 定义 renderer-neutral `SpatialSceneModel`，从 geometry/catalog/evaluation 生成。
+- [x] 将 N6 外壳、内部空间、主板、CPU、RAM、M.2、PSU、GPU、HBA、硬盘、风扇转换为统一场景节点。
+- [x] 统一坐标系、毫米单位、旋转和 anchor；不复制 geometry 常量。
+- [x] 实现透视/正交相机、orbit、pan、zoom、reset 和视角预设。
+- [x] 实现透明外壳、分层、显示/隐藏、爆炸视图。
+- [x] 实现 raycast 选择、hover、高亮和部件 inspector。
+- [x] inspector 展示名称、SKU、尺寸、位置、evidence、provenance 和关联 findings。
+- [x] 使用实例化网格优化硬盘/风扇等重复部件。
+- [x] 检测 WebGL 不可用时回退到现有 SVG/2D 视图。
+- [x] 遵守 reduced-motion，处理 resize、DPR、context lost 和资源 dispose。
 
 ### 聚焦验证
 
@@ -1124,4 +1124,19 @@ R3 工作台编辑器  R4 评估版本化
 - 数据迁移：PlanVersion 新增可选 evaluation hash/time，旧版本保持兼容
 - 未验证项：R5/R6 将把正式 finding target 映射消费到 Three.js 选择/高亮和走线图层
 - 回滚方式：移除 coordinator/stamping，PlanStore 可退回直接 `setEvaluation`；新增版本字段可选，不影响旧数据
+- Push：未授权
+
+### R5 执行记录
+
+- 状态：完成
+- 起始 HEAD：`bbe9f8b`
+- 完成提交：`feat(spatial): add evidence-aware interactive 3d scene`（SHA 见 Git log）
+- 修改文件：renderer-neutral `SpatialSceneModel`、selection/fallback、懒加载 Three.js renderer、动态 3D chrome/CSS、boot 接入、Three.js 依赖、R5 unit/browser tests；同时修复 non-physical metadata 污染 `physical.hash`
+- 聚焦测试：`npx vitest run tests/spatial-scene-model.test.ts tests/spatial-selection.test.ts tests/spatial-fallback.test.ts`，3 files / 7 tests passed；physical metadata 稳定性回归 passed
+- 全量门禁：Vitest 67 files / 401 tests passed；typecheck passed；client + Agent + workspace production build passed；legacy model 85 assertions passed；legacy static 23 assertions passed；secret scan 306 files / 0 findings；`git diff --check` passed
+- 浏览器证据：G1、G7、workspace、spatial E2E 连续 passed；3D 39 nodes，透视/正交/预设/爆炸/raycast inspector/PlanStore selection/配置增删部件 passed；`spatialFallback=1` 下 SVG 键盘视图 passed
+- Bundle/性能：Three renderer 为动态 import 独立 chunk 542.97 kB / gzip 136.88 kB；主入口 290.12 kB / gzip 100.20 kB；重复部件 InstancedMesh、DPR 上限 2、按变化渲染、IntersectionObserver 近视口加载
+- 数据迁移：无；场景只消费 active plan 的 BuildEvaluation，未新增持久化格式
+- 未验证项：R6 将加入正式冲突/间隙/走线/热场/装机步骤图层和反向编辑联动
+- 回滚方式：移除 `mountSpatialView` 接入、Three/spatial 模块与依赖即可恢复原 SVG；方案、版本和评估数据格式不变
 - Push：未授权

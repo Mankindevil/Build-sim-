@@ -50,6 +50,16 @@ export interface PhysicalOptions {
   gpuRotationDeg?: number;
 }
 
+/** Plan identity, display metadata and persistence timestamps are not physical inputs. */
+function physicalConfigFacts(config: BuildConfig) {
+  return {
+    caseId: config.caseId,
+    boardId: config.boardId,
+    cpuId: config.cpuId,
+    selection: config.selection,
+  };
+}
+
 function tinyHash(value: unknown): string {
   const text = JSON.stringify(value);
   let hash = 2166136261;
@@ -158,7 +168,7 @@ export function evaluatePhysicalConstraints(
   const result: PhysicalEvaluation = {
     schemaVersion: "1.0.0",
     rulesetVersion: PHYSICAL_RULESET_VERSION,
-    hash: tinyHash({ config, gpu: gpuFact, plugSweeps, bendRadiusFacts, slotEvidence, laneEvidence, provenance }),
+    hash: tinyHash({ config: physicalConfigFacts(config), gpu: gpuFact, plugSweeps, bendRadiusFacts, slotEvidence, laneEvidence, provenance }),
     provenance,
     ...(gpuFact ? { gpu: gpuFact } : {}),
     plugSweeps,
