@@ -92,6 +92,7 @@ export interface BuildProgressController {
   summary: () => BuildProgressSummary;
   purchaseFacts: () => Array<{ skuId: string; stage: BuildStage; receiptId?: string; planId?: string | null; planItemId?: string | null; linkStatus?: PlanTransactionLink["linkStatus"] }>;
   subscribe: (listener: () => void) => () => void;
+  dispose: () => void;
 }
 
 const stageRank = new Map(BUILD_STAGES.map((stage, index) => [stage, index]));
@@ -766,5 +767,11 @@ export function initBuildProgress(args: {
       }));
     },
     subscribe(listener) { listeners.add(listener); listener(); return () => listeners.delete(listener); },
+    dispose() {
+      clearScreenshotObjectUrls();
+      pendingTransactions.clear(); pendingScreenshotDeletes.clear(); pendingArchiveDeletes.clear(); listeners.clear();
+      screenshotArchive.discard();
+      if (dialog?.open) dialog.close();
+    },
   };
 }

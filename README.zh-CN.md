@@ -33,6 +33,9 @@ Build Sim 当前可作为本地 Alpha 版本使用，仍在持续开发中。
 | 领域 | 当前状态 |
 | --- | --- |
 | 确定性装机评估 | 已实现，由 UI、Advice 服务和 Agent Tool 共用 |
+| 方案生命周期工作台 | 已实现：创建、自动保存、复制、切换、不可变版本、恢复、软删除与离线缓存 |
+| 方案关联交易与装机任务 | 已实现精确部件关联、稳定任务 sourceRef、reconcile 与可追溯清单导出 |
+| evidence-aware Three.js 场景 | 已实现问题、走线、尺寸、规划热场与装配工作流，并保留 SVG fallback |
 | JONSBO N6 几何、适配、接线、路由与装配 | 已在当前机箱配置中实现 |
 | 散热、噪音、功耗与价格规划 | 已实现，并明确标注估算和证据边界 |
 | 价格与官网目录服务 | 已实现，为仅绑定回环地址的本地服务 |
@@ -92,14 +95,15 @@ Build Sim 当前可作为本地 Alpha 版本使用，仍在持续开发中。
 
 ### 浏览器界面
 
-当前界面包含六个主要工作区：
+当前界面包含七个按方案隔离的主要工作区：
 
-1. **装机预览**：选择精确 SKU、检查适配、查看空间布局、导入导出配置，并使用可选 Agent。
-2. **热量与噪音**：查看舱室温度、部件估算、风量假设和噪音规划。
-3. **1–9 盘接线**：检查存储数据路径、电源插座、背板供电、走线和装配顺序。
-4. **GPU 适配**：检查显卡净空和空间冲突。
-5. **价格与配件**：查看快照、采集候选、检查规格，并请求结构化建议。
-6. **装机顺序**：查看推导步骤和官方手册步骤。
+1. **工作台**：创建、复制、切换、归档、恢复独立方案，并查看下一步任务。
+2. **方案编辑与评估**：编辑 active draft，保存绑定 hash 的不可变版本。
+3. **空间视图**：查看 evidence-aware Three.js 场景、问题、走线、尺寸、规划热场和装配步骤；SVG 为 fallback。
+4. **采购与交易**：审阅 staged OCR、关联精确方案部件、归档证据并执行隐私删除。
+5. **装机执行**：按稳定 sourceRef reconcile 采购、装配、接线和验证任务。
+6. **Agent**：读取 active plan/3D/评估/采购/任务上下文并提出 allowlist 修改；只有明确人工批准才能修改草稿。
+7. **Legacy 详情面板**：通过有边界的兼容 adapter 保留散热、接线、GPU、价格和检查清单细节。
 
 ## 系统架构
 
@@ -108,6 +112,7 @@ flowchart LR
   B[浏览器 UI<br/>Vite 静态应用] -->|本地确定性模块| E[BuildEvaluation]
   B -->|/api/price, /api/advice| P[价格 / 目录 / Advice<br/>127.0.0.1:5174]
   B -->|/api/agent| A[Agent 服务<br/>127.0.0.1:5175]
+  B -->|/api/workspace| W[Workspace 服务<br/>127.0.0.1:5176]
   A --> E
   A -->|外部只读 Tool| P
   P --> D[(目录、价格、<br/>草稿与审计数据)]
@@ -135,10 +140,16 @@ git clone <你的-fork-或仓库地址> build-sim
 cd build-sim
 npm ci
 cp .env.example .env.local
+```
+
+在第二个终端启动 workspace 服务，然后打开 `http://127.0.0.1:5173`：
+
+```bash
+npm run workspace:serve
 npm run dev
 ```
 
-浏览器打开 `http://127.0.0.1:5176`。确定性模拟器不需要 AI Key。
+确定性模拟器不需要 AI Key。
 
 需要价格或 Agent 功能时，在独立终端启动：
 
@@ -683,6 +694,12 @@ npm run agent:secret-scan
 ```bash
 npm run test:g1:browser
 npm run test:g7:browser
+npm run test:workspace:browser
+npm run test:spatial:browser
+npm run test:agent-plan:browser
+npm run test:transactions:browser
+npm run test:build-tasks:browser
+npm run test:platform:browser
 npm run test:c7:browser
 ```
 
@@ -707,10 +724,13 @@ npm run price:fixture
 ## 仓库结构
 
 ```text
-index.html                 Build Lab 主界面
+index.html                 最小 Vite 应用壳
+src/lab/app-document.html  惰性加载的 legacy-compatible N6 详情模板
+src/plans/                 方案契约、repository/client store、评估快照、提案与任务 reconcile
 src/core/                  评估、几何、策略、散热、路由、装配
 src/lab/                   浏览器启动与 view-model 集成
 src/server/                Agent HTTP 服务与确定性领域 Tool
+src/server/workspace-*     回环 workspace API 与提案/上下文审计边界
 src/wiring/                接线与 PSU 插座规划
 src/price/                 快照合并、匹配、查询与合理性门禁
 src/adapters/jonsbo-n6/    JONSBO N6 机箱适配层
@@ -737,6 +757,7 @@ legacy/v1/                 冻结的 V1 参考实现
 - 交易截图 OCR 默认使用实验版 DeepSeek 公共视觉模型；其可用性和价格可能变化，OCR 结果仍只能生成待审证据。自托管 DeepSeek-OCR 为可选方案，Osaka Compose 不内置该模型服务。
 - Claude 具有 fixture 证据，但当前仓库状态没有已验收的真实 Provider 证据。
 - 尚未实现公网认证、授权、租户隔离和应用级限流。
+- Legacy 详情 markup/runtime 仍位于明确的浏览器兼容 adapter 后；PlanStore 与 BuildEvaluation 已是权威源，完整框架/模板重写有意延后。
 - Osaka Docker 配置是单机且部署专用的；尚无 Kubernetes 清单和自动公网部署流水线。
 - 历史价格序列、实测校准、产品纹理映射和更多硬件档案仍是后续工作。
 

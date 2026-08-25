@@ -17,6 +17,7 @@
     "test:agent-plan:browser": "node scripts/agent-plan-browser-smoke.mjs",
     "test:transactions:browser": "node scripts/transaction-plan-browser-smoke.mjs",
     "test:build-tasks:browser": "node scripts/build-task-browser-smoke.mjs",
+    "test:platform:browser": "node scripts/platform-acceptance-browser.mjs",
     "test:c7:browser": "node scripts/c7-catalog-agent-browser-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "price:refresh": "node scripts/price-refresh/refresh.mjs",

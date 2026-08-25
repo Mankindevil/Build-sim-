@@ -3,6 +3,7 @@ import type { WorkspacePlanApi } from "../src/plans/client";
 import { WorkspaceApiError } from "../src/plans/client";
 import { PlanStore } from "../src/plans/client-store";
 import { PLAN_SCHEMA_VERSION, type BuildPlan, type BuildPlanSummary, type PlanVersion } from "../src/plans/contracts";
+import { sha256Hex } from "../src/plans/canonical";
 import { createDefaultN6Config } from "../src/plans/default-plan";
 
 const storage = { getItem: () => null, setItem: () => undefined };
@@ -23,11 +24,22 @@ describe("R2 plan autosave", () => {
     await store.initialize();
     store.patchDraft((config) => { config.selection.diskCount = 2; });
     store.patchDraft((config) => { config.selection.diskCount = 3; });
+    store.setEvaluationSnapshot({
+      schemaVersion: PLAN_SCHEMA_VERSION,
+      planId: "plan-12345678",
+      planVersionId: null,
+      draftRevision: 0,
+      configHash: await sha256Hex(store.getState().activePlan!.draft.config),
+      evaluationHash: "a".repeat(64),
+      evaluatedAt: now,
+      evaluation: {} as never,
+    });
     await vi.advanceTimersByTimeAsync(249);
     expect(update).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
     expect(update).toHaveBeenCalledWith("plan-12345678", expect.objectContaining({ expectedRevision: 0, config: expect.objectContaining({ selection: expect.objectContaining({ diskCount: 3 }) }) }));
+    await vi.waitFor(() => expect(store.getState().evaluationSnapshot?.draftRevision).toBe(1));
     expect(store.getState().saveStatus).toBe("saved");
     store.dispose();
     vi.useRealTimers();

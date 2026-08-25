@@ -33,6 +33,9 @@ Build Sim is usable as a local alpha and is under active development.
 | Area | Current status |
 | --- | --- |
 | Deterministic build evaluation | Implemented and shared by the UI, Advice service, and Agent tools |
+| Plan lifecycle workspace | Implemented: create, autosave, duplicate, switch, immutable versions, restore, soft delete, and offline cache |
+| Plan-linked transactions and build tasks | Implemented with exact item links, stable task source references, reconciliation, and traceable checklist export |
+| Evidence-aware Three.js scene | Implemented with SVG fallback, findings, routing, dimensions, thermal planning overlays, and assembly workflow |
 | JONSBO N6 geometry, fit, wiring, routing, and assembly | Implemented for the current case profile |
 | Thermal, noise, power, and price planning | Implemented with explicit estimate/provenance boundaries |
 | Price and official-catalog service | Implemented as a loopback-only local service |
@@ -92,14 +95,15 @@ Build Sim is usable as a local alpha and is under active development.
 
 ### Browser interface
 
-The current interface contains six working areas:
+The current interface contains seven plan-scoped working areas:
 
-1. **Build Preview** — configure exact SKUs, inspect fit, view the spatial build, import/export configuration, and use the optional Agent.
-2. **Thermal & Noise** — inspect chamber temperatures, component estimates, airflow assumptions, and acoustic planning.
-3. **1–9 Drive Wiring** — review storage data paths, PSU sockets, backplane feeds, cable routes, and assembly order.
-4. **GPU Fit** — inspect graphics-card clearance and conflicts.
-5. **Prices & Parts** — view snapshots, collect candidates, inspect variants, and request structured advice.
-6. **Assembly Order** — follow derived and manual-backed installation sequencing.
+1. **Workspace** — create, duplicate, switch, archive, restore, and inspect the next tasks for independent plans.
+2. **Plan editor and evaluation** — edit the active draft and save immutable, hash-bound versions.
+3. **Spatial view** — inspect the evidence-aware Three.js scene, findings, routes, dimensions, thermal planning, and assembly steps; SVG remains the fallback.
+4. **Purchases and transactions** — review staged OCR, link exact plan items, archive evidence, and manage privacy deletion.
+5. **Build execution** — reconcile purchase, assembly, wiring, and verification tasks by stable source reference.
+6. **Agent** — read the active plan/3D/evaluation/purchase/task context and propose allowlisted changes; only explicit human approval can mutate the draft.
+7. **Legacy detail panels** — retain thermal, wiring, GPU, price, and checklist detail through a documented compatibility adapter while migration continues.
 
 ## Architecture
 
@@ -108,6 +112,7 @@ flowchart LR
   B[Browser UI<br/>Vite static app] -->|deterministic local modules| E[BuildEvaluation]
   B -->|/api/price, /api/advice| P[Price / Catalog / Advice<br/>127.0.0.1:5174]
   B -->|/api/agent| A[Agent service<br/>127.0.0.1:5175]
+  B -->|/api/workspace| W[Workspace service<br/>127.0.0.1:5176]
   A --> E
   A -->|external read tools| P
   P --> D[(Catalog, prices,<br/>drafts and audit data)]
@@ -135,10 +140,16 @@ git clone <your-fork-or-repository-url> build-sim
 cd build-sim
 npm ci
 cp .env.example .env.local
+```
+
+Start the workspace service in a second terminal and open `http://127.0.0.1:5173`:
+
+```bash
+npm run workspace:serve
 npm run dev
 ```
 
-Open `http://127.0.0.1:5176`. The deterministic simulator does not require an AI key.
+The deterministic simulator does not require an AI key.
 
 Run the supporting services in separate terminals when their features are needed:
 
@@ -683,6 +694,12 @@ Browser acceptance checks require their referenced local services and a Playwrig
 ```bash
 npm run test:g1:browser
 npm run test:g7:browser
+npm run test:workspace:browser
+npm run test:spatial:browser
+npm run test:agent-plan:browser
+npm run test:transactions:browser
+npm run test:build-tasks:browser
+npm run test:platform:browser
 npm run test:c7:browser
 ```
 
@@ -707,10 +724,13 @@ npm run price:fixture
 ## Repository layout
 
 ```text
-index.html                 Main Build Lab shell
+index.html                 Minimal Vite app shell
+src/lab/app-document.html  Inert legacy-compatible N6 detail template
+src/plans/                 Plan contracts, repository/client store, evaluation snapshots, proposals, task reconcile
 src/core/                  Evaluation, geometry, policy, thermal, routing, assembly
 src/lab/                   Browser boot and view-model integration
 src/server/                Agent HTTP service and deterministic domain tools
+src/server/workspace-*     Loopback workspace API and proposal/context audit boundary
 src/wiring/                Wiring and PSU socket planning
 src/price/                 Snapshot merge, matching, queries, and plausibility gates
 src/adapters/jonsbo-n6/    JONSBO N6 case adapters
@@ -737,6 +757,7 @@ legacy/v1/                 Frozen V1 reference
 - Transaction screenshot OCR uses the experimental public DeepSeek vision model by default; availability and pricing can change, and OCR output remains review-only. Self-hosted DeepSeek-OCR is optional and is not bundled in the Osaka Compose profile.
 - Claude has fixture evidence but no accepted live-provider verification in this repository state.
 - Public authentication, authorization, tenancy, and application-level rate limiting are not implemented.
+- The legacy detail-panel markup/runtime remains behind an explicit browser adapter; PlanStore and BuildEvaluation are authoritative, but a full framework/template rewrite is intentionally deferred.
 - The Osaka Docker profile is single-host and deployment-specific; Kubernetes manifests and an automated public deployment pipeline are not included.
 - Price history series, measured calibration, product texture mapping, and broader hardware profiles remain future work.
 

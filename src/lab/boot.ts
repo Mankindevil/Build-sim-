@@ -22,10 +22,10 @@ import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 import n6Routing from "../../data/cases/jonsbo-n6/routing.json";
 import v1RuntimeUrl from "./v1-runtime.js?url";
 import { initAdvicePanel } from "./advice-panel";
-import { initAgentPanel } from "./agent-panel";
+import { initAgentPanel, type AgentPanelController } from "./agent-panel";
 import { buildAdviceInput } from "../advice/validate";
 import { initBuildProgress, type BuildProgressController } from "./build-progress";
-import { initTransactionImport } from "./transaction-import";
+import { initTransactionImport, type TransactionImportController } from "./transaction-import";
 import { WorkspaceApiClient } from "../plans/client";
 import { PlanStore } from "../plans/client-store";
 import { canonicalJson, sha256Hex } from "../plans/canonical";
@@ -46,6 +46,8 @@ let priceStamp = bundledPriceSummary();
 let latestEvaluation: BuildEvaluation | null = null;
 let buildProgress: BuildProgressController | null = null;
 let buildTaskStore: BuildTaskStore | null = null;
+let transactionImport: TransactionImportController | null = null;
+let agentPanel: AgentPanelController | null = null;
 let planStore: PlanStore | null = null;
 let planShell: PlanShellController | null = null;
 let workspacePages: WorkspacePagesController | null = null;
@@ -1111,7 +1113,7 @@ async function boot(): Promise<void> {
     });
   };
   buildProgress.subscribe(syncBuildTasks);
-  initTransactionImport({
+  transactionImport = initTransactionImport({
     onImport: (record, screenshot) => buildProgress?.stageTransaction(record, screenshot),
     getPlanContext: () => {
       const state = planStore?.getState();
@@ -1136,12 +1138,16 @@ async function boot(): Promise<void> {
 
   await initPricePanel({ catalog, onAudited: () => reapplyLocalPrices() });
   initAdvicePanel({ getInput: adviceInput });
-  await initAgentPanel({
+  agentPanel = await initAgentPanel({
     getBuildConfig: configFromDom,
     getPlanContext: currentPlanAgentContext,
     subscribePlanContext: (listener) => planStore?.subscribe(() => listener()) ?? (() => undefined),
     acceptServerPlan: (plan) => planStore?.acceptServerPlan(plan),
   });
+  window.addEventListener("pagehide", (event) => {
+    if ((event as PageTransitionEvent).persisted) return;
+    agentPanel?.dispose(); transactionImport?.dispose(); buildProgress?.dispose(); spatialView?.dispose(); workspacePages?.dispose(); planShell?.dispose(); planStore?.dispose();
+  }, { once: true });
 }
 
 void boot();

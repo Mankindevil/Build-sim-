@@ -12,6 +12,24 @@ page.on("console", (message) => {
 await page.goto("http://127.0.0.1:5173/index.html#/agent", { waitUntil: "networkidle" });
 await page.waitForFunction(() => Boolean(window.__BUILD_SIM_PLAN_STORE__?.getState().evaluationSnapshot));
 await page.waitForSelector("[data-agent-plan-proposals]", { state: "attached" });
+// Previous browser gates intentionally persist their active plan. Normalize the
+// proposal fixture to a valid onboard-storage baseline so this gate does not
+// inherit G7's nine-disk/HBA-warning configuration.
+const inherited = await page.evaluate(() => {
+  const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+  return { diskCount: state?.activePlan?.draft.config.selection.diskCount, evaluationHash: state?.evaluationSnapshot?.evaluationHash };
+});
+if (inherited.diskCount !== 1) {
+  await page.fill("#disk-range", "1");
+  await page.locator("#disk-range").dispatchEvent("input");
+  await page.waitForFunction((previousHash) => {
+    const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+    return state?.activePlan?.draft.config.selection.diskCount === 1
+      && state.evaluationSnapshot?.evaluationHash !== previousHash
+      && document.querySelector("[data-save-status]")?.getAttribute("data-status") === "saved"
+      && state.evaluationSnapshot?.draftRevision === state.activePlan?.draftRevision;
+  }, inherited.evaluationHash);
+}
 const baseline = await page.evaluate(() => {
   const state = window.__BUILD_SIM_PLAN_STORE__.getState();
   return {
@@ -42,7 +60,11 @@ await page.locator("[data-agent-plan-proposals]").evaluate((host, value) => {
   } } }));
 }, { proposalId, targetDiskCount, ...baseline });
 const card = page.locator(`[data-plan-proposal="${proposalId}"]`);
-await card.waitFor();
+await page.waitForFunction((id) => {
+  const host = document.querySelector("[data-agent-plan-proposals]");
+  return Boolean(document.querySelector(`[data-plan-proposal="${id}"]`)) || host?.textContent?.includes("提案验证失败");
+}, proposalId);
+if (!(await card.count())) throw new Error(`proposal validation failed: ${await page.locator("[data-agent-plan-proposals]").textContent()}`);
 if ((await card.textContent()).includes("agent-untrusted")) throw new Error("proposal card trusted model-provided impact instead of server evaluation");
 if ((await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.draft.config.selection.diskCount)) !== baseline.diskCount) throw new Error("proposal mutated the draft before approval");
 const apply = card.locator("[data-apply-proposal]");

@@ -923,17 +923,17 @@ R0-R9 完成。
 
 ### 任务
 
-- [ ] 删除或隔离已被替代的 DOM/localStorage 状态逻辑；保留必要兼容 reader。
-- [ ] `index.html` 缩减为 app shell，功能 markup/CSS/logic 拆分到模块。
-- [ ] 清理 `v1-runtime.js` 中已迁移的职责；未迁移部分通过清晰 adapter 保留。
-- [ ] 更新 README、README.zh-CN、ROADMAP 和架构文档。
-- [ ] 添加完整 E2E：create → edit → save version → 3D → Agent proposal → apply → transaction → build task。
-- [ ] 添加桌面、平板、手机 viewport 视觉回归/截图验收。
-- [ ] 检查键盘导航、focus、dialog、aria-live、颜色对比和 reduced motion。
-- [ ] 测量首次加载、3D 初始化、方案切换、重评估和大列表性能。
-- [ ] 检查 WebGL 资源 dispose、事件监听泄漏、object URL 和 SSE cleanup。
-- [ ] 模拟服务离线、存储损坏、stale revision、OCR 失败、Agent 失败、WebGL context lost。
-- [ ] 生成执行报告：已实现、未实现、限制、测试证据、迁移结果和 Git 状态。
+- [x] 删除或隔离已被替代的 DOM/localStorage 状态逻辑；保留必要兼容 reader。
+- [x] `index.html` 缩减为 app shell，功能 markup/CSS/logic 拆分到模块。
+- [x] 清理 `v1-runtime.js` 中已迁移的职责；未迁移部分通过清晰 adapter 保留。
+- [x] 更新 README、README.zh-CN、ROADMAP 和架构文档。
+- [x] 添加完整 E2E：create → edit → save version → 3D → Agent proposal → apply → transaction → build task。
+- [x] 添加桌面、平板、手机 viewport 视觉回归/截图验收。
+- [x] 检查键盘导航、focus、dialog、aria-live、颜色对比和 reduced motion。
+- [x] 测量首次加载、3D 初始化、方案切换、重评估和大列表性能。
+- [x] 检查 WebGL 资源 dispose、事件监听泄漏、object URL 和 SSE cleanup。
+- [x] 模拟服务离线、存储损坏、stale revision、OCR 失败、Agent 失败、WebGL context lost。
+- [x] 生成执行报告：已实现、未实现、限制、测试证据、迁移结果和 Git 状态。
 
 ### 最终验证
 
@@ -1203,4 +1203,20 @@ R3 工作台编辑器  R4 评估版本化
 - Bundle/性能：Three 动态 chunk 552.39 kB / gzip 140.07 kB；主入口 333.68 kB / gzip 114.01 kB；任务派生与 reconcile 为当前方案本地有界线性操作
 - 未验证项：R10 将覆盖任务大批量/损坏 localStorage/离线切换、最终性能预算、无障碍、安全和回滚演练
 - 回滚方式：移除 BuildTaskStore boot/页面/Agent/export 接入与 `build-sim.tasks.v1:<planId>` 本地键；Plan/Version、交易归档、BuildEvaluation 和既有采购进度数据格式不变
+- Push：未授权
+
+### R10 执行记录
+
+- 状态：完成
+- 起始 HEAD：`673b96f`
+- 完成提交：`refactor(lab): complete plan lifecycle platform migration`（SHA 见 Git log）
+- 修改文件：最小 `index.html`/shell loader/兼容模板，PlanStore 与资源 cleanup，正确限定根 `runtime/` ignore 并纳入必需 runtime flags 源码，离线/损坏/性能/无障碍/壳层测试，完整平台浏览器验收，README/ROADMAP/架构与执行报告
+- 聚焦测试：platform resilience/cleanup/accessibility/performance/shell 共 5 files / 12 tests passed；自动保存 snapshot revision 回归 passed
+- 全量门禁：保留用户改动的工作树 Vitest 82 files / 438 tests passed；独立暂存快照 82 files / 434 tests passed；typecheck passed；client + Agent + workspace production build passed；legacy model 85 assertions passed；legacy static 23 assertions passed；secret scan 336 files / 0 findings；`git diff --check` passed
+- 浏览器证据：G1、G7、workspace、spatial、Agent proposal、transaction、build task、platform acceptance 全部 passed；完整桌面与手机闭环通过；unnamed buttons 0、broken dialogs 0
+- 性能/视觉：首次加载 1314 ms、重评估 4193 ms、方案切换 406 ms、3D 初始化 148 ms；desktop/tablet/mobile 截图尺寸、字节数与 SHA-256 记录于执行报告
+- 数据与迁移：兼容 reader 保留；损坏 plan cache fail-closed，损坏 task cache 确定性重建，禁用 storage 在线可用；测试仓库与截图临时数据已清理
+- 所有权：原有 DeepSeek V4/Agent 修改保持未暂存；原 `index.html` 用户 UI 差异迁至 `src/lab/app-document.html` 并保持未暂存，不纳入 R10 提交
+- 限制：legacy detail adapter 仍保留；Three lazy chunk 552.39 kB / gzip 140.07 kB，构建存在 >500 kB 提示；详见执行报告
+- 回滚方式：先恢复旧 index boot 入口并移除 shell loader，再按 R9→R0 反向回滚；不得删除方案仓库、版本、交易或 `.trash` 数据
 - Push：未授权

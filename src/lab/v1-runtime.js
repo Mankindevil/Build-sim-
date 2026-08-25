@@ -1,3 +1,12 @@
+/**
+ * Legacy detail-view adapter (page lifetime only).
+ *
+ * It owns no persistence, plan identity, version, evaluation snapshot,
+ * transaction link, task status, Agent proposal, or 3D state. Those migrated
+ * responsibilities live in PlanStore/BuildEvaluation and typed modules. This
+ * adapter only projects window.__N6_LAB__ facts into the still-supported N6
+ * detail panels and exposes readConfig/render during the template transition.
+ */
 (() => {
   const root = document.getElementById('n6-lab');
   const LAB = window.__N6_LAB__;

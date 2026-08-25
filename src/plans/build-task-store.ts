@@ -2,6 +2,7 @@ import type { BuildEvaluation } from "../core/evaluate";
 import type { KeyValueStorage } from "./migration";
 import type { BuildTask } from "./contracts";
 import { deriveBuildTasks, reconcileBuildTasks, summarizeBuildTasks, type BuildPurchaseFact, type BuildTaskSummary } from "./build-tasks";
+import { validateBuildTask } from "./validation";
 
 export const BUILD_TASK_STORAGE_PREFIX = "build-sim.tasks.v1:";
 
@@ -12,7 +13,7 @@ function load(storage: KeyValueStorage, planId: string): BuildTask[] {
     const raw = storage.getItem(`${BUILD_TASK_STORAGE_PREFIX}${planId}`);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as { schemaVersion?: number; tasks?: BuildTask[] };
-    return parsed.schemaVersion === 1 && Array.isArray(parsed.tasks) ? parsed.tasks.filter((item) => item?.planId === planId && typeof item.sourceRef === "string") : [];
+    return parsed.schemaVersion === 1 && Array.isArray(parsed.tasks) ? parsed.tasks.filter((item) => item?.planId === planId && validateBuildTask(item).length === 0) : [];
   } catch { return []; }
 }
 

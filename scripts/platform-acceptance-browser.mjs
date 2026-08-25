@@ -1,0 +1,168 @@
+import { chromium } from "playwright";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+const visualRoot = await mkdtemp(path.join(tmpdir(), "build-sim-r10-visual-"));
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
+page.setDefaultTimeout(25_000);
+const errors = [];
+const archives = [];
+page.on("pageerror", (error) => errors.push(String(error)));
+page.on("console", (message) => { if (message.type() === "error" && !/500|502/.test(message.text())) errors.push(message.text()); });
+page.on("dialog", (dialog) => dialog.accept());
+
+const routeTransactions = async (target) => target.route("**/api/price/transactions/**", async (route) => {
+  const request = route.request(); const url = new URL(request.url());
+  if (url.pathname.endsWith("/analyze")) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+    receiptId: "receipt-platform-r10", status: "matched-catalog",
+    detected: { name: "Corsair SF750", brand: "Corsair", model: "SF750", category: "psu", qty: 1, unitPriceCny: 999 },
+    catalogMatch: { skuId: "psu.corsair-sf750-atx31", kind: "exact-mpn", score: 1 },
+    evidence: { receiptId: "receipt-platform-r10", fileName: "sf750.png", contentHash: "a".repeat(64), capturedAt: "2026-08-25T00:00:00.000Z", ocrEngine: "fixture-ocr", ocrConfidence: 98, excerpt: "Corsair SF750 CNY 999" }, catalogSearch: null,
+  }) });
+  if (url.pathname.endsWith("/archive") && request.method() === "GET") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ records: archives }) });
+  if (url.pathname.endsWith("/archive") && request.method() === "POST") {
+    const body = request.postDataJSON(); const record = { schemaVersion: 2, receiptId: body.receiptId, storedAt: "2026-08-25T01:00:00.000Z", updatedAt: "2026-08-25T01:00:00.000Z", item: body.item, link: body.link, image: null };
+    archives.splice(0, archives.length, record); return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(record) });
+  }
+  return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+});
+await routeTransactions(page);
+
+const started = Date.now();
+await page.goto("http://127.0.0.1:5173/index.html#/workspace", { waitUntil: "networkidle" });
+await page.waitForFunction(() => Boolean(window.__BUILD_SIM_PLAN_STORE__?.getState().evaluationSnapshot));
+const firstLoadMs = Date.now() - started;
+
+await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
+await page.fill("[data-create-name]", "R10 完整验收方案");
+await page.selectOption("[data-create-mode]", "template");
+await page.click("[data-create-submit]");
+await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.name === "R10 完整验收方案");
+const firstPlan = await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.id);
+
+const evaluationStarted = Date.now();
+await page.fill('[data-config-field="selection.diskCount"]', "2");
+await page.locator('[data-config-field="selection.diskCount"]').dispatchEvent("change");
+await page.selectOption('[data-config-field="selection.psuId"]', "psu.corsair-sf750-atx31");
+await page.waitForFunction(() => {
+  const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+  return state?.evaluation?.config.selection.diskCount === 2 && state.evaluation.config.selection.psuId === "psu.corsair-sf750-atx31";
+});
+const reevaluationMs = Date.now() - evaluationStarted;
+await page.click("[data-open-save]");
+await page.fill("[data-version-summary]", "R10 v1 · 双盘与 SF750");
+await page.click("[data-version-submit]");
+await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.dirty === false);
+
+await page.click('[data-route="workspace"]');
+await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
+await page.selectOption("[data-create-mode]", "duplicate");
+await page.fill("[data-create-name]", "R10 独立副本");
+await page.click("[data-create-submit]");
+await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id !== id, firstPlan);
+const secondPlan = await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.id);
+await page.selectOption("[data-plan-switcher]", firstPlan);
+await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id === id, firstPlan);
+if (await page.locator('[data-config-field="selection.diskCount"]').inputValue() !== "2") throw new Error("source plan was polluted by duplicate");
+const switchStarted = Date.now();
+await page.selectOption("[data-plan-switcher]", secondPlan);
+await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id === id, secondPlan);
+const planSwitchMs = Date.now() - switchStarted;
+
+await page.click('[data-route="workspace"]');
+const finding = page.locator("[data-current-plan] [data-finding-id]").first();
+if (await finding.count()) {
+  await finding.click();
+  await page.waitForFunction(() => location.hash === "#/spatial");
+  await page.click("[data-edit-finding]");
+  await page.waitForFunction(() => location.hash === "#/editor");
+}
+const spatialStarted = Date.now();
+await page.click('[data-route="spatial"]');
+await page.waitForFunction(() => document.querySelector("#spatial-stage")?.classList.contains("spatial-three-active") || !document.querySelector("[data-three-fallback]")?.classList.contains("is-hidden"));
+const spatialInitMs = Date.now() - spatialStarted;
+
+await page.click('[data-route="agent"]');
+await page.waitForSelector("[data-agent-plan-proposals]", { state: "attached" });
+const proposal = await page.evaluate(() => {
+  const state = window.__BUILD_SIM_PLAN_STORE__.getState();
+  return { planId: state.activePlan.id, revision: state.activePlan.draftRevision, configHash: state.evaluationSnapshot.configHash, diskCount: state.activePlan.draft.config.selection.diskCount };
+});
+await page.locator("[data-agent-plan-proposals]").evaluate((host, value) => host.dispatchEvent(new CustomEvent("build-sim:agent-plan-proposal", { detail: { proposal: {
+  schemaVersion: "1.0.0", id: "proposal-platform-r10", planId: value.planId, expectedDraftRevision: value.revision, expectedConfigHash: value.configHash, createdAt: "2026-08-25T02:00:00.000Z",
+  summary: "R10 人工批准增加一块数据盘", rationale: ["完整路径 fixture"], operations: [{ op: "replace", path: "/selection/diskCount", value: value.diskCount + 1 }],
+  predictedImpact: { resolvedFindingIds: [], introducedFindingIds: [], budgetDeltaCny: null }, status: "proposed",
+} } })), proposal);
+const proposalCard = page.locator('[data-plan-proposal="proposal-platform-r10"]');
+await proposalCard.waitFor();
+if (!await proposalCard.locator("[data-apply-proposal]").isDisabled()) throw new Error("proposal bypassed approval gate");
+await proposalCard.locator("[data-proposal-approval]").check();
+await proposalCard.locator("[data-apply-proposal]").click();
+await page.waitForFunction((diskCount) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.config.selection.diskCount === diskCount + 1, proposal.diskCount);
+await page.click("[data-save-version]");
+await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.dirty === false);
+const saved = await page.evaluate(() => ({ id: window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.id, versionId: window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.activeVersionId }));
+
+await page.click('[data-route="purchases"]');
+await page.setInputFiles("#transaction-screenshot-input", { name: "sf750.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+await page.waitForFunction(() => document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase") === "reviewing");
+if (await page.locator(".transaction-review-link").inputValue() !== "psu.corsair-sf750-atx31") throw new Error("transaction was not linked to the v2 PSU");
+await page.click(".transaction-review-actions button:last-child");
+await page.click("#build-base-save");
+await page.waitForFunction(() => document.querySelector("#build-base-save-status")?.getAttribute("data-phase") === "archived");
+if (await page.locator("#build-base-close").isVisible()) await page.click("#build-base-close");
+await page.click('[data-route="build"]');
+const purchaseTask = page.locator('[data-task-kind="purchase"]').filter({ hasText: "purchase:sku:psu.corsair-sf750-atx31" });
+await purchaseTask.waitFor();
+if (await purchaseTask.getAttribute("data-task-status-value") !== "done") throw new Error("archived transaction did not update build task");
+
+const a11y = await page.evaluate(() => ({
+  unnamedButtons: [...document.querySelectorAll("button")].filter((button) => button.getClientRects().length && !(button.textContent?.trim() || button.getAttribute("aria-label"))).length,
+  brokenDialogs: [...document.querySelectorAll("dialog")].filter((dialog) => { const id = dialog.getAttribute("aria-labelledby"); return !id || !document.getElementById(id); }).length,
+  liveRegions: document.querySelectorAll('[aria-live="polite"], [aria-live="assertive"]').length,
+}));
+if (a11y.unnamedButtons || a11y.brokenDialogs || a11y.liveRegions < 5) throw new Error(`accessibility audit failed: ${JSON.stringify(a11y)}`);
+
+const screenshots = [];
+for (const [name, width, height, route] of [["desktop", 1440, 1000, "workspace"], ["tablet", 1024, 768, "build"], ["mobile", 390, 844, "editor"]]) {
+  await page.setViewportSize({ width, height }); await page.click(`[data-route="${route}"]`); const file = path.join(visualRoot, `${name}.png`); await page.screenshot({ path: file, fullPage: true });
+  const buffer = await readFile(file); screenshots.push({ name, width, height, bytes: buffer.byteLength, sha256: createHash("sha256").update(buffer).digest("hex") });
+}
+
+// Mobile completion path: create, edit, save a version, review and archive a transaction.
+await page.click('[data-route="workspace"]');
+await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
+await page.fill("[data-create-name]", "R10 手机方案");
+await page.selectOption("[data-create-mode]", "template");
+await page.click("[data-create-submit]");
+await page.fill('[data-config-field="selection.diskCount"]', "3");
+await page.locator('[data-config-field="selection.diskCount"]').dispatchEvent("change");
+await page.selectOption('[data-config-field="selection.psuId"]', "psu.corsair-sf750-atx31");
+await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation?.config.selection.diskCount === 3);
+await page.click("[data-open-save]");
+await page.fill("[data-version-summary]", "R10 mobile version");
+await page.click("[data-version-submit]");
+await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.dirty === false);
+await page.click('[data-route="purchases"]');
+await page.setInputFiles("#transaction-screenshot-input", { name: "sf750-mobile.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+await page.waitForFunction(() => document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase") === "reviewing");
+if (!await page.locator(".transaction-review-fields").isVisible()) throw new Error("mobile transaction review is not operable");
+await page.click(".transaction-review-actions button:last-child");
+await page.click("#build-base-save");
+await page.waitForFunction(() => document.querySelector("#build-base-save-status")?.getAttribute("data-phase") === "archived");
+if (await page.locator("#build-base-close").isVisible()) await page.click("#build-base-close");
+await page.selectOption("[data-plan-switcher]", saved.id);
+await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id === id, saved.id);
+
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id === id, saved.id);
+const restored = await page.evaluate(() => ({ versionId: window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.activeVersionId, task: localStorage.getItem(`build-sim.tasks.v1:${window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.id}`), progress: localStorage.getItem(`build-sim.progress.v2:${window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.id}`) }));
+if (restored.versionId !== saved.versionId || !restored.task || !restored.progress) throw new Error("refresh did not restore version/task/progress state");
+if (errors.length) throw new Error(`page errors:\n${errors.join("\n")}`);
+
+console.log("Platform acceptance browser passed", { plans: [firstPlan, secondPlan], savedVersion: saved.versionId, archives: archives.length, performance: { firstLoadMs, reevaluationMs, planSwitchMs, spatialInitMs }, accessibility: a11y, screenshots });
+await browser.close();
+await rm(visualRoot, { recursive: true, force: true });

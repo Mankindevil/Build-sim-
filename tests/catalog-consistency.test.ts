@@ -38,7 +38,7 @@ describe("catalog consistency", () => {
   });
 
   it("keeps core component selectors unique and backed by the correct catalog category", () => {
-    const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+    const html = readFileSync(new URL("../src/lab/app-document.html", import.meta.url), "utf8");
     const skus = indexSkus(catalog);
     const selectors: Array<[string, SkuRecord["category"]]> = [
       ["psu-select", "psu"],

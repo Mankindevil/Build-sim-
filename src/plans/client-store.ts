@@ -5,6 +5,7 @@ import type { BuildPlan, BuildPlanSummary, PlanEvaluationSnapshot, PlanSaveStatu
 import type { WorkspacePlanApi } from "./client";
 import { WorkspaceApiError } from "./client";
 import { migrateLegacyProgress, type KeyValueStorage } from "./migration";
+import { validateBuildPlan } from "./validation";
 
 export const ACTIVE_PLAN_KEY = "build-sim.workspace.active-plan.v1";
 const CACHE_PREFIX = "build-sim.workspace.plan-cache.v1:";
@@ -118,7 +119,9 @@ export class PlanStore {
   private cached(planId: string): BuildPlan | null {
     try {
       const raw = this.options.storage.getItem(`${CACHE_PREFIX}${planId}`);
-      return raw ? JSON.parse(raw) as BuildPlan : null;
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as unknown;
+      return validateBuildPlan(parsed).length ? null : parsed as BuildPlan;
     } catch {
       return null;
     }
@@ -131,8 +134,9 @@ export class PlanStore {
   }
 
   async initialize(): Promise<void> {
-    migrateLegacyProgress(this.options.storage);
-    const preferredId = this.options.storage.getItem(ACTIVE_PLAN_KEY);
+    try { migrateLegacyProgress(this.options.storage); } catch { /* disabled storage must not prevent an online workspace */ }
+    let preferredId: string | null = null;
+    try { preferredId = this.options.storage.getItem(ACTIVE_PLAN_KEY); } catch { /* storage may be unavailable in private/locked contexts */ }
     try {
       this.state.plans = await this.options.api.list();
       const selected = (preferredId && this.state.plans.some((plan) => plan.id === preferredId) ? preferredId : this.state.plans.find((plan) => plan.status === "active")?.id) ?? this.state.plans[0]?.id;
@@ -264,11 +268,19 @@ export class PlanStore {
       expectedRevision,
       config,
       idempotencyKey: `draft-${planId}-${expectedRevision}-${token}`,
-    }).then((saved) => {
+    }).then(async (saved) => {
       if (this.state.activePlan?.id !== planId) return saved;
       if (this.changeToken === token) {
         this.state.activePlan = saved;
         this.state.saveStatus = "saved";
+        const snapshot = this.state.evaluationSnapshot;
+        if (snapshot?.planId === saved.id && snapshot.configHash === await sha256Hex(saved.draft.config)) {
+          this.state.evaluationSnapshot = {
+            ...snapshot,
+            planVersionId: saved.activeVersionId,
+            draftRevision: saved.draftRevision,
+          };
+        }
       } else {
         saved.draft.config = clone(this.state.activePlan.draft.config);
         saved.draft.dirty = true;

@@ -103,18 +103,22 @@ export interface TransactionImportPlanContext {
   items: Array<{ id: string; skuId: string; name: string; category: string }>;
 }
 
-export function initTransactionImport(options: { onImport: (record: TransactionImportRecord, screenshot: File) => void; getPlanContext?: () => TransactionImportPlanContext | null }): void {
+export interface TransactionImportController { dispose(): void; }
+
+export function initTransactionImport(options: { onImport: (record: TransactionImportRecord, screenshot: File) => void; getPlanContext?: () => TransactionImportPlanContext | null }): TransactionImportController | null {
   const input = $("transaction-screenshot-input") as HTMLInputElement | null;
   const drop = $("transaction-screenshot-drop");
   const preview = $("transaction-screenshot-preview") as HTMLImageElement | null;
   const status = $("transaction-screenshot-status");
   const result = $("transaction-screenshot-result");
-  if (!input || !drop || !preview || !status || !result) return;
+  if (!input || !drop || !preview || !status || !result) return null;
+  let createdFlow = false;
   if (!$("transaction-flow")) {
     const flow = document.createElement("ol");
     flow.id = "transaction-flow"; flow.className = "transaction-flow"; flow.setAttribute("aria-label", "交易导入进度");
     flow.innerHTML = '<li data-step="upload" data-state="current"><span>选择截图</span></li><li data-step="recognize" data-state="idle"><span>识别交易</span></li><li data-step="enrich" data-state="idle"><span>核验型号</span></li><li data-step="review" data-state="idle"><span>确认入档</span></li>';
     drop.parentElement?.insertBefore(flow, drop);
+    createdFlow = true;
   }
 
   let previewUrl: string | null = null;
@@ -375,11 +379,30 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
     }
   };
 
-  cancel.addEventListener("click", () => activeRequest?.abort());
-  retry.addEventListener("click", () => { if (lastFile) void processFile(lastFile); });
-
-  input.addEventListener("change", () => { const file = input.files?.[0]; if (file) void processFile(file); });
-  for (const eventName of ["dragenter", "dragover"]) drop.addEventListener(eventName, (event) => { event.preventDefault(); drop.dataset.drag = "true"; });
-  for (const eventName of ["dragleave", "drop"]) drop.addEventListener(eventName, (event) => { event.preventDefault(); delete drop.dataset.drag; });
-  drop.addEventListener("drop", (event) => { const file = event.dataTransfer?.files?.[0]; if (file) void processFile(file); });
+  const onCancel = () => activeRequest?.abort();
+  const onRetry = () => { if (lastFile) void processFile(lastFile); };
+  const onInput = () => { const file = input.files?.[0]; if (file) void processFile(file); };
+  const onDragActive = (event: DragEvent) => { event.preventDefault(); drop.dataset.drag = "true"; };
+  const onDragInactive = (event: DragEvent) => { event.preventDefault(); delete drop.dataset.drag; };
+  const onDrop = (event: DragEvent) => { const file = event.dataTransfer?.files?.[0]; if (file) void processFile(file); };
+  cancel.addEventListener("click", onCancel);
+  retry.addEventListener("click", onRetry);
+  input.addEventListener("change", onInput);
+  for (const eventName of ["dragenter", "dragover"] as const) drop.addEventListener(eventName, onDragActive);
+  for (const eventName of ["dragleave", "drop"] as const) drop.addEventListener(eventName, onDragInactive);
+  drop.addEventListener("drop", onDrop);
+  return {
+    dispose() {
+      activeRequest?.abort(); activeRequest = null;
+      if (phaseTimer !== null) window.clearInterval(phaseTimer);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = null; preview.removeAttribute("src");
+      cancel.removeEventListener("click", onCancel); retry.removeEventListener("click", onRetry); input.removeEventListener("change", onInput);
+      for (const eventName of ["dragenter", "dragover"] as const) drop.removeEventListener(eventName, onDragActive);
+      for (const eventName of ["dragleave", "drop"] as const) drop.removeEventListener(eventName, onDragInactive);
+      drop.removeEventListener("drop", onDrop);
+      cancel.remove(); readProgress.remove();
+      if (createdFlow) $("transaction-flow")?.remove();
+    },
+  };
 }

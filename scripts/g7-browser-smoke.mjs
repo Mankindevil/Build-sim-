@@ -29,6 +29,12 @@ const evaluation = await page.evaluate(() => window.__N6_LAB__.evaluate());
 if (evaluation.config.selection.diskCount !== 9 || evaluation.config.selection.nvmeCount !== 3) throw new Error("parameterized config did not reach BuildEvaluation");
 if (!evaluation.physical.hash || !evaluation.calibration.hash) throw new Error("cross-layer hashes missing from BuildEvaluation");
 
+// Checklist exports are deliberately bound to an immutable saved version.
+// Persist the parameterized draft before asserting its evidence hashes.
+await page.waitForFunction(() => document.querySelector("[data-save-status]")?.getAttribute("data-status") !== "saving");
+await page.click("[data-save-version]");
+await page.waitForFunction(() => document.querySelector("[data-save-status]")?.getAttribute("data-status") === "clean");
+
 const [download] = await Promise.all([
   page.waitForEvent("download"),
   page.click("#cfg-export-checklist"),

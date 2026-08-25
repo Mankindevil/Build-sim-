@@ -23,6 +23,8 @@ export interface AgentPanelOptions {
   eventSourceFactory?: (url: string) => EventStream;
 }
 
+export interface AgentPanelController { dispose(): void; }
+
 function byId<T extends HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
 }
@@ -123,7 +125,7 @@ function proposalNode(
   return card;
 }
 
-export async function initAgentPanel(options: AgentPanelOptions): Promise<void> {
+export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentPanelController | null> {
   const model = byId<HTMLSelectElement>("agent-model");
   const skill = byId<HTMLSelectElement>("agent-skill");
   const status = byId<HTMLElement>("agent-status");
@@ -135,7 +137,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
   const cancel = byId<HTMLButtonElement>("agent-cancel");
   const reset = byId<HTMLButtonElement>("agent-new-session");
   const usage = byId<HTMLElement>("agent-usage");
-  if (!model || !skill || !status || !transcript || !events || !form || !input || !send || !cancel || !reset || !usage) return;
+  if (!model || !skill || !status || !transcript || !events || !form || !input || !send || !cancel || !reset || !usage) return null;
 
   const contextBadge = document.createElement("p");
   contextBadge.className = "agent-plan-context";
@@ -170,7 +172,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
     contextBadge.textContent = `绑定方案 ${current.planId} · revision ${current.draftRevision} · evaluation ${current.evaluationHash.slice(0, 12)}${boundContext ? stale ? " · context stale，发送时刷新" : " · context current" : " · 尚未发送"}`;
   };
   refreshContextBadge();
-  options.subscribePlanContext?.(refreshContextBadge);
+  const unsubscribePlanContext = options.subscribePlanContext?.(refreshContextBadge) ?? (() => undefined);
 
   const setStatus = (content: string, level: "ok" | "warn" | "bad" = "warn") => {
     status.textContent = content;
@@ -200,9 +202,10 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
       proposalHost.prepend(notice);
     }
   };
-  proposalHost.addEventListener("build-sim:agent-plan-proposal", (event) => {
+  const onProposal = (event: Event) => {
     void receiveProposal((event as CustomEvent<unknown>).detail);
-  });
+  };
+  proposalHost.addEventListener("build-sim:agent-plan-proposal", onProposal);
   const setBusy = (busy: boolean) => {
     send.disabled = busy || !catalogReady;
     cancel.disabled = !busy || !activeRunId;
@@ -387,25 +390,25 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
     send.disabled = true;
   }
 
-  model.addEventListener("change", () => {
+  const onModelChange = () => {
     clearConversation();
     setStatus("模型已切换；下一条消息将创建新会话", "warn");
-  });
-  reset.addEventListener("click", () => {
+  };
+  const onReset = () => {
     clearConversation();
     setBusy(false);
     setStatus("已清空本地会话；下一条消息将创建新会话", "warn");
-  });
-  cancel.addEventListener("click", async () => {
+  };
+  const onCancel = async () => {
     if (!activeRunId) return;
     cancel.disabled = true;
     try { await json(fetchImpl, `/runs/${encodeURIComponent(activeRunId)}/cancel`, { method: "POST", body: "{}" }); }
     catch (error) { setStatus(`取消失败：${text((error as Error).message)}`, "bad"); }
-  });
-  input.addEventListener("keydown", (event) => {
+  };
+  const onInputKeydown = (event: KeyboardEvent) => {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) form.requestSubmit();
-  });
-  form.addEventListener("submit", async (event) => {
+  };
+  const onSubmit = async (event: SubmitEvent) => {
     event.preventDefault();
     const content = input.value.trim();
     if (!content || activeRunId) return;
@@ -443,5 +446,23 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<void> 
       setStatus(`发送失败：${text((error as Error).message)}`, "bad");
       transcript.append(messageNode("notice", `发送失败：${text((error as Error).message)}`));
     }
-  });
+  };
+  model.addEventListener("change", onModelChange);
+  reset.addEventListener("click", onReset);
+  cancel.addEventListener("click", onCancel);
+  input.addEventListener("keydown", onInputKeydown);
+  form.addEventListener("submit", onSubmit);
+  return {
+    dispose() {
+      stream?.close(); stream = null; activeRunId = null;
+      unsubscribePlanContext();
+      proposalHost.removeEventListener("build-sim:agent-plan-proposal", onProposal);
+      model.removeEventListener("change", onModelChange);
+      reset.removeEventListener("click", onReset);
+      cancel.removeEventListener("click", onCancel);
+      input.removeEventListener("keydown", onInputKeydown);
+      form.removeEventListener("submit", onSubmit);
+      proposalHost.remove(); contextBadge.remove();
+    },
+  };
 }
