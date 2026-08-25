@@ -312,6 +312,8 @@ export class FilePlanRepository implements PlanRepository {
           createdAt: this.now(),
           reason: input.reason,
           ...(input.summary ? { summary: input.summary } : {}),
+          ...(input.evaluationHash ? { evaluationHash: input.evaluationHash } : {}),
+          ...(input.evaluatedAt ? { evaluatedAt: input.evaluatedAt } : {}),
           config: plan.draft.config,
           parentVersionId: plan.activeVersionId,
         });

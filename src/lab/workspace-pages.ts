@@ -3,6 +3,7 @@ import type { BuildEvaluation } from "../core/evaluate";
 import type { PlanStore, PlanStoreState } from "../plans/client-store";
 import { createDefaultN6Config } from "../plans/default-plan";
 import { diffBuildConfigs } from "../plans/diff";
+import { targetForFinding } from "../plans/finding-targets";
 import type { PlanVersion } from "../plans/contracts";
 import { WorkspaceRouter } from "./workspace-router";
 import "./workspace-pages.css";
@@ -28,16 +29,6 @@ function evaluationSummary(evaluation: BuildEvaluation | null): { bad: number; w
     budget: evaluation.price.knownCny,
     unknown: evaluation.price.unknownSkuIds.length,
   };
-}
-
-function findingField(findingId: string): string {
-  const value = findingId.toLowerCase();
-  if (value.includes("psu") || value.includes("power")) return "selection.psuId";
-  if (value.includes("disk") || value.includes("sata") || value.includes("tray")) return "selection.diskCount";
-  if (value.includes("hba") || value.includes("pcie")) return "selection.hbaMode";
-  if (value.includes("gpu")) return "selection.gpuId";
-  if (value.includes("cool") || value.includes("thermal")) return "selection.coolerId";
-  return "caseId";
 }
 
 function optionMarkup(sourceId: string, selected: string): string {
@@ -157,7 +148,7 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     const active = state.activePlan;
     const evalSummary = evaluationSummary(state.evaluation);
     const findings = state.evaluation?.findings.filter((finding) => finding.verdict === "bad" || finding.verdict === "warn").slice(0, 3) ?? [];
-    currentHost.innerHTML = active ? `<article><div><p>CURRENT PLAN</p><h3>${escapeHtml(active.name)}</h3><span>${active.activeVersionId ? `版本 ${escapeHtml(active.activeVersionId.slice(-8))}` : "尚无版本"} · ${state.saveStatus}</span></div><div class="workspace-current-metrics"><strong data-level="${evalSummary.bad ? "bad" : evalSummary.warn ? "warn" : "ok"}">${evalSummary.bad} 阻断</strong><span>${evalSummary.warn} 警告</span><span>预算 ${formatCny(active.metadata.budgetCny ?? evalSummary.budget)}</span></div><ul class="workspace-current-findings">${findings.map((finding) => `<li data-level="${finding.verdict}"><button data-finding-field="${findingField(finding.id)}">${escapeHtml(finding.message.slice(0, 72))}</button></li>`).join("") || "<li>当前没有阻断或警告。</li>"}</ul><div><button data-route-action="editor">继续编辑</button><button data-route-action="spatial">打开 3D</button><button data-route-action="purchases">上传交易</button><button data-route-action="agent">询问 Agent</button></div></article>` : `<article class="workspace-empty"><h3>还没有方案</h3><p>创建第一套 N6 方案后开始评估。</p><button data-open-create>新建方案</button></article>`;
+    currentHost.innerHTML = active ? `<article><div><p>CURRENT PLAN</p><h3>${escapeHtml(active.name)}</h3><span>${active.activeVersionId ? `版本 ${escapeHtml(active.activeVersionId.slice(-8))}` : "尚无版本"} · ${state.saveStatus}</span></div><div class="workspace-current-metrics"><strong data-level="${evalSummary.bad ? "bad" : evalSummary.warn ? "warn" : "ok"}">${evalSummary.bad} 阻断</strong><span>${evalSummary.warn} 警告</span><span>预算 ${formatCny(active.metadata.budgetCny ?? evalSummary.budget)}</span></div><ul class="workspace-current-findings">${findings.map((finding) => `<li data-level="${finding.verdict}"><button data-finding-field="${targetForFinding(finding.id).field}">${escapeHtml(finding.message.slice(0, 72))}</button></li>`).join("") || "<li>当前没有阻断或警告。</li>"}</ul><div><button data-route-action="editor">继续编辑</button><button data-route-action="spatial">打开 3D</button><button data-route-action="purchases">上传交易</button><button data-route-action="agent">询问 Agent</button></div></article>` : `<article class="workspace-empty"><h3>还没有方案</h3><p>创建第一套 N6 方案后开始评估。</p><button data-open-create>新建方案</button></article>`;
     grid.innerHTML = state.plans.filter((plan) => plan.name.toLowerCase().includes(search.toLowerCase())).map((plan) => `<article data-plan-card="${escapeHtml(plan.id)}"${plan.id === active?.id ? " data-active=true" : ""}><div><small>${plan.status === "archived" ? "已归档" : plan.id === active?.id ? "当前方案" : "方案"}</small><h3>${escapeHtml(plan.name)}</h3><p>${plan.activeVersionId ? `版本 ${escapeHtml(plan.activeVersionId.slice(-8))}` : "尚无版本"} · ${formatDate(plan.updatedAt)}</p><span>${plan.dirty ? "有未版本化草稿" : "版本已保存"}</span></div><footer>${plan.status === "archived" ? `<button data-restore-plan="${escapeHtml(plan.id)}">恢复</button>` : `<button data-activate-plan="${escapeHtml(plan.id)}">打开</button>`}<button data-delete-plan="${escapeHtml(plan.id)}">删除</button></footer></article>`).join("") || `<div class="workspace-empty"><p>没有匹配的方案。</p></div>`;
     if (active) {
       const signature = `${active.id}:${active.draftRevision}:${state.localRevision}`;

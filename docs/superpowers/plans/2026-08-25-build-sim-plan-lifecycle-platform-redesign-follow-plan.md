@@ -1111,3 +1111,17 @@ R3 工作台编辑器  R4 评估版本化
 - 未验证项：R4 将把当前风险变化摘要升级为 hash-bound evaluation diff 与正式 finding target mapping
 - 回滚方式：移除动态 `workspace-pages` 挂载及 info PATCH route；R2 shell/PlanStore 与 legacy 页面继续可用，已有版本不变
 - Push：未授权
+
+### R4 执行记录
+
+- 状态：完成
+- 起始 HEAD：`491223b`
+- 完成提交：`feat(evaluation): bind deterministic results to plan revisions`（SHA 见 Git log）
+- 修改文件：EvaluationCoordinator、snapshot/diff/finding target mapping、PlanStore snapshot、PlanVersion evaluation metadata、boot hash stamping、R4 tests/E2E
+- 聚焦测试：`npx vitest run tests/plan-evaluation.test.ts tests/evaluation-diff.test.ts tests/finding-navigation.test.ts`，3 files / 4 tests passed
+- 全量门禁：Vitest 64 files / 393 tests passed；typecheck passed；client + Agent + workspace production build passed；legacy model 85 assertions passed；legacy static 23 assertions passed；secret scan 295 files / 0 findings；`git diff --check` passed
+- 浏览器证据：workspace E2E passed；六个主要模块的 `data-evaluation-hash` 完全一致；保存版本的 evaluation hash 与当前 snapshot 一致
+- 数据迁移：PlanVersion 新增可选 evaluation hash/time，旧版本保持兼容
+- 未验证项：R5/R6 将把正式 finding target 映射消费到 Three.js 选择/高亮和走线图层
+- 回滚方式：移除 coordinator/stamping，PlanStore 可退回直接 `setEvaluation`；新增版本字段可选，不影响旧数据
+- Push：未授权

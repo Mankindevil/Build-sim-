@@ -37,6 +37,9 @@ try {
 const initialPlanId = await page.locator("[data-plan-switcher]").inputValue();
 if (!initialPlanId.startsWith("plan-")) throw new Error("default active plan was not restored");
 if (!(await page.$('[data-workspace-page="editor"] [data-config-field="selection.diskCount"]'))) throw new Error("R3 grouped editor did not render");
+await page.waitForFunction(() => Boolean(document.querySelector("#n6-lab")?.getAttribute("data-evaluation-hash")));
+const initialEvaluationHashes = await page.evaluate(() => ["n6-lab", "fit-chip", "workspace-results", "spatial-stage", "build-base-dialog", "agent-title"].map((id) => document.getElementById(id)?.getAttribute("data-evaluation-hash")));
+if (new Set(initialEvaluationHashes).size !== 1 || !initialEvaluationHashes[0]) throw new Error("major panels do not share one evaluation hash");
 
 await page.fill("#disk-range", "2");
 await page.locator("#disk-range").dispatchEvent("input");
@@ -62,6 +65,13 @@ await page.click("[data-open-save]");
 await page.fill("[data-version-summary]", "E2E initial version");
 await page.click("[data-version-submit]");
 await page.waitForFunction(() => document.querySelector("[data-save-status]")?.getAttribute("data-status") === "clean");
+const savedVersionContext = await page.evaluate(async () => {
+  const planId = window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id;
+  const response = await fetch(`/api/workspace/plans/${encodeURIComponent(planId ?? "")}/versions`);
+  const payload = await response.json();
+  return { versions: payload.versions, evaluationHash: document.querySelector("#n6-lab")?.getAttribute("data-evaluation-hash") };
+});
+if (savedVersionContext.versions.at(-1)?.evaluationHash !== savedVersionContext.evaluationHash) throw new Error("saved version lost evaluation hash binding");
 await page.click("[data-open-history]");
 await page.waitForFunction(() => document.querySelector("[data-version-list]")?.textContent?.includes("E2E initial version"));
 await page.click("[data-close-history]");

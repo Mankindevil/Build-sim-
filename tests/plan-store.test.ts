@@ -72,8 +72,9 @@ describe("R1 file plan repository", () => {
     const renamed = await store.updateInfo(plan.id, { expectedRevision: 0, name: "After", description: "Workstation NAS" });
     expect(renamed).toMatchObject({ name: "After", description: "Workstation NAS", draftRevision: 1, draft: { config: { name: "After" }, dirty: true } });
     await expect(store.updateInfo(plan.id, { expectedRevision: 0, name: "Stale" })).rejects.toMatchObject({ code: "stale_revision" });
-    const version = await store.saveVersion(plan.id, { expectedRevision: 1, expectedConfigHash: await sha256Hex(renamed.draft.config), reason: "manual-save", summary: "Rename and document purpose" });
+    const version = await store.saveVersion(plan.id, { expectedRevision: 1, expectedConfigHash: await sha256Hex(renamed.draft.config), reason: "manual-save", summary: "Rename and document purpose", evaluationHash: "b".repeat(64), evaluatedAt: "2026-08-25T00:00:10.000Z" });
     expect(version.summary).toBe("Rename and document purpose");
+    expect(version.evaluationHash).toBe("b".repeat(64));
     expect((await store.listVersions(plan.id))[0]?.summary).toBe("Rename and document purpose");
   });
 

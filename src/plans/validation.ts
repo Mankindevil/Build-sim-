@@ -83,6 +83,8 @@ export function validatePlanVersion(value: unknown): string[] {
   if (input.summary !== undefined && (typeof input.summary !== "string" || input.summary.length > 500)) errors.push("summary invalid");
   if (!validConfig(input.config)) errors.push("config must be a valid BuildConfig");
   if (typeof input.configHash !== "string" || !HASH.test(input.configHash)) errors.push("configHash must be a sha256 hex digest");
+  if (input.evaluationHash !== undefined && (typeof input.evaluationHash !== "string" || !HASH.test(input.evaluationHash))) errors.push("evaluationHash invalid");
+  if (input.evaluatedAt !== undefined) isoDate(input, "evaluatedAt", errors);
   if (input.parentVersionId !== null && (typeof input.parentVersionId !== "string" || !input.parentVersionId)) errors.push("parentVersionId invalid");
   return errors;
 }

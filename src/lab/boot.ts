@@ -32,6 +32,7 @@ import { canonicalJson } from "../plans/canonical";
 import { mountPlanShell, type PlanShellController } from "./plan-shell";
 import { WorkspaceRouter } from "./workspace-router";
 import { mountWorkspacePages, type WorkspacePagesController } from "./workspace-pages";
+import { EvaluationCoordinator } from "../plans/evaluation";
 import "./design-system.css";
 
 let catalog = loadBundledCatalog();
@@ -42,6 +43,7 @@ let buildProgress: BuildProgressController | null = null;
 let planStore: PlanStore | null = null;
 let planShell: PlanShellController | null = null;
 let workspacePages: WorkspacePagesController | null = null;
+const evaluationCoordinator = new EvaluationCoordinator((config) => evaluateBuild(config, catalog));
 
 const BOARD_ID = "board.asus-w680m-ace-se";
 
@@ -859,6 +861,23 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   updatePriceStamp();
   buildProgress?.syncEvaluation(evaluation);
   planStore?.setEvaluation(evaluation);
+  const state = planStore?.getState();
+  const active = state?.activePlan;
+  if (active) {
+    void evaluationCoordinator.acceptResolved({
+      planId: active.id,
+      planVersionId: active.activeVersionId,
+      draftRevision: active.draftRevision,
+      config: evaluation.config,
+      evaluation,
+    }).then(({ snapshot, latest }) => {
+      if (!latest || planStore?.getState().activePlan?.id !== snapshot.planId) return;
+      planStore.setEvaluationSnapshot(snapshot);
+      for (const id of ["n6-lab", "fit-chip", "workspace-results", "spatial-stage", "build-base-dialog", "agent-title"]) {
+        $(id)?.setAttribute("data-evaluation-hash", snapshot.evaluationHash);
+      }
+    });
+  }
 }
 
 function bindConfigChrome(): void {

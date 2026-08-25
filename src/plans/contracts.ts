@@ -55,6 +55,8 @@ export interface PlanVersion {
   readonly summary?: string;
   readonly config: Readonly<BuildConfig>;
   readonly configHash: string;
+  readonly evaluationHash?: string;
+  readonly evaluatedAt?: string;
   readonly parentVersionId: string | null;
 }
 
@@ -172,6 +174,8 @@ export interface SaveVersionInput {
   expectedConfigHash: string;
   reason: PlanVersionReason;
   summary?: string;
+  evaluationHash?: string;
+  evaluatedAt?: string;
   idempotencyKey?: string;
 }
 

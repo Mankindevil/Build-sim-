@@ -1,7 +1,7 @@
 import type { BuildConfig } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
 import { sha256Hex } from "./canonical";
-import type { BuildPlan, BuildPlanSummary, PlanSaveStatus, PlanVersion, PlanVersionReason } from "./contracts";
+import type { BuildPlan, BuildPlanSummary, PlanEvaluationSnapshot, PlanSaveStatus, PlanVersion, PlanVersionReason } from "./contracts";
 import type { WorkspacePlanApi } from "./client";
 import { WorkspaceApiError } from "./client";
 import { migrateLegacyProgress, type KeyValueStorage } from "./migration";
@@ -21,6 +21,7 @@ export interface PlanStoreState {
   plans: BuildPlanSummary[];
   activePlan: BuildPlan | null;
   evaluation: BuildEvaluation | null;
+  evaluationSnapshot: PlanEvaluationSnapshot | null;
   saveStatus: PlanSaveStatus;
   selection: PlanSelection | null;
   offline: boolean;
@@ -66,6 +67,7 @@ export class PlanStore {
     plans: [],
     activePlan: null,
     evaluation: null,
+    evaluationSnapshot: null,
     saveStatus: "clean",
     selection: null,
     offline: false,
@@ -302,6 +304,10 @@ export class PlanStore {
       expectedConfigHash: await sha256Hex(plan.draft.config),
       reason,
       ...(summary?.trim() ? { summary: summary.trim() } : {}),
+      ...(this.state.evaluationSnapshot?.configHash === await sha256Hex(plan.draft.config) ? {
+        evaluationHash: this.state.evaluationSnapshot.evaluationHash,
+        evaluatedAt: this.state.evaluationSnapshot.evaluatedAt,
+      } : {}),
       idempotencyKey: `version-${plan.id}-${plan.draftRevision}-${await sha256Hex(plan.draft.config)}`,
     });
     plan.activeVersionId = version.id;
@@ -390,6 +396,14 @@ export class PlanStore {
 
   setEvaluation(evaluation: BuildEvaluation | null): void {
     this.state.evaluation = evaluation;
+    this.state.evaluationSnapshot = null;
+    this.emit();
+  }
+
+  setEvaluationSnapshot(snapshot: PlanEvaluationSnapshot): void {
+    if (snapshot.planId !== this.state.activePlan?.id) return;
+    this.state.evaluationSnapshot = snapshot;
+    this.state.evaluation = snapshot.evaluation;
     this.emit();
   }
 
