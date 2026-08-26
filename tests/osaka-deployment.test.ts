@@ -17,4 +17,24 @@ describe("Osaka lifecycle deployment", () => {
     expect(nginx).toContain("location /api/workspace/");
     expect(nginx).toContain("proxy_pass http://127.0.0.1:5176;");
   });
+
+  it("ships a rollback-capable deployment script with bounded health checks", async () => {
+    const script = await readFile("deploy/osaka/deploy.sh", "utf8");
+    expect(script).toContain("git merge-base --is-ancestor");
+    expect(script).toContain("build-sim-web:rollback");
+    expect(script).toContain("build-sim-runtime:rollback");
+    expect(script).toContain("BUILD_SIM_HEALTH_ATTEMPTS");
+    expect(script).toContain("restore_previous_release");
+    expect(script).toContain("/api/workspace/plans");
+  });
+
+  it("verifies main before deploying through a host-key-pinned SSH connection", async () => {
+    const workflow = await readFile(".github/workflows/deploy-osaka.yml", "utf8");
+    expect(workflow).toContain("needs: verify");
+    expect(workflow).toContain("environment: osaka-production");
+    expect(workflow).toContain("OSAKA_SSH_PRIVATE_KEY");
+    expect(workflow).toContain("OSAKA_KNOWN_HOSTS");
+    expect(workflow).toContain("StrictHostKeyChecking=yes");
+    expect(workflow).toContain("--ref '${GITHUB_SHA}'");
+  });
 });

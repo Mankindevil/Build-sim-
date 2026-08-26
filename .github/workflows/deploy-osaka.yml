@@ -1,0 +1,68 @@
+name: Verify and deploy Osaka
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osaka-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: osaka-production
+    env:
+      SSH_HOST: ${{ secrets.OSAKA_HOST }}
+      SSH_USER: ${{ secrets.OSAKA_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.OSAKA_SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.OSAKA_KNOWN_HOSTS }}
+      SSH_PORT_CONFIG: ${{ vars.OSAKA_SSH_PORT }}
+      APP_DIR_CONFIG: ${{ vars.OSAKA_APP_DIR }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure trusted SSH connection
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SSH_PORT="${SSH_PORT_CONFIG:-22}"
+          APP_DIR="${APP_DIR_CONFIG:-/home/linuxuser/Code/build-sim}"
+          [[ -n "$SSH_HOST" && -n "$SSH_USER" && -n "$SSH_PRIVATE_KEY" && -n "$SSH_KNOWN_HOSTS" ]]
+          [[ "$SSH_PORT" =~ ^[0-9]{1,5}$ ]]
+          [[ "$APP_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]]
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          printf 'SSH_PORT=%s\nAPP_DIR=%s\n' "$SSH_PORT" "$APP_DIR" >> "$GITHUB_ENV"
+      - name: Deploy verified commit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          REMOTE_SCRIPT="/tmp/build-sim-deploy-${GITHUB_SHA}.sh"
+          TARGET="${SSH_USER}@${SSH_HOST}"
+          SCP_OPTIONS=(-P "$SSH_PORT" -i "$HOME/.ssh/id_ed25519" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          SSH_OPTIONS=(-p "$SSH_PORT" -i "$HOME/.ssh/id_ed25519" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          scp "${SCP_OPTIONS[@]}" deploy/osaka/deploy.sh "${TARGET}:${REMOTE_SCRIPT}"
+          ssh "${SSH_OPTIONS[@]}" "$TARGET" "set -eu; trap 'rm -f ${REMOTE_SCRIPT}' EXIT; chmod 700 '${REMOTE_SCRIPT}'; BUILD_SIM_APP_DIR='${APP_DIR}' '${REMOTE_SCRIPT}' --ref '${GITHUB_SHA}'"
