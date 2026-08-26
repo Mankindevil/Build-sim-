@@ -285,7 +285,7 @@ npm run price:login
 
 ## 生产环境部署
 
-仓库已经在 `deploy/osaka/` 提供完整的单机 Docker Compose 部署：构建静态 Web 镜像和共用 Node.js Runtime 镜像，然后运行 Web、Price/Catalog/Advice、Agent 与固定摘要的 SearXNG 镜像。当前仍没有 Kubernetes 清单和自动公网部署流水线。
+仓库已经在 `deploy/osaka/` 提供完整的单机 Docker Compose 部署：构建静态 Web 镜像和共用 Node.js Runtime 镜像，然后运行 Web、Price/Catalog/Advice、Agent、Workspace 与固定摘要的 SearXNG 镜像。当前仍没有 Kubernetes 清单和自动公网部署流水线。
 
 ### Osaka Docker Compose 部署
 
@@ -338,6 +338,7 @@ Compose 使用以下回环监听地址：
 | Web 容器 | `127.0.0.1:15176` |
 | Price / Catalog / Advice | `127.0.0.1:5174` |
 | Agent | `127.0.0.1:5175` |
+| Workspace / 方案仓库 | `127.0.0.1:5176` |
 | SearXNG | `127.0.0.1:18080` |
 
 #### 3. 配置 Nginx 与 HTTPS
@@ -368,6 +369,7 @@ sudo systemctl reload nginx
 curl --fail http://127.0.0.1:15176/healthz
 curl --fail http://127.0.0.1:5174/api/price/health
 curl --fail http://127.0.0.1:5175/api/agent/health
+curl --fail http://127.0.0.1:5176/api/workspace/plans
 docker compose -f deploy/osaka/compose.yaml logs --tail=100
 ```
 

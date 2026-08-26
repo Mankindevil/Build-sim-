@@ -285,7 +285,7 @@ The login profile is stored under `.cache/` and must not be committed. Respect e
 
 ## Production deployment
 
-The repository includes a complete single-host Docker Compose profile under `deploy/osaka/`. It builds the static Web image and the shared Node.js runtime image, then runs Web, Price/Catalog/Advice, Agent, and a pinned SearXNG image. Kubernetes manifests and an automated public deployment pipeline are not included.
+The repository includes a complete single-host Docker Compose profile under `deploy/osaka/`. It builds the static Web image and the shared Node.js runtime image, then runs Web, Price/Catalog/Advice, Agent, Workspace, and a pinned SearXNG image. Kubernetes manifests and an automated public deployment pipeline are not included.
 
 ### Docker Compose on Osaka
 
@@ -338,6 +338,7 @@ The profile uses these loopback listeners:
 | Web container | `127.0.0.1:15176` |
 | Price / Catalog / Advice | `127.0.0.1:5174` |
 | Agent | `127.0.0.1:5175` |
+| Workspace / Plan repository | `127.0.0.1:5176` |
 | SearXNG | `127.0.0.1:18080` |
 
 #### 3. Configure Nginx and HTTPS
@@ -368,6 +369,7 @@ The final proxy exposes only the UI, Price/Advice/Agent routes, catalog search p
 curl --fail http://127.0.0.1:15176/healthz
 curl --fail http://127.0.0.1:5174/api/price/health
 curl --fail http://127.0.0.1:5175/api/agent/health
+curl --fail http://127.0.0.1:5176/api/workspace/plans
 docker compose -f deploy/osaka/compose.yaml logs --tail=100
 ```
 

@@ -42,6 +42,18 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  workspace:
+    image: build-sim-runtime:osaka
+    command: ["node", "dist-workspace/workspace-server.js"]
+    network_mode: host
+    env_file:
+      - ../../.env.remote
+    volumes:
+      - ../../runtime:/app/runtime
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
   searxng:
     image: docker.io/searxng/searxng@sha256:11a9b34cdc0b1ec2b991470a2762ecb5a1a531898289fb51dcd015260450729e
     ports:
