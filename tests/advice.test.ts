@@ -1,11 +1,11 @@
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildAdviceInput, validateAdviceInput, validateAdviceResult } from "../src/advice/validate";
 import type { BuildAdviceInput, BuildAdviceResult } from "../src/advice/types";
 import { createAdviceJob, getAdviceBillingSummary, restoreAdviceRollback, waitForAdviceJob } from "../scripts/deepseek/advice.mjs";
-import { parseDeepSeekConfig } from "../scripts/deepseek/config.mjs";
+import { loadDeepSeekConfig, parseDeepSeekConfig } from "../scripts/deepseek/config.mjs";
 
 function input(): BuildAdviceInput {
   return {
@@ -59,6 +59,20 @@ describe("G6 structured DeepSeek advice", () => {
     expect(() => parseDeepSeekConfig({ DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture-secret", DEEPSEEK_API_URL: "file:///tmp/deepseek" })).toThrow(/http/);
     expect(() => parseDeepSeekConfig({ DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture-secret", DEEPSEEK_TIMEOUT_MS: "999999" })).toThrow(/TIMEOUT/);
     expect(parseDeepSeekConfig({})).toMatchObject({ enabled: false, model: "deepseek-v4-flash", timeoutMs: 30_000 });
+  });
+
+  it("uses deployed process environment values ahead of local fallbacks", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-deepseek-config-"));
+    await writeFile(path.join(root, ".env.local"), "DEEPSEEK_ENABLED=false\nDEEPSEEK_MODEL=local-model\n", "utf8");
+    const config = await loadDeepSeekConfig({
+      rootDir: root,
+      processEnv: {
+        DEEPSEEK_ENABLED: "true",
+        DEEPSEEK_API_KEY: "deployed-secret",
+        DEEPSEEK_MODEL: "deployed-model",
+      },
+    });
+    expect(config).toMatchObject({ enabled: true, model: "deployed-model", apiKey: "deployed-secret" });
   });
 
   it("builds a bounded input from the same BuildEvaluation facts", () => {

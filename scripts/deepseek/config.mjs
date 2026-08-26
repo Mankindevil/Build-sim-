@@ -77,10 +77,12 @@ export function parseDeepSeekConfig(env) {
 }
 
 /** DeepSeek values are intentionally isolated from the generic process loader. */
-export async function loadDeepSeekConfig() {
+export async function loadDeepSeekConfig(options = {}) {
   const env = {};
+  const rootDir = options.rootDir ?? ROOT;
+  const processEnv = options.processEnv ?? process.env;
   try {
-    const raw = await readFile(path.join(ROOT, ".env.local"), "utf8");
+    const raw = await readFile(path.join(rootDir, ".env.local"), "utf8");
     for (const line of raw.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
@@ -91,7 +93,12 @@ export async function loadDeepSeekConfig() {
       env[key] = value;
     }
   } catch {
-    /* Missing .env.local means the feature stays disabled. */
+    /* Missing .env.local is normal in deployed containers. */
+  }
+  // Docker Compose and other production runtimes inject secrets and rollout
+  // switches through process.env. Those values must override local fallbacks.
+  for (const [key, value] of Object.entries(processEnv)) {
+    if (value !== undefined) env[key] = String(value);
   }
   return parseDeepSeekConfig(env);
 }
