@@ -28,17 +28,27 @@
 </head>
 <body>
 <div id="n6-lab">
+  <nav class="app-bar" aria-label="主导航">
+    <a class="app-brand" href="#top" aria-label="Build Sim 首页"><span>BS</span><strong>Build Sim</strong><small>N6 工作台</small></a>
+    <div class="app-nav-links">
+      <a href="#lab-config-title">方案配置</a>
+      <a href="#workspace-results">评估结果</a>
+      <button id="build-transaction-import" type="button">录入交易</button>
+    </div>
+    <button id="build-base-edit" type="button" class="app-profile-btn"><span>装机档案</span><b>管理</b></button>
+  </nav>
   <header class="lab-hero">
     <div class="lab-hero-copy">
-      <p class="lab-eyebrow"><span class="lab-brand-mark">N6</span> BUILD / SIM</p>
-      <h2>把 NAS 装机从清单<br>变成一套可验证的方案</h2>
-      <p class="lab-subtitle">配置硬件、检查物理冲突、核对接线和采购顺序。所有结论来自统一评估引擎；证据不足的字段保持 unknown。</p>
-      <div class="lab-hero-meta" aria-label="系统能力">
-        <span>统一评估</span><span>证据可追溯</span><span>9 盘位拓扑</span>
+      <p class="lab-eyebrow"><span class="lab-brand-mark">N6</span> 装机项目 · 进行中</p>
+      <h1>今天，把方案推进一步。</h1>
+      <p class="lab-subtitle">从配置、验证到采购和装机，所有决定与交易凭证都集中在一个工作台。</p>
+      <div class="hero-actions">
+        <a class="primary-action" href="#lab-config-title">继续配置方案 <span>→</span></a>
+        <button id="hero-upload-transaction" type="button" class="secondary-action">上传交易截图</button>
       </div>
     </div>
     <div class="lab-owned" aria-label="装机档案进度">
-      <div class="lab-owned-head"><p class="lab-kicker">装机档案</p><button id="build-base-edit" type="button" class="case-view-btn">编辑基座</button></div>
+      <div class="lab-owned-head"><div><p class="lab-kicker">PROJECT PULSE</p><h2>装机进度</h2></div><button id="hero-manage-record" type="button" class="case-view-btn">查看档案</button></div>
       <div id="build-base-summary" class="build-base-summary" aria-live="polite">
         <p class="text-muted">正在读取装机进度…</p>
       </div>
@@ -49,44 +59,50 @@
   <dialog id="build-base-dialog" class="build-dialog" aria-labelledby="build-base-dialog-title">
     <div class="build-dialog-shell">
       <header class="build-dialog-head">
-        <div><p class="lab-kicker">BUILD RECORD</p><h3 id="build-base-dialog-title">编辑装机档案</h3><p>正式 SKU 参与确定性评估；用户记录部件只跟踪采购与组装，不进入兼容性计算。</p></div>
-        <button id="build-base-close" type="button" class="case-view-btn" aria-label="关闭编辑装机档案">关闭</button>
+        <div><p class="lab-kicker">BUILD RECORD</p><h2 id="build-base-dialog-title">装机档案</h2><p>管理部件进度、成交价格和交易凭证。</p></div>
+        <button id="build-base-close" type="button" class="dialog-close" aria-label="关闭装机档案">×</button>
       </header>
       <nav class="build-review-tabs" aria-label="装机档案 Review">
-        <button id="build-review-current-tab" type="button" aria-selected="true">当前配置 <small id="build-review-current-count">0 项</small></button>
-        <button id="build-review-transactions-tab" type="button" aria-selected="false">交易记录 <small id="build-review-transaction-count">0 笔</small></button>
+        <button id="build-review-current-tab" type="button" aria-selected="true"><span>部件清单</span><small id="build-review-current-count">0 项</small></button>
+        <button id="build-review-transactions-tab" type="button" aria-selected="false"><span>交易凭证</span><small id="build-review-transaction-count">0 笔</small></button>
       </nav>
       <section id="build-review-current-panel" class="build-review-panel" aria-labelledby="build-review-current-tab">
         <div id="build-review-current-summary" class="build-review-current-summary" aria-live="polite"></div>
         <section class="transaction-import" aria-labelledby="transaction-import-title">
           <div class="transaction-import-copy">
-            <p class="lab-kicker">TRANSACTION AGENT</p>
-            <h4 id="transaction-import-title">从交易截图补充装机档案</h4>
-            <p>上传后先检查并修改识别结果，再加入下方基座；点击“保存基座”后才会归档到服务器。</p>
+            <div><p class="lab-kicker">SMART IMPORT</p><h3 id="transaction-import-title">导入一笔交易</h3></div>
+            <p>上传订单或支付截图，我们会提取商品、数量和成交价。确认前不会写入档案。</p>
           </div>
+          <ol id="transaction-flow" class="transaction-flow" aria-label="交易导入进度">
+            <li data-step="upload" data-state="current"><i>1</i><span>选择截图<small>等待上传</small></span></li>
+            <li data-step="recognize" data-state="idle"><i>2</i><span>识别交易<small>商品与价格</small></span></li>
+            <li data-step="enrich" data-state="idle"><i>3</i><span>核验型号<small>匹配官方参数</small></span></li>
+            <li data-step="review" data-state="idle"><i>4</i><span>确认入档<small>由你最终确认</small></span></li>
+          </ol>
           <label id="transaction-screenshot-drop" class="transaction-drop" for="transaction-screenshot-input">
             <input id="transaction-screenshot-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
             <img id="transaction-screenshot-preview" alt="待识别交易截图预览" hidden>
-            <span><b>上传交易截图</b><small>点击选择或拖入 PNG / JPEG / WebP · 最大 5MB</small></span>
+            <span class="transaction-drop-icon" aria-hidden="true">↑</span>
+            <span><b>拖入截图，或点击选择</b><small>支持 PNG / JPEG / WebP · 最大 5MB · 建议隐藏无关隐私信息</small></span>
           </label>
-          <p id="transaction-screenshot-status" class="transaction-status" data-level="idle" aria-live="polite">截图会发送给服务端 DeepSeek 视觉 OCR；只有点击“保存基座”后，原图和交易摘要才会归档到服务器持久化目录。</p>
+          <div class="transaction-live-status"><span class="status-dot" aria-hidden="true"></span><p id="transaction-screenshot-status" class="transaction-status" data-level="idle" aria-live="polite">准备就绪。截图仅在你确认保存后归档。</p><button id="transaction-retry" type="button" class="case-view-btn" hidden>重试</button></div>
           <div id="transaction-screenshot-result" class="transaction-result" aria-live="polite" hidden></div>
         </section>
-        <div id="build-base-editor" class="build-base-editor"></div>
-        <button id="build-add-custom" type="button" class="case-view-btn">添加用户记录部件</button>
+        <section class="build-list-section"><header><div><p class="lab-kicker">COMPONENTS</p><h3>当前部件</h3></div><button id="build-add-custom" type="button" class="case-view-btn">＋ 手动添加</button></header><div class="build-editor-labels" aria-hidden="true"><span>部件</span><span>分类</span><span>数量</span><span>单价</span><span>状态</span><span></span></div><div id="build-base-editor" class="build-base-editor"></div></section>
       </section>
       <section id="build-review-transactions-panel" class="build-review-panel" aria-labelledby="build-review-transactions-tab" hidden>
         <header class="transaction-history-head">
-          <div><p class="lab-kicker">SERVER ARCHIVE</p><h4>交易与截图档案</h4><p>这里展示服务器已归档记录和本次待保存记录。原图可能含订单号、姓名或地址，请按需保留。</p></div>
-          <button id="transaction-history-refresh" type="button" class="case-view-btn">刷新档案</button>
+          <div><p class="lab-kicker">TRANSACTION ARCHIVE</p><h3>交易凭证</h3><p>查看已归档和待保存的记录；可单独删除包含隐私信息的原图。</p></div>
+          <button id="transaction-history-refresh" type="button" class="case-view-btn">↻ 刷新</button>
         </header>
+        <div class="transaction-history-toolbar"><label><span class="sr-only">搜索交易</span><input id="transaction-history-search" type="search" placeholder="搜索商品、分类或文件名"></label><label><span>状态</span><select id="transaction-history-filter"><option value="all">全部记录</option><option value="pending">待保存</option><option value="archived">已归档</option></select></label></div>
         <p id="transaction-history-status" class="transaction-history-status" data-level="idle" aria-live="polite">正在读取服务器档案…</p>
         <div id="transaction-history-list" class="transaction-history-list"></div>
       </section>
       <footer class="build-dialog-actions">
-        <p id="build-base-save-status" data-level="idle" aria-live="polite">修改与新截图只会在点击“保存基座”后生效。</p>
+        <div class="save-state"><span class="status-dot" aria-hidden="true"></span><p id="build-base-save-status" data-level="idle" aria-live="polite">所有更改均已保存。</p></div>
         <button id="build-base-cancel" type="button" class="case-view-btn">取消</button>
-        <button id="build-base-save" type="button">保存基座</button>
+        <button id="build-base-save" type="button">保存更改</button>
       </footer>
     </div>
   </dialog>
@@ -106,6 +122,7 @@
         <header><span>01</span><div><h4 id="control-core-title">核心硬件</h4><p>电源、散热、显卡与内存</p></div></header>
       <label>电源
         <select id="psu-select" class="form-select">
+          <option value="psu.seasonic-focus-plus-gold-850-fx">Seasonic FOCUS Plus Gold 850 · SSR-850FX · 4 外围座</option>
           <option value="psu.seasonic-focus-gx-850-v5">Seasonic FOCUS GX-850 V5 · ATX 3.1 · 3 外围座</option>
           <option value="psu.seasonic-focus-gx-750-v5">Seasonic FOCUS GX-750 V5 · ATX 3.1 · 3 外围座</option>
           <option value="psu.greatwall-f8-850">长城 F8 850W · ATX · 外围座未知</option>
@@ -249,7 +266,7 @@
     <div id="ram-compat-note" class="lab-callout" data-level="ok">W680M-ACE SE 是 DDR5 UDIMM 主板；不兼容 DDR4、RDIMM 或 LRDIMM。i5-14500 官方 DDR5 基线为 4800 MT/s。</div>
   </section>
 
-  <nav class="lab-tabs" aria-label="模拟器视图">
+  <nav id="workspace-results" class="lab-tabs" aria-label="模拟器视图">
     <button class="lab-tab" data-tab="overview" aria-selected="true"><span>概览</span><small>方案与结论</small></button>
     <button class="lab-tab" data-tab="thermal" aria-selected="false"><span>热设计</span><small>温度与噪音</small></button>
     <button class="lab-tab" data-tab="wiring" aria-selected="false"><span>接线</span><small>1–9 盘拓扑</small></button>
@@ -986,8 +1003,5 @@
   #n6-lab .as-why { display: block; color: var(--muted-foreground); font-size: 10.5px; }
   @media (prefers-reduced-motion: reduce) { #n6-lab * { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
 </style>
-
-
-
 </body>
 </html>

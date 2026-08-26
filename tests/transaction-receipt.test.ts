@@ -29,6 +29,30 @@ describe("transaction screenshot receipt agent", () => {
     expect(result.evidence.excerpt).not.toContain("12345678901");
   });
 
+  it("infers the category but keeps a cross-generation model fragment unresolved", () => {
+    const result = analyzeTransactionText("GX-850 数量 1 实付 ¥400", catalog);
+    expect(result).toMatchObject({
+      status: "catalog-search-required",
+      detected: { name: "GX-850", category: "psu", qty: 1, unitPriceCny: 400 },
+      catalogMatch: null,
+    });
+  });
+
+  it("matches the FX generation only when the revision is present", () => {
+    const result = analyzeTransactionText("Seasonic GX-850 FX 数量 1 实付 ¥400", catalog);
+    expect(result).toMatchObject({
+      status: "matched-catalog",
+      detected: { name: "Seasonic FOCUS Plus Gold 850 (SSR-850FX)", category: "psu" },
+      catalogMatch: { skuId: "psu.seasonic-focus-plus-gold-850-fx", kind: "brand-model" },
+    });
+  });
+
+  it("does not guess a SKU from an ambiguous numeric fragment", () => {
+    const result = analyzeTransactionText("850 数量 1 实付 ¥400", catalog);
+    expect(result.catalogMatch).toBeNull();
+    expect(result.status).toBe("identity-review-required");
+  });
+
   it("creates a provisional record and search query for a model absent from the catalog", () => {
     const result = analyzeTransactionText("Seasonic VERTEX-GX-1000 power supply Paid CNY 1299 Qty 1", catalog);
     expect(result.status).toBe("catalog-search-required");
@@ -76,7 +100,7 @@ describe("transaction screenshot receipt agent", () => {
       model: "deepseek-v4-flash-vision-exp",
       fetchImpl,
     });
-    expect(result).toMatchObject({ status: "matched-catalog", image: { mimeType: "image/png", bytes: image.length }, evidence: { ocrEngine: "deepseek-vision:deepseek-v4-flash-vision-exp", ocrConfidence: null }, billing: { status: "priced", pricing: { billedModel: "deepseek-v4-flash-vision-exp" }, cost: { estimated: true } } });
+    expect(result).toMatchObject({ status: "matched-catalog", ocrText: "Intel i5-14500 CPU Total ¥1380", image: { mimeType: "image/png", bytes: image.length }, evidence: { ocrEngine: "deepseek-vision:deepseek-v4-flash-vision-exp", ocrConfidence: null }, billing: { status: "priced", pricing: { billedModel: "deepseek-v4-flash-vision-exp" }, cost: { estimated: true } } });
     expect(JSON.stringify(result)).not.toContain("base64");
     expect(JSON.stringify(requestBody)).toContain("data:image/png;base64");
     expect(requestBody).not.toHaveProperty("vllm_xargs");
@@ -121,5 +145,15 @@ describe("transaction screenshot receipt agent", () => {
       { candidateId: "weak", match: { kind: "weak", score: 0.3 }, extraction: { status: "not-run", fieldsFound: 0 } },
       { candidateId: "exact", match: { kind: "exact-mpn", score: 1 }, extraction: { status: "ok", fieldsFound: 6 } },
     ])?.candidateId).toBe("exact");
+  });
+
+  it("rejects an unrelated extracted page even when it has more fields", () => {
+    expect(selectBestCatalogCandidate([
+      { candidateId: "seasonic", title: "Seasonic FOCUS GX-850", canonicalUrl: "https://seasonic.com/focus-gx/", match: { kind: "weak", score: 0.2 }, extraction: { status: "failed", fieldsFound: 1 } },
+      { candidateId: "case", title: "JONSBO computer case", canonicalUrl: "https://www.jonsbo.com/en/product/ComputerCase.html", match: { kind: "weak", score: 0.2 }, extraction: { status: "partial", fieldsFound: 3 } },
+    ], { name: "GX-850", model: "GX-850", brand: "Seasonic" })?.candidateId).toBe("seasonic");
+    expect(selectBestCatalogCandidate([
+      { candidateId: "case", title: "JONSBO computer case", canonicalUrl: "https://www.jonsbo.com/en/product/ComputerCase.html", match: { kind: "weak", score: 0.2 }, extraction: { status: "partial", fieldsFound: 3 } },
+    ], { name: "GX-850", model: "GX-850", brand: "Seasonic" })).toBeNull();
   });
 });

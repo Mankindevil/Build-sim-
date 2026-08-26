@@ -76,6 +76,66 @@ describe("A2 DeepSeek provider adapter", () => {
     expect(result.toolCalls).toEqual([{ id: "call-1", name: "get_build_evaluation", input: { sections: ["findings"] } }]);
   });
 
+  it("preserves private reasoning across tool-call turns without streaming it as answer text", async () => {
+    const deltas: string[] = [];
+    const requestBodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => {
+      requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return sse([
+        { id: "provider-thinking", model: config.model, choices: [{ delta: { reasoning_content: "private reasoning" }, finish_reason: null }] },
+        { id: "provider-thinking", model: config.model, choices: [{ delta: { content: "checking", tool_calls: [{ index: 0, id: "call-1", function: { name: "get_build_evaluation", arguments: "{}" } }] }, finish_reason: "tool_calls" }] },
+        "[DONE]",
+      ]);
+    };
+    const adapter = new DeepSeekProviderAdapter(config, fetchImpl as typeof fetch);
+    const first = await adapter.createTurn({
+      ...request((text) => deltas.push(text)),
+      tools: [{ name: "get_build_evaluation", description: "Read evaluation.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, strict: true }],
+    });
+    expect(first).toMatchObject({ content: "checking", reasoningContent: "private reasoning", stopReason: "tool_use" });
+    expect(deltas).toEqual(["checking"]);
+    expect(requestBodies[0]).toMatchObject({ thinking: { type: "enabled" }, reasoning_effort: "high" });
+    expect(requestBodies[0]).not.toHaveProperty("temperature");
+    expect(requestBodies[0]).not.toHaveProperty("tool_choice");
+
+    await adapter.createTurn({
+      ...request(),
+      messages: [{
+        id: "assistant-tool",
+        role: "assistant",
+        content: "",
+        reasoningContent: first.reasoningContent ?? "",
+        toolCalls: first.toolCalls,
+        createdAt: "2026-08-24T00:00:00.000Z",
+      }],
+    });
+    expect(requestBodies[1]?.messages).toEqual([
+      { role: "system", content: "fixture system" },
+      {
+        role: "assistant",
+        content: "",
+        reasoning_content: "private reasoning",
+        tool_calls: [{ id: "call-1", type: "function", function: { name: "get_build_evaluation", arguments: "{}" } }],
+      },
+    ]);
+  });
+
+  it("keeps legacy OpenAI-compatible models on temperature and tool_choice", async () => {
+    let body: Record<string, unknown> = {};
+    const adapter = new DeepSeekProviderAdapter({ ...config, model: "private-model" }, (async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return sse([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }, "[DONE]"]);
+    }) as typeof fetch);
+    await adapter.createTurn({
+      ...request(),
+      model: "private-model",
+      tools: [{ name: "get_build_evaluation", description: "Read evaluation.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, strict: true }],
+    });
+    expect(body).toMatchObject({ temperature: 0.2, tool_choice: "auto" });
+    expect(body).not.toHaveProperty("thinking");
+    expect(body).not.toHaveProperty("reasoning_effort");
+  });
+
   it("returns bounded provider errors without response bodies or secrets", async () => {
     const adapter = new DeepSeekProviderAdapter(config, (async () => new Response("upstream secret body", { status: 429 })) as typeof fetch);
     await expect(adapter.createTurn(request())).rejects.toThrow("DeepSeek Agent HTTP 429");

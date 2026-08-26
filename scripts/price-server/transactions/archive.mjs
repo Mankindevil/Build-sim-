@@ -68,6 +68,7 @@ function sanitizeItem(raw, receiptId) {
       candidateId: evidence.candidateId ? text(evidence.candidateId, 160) : null,
       draftId: evidence.draftId ? text(evidence.draftId, 160) : null,
       officialUrl: /^https:\/\//.test(String(evidence.officialUrl ?? "")) ? text(evidence.officialUrl, 1_000) : null,
+      sourceReview: evidence.sourceReview === "user-confirmed" ? "user-confirmed" : undefined,
     },
   };
 }

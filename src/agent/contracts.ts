@@ -24,6 +24,8 @@ export interface AgentMessage {
   id: string;
   role: AgentRole;
   content: string;
+  /** Provider-private reasoning state required to continue DeepSeek tool-call turns. Never render this as answer text. */
+  reasoningContent?: string;
   createdAt: string;
   toolCalls?: AgentToolCall[];
   toolCallId?: string;
@@ -82,6 +84,8 @@ export interface ProviderTurnResult {
   providerRequestId: string | null;
   model: string;
   content: string;
+  /** Opaque reasoning state used only for provider context replay across tool calls. */
+  reasoningContent?: string;
   toolCalls: AgentToolCall[];
   stopReason: "end_turn" | "tool_use" | "max_tokens" | "content_filter" | "cancelled" | "error";
   usage: ProviderUsage;

@@ -43,6 +43,7 @@ export interface TransactionEvidence {
   candidateId?: string | null;
   draftId?: string | null;
   officialUrl?: string | null;
+  sourceReview?: "user-confirmed";
   screenshotArchive?: "server";
   screenshotStoredAt?: string | null;
   screenshotMimeType?: string | null;
@@ -246,6 +247,7 @@ export function initBuildProgress(args: {
   getPlanContext?: () => BuildProgressPlanContext | null;
   getPlans?: () => Array<{ id: string; name: string }>;
   screenshotArchive?: TransactionScreenshotArchive;
+  onTransactionsArchived?: (items: BuildProgressItem[]) => string[] | void;
 }): BuildProgressController {
   const initialPlan = args.getPlanContext?.() ?? null;
   let activePlanId = initialPlan?.planId ?? null;
@@ -644,13 +646,16 @@ export function initBuildProgress(args: {
       }
       state = nextState;
       persistState(state, activePlanId);
+      const archivedReceiptIds = new Set(batch.archived.map((record) => record.receiptId));
+      const archivedItems = Object.values(state.items).filter((item) => item.transaction && archivedReceiptIds.has(item.transaction.receiptId));
+      const defaultedParts = archivedItems.length ? args.onTransactionsArchived?.(archivedItems.map((item) => structuredClone(item))) ?? [] : [];
       for (const [id, pending] of pendingTransactions) if (!pending.transaction || !failedReceipts.has(pending.transaction.receiptId)) pendingTransactions.delete(id);
       for (const receiptId of [...pendingScreenshotDeletes]) if (!failedReceipts.has(receiptId)) pendingScreenshotDeletes.delete(receiptId);
       for (const receiptId of [...pendingArchiveDeletes]) if (!failedReceipts.has(receiptId)) pendingArchiveDeletes.delete(receiptId);
       if (!failures.length) {
         closeEditor(false);
         if (saveStatus) {
-          saveStatus.textContent = `archived · ${batch.archived.length} 笔截图已归档，方案采购状态已更新。`;
+          saveStatus.textContent = `archived · ${batch.archived.length} 笔截图已归档，方案采购状态已更新${defaultedParts.length ? `；已将 ${defaultedParts.join("、")} 设为方案默认部件` : ""}。`;
           saveStatus.dataset.level = "ok";
           saveStatus.dataset.phase = "archived";
         }

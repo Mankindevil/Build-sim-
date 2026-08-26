@@ -7,6 +7,7 @@ import { MemoryAgentSessionStore } from "../src/agent/session-store";
 import type { ProviderAdapter, ProviderTurnRequest } from "../src/agent/contracts";
 import { FileAgentSessionStore } from "../src/server/file-session-store";
 import { parseAgentRuntimeConfig } from "../src/server/agent-env";
+import { publicAgentSession } from "../src/server/agent-server";
 
 function fakeProvider(turns: ProviderTurnRequest[]): ProviderAdapter {
   return {
@@ -81,6 +82,47 @@ describe("A2 Agent runtime", () => {
     ]);
     expect(turns[1]?.messages.map((message) => message.content)).toEqual(["第一问", "回答 1", "第二问"]);
     expect(runtime.getRun(second.runId).events.map((event) => event.type)).toEqual(["run_status", "run_status", "text_delta", "text_delta", "usage", "run_status"]);
+  });
+
+  it("fails visibly when a provider returns tokens but no final answer", async () => {
+    const provider: ProviderAdapter = {
+      ...fakeProvider([]),
+      async createTurn() {
+        return {
+          provider: "deepseek",
+          providerRequestId: "provider-empty",
+          model: "deepseek-v4-flash",
+          content: "",
+          reasoningContent: "private reasoning only",
+          toolCalls: [],
+          stopReason: "end_turn",
+          usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 10, reasoningTokens: 20 },
+          latencyMs: 5,
+        };
+      },
+    };
+    const runtime = new AgentRuntime([provider], new MemoryAgentSessionStore());
+    const session = await runtime.createSession();
+    const run = await runtime.startRun(session.id, { content: "不要显示空回答" });
+    await runtime.waitForRun(run.runId);
+    expect(runtime.getRun(run.runId).status).toBe("failed");
+    expect(runtime.getRun(run.runId).events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "error", code: "provider_empty_response" }),
+      expect.objectContaining({ type: "run_status", status: "failed" }),
+    ]));
+  });
+
+  it("keeps provider reasoning out of browser session payloads", () => {
+    expect(publicAgentSession({
+      contractVersion: "1.0.0",
+      id: "session-private-reasoning",
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      messages: [{ id: "message-1", role: "assistant", content: "visible answer", reasoningContent: "private reasoning", createdAt: "now" }],
+      buildConfig: null,
+      createdAt: "now",
+      updatedAt: "now",
+    }).messages[0]).toEqual({ id: "message-1", role: "assistant", content: "visible answer", createdAt: "now" });
   });
 
   it("selects Claude through the same session contract with provider-specific budgets", async () => {

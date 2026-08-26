@@ -10,7 +10,7 @@ import { FileAgentSessionStore } from "./file-session-store";
 import { FileAgentRunAuditStore } from "./file-audit-store";
 import { loadAgentRuntimeConfig } from "./agent-env";
 import { createBuildSimTools } from "./domain-tools";
-import type { AgentWriteApprovalEnvelope } from "../agent/contracts";
+import type { AgentSession, AgentWriteApprovalEnvelope } from "../agent/contracts";
 
 const HOST = "127.0.0.1";
 const MAX_BODY_BYTES = 1_000_000;
@@ -73,6 +73,14 @@ function terminal(status: string): boolean {
   return ["completed", "failed", "cancelled", "limit_exceeded"].includes(status);
 }
 
+/** The browser only needs visible conversation text; provider reasoning stays server-side. */
+export function publicAgentSession(session: AgentSession): AgentSession {
+  return {
+    ...session,
+    messages: session.messages.map(({ reasoningContent: _reasoningContent, ...message }) => message),
+  };
+}
+
 async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url: URL, runtime: AgentRuntime, maxBodyBytes: number): Promise<boolean> {
   const route = `${req.method} ${url.pathname}`;
   if (route === "GET /api/agent/models") {
@@ -94,7 +102,7 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
   }
   const sessionMatch = url.pathname.match(/^\/api\/agent\/sessions\/([^/]+)$/);
   if (req.method === "GET" && sessionMatch?.[1]) {
-    send(res, 200, await runtime.getSession(decodeURIComponent(sessionMatch[1])));
+    send(res, 200, publicAgentSession(await runtime.getSession(decodeURIComponent(sessionMatch[1]))));
     return true;
   }
   const messageMatch = url.pathname.match(/^\/api\/agent\/sessions\/([^/]+)\/messages$/);

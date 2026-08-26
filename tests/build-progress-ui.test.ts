@@ -115,6 +115,7 @@ describe("build progress transaction import", () => {
   });
 
   it("archives a staged screenshot on the server only when Save base succeeds", async () => {
+    const onTransactionsArchived = vi.fn(() => ["Server saved PSU"]);
     const commit = vi.fn(async () => ({ archived: [{
       schemaVersion: 2 as const,
       receiptId: "receipt-server",
@@ -130,7 +131,7 @@ describe("build progress transaction import", () => {
       deleteScreenshot: vi.fn(async () => undefined), deleteRecord: vi.fn(async () => undefined),
       updateRecord: vi.fn(async () => { throw new Error("unused"); }),
     };
-    const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: ["case.jonsbo-n6"], screenshotArchive: archive });
+    const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: ["case.jonsbo-n6"], screenshotArchive: archive, onTransactionsArchived });
     controller.syncEvaluation(evaluation());
     document.querySelector<HTMLButtonElement>("#build-base-edit")?.click();
     const file = new File([new Uint8Array([137, 80, 78, 71])], "order.png", { type: "image/png" });
@@ -140,12 +141,15 @@ describe("build progress transaction import", () => {
     }, file);
     expect(archive.stage).toHaveBeenCalledWith("receipt-server", file, "e".repeat(64), "2026-08-25T00:00:00.000Z");
     expect(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY)).toBeNull();
+    expect(onTransactionsArchived).not.toHaveBeenCalled();
 
     document.querySelector<HTMLButtonElement>("#build-base-save")?.click();
     await vi.waitFor(() => expect(commit).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(onTransactionsArchived).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY)).not.toBeNull());
     const stored = JSON.parse(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY) ?? "{}");
     expect(stored.items["transaction-receipt-server"].transaction).toMatchObject({ screenshotArchive: "server", screenshotStoredAt: "2026-08-25T01:00:00.000Z", screenshotMimeType: "image/png", screenshotSize: 4 });
+    expect(document.querySelector("#build-base-save-status")?.textContent).toContain("已将 Server saved PSU 设为方案默认部件");
   });
 
   it("isolates purchase state per active plan and restores it when switching back", () => {

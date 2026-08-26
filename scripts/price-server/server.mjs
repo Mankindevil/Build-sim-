@@ -247,6 +247,13 @@ const server = http.createServer(async (req, res) => {
         model: env.DEEPSEEK_OCR_MODEL || "deepseek-v4-flash-vision-exp",
         maxTokens: DEEPSEEK_OCR_MAX_TOKENS,
       });
+      // OCR is deliberately read-only. The client lets the user correct the
+      // detected identity/category before starting any external catalog search.
+      return send(res, 200, { ...analysis, catalogSearch: null });
+    }
+    if (route === "POST /api/price/transactions/catalog-search") {
+      const body = await readBody(req);
+      const catalog = await loadCatalog();
       const transactionDiscoveryMode = env.TRANSACTION_CATALOG_DISCOVERY_PROVIDER || "searxng";
       if (!["registry", "searxng"].includes(transactionDiscoveryMode)) throw new Error("TRANSACTION_CATALOG_DISCOVERY_PROVIDER must be registry or searxng");
       const discoveryProviders = [
@@ -254,10 +261,13 @@ const server = http.createServer(async (req, res) => {
         ...(transactionDiscoveryMode === "searxng" ? [createSearXngDiscoveryProvider(env)] : []),
         new RegistrySearchDiscoveryProvider(),
       ];
-      const catalogSearch = analysis.status === "catalog-search-required" && analysis.searchQuery
-        ? queueSearch({ query: analysis.searchQuery, brand: analysis.detected.brand ?? undefined, category: analysis.detected.category, officialOnly: true, limit: 8 }, { discoveryProviders, catalog, persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd() })
-        : null;
-      return send(res, 200, { ...analysis, catalogSearch: catalogSearch ? { jobId: catalogSearch.jobId, status: catalogSearch.status, stage: catalogSearch.stage } : null });
+      return send(res, 202, queueSearch({
+        query: body.query,
+        ...(body.brand ? { brand: body.brand } : {}),
+        category: body.category,
+        officialOnly: true,
+        limit: 8,
+      }, { discoveryProviders, catalog, persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd() }));
     }
     if (route === "POST /api/catalog/search") {
       const body = await readBody(req);

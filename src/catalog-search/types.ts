@@ -42,6 +42,7 @@ export interface CandidateExtraction {
 
 export interface ModelCandidate {
   candidateId: string;
+  skuId?: string;
   query: NormalizedModelQuery;
   brand?: string;
   model?: string;

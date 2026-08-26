@@ -132,7 +132,23 @@ function matchCatalog(raw, catalog) {
     const kind = sku.mpn && haystack.includes(comparable(sku.mpn)) ? "exact-mpn" : "brand-model";
     return [{ sku, score: kind === "exact-mpn" ? 1 : Math.min(0.98, 0.72 + exact.length / 100), kind }];
   });
-  return rows.sort((a, b) => b.score - a.score)[0] ?? null;
+  const exactMatch = rows.sort((a, b) => b.score - a.score)[0];
+  if (exactMatch) return exactMatch;
+
+  // Transaction titles often omit a product-family prefix or revision, for
+  // example "GX-850" instead of "FOCUS GX-850 V5". Treat a sufficiently
+  // specific model fragment as a catalog match only when it identifies one SKU
+  // unambiguously; generic fragments such as "850" must remain reviewable.
+  const fragments = (text(raw).match(/[A-Za-z0-9]+(?:[-_./][A-Za-z0-9]+)+|[A-Za-z]{1,12}\d{2,}[A-Za-z0-9-]*/g) ?? [])
+    .map((value) => comparable(value))
+    .filter((value) => value.length >= 5 && /[a-z]{2,}/.test(value) && /\d{2,}/.test(value));
+  for (const fragment of [...new Set(fragments)].sort((a, b) => b.length - a.length)) {
+    const partial = (catalog?.skus ?? []).filter((sku) => [sku.mpn, sku.model]
+      .filter(Boolean)
+      .some((identity) => comparable(identity).includes(fragment)));
+    if (partial.length === 1) return { sku: partial[0], score: 0.82, kind: "brand-model" };
+  }
+  return null;
 }
 
 function detectIdentity(raw, catalog) {
@@ -143,7 +159,14 @@ function detectIdentity(raw, catalog) {
   const tokens = normalized.match(/[A-Za-z0-9]+(?:[-_./][A-Za-z0-9]+)+|[A-Za-z]{1,12}\d{2,}[A-Za-z0-9-]*/g) ?? [];
   const rejected = /^(?:20\d{2}|\d{8,}|order|total|amount)$/i;
   const model = tokens.filter((token) => !rejected.test(token) && /[A-Za-z]/.test(token) && /\d/.test(token)).sort((a, b) => b.length - a.length)[0];
-  const category = CATEGORY_WORDS.find(([, words]) => words.some((word) => lower.includes(word)))?.[0];
+  const explicitCategory = CATEGORY_WORDS.find(([, words]) => words.some((word) => lower.includes(word)))?.[0];
+  const modelFragment = comparable(model);
+  const catalogCategories = new Set(modelFragment.length >= 5
+    ? (catalog?.skus ?? [])
+      .filter((sku) => [sku.mpn, sku.model].filter(Boolean).some((identity) => comparable(identity).includes(modelFragment)))
+      .map((sku) => sku.category)
+    : []);
+  const category = explicitCategory ?? (catalogCategories.size === 1 ? [...catalogCategories][0] : null);
   return { brand: brand ?? null, model: model ?? null, category: category ?? null, query: [brand, model].filter(Boolean).join(" ") };
 }
 
@@ -199,6 +222,7 @@ export async function analyzeTransactionScreenshot(body, options = {}) {
   });
   return {
     ...result,
+    ocrText: ocr.text,
     billing: ocr.billing ?? null,
     image: { mimeType: decoded.mimeType, bytes: decoded.buffer.byteLength, dimensions },
   };

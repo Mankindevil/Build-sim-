@@ -24,10 +24,12 @@ export class CatalogCacheDiscoveryProvider {
     return (this.catalog.skus ?? []).flatMap((sku) => {
       const haystack = `${sku.brand} ${sku.model} ${sku.name} ${sku.mpn ?? ""}`.toLocaleLowerCase();
       const exactMpn = Boolean(query.mpn && sku.mpn && query.mpn.toLocaleLowerCase() === sku.mpn.toLocaleLowerCase());
-      if (!exactMpn && (!wanted || !haystack.includes(wanted))) return [];
+      const significantTokens = (query.tokens ?? []).filter((token) => token.length >= 2);
+      const tokenMatch = significantTokens.length >= 2 && significantTokens.every((token) => haystack.includes(token));
+      if (!exactMpn && !tokenMatch && (!wanted || !haystack.includes(wanted))) return [];
       const url = sku.appearance?.page ?? sku.price?.listingUrl;
       if (!url) return [];
-      return [{ url, title: sku.name, provider: this.id, retrievedAt: now(), rank: exactMpn ? 0 : 1 }];
+      return [{ url, title: sku.name, skuId: sku.id, matchKind: exactMpn ? "exact-mpn" : "brand-model", matchScore: exactMpn ? 1 : 0.85, provider: this.id, retrievedAt: now(), rank: exactMpn ? 0 : 1 }];
     }).slice(0, limit);
   }
 }

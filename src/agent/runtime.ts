@@ -228,6 +228,7 @@ export class AgentRuntime {
           id: this.id("message"),
           role: "assistant",
           content: turn.content,
+          ...(turn.reasoningContent !== undefined ? { reasoningContent: turn.reasoningContent } : {}),
           createdAt: this.now(),
           ...(turn.toolCalls.length ? { toolCalls: turn.toolCalls } : {}),
         });
@@ -241,6 +242,9 @@ export class AgentRuntime {
           at: this.now(),
         });
         if (!turn.toolCalls.length) {
+          if (!turn.content.trim()) {
+            throw new AgentRuntimeError("provider_empty_response", "Agent provider returned no final answer", 502);
+          }
           session.updatedAt = this.now();
           await this.store.put(session);
           run.status = "completed";

@@ -616,11 +616,96 @@ body:has(#n6-lab#n6-lab) {
   overflow-wrap: anywhere;
 }
 
+#n6-lab#n6-lab .transaction-review-ocr {
+  margin-top: 7px;
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+#n6-lab#n6-lab .transaction-review-ocr summary {
+  cursor: pointer;
+  color: var(--foreground);
+}
+
+#n6-lab#n6-lab .transaction-review-ocr textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--foreground);
+  font: 8px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  box-sizing: border-box;
+}
+
+#n6-lab#n6-lab .transaction-review-ocr small {
+  display: block;
+  margin-top: 4px;
+}
+
+#n6-lab#n6-lab .transaction-search-log,
+#n6-lab#n6-lab .transaction-candidate-review {
+  margin-top: 8px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+  font-size: 8px;
+}
+
+#n6-lab#n6-lab .transaction-search-log ol {
+  max-height: 120px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+  overflow: auto;
+  color: var(--muted-foreground);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+#n6-lab#n6-lab .transaction-candidate-review > p {
+  margin: 5px 0;
+  color: var(--muted-foreground);
+}
+
+#n6-lab#n6-lab .transaction-candidate-review > a {
+  color: var(--primary);
+}
+
+#n6-lab#n6-lab .transaction-candidate-fields {
+  display: grid;
+  grid-template-columns: minmax(90px, .4fr) minmax(0, 1fr);
+  gap: 4px 8px;
+  margin: 8px 0;
+}
+
+#n6-lab#n6-lab .transaction-candidate-fields dt,
+#n6-lab#n6-lab .transaction-candidate-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+#n6-lab#n6-lab .transaction-candidate-review > label {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 8px 0;
+  color: var(--foreground);
+}
+
 #n6-lab#n6-lab .transaction-review-fields label {
   display: grid;
   gap: 4px;
   color: var(--muted-foreground);
   font-size: 8px;
+}
+
+#n6-lab#n6-lab .transaction-review-link-hint {
+  color: var(--muted-foreground);
+  font-size: 7px;
+  line-height: 1.45;
 }
 
 #n6-lab#n6-lab .transaction-review-fields input,

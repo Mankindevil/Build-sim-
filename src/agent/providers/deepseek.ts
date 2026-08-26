@@ -53,18 +53,23 @@ function toProviderMessage(message: AgentMessage): Record<string, unknown> {
   if (message.role === "tool") {
     return { role: "tool", content: message.content, tool_call_id: message.toolCallId };
   }
-  if (message.role === "assistant" && message.toolCalls?.length) {
+  if (message.role === "assistant") {
     return {
       role: "assistant",
-      content: message.content || null,
-      tool_calls: message.toolCalls.map((call) => ({
+      content: message.content,
+      ...(message.reasoningContent !== undefined ? { reasoning_content: message.reasoningContent } : {}),
+      ...(message.toolCalls?.length ? { tool_calls: message.toolCalls.map((call) => ({
         id: call.id,
         type: "function",
         function: { name: call.name, arguments: JSON.stringify(call.input) },
-      })),
+      })) } : {}),
     };
   }
   return { role: message.role, content: message.content };
+}
+
+function usesV4Thinking(model: string): boolean {
+  return /^deepseek-v4(?:-|$)/.test(model);
 }
 
 function stopReason(value: unknown): ProviderTurnResult["stopReason"] {
@@ -115,13 +120,14 @@ export class DeepSeekProviderAdapter implements ProviderAdapter {
     request.signal.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(abort, Math.min(this.config.timeoutMs, 120_000));
     const started = Date.now();
+    const thinking = usesV4Thinking(request.model);
     try {
       const response = await this.fetchImpl(`${this.config.apiUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.config.apiKey}` },
         body: JSON.stringify({
           model: request.model,
-          temperature: request.temperature,
+          ...(thinking ? { thinking: { type: "enabled" }, reasoning_effort: "high" } : { temperature: request.temperature }),
           max_tokens: request.maxTokens,
           stream: true,
           stream_options: { include_usage: true },
@@ -136,7 +142,8 @@ export class DeepSeekProviderAdapter implements ProviderAdapter {
                 strict: tool.strict,
               },
             })),
-            tool_choice: "auto",
+            // DeepSeek V4 thinking mode rejects tool_choice and chooses tools automatically.
+            ...(!thinking ? { tool_choice: "auto" } : {}),
           } : {}),
         }),
         signal: controller.signal,
@@ -148,6 +155,7 @@ export class DeepSeekProviderAdapter implements ProviderAdapter {
       const decoder = new TextDecoder();
       let buffer = "";
       let content = "";
+      let reasoningContent = "";
       let providerRequestId: string | null = null;
       let providerModel = request.model;
       let finish: unknown = null;
@@ -174,6 +182,9 @@ export class DeepSeekProviderAdapter implements ProviderAdapter {
           if (typeof delta.content === "string" && delta.content) {
             content += delta.content;
             request.onTextDelta?.(delta.content);
+          }
+          if (typeof delta.reasoning_content === "string" && delta.reasoning_content) {
+            reasoningContent += delta.reasoning_content;
           }
           const calls = Array.isArray(delta.tool_calls) ? delta.tool_calls as Array<Record<string, unknown>> : [];
           for (const call of calls) {
@@ -210,6 +221,7 @@ export class DeepSeekProviderAdapter implements ProviderAdapter {
         providerRequestId,
         model: providerModel,
         content,
+        ...(reasoningContent ? { reasoningContent } : {}),
         toolCalls,
         stopReason: toolCalls.length ? "tool_use" : stopReason(finish),
         usage,
@@ -226,4 +238,4 @@ export class DeepSeekProviderAdapter implements ProviderAdapter {
   }
 }
 
-export const __testing = { normalizeUsage, toProviderMessage, stopReason };
+export const __testing = { normalizeUsage, toProviderMessage, stopReason, usesV4Thinking };

@@ -24,7 +24,7 @@ import v1RuntimeUrl from "./v1-runtime.js?url";
 import { initAdvicePanel } from "./advice-panel";
 import { initAgentPanel, type AgentPanelController } from "./agent-panel";
 import { buildAdviceInput } from "../advice/validate";
-import { initBuildProgress, type BuildProgressController } from "./build-progress";
+import { initBuildProgress, type BuildProgressController, type BuildProgressItem } from "./build-progress";
 import { initTransactionImport, type TransactionImportController } from "./transaction-import";
 import { WorkspaceApiClient } from "../plans/client";
 import { PlanStore } from "../plans/client-store";
@@ -36,6 +36,7 @@ import { WorkspaceRouter } from "./workspace-router";
 import { mountWorkspacePages, type WorkspacePagesController } from "./workspace-pages";
 import { EvaluationCoordinator } from "../plans/evaluation";
 import { mountSpatialView, type SpatialViewController } from "./spatial-view";
+import { applyArchivedPurchasesAsDefaults } from "./transaction-plan-default";
 import { createPlanAgentContext } from "../agent/plan-context";
 import type { PlanAgentContext } from "../plans/contracts";
 import "./design-system.css";
@@ -55,6 +56,15 @@ let spatialView: SpatialViewController | null = null;
 const evaluationCoordinator = new EvaluationCoordinator((config) => evaluateBuild(config, catalog));
 
 const BOARD_ID = "board.asus-w680m-ace-se";
+
+function setArchivedPurchasesAsPlanDefaults(items: BuildProgressItem[]): string[] {
+  const state = planStore?.getState();
+  if (!planStore || !state?.activePlan) return [];
+  const preview = structuredClone(state.activePlan.draft.config);
+  const changed = applyArchivedPurchasesAsDefaults(preview, items, state.activePlan.id, catalog);
+  if (changed.length) planStore.replaceDraft(preview);
+  return changed;
+}
 
 export interface LabEvaluationOptions {
   ambientC: number;
@@ -1101,6 +1111,7 @@ async function boot(): Promise<void> {
       return state?.activePlan && state.evaluation ? { planId: state.activePlan.id, planVersionId: state.activePlan.activeVersionId, planName: state.activePlan.name, evaluation: state.evaluation } : null;
     },
     getPlans: () => planStore?.getState().plans.map((plan) => ({ id: plan.id, name: plan.name })) ?? [],
+    onTransactionsArchived: setArchivedPurchasesAsPlanDefaults,
   });
   const syncBuildTasks = () => {
     const state = planStore?.getState();

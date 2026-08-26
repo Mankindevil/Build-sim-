@@ -195,6 +195,7 @@ async function processJob(job, options) {
   }
   const candidates = discovery.candidates.map((entry) => ({
     candidateId: candidateId(`${job.query.raw}|${entry.url}`),
+    ...(entry.skuId ? { skuId: entry.skuId } : {}),
     query: job.query,
     ...(job.query.brand ? { brand: job.query.brand } : {}),
     ...(job.query.model ? { model: job.query.model } : {}),
@@ -204,7 +205,7 @@ async function processJob(job, options) {
     url: entry.url,
     discovery: entry,
     source: { kind: entry.provider === "catalog-cache" ? "official" : "search", provider: entry.provider, domain: domainOf(entry.url), retrievedAt: entry.retrievedAt },
-    match: { score: entry.provider === "catalog-cache" && job.query.mpn ? 1 : 0.3, kind: entry.provider === "catalog-cache" && job.query.mpn ? "exact-mpn" : "weak", reasons: [entry.provider === "catalog-cache" ? "catalog candidate" : "discovery candidate; inspection required"] },
+    match: { score: entry.matchScore ?? 0.3, kind: entry.matchKind ?? "weak", reasons: [entry.provider === "catalog-cache" ? "catalog candidate" : "discovery candidate; inspection required"] },
     extraction: { status: "not-run", fieldsFound: 0, fieldsMissing: 0 },
   }));
   job.stage = "fetch";

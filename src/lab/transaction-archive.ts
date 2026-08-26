@@ -23,6 +23,7 @@ export interface TransactionArchiveItemSnapshot {
     candidateId?: string | null;
     draftId?: string | null;
     officialUrl?: string | null;
+    sourceReview?: "user-confirmed";
     screenshotArchive?: "server";
     screenshotStoredAt?: string | null;
     screenshotMimeType?: string | null;

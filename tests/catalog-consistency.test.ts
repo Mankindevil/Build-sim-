@@ -20,6 +20,7 @@ describe("catalog consistency", () => {
 
   it("locks the reviewed PSU-side peripheral socket counts", () => {
     const expected = new Map<string, number>([
+      ["psu.seasonic-focus-plus-gold-850-fx", 4],
       ["psu.seasonic-focus-gx-850-v5", 3],
       ["psu.seasonic-focus-gx-750-v5", 3],
       ["psu.corsair-sf750-atx31", 3],

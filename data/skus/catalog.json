@@ -1,6 +1,6 @@
 {
   "schemaVersion": "2.0.0",
-  "updatedAt": "2026-08-25",
+  "updatedAt": "2026-08-26",
   "skus": [
     {
       "id": "case.jonsbo-n6",
@@ -131,6 +131,84 @@
       "appearance": {
         "page": "https://www.intel.com/content/www/us/en/products/sku/236784/intel-core-i5-processor-14500-24m-cache-up-to-5-00-ghz/specifications.html",
         "note": "Intel 未提供 i5-14500 型号专属实物图"
+      }
+    },
+    {
+      "id": "psu.seasonic-focus-plus-gold-850-fx",
+      "category": "psu",
+      "brand": "Seasonic",
+      "model": "GX-850 FX",
+      "name": "Seasonic FOCUS Plus Gold 850 (SSR-850FX)",
+      "mpn": "SSR-850FX",
+      "dims": {
+        "lengthMm": 140,
+        "widthMm": 150,
+        "heightMm": 86,
+        "evidence": "official"
+      },
+      "power": {
+        "ratedW": 850,
+        "evidence": "official"
+      },
+      "harness": {
+        "modularCables": 10,
+        "peripheralLeads": 4,
+        "sataLeads": 3,
+        "molexLeads": 1,
+        "sataConnectors": 10,
+        "molexConnectors": 3,
+        "pciePower": [
+          "3x PCIe cable, 2x 8-pin (6+2) connectors per cable"
+        ],
+        "evidence": "official",
+        "leadEvidence": "official",
+        "sourceUrl": "https://seasonic.com/product/focus-plus-gold/",
+        "note": "Seasonic 官方旧款 FOCUS PLUS Gold 850 线材表：3 根 SATA 线（2 根各 4 头、1 根 2 头）及 1 根 Molex 线，共 4 根独立外围线；MPN SSR-850FX 由官方兼容表确认。"
+      },
+      "price": {
+        "currency": "CNY",
+        "current": null,
+        "historicalLow": null,
+        "asOf": "2026-08-26",
+        "listingUrl": "https://seasonic.com/product/focus-plus-gold/",
+        "note": "已停产旧款；当前价格与历史低价 unknown，成交价应来自用户交易档案。",
+        "historicalLowEvidence": "unknown",
+        "currentEvidence": "unknown"
+      },
+      "tags": [
+        "atx",
+        "legacy"
+      ],
+      "attrs": {
+        "form": "ATX",
+        "planningEfficiency": 0.89,
+        "efficiencyEvidence": "inferred",
+        "certification": "80 PLUS Gold",
+        "certificationEvidence": "official",
+        "modular": "full",
+        "atx12vVersion": "2.4",
+        "peripheralSockets": 4,
+        "peripheralSocketsEvidence": "inferred",
+        "peripheralSocketsNote": "用户实物确认 4 个 Peripheral/SATA 模组座；官方旧款线材表同时列出 3 根 SATA 与 1 根 Molex 外围线。",
+        "peripheralSocketsSourceUrl": "https://seasonic.com/product/focus-plus-gold/"
+      },
+      "appearance": {
+        "page": "https://seasonic.com/product/focus-plus-gold/",
+        "note": "Seasonic 官方 FOCUS PLUS Gold 旧款页；SSR-850FX，不是 V5 / ATX 3.1"
+      },
+      "modularPanel": {
+        "groups": [
+          {
+            "id": "peripheral",
+            "label": "Peripheral (SATA/Molex 通用)",
+            "pins": 6,
+            "sockets": 4
+          }
+        ],
+        "total": null,
+        "evidence": "inferred",
+        "source": "用户实物确认 4 座，并由 Seasonic 官方旧款 850W 线材清单交叉核对。",
+        "sourceUrl": "https://seasonic.com/product/focus-plus-gold/"
       }
     },
     {
