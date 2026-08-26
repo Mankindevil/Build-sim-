@@ -10,6 +10,7 @@ describe("R10 app shell and legacy isolation", () => {
     expect(index).toContain("/src/lab/shell-loader.ts");
     expect(index).not.toContain("id=\"n6-lab\"");
     expect(template).toContain("id=\"n6-lab\"");
+    expect(template).not.toContain("class=\"app-bar\"");
     expect(template).not.toContain("/src/lab/boot.ts");
     expect(loader).toContain("document.body.replaceChildren");
     expect(loader).toContain('await import("./boot")');

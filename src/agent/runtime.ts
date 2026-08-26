@@ -115,9 +115,8 @@ export class AgentRuntime {
 
   async startRun(sessionId: string, input: StartAgentRunInput): Promise<{ runId: string; status: AgentRunStatus }> {
     const maxMessageChars = this.options.maxMessageChars ?? 20_000;
-    if (typeof input.content !== "string" || !input.content.trim() || input.content.length > maxMessageChars) {
-      throw new AgentRuntimeError("message_invalid", `Agent message must contain 1-${maxMessageChars} characters`);
-    }
+    if (typeof input.content !== "string" || !input.content.trim()) throw new AgentRuntimeError("message_invalid", "Agent message must not be empty");
+    if (input.content.length > maxMessageChars) throw new AgentRuntimeError("message_too_long", `Agent message exceeds ${maxMessageChars} characters after context binding`, 413);
     const session = await this.getSession(sessionId);
     const provider = this.providers.get(session.provider);
     if (!provider) throw new AgentRuntimeError("provider_not_found", "Agent provider is unavailable", 503);

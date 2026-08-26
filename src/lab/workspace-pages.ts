@@ -214,7 +214,10 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   host.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
     const route = target.closest<HTMLElement>("[data-route-action]")?.dataset.routeAction;
-    if (route) router.navigate(route as Parameters<WorkspaceRouter["navigate"]>[0]);
+    if (route) {
+      router.navigate(route as Parameters<WorkspaceRouter["navigate"]>[0]);
+      if (route === "purchases") document.getElementById("transaction-screenshot-input")?.click();
+    }
     const openTaskId = target.closest<HTMLElement>("[data-open-task]")?.dataset.openTask;
     if (openTaskId) router.navigate("build");
     const spatialTaskId = target.closest<HTMLElement>("[data-task-spatial]")?.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;

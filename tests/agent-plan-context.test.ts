@@ -26,6 +26,10 @@ describe("R7 plan-bound Agent context", () => {
     const envelope = planAgentContextEnvelope("检查 PSU", context);
     expect(envelope).toContain("<plan_agent_context");
     expect(envelope).toContain(context.evaluationHash);
+    expect(envelope).toContain("get_build_evaluation");
+    expect(envelope).not.toContain('"evaluation":');
+    expect(envelope).not.toContain('"buildConfig":');
+    expect(envelope.length).toBeLessThan(20_000);
     expect(envelope).not.toContain("approvalToken");
   });
 

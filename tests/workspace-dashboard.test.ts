@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mountWorkspacePages } from "../src/lab/workspace-pages";
 import { WorkspaceRouter } from "../src/lab/workspace-router";
 import { initializedStore, makePlan, mountWorkspaceDom } from "./helpers/workspace-ui";
@@ -18,5 +18,20 @@ describe("R3 workspace dashboard", () => {
     expect(root.textContent).toContain("恢复");
     pages.dispose(); store.dispose();
   });
-});
 
+  it("opens the transaction file picker directly from the current-plan action", async () => {
+    const root = mountWorkspaceDom();
+    const input = document.createElement("input");
+    input.id = "transaction-screenshot-input";
+    input.type = "file";
+    root.append(input);
+    const click = vi.spyOn(input, "click").mockImplementation(() => undefined);
+    const { store } = await initializedStore();
+    const router = new WorkspaceRouter();
+    const pages = mountWorkspacePages(root, store, router);
+    root.querySelector<HTMLButtonElement>('[data-route-action="purchases"]')!.click();
+    expect(router.current()).toBe("purchases");
+    expect(click).toHaveBeenCalledOnce();
+    pages.dispose(); store.dispose();
+  });
+});

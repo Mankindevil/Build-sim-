@@ -33,7 +33,24 @@ export function createPlanAgentContext(input: CreatePlanAgentContextInput): Plan
 }
 
 export function planAgentContextEnvelope(content: string, context: PlanAgentContext): string {
-  return `${content.trim()}\n\n<plan_agent_context schema_version="${context.schemaVersion}">\n${JSON.stringify(context)}\n</plan_agent_context>\nOnly propose changes through the structured propose_plan_change tool. A normal answer never changes the plan.`;
+  // BuildConfig is already sent through the validated session field, and the
+  // authoritative evaluation is available through get_build_evaluation. Do not
+  // duplicate either large payload in the user message: a normal N6 evaluation
+  // can exceed the Agent message limit before the provider is ever called.
+  const promptContext = {
+    schemaVersion: context.schemaVersion,
+    planId: context.planId,
+    planVersionId: context.planVersionId,
+    draftRevision: context.draftRevision,
+    configHash: context.configHash,
+    evaluationHash: context.evaluationHash,
+    spatialSelection: context.spatialSelection,
+    ...(context.spatialViewContext ? { spatialViewContext: context.spatialViewContext } : {}),
+    purchaseSummary: context.purchaseSummary,
+    buildTaskSummary: context.buildTaskSummary,
+    authoritativeFacts: "Use get_build_evaluation; BuildConfig is attached to the Agent session.",
+  };
+  return `${content.trim()}\n\n<plan_agent_context schema_version="${context.schemaVersion}">\n${JSON.stringify(promptContext)}\n</plan_agent_context>\nOnly propose changes through the structured propose_plan_change tool. A normal answer never changes the plan.`;
 }
 
 export function isPlanAgentContextStale(bound: PlanAgentContext | null, current: PlanAgentContext | null): boolean {

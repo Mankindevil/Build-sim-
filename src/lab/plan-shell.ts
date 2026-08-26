@@ -96,6 +96,7 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
     });
   }
   const unsubscribeRoute = router.subscribe((route) => {
+    root.dataset.workspaceRoute = route;
     for (const link of routeLinks) link.setAttribute("aria-current", link.dataset.route === route ? "page" : "false");
     showLegacyPanel(root, route);
     const target = document.getElementById(router.target(route));
@@ -117,6 +118,7 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
       unsubscribeRoute();
       router.stop();
       window.removeEventListener("beforeunload", beforeUnload);
+      delete root.dataset.workspaceRoute;
       shell.remove();
     },
   };

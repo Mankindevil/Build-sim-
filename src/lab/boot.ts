@@ -1140,6 +1140,12 @@ async function boot(): Promise<void> {
       };
     },
   });
+  const openTransactionUpload = (): void => {
+    router?.navigate("purchases");
+    $("build-review-current-tab")?.click();
+    $("transaction-screenshot-input")?.click();
+  };
+  $("hero-upload-transaction")?.addEventListener("click", openTransactionUpload);
   const syncBuildProgressPlan = () => {
     const state = planStore?.getState();
     if (state?.activePlan && state.evaluation) buildProgress?.activatePlan({ planId: state.activePlan.id, planVersionId: state.activePlan.activeVersionId, planName: state.activePlan.name, evaluation: state.evaluation });
