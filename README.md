@@ -390,19 +390,6 @@ For a repeatable manual release, use the checked-in deployment script. With no a
 
 The script refuses tracked local changes, validates Compose, preserves `.env.remote` and `runtime/`, backs up the current Web and Runtime images, recreates the stack, and checks Web, Price, Agent, Workspace, and SearXNG. A failed build or health check restores the previous Git commit and image tags.
 
-### GitHub Actions deployment
-
-`.github/workflows/deploy-osaka.yml` runs type checking, the complete test suite, and the production build on every push to `main`. Only a verified commit is sent to the Osaka host. Configure the `osaka-production` GitHub Environment with these secrets:
-
-| Secret | Purpose |
-| --- | --- |
-| `OSAKA_HOST` | SSH hostname or IP address |
-| `OSAKA_USER` | Dedicated unprivileged deployment user |
-| `OSAKA_SSH_PRIVATE_KEY` | Private key dedicated to this repository's deployment |
-| `OSAKA_KNOWN_HOSTS` | Pre-verified OpenSSH `known_hosts` entry for the host |
-
-Optional environment variables are `OSAKA_SSH_PORT` (default `22`) and `OSAKA_APP_DIR` (default `/home/linuxuser/Code/build-sim`). The deployment user needs read/write access to the clean production checkout and either Docker-group access or passwordless `sudo docker`. Protect the `osaka-production` Environment with required reviewers if production releases should require final approval. Verify the server host-key fingerprint out of band before saving `OSAKA_KNOWN_HOSTS`; do not accept a key obtained from an untrusted network without verification.
-
 Stop the stack without deleting the bind-mounted `runtime/` data:
 
 ```bash

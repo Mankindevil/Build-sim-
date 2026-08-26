@@ -27,14 +27,4 @@ describe("Osaka lifecycle deployment", () => {
     expect(script).toContain("restore_previous_release");
     expect(script).toContain("/api/workspace/plans");
   });
-
-  it("verifies main before deploying through a host-key-pinned SSH connection", async () => {
-    const workflow = await readFile(".github/workflows/deploy-osaka.yml", "utf8");
-    expect(workflow).toContain("needs: verify");
-    expect(workflow).toContain("environment: osaka-production");
-    expect(workflow).toContain("OSAKA_SSH_PRIVATE_KEY");
-    expect(workflow).toContain("OSAKA_KNOWN_HOSTS");
-    expect(workflow).toContain("StrictHostKeyChecking=yes");
-    expect(workflow).toContain("--ref '${GITHUB_SHA}'");
-  });
 });

@@ -390,19 +390,6 @@ docker compose -f deploy/osaka/compose.yaml up -d --force-recreate
 
 脚本会拒绝带有已跟踪本地改动的生产检出，校验 Compose，保留 `.env.remote` 与 `runtime/`，备份当前 Web/Runtime 镜像，重建服务，并检查 Web、Price、Agent、Workspace 与 SearXNG。构建或健康检查失败时，会恢复上一个 Git 提交及旧镜像标签。
 
-### GitHub Actions 自动部署
-
-`.github/workflows/deploy-osaka.yml` 会在每次推送到 `main` 后依次执行类型检查、完整测试和生产构建，只有验证通过的提交才会发送到 Osaka 主机。请创建 `osaka-production` GitHub Environment，并配置以下 Secrets：
-
-| Secret | 用途 |
-| --- | --- |
-| `OSAKA_HOST` | SSH 主机名或 IP |
-| `OSAKA_USER` | 专用的非 root 部署用户 |
-| `OSAKA_SSH_PRIVATE_KEY` | 仅供本仓库部署使用的私钥 |
-| `OSAKA_KNOWN_HOSTS` | 预先核验过的 OpenSSH `known_hosts` 主机记录 |
-
-可选环境变量为 `OSAKA_SSH_PORT`（默认 `22`）和 `OSAKA_APP_DIR`（默认 `/home/linuxuser/Code/build-sim`）。部署用户需要能读写干净的生产检出，并加入 Docker 组或拥有免密 `sudo docker` 权限。如需发布前人工批准，可给 `osaka-production` Environment 设置 required reviewers。写入 `OSAKA_KNOWN_HOSTS` 前应通过可信渠道核对服务器主机指纹，不要直接信任未经核验的网络扫描结果。
-
 停止服务但保留绑定挂载的 `runtime/` 数据：
 
 ```bash
