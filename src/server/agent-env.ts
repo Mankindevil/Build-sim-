@@ -78,6 +78,7 @@ export function parseAgentRuntimeConfig(env: Record<string, string | undefined>)
   const parsedDeepSeek = parseDeepSeekConfig(env) as DeepSeekAgentConfig;
   const deepseek = {
     ...parsedDeepSeek,
+    maxTokens: intEnv(env.DEEPSEEK_AGENT_MAX_TOKENS, 8_192, "DEEPSEEK_AGENT_MAX_TOKENS", 1, 16_384),
     models: modelList(env.DEEPSEEK_AGENT_MODELS, [...new Set([
       parsedDeepSeek.model,
       "deepseek-v4-flash",

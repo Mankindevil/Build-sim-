@@ -26,6 +26,7 @@ function fakeProvider(turns: ProviderTurnRequest[]): ProviderAdapter {
 describe("A2 Agent runtime", () => {
   it("keeps the provider disabled unless both Agent and DeepSeek flags are enabled", () => {
     expect(parseAgentRuntimeConfig({}).deepseek).toMatchObject({ enabled: false, models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"] });
+    expect(parseAgentRuntimeConfig({}).deepseek.maxTokens).toBe(8_192);
     expect(parseAgentRuntimeConfig({ DEEPSEEK_ENABLED: "true", DEEPSEEK_API_KEY: "fixture" }).deepseek.enabled).toBe(false);
     expect(parseAgentRuntimeConfig({
       BUILD_SIM_AGENT_ENABLED: "true",
@@ -59,6 +60,8 @@ describe("A2 Agent runtime", () => {
     expect(() => parseAgentRuntimeConfig({ AGENT_MAX_MODEL_TURNS: "33" })).toThrow(/AGENT_MAX_MODEL_TURNS/);
     expect(() => parseAgentRuntimeConfig({ AGENT_REQUEST_BODY_MAX_BYTES: "999999999" })).toThrow(/AGENT_REQUEST_BODY_MAX_BYTES/);
     expect(parseAgentRuntimeConfig({ DEEPSEEK_AGENT_MODELS: "deepseek-v4-pro,custom/model" }).deepseek.models).toEqual(["deepseek-v4-pro", "custom/model"]);
+    expect(parseAgentRuntimeConfig({ DEEPSEEK_AGENT_MAX_TOKENS: "12000" }).deepseek.maxTokens).toBe(12_000);
+    expect(() => parseAgentRuntimeConfig({ DEEPSEEK_AGENT_MAX_TOKENS: "20000" })).toThrow(/DEEPSEEK_AGENT_MAX_TOKENS/);
     expect(() => parseAgentRuntimeConfig({ DEEPSEEK_AGENT_MODELS: "bad model" })).toThrow(/DEEPSEEK_AGENT_MODELS/);
     expect(parseAgentRuntimeConfig({ BUILD_SIM_AGENT_ENABLED: "true", CLAUDE_ENABLED: "false" }).claude.enabled).toBe(false);
     expect(parseAgentRuntimeConfig({ BUILD_SIM_AGENT_ENABLED: "true", CLAUDE_ENABLED: "true", CLAUDE_API_KEY: "fixture" })).toMatchObject({ claude: { enabled: true, model: "claude-sonnet-4-20250514" } });
@@ -110,6 +113,41 @@ describe("A2 Agent runtime", () => {
       expect.objectContaining({ type: "error", code: "provider_empty_response" }),
       expect.objectContaining({ type: "run_status", status: "failed" }),
     ]));
+  });
+
+  it("continues max-token responses and persists one complete assistant answer", async () => {
+    const requests: ProviderTurnRequest[] = [];
+    const provider: ProviderAdapter = {
+      ...fakeProvider([]),
+      async createTurn(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          request.onTextDelta?.("第一段，尤其在这个");
+          return { provider: "deepseek", providerRequestId: "provider-partial", model: request.model, content: "第一段，尤其在这个", reasoningContent: "reason-1", toolCalls: [], stopReason: "max_tokens", usage: { inputTokens: 10, outputTokens: 100, totalTokens: 110, cacheReadTokens: 0, cacheWriteTokens: 10, reasoningTokens: 50 }, latencyMs: 5 };
+        }
+        request.onTextDelta?.("机箱里需要确认进风净空。完整结束。");
+        return { provider: "deepseek", providerRequestId: "provider-complete", model: request.model, content: "机箱里需要确认进风净空。完整结束。", reasoningContent: "reason-2", toolCalls: [], stopReason: "end_turn", usage: { inputTokens: 20, outputTokens: 20, totalTokens: 40, cacheReadTokens: 10, cacheWriteTokens: 10, reasoningTokens: 5 }, latencyMs: 5 };
+      },
+    };
+    const runtime = new AgentRuntime([provider], new MemoryAgentSessionStore(), { maxTokens: 8_192 });
+    const session = await runtime.createSession();
+    const run = await runtime.startRun(session.id, { content: "请详细分析" });
+    await runtime.waitForRun(run.runId);
+
+    expect(runtime.getRun(run.runId).status).toBe("completed");
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.maxTokens).toBe(8_192);
+    expect(requests[1]?.tools).toEqual([]);
+    expect(requests[1]?.messages.slice(-2).map((message) => [message.role, message.content])).toEqual([
+      ["assistant", "第一段，尤其在这个"],
+      ["user", expect.stringContaining("Continue exactly")],
+    ]);
+    const saved = await runtime.getSession(session.id);
+    expect(saved.messages.map((message) => [message.role, message.content])).toEqual([
+      ["user", "请详细分析"],
+      ["assistant", "第一段，尤其在这个机箱里需要确认进风净空。完整结束。"],
+    ]);
+    expect(saved.messages.at(-1)?.reasoningContent).toBe("reason-1reason-2");
   });
 
   it("keeps provider reasoning out of browser session payloads", () => {
