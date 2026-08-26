@@ -33,6 +33,7 @@ function payload(value: unknown, status = 200): Response {
 
 const model = { provider: "deepseek", id: "deepseek-v4-flash", label: "DeepSeek V4 Flash", capabilities: { streaming: true, tools: true, parallelTools: true, structuredOutput: true, thinking: true } };
 const skill = { manifest: { id: "build-diagnosis", name: "装机诊断", description: "fixture", version: "1.0.0", allowedTools: ["get_build_evaluation", "get_sku_facts"], readOnly: true }, definitionHash: "a".repeat(64) };
+const initializerSkill = { manifest: { id: "plan-initializer", name: "方案初始化", description: "fixture", version: "1.0.0", allowedTools: ["search_catalog_skus", "propose_plan_initialization"], readOnly: true }, definitionHash: "b".repeat(64) };
 const session = { contractVersion: "1.0.0", id: "session-fixture", provider: "deepseek", model: model.id, buildConfig: null, messages: [], createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" };
 
 describe("A5 Agent panel", () => {
@@ -54,6 +55,22 @@ describe("A5 Agent panel", () => {
     expect((document.querySelector("#agent-model") as HTMLSelectElement).options).toHaveLength(3);
     expect(document.querySelector("#agent-status")?.textContent).toContain("3 模型 · 1 Skills");
     expect(document.body.textContent).not.toContain("装机诊断工作流");
+  });
+
+  it("automatically selects the initializer Skill for a pending blank plan", async () => {
+    const active = makePlan("plan-agent-init-12345678", "待 Agent 初始化方案");
+    active.metadata.initialization = { status: "pending", source: "agent" };
+    const context = {
+      schemaVersion: "1.0.0", planId: active.id, planVersionId: null, draftRevision: 0,
+      configHash: "1".repeat(64), evaluationHash: "2".repeat(64), buildConfig: active.draft.config,
+      evaluation: { config: active.draft.config }, purchaseSummary: {}, buildTaskSummary: {},
+      initialization: active.metadata.initialization,
+    } as unknown as PlanAgentContext;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/models") ? payload({ models: [model] }) : payload({ skills: [skill, initializerSkill] }));
+    await initAgentPanel({ getBuildConfig: () => active.draft.config, getPlanContext: () => context, fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => new FakeEventSource() });
+    expect((document.querySelector("#agent-skill") as HTMLSelectElement).value).toBe("plan-initializer");
+    expect(document.querySelector("[data-agent-plan-context]")?.textContent).toContain("空白方案待初始化");
+    expect((document.querySelector("#agent-input") as HTMLTextAreaElement).placeholder).toContain("预算 8000 元");
   });
 
   it("refreshes a stale model catalog and retries session creation once", async () => {

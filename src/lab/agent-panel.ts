@@ -98,12 +98,13 @@ function proposalNode(
   card.className = "agent-plan-proposal";
   card.dataset.planProposal = proposal.id;
   const heading = document.createElement("h4"); heading.textContent = proposal.summary;
-  const meta = document.createElement("p"); meta.textContent = `方案 ${proposal.planId} · revision ${proposal.expectedDraftRevision} · config ${proposal.expectedConfigHash.slice(0, 12)}`;
+  const initialization = proposal.kind === "initialization";
+  const meta = document.createElement("p"); meta.textContent = `${initialization ? "完整初始化" : "方案修改"} · 方案 ${proposal.planId} · revision ${proposal.expectedDraftRevision} · config ${proposal.expectedConfigHash.slice(0, 12)}`;
   const list = document.createElement("ol");
   proposal.operations.forEach((operation, index) => {
     const item = document.createElement("li");
     const label = document.createElement("label"); const checkbox = document.createElement("input");
-    checkbox.type = "checkbox"; checkbox.checked = true; checkbox.dataset.proposalOperation = String(index);
+    checkbox.type = "checkbox"; checkbox.checked = true; checkbox.disabled = initialization; checkbox.dataset.proposalOperation = String(index);
     const value = operation.op === "remove" ? "移除" : JSON.stringify(operation.value);
     label.append(checkbox, ` ${operation.op} ${operation.path} → ${value.length > 120 ? `${value.slice(0, 120)}…` : value}`); item.append(label); list.append(item);
   });
@@ -111,7 +112,7 @@ function proposalNode(
   impact.className = "agent-proposal-impact";
   impact.textContent = `确定性预览：解决 ${proposal.predictedImpact.resolvedFindingIds.length} · 新增 ${proposal.predictedImpact.introducedFindingIds.length} · 预算 ${proposal.predictedImpact.budgetDeltaCny === null ? "unknown" : `${proposal.predictedImpact.budgetDeltaCny >= 0 ? "+" : ""}${proposal.predictedImpact.budgetDeltaCny} CNY`}`;
   const approvalLabel = document.createElement("label"); const approval = document.createElement("input");
-  approval.type = "checkbox"; approval.dataset.proposalApproval = ""; approvalLabel.append(approval, " 我已审阅所选字段并批准写入当前草稿");
+  approval.type = "checkbox"; approval.dataset.proposalApproval = ""; approvalLabel.append(approval, initialization ? " 我已审阅完整配置与需求摘要，并批准整体替换初始化脚手架" : " 我已审阅所选字段并批准写入当前草稿");
   const actions = document.createElement("div"); const apply = document.createElement("button"); const reject = document.createElement("button");
   apply.type = "button"; apply.textContent = "应用所选项"; apply.disabled = true; apply.dataset.applyProposal = "";
   reject.type = "button"; reject.textContent = "拒绝"; reject.dataset.rejectProposal = "";
@@ -172,7 +173,10 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
     }
     const stale = isPlanAgentContextStale(boundContext, current);
     contextBadge.dataset.stale = String(stale);
-    contextBadge.textContent = `绑定方案 ${current.planId} · revision ${current.draftRevision} · evaluation ${current.evaluationHash.slice(0, 12)}${boundContext ? stale ? " · context stale，发送时刷新" : " · context current" : " · 尚未发送"}`;
+    const pending = current.initialization?.status === "pending";
+    contextBadge.textContent = `${pending ? "空白方案待初始化" : "绑定方案"} ${current.planId} · revision ${current.draftRevision} · evaluation ${current.evaluationHash.slice(0, 12)}${pending ? " · 当前配置仅为内部脚手架" : ""}${boundContext ? stale ? " · context stale，发送时刷新" : " · context current" : " · 尚未发送"}`;
+    if (pending && [...skill.options].some((entry) => entry.value === "plan-initializer") && !activeRunId) skill.value = "plan-initializer";
+    input.placeholder = pending ? "例如：我想配一台预算 8000 元的 2K 游戏主机，请先问我必要问题" : "输入问题，Ctrl/⌘ + Enter 发送";
   };
   refreshContextBadge();
   const unsubscribePlanContext = options.subscribePlanContext?.(refreshContextBadge) ?? (() => undefined);
@@ -194,7 +198,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
         });
         options.acceptServerPlan?.(result.plan);
         target.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach((control) => { control.disabled = true; });
-        target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = `applied · ${result.audit.approvalId} · 已进入 active draft，未自动保存版本`;
+        target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = `applied · ${result.audit.approvalId} · ${validated.proposal.kind === "initialization" ? "初始化完成，已写入 active draft" : "已进入 active draft"}，未自动保存版本`;
       }, (target) => {
         target.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach((control) => { control.disabled = true; });
         target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = "rejected · 方案未改变";
@@ -337,7 +341,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
       if (data) {
         const summary = formatCatalogToolResult(data.toolName, data.result.content);
         addEvent(`Tool 结果 · ${data.toolName} · ${data.result.ok ? "ok" : data.result.errorCode ?? "error"}${summary ? ` · ${summary}` : ""}`, data.result.ok ? "ok" : "warn");
-        if (data.result.ok && data.toolName === "propose_plan_change") void receiveProposal(data.result.content);
+        if (data.result.ok && (data.toolName === "propose_plan_change" || data.toolName === "propose_plan_initialization")) void receiveProposal(data.result.content);
       }
     });
     source.addEventListener("usage", (event) => {
@@ -383,7 +387,9 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
       return option;
     });
     skill.replaceChildren(general, ...skillOptions);
-    skill.value = skillPayload.skills.some((entry) => entry.manifest.id === "build-diagnosis") ? "build-diagnosis" : "";
+    skill.value = currentContext()?.initialization?.status === "pending" && skillPayload.skills.some((entry) => entry.manifest.id === "plan-initializer")
+      ? "plan-initializer"
+      : skillPayload.skills.some((entry) => entry.manifest.id === "build-diagnosis") ? "build-diagnosis" : "";
     if (!modelPayload.models.length) throw new Error("服务端没有可用模型");
     catalogReady = true;
     setBusy(false);

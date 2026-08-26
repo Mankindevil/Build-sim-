@@ -5,6 +5,7 @@ import { AgentRuntime } from "../src/agent/runtime";
 import { MemoryAgentSessionStore } from "../src/agent/session-store";
 import { AgentToolRegistry } from "../src/agent/tool-registry";
 import { createBuildSimTools } from "../src/server/domain-tools";
+import { sha256Hex } from "../src/plans/canonical";
 
 function context(): AgentToolContext {
   return { sessionId: "session-fixture", runId: "run-fixture", buildConfig: baseline as never, signal: new AbortController().signal };
@@ -14,9 +15,9 @@ describe("A3 Build Sim Tool registry", () => {
   it("registers governed read/external-read tools and one approval-bound write tool", () => {
     const registry = new AgentToolRegistry(createBuildSimTools());
     expect(registry.names()).toEqual([
-      "compare_builds", "enrich_official_catalog", "get_build_evaluation", "get_catalog_search_job", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "list_official_domain_proposals", "propose_plan_change", "search_official_catalog", "search_price_candidates",
+      "compare_builds", "enrich_official_catalog", "get_build_evaluation", "get_catalog_search_job", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "list_official_domain_proposals", "propose_plan_change", "propose_plan_initialization", "search_catalog_skus", "search_official_catalog", "search_price_candidates",
     ]);
-    expect(registry.catalog()).toHaveLength(11);
+    expect(registry.catalog()).toHaveLength(13);
     expect(registry.catalog().every((tool) => /^[a-f0-9]{64}$/.test(tool.definitionHash))).toBe(true);
     expect(registry.catalog().filter((tool) => tool.effect === "write")).toEqual([expect.objectContaining({ name: "enrich_official_catalog", approval: "required" })]);
   });
@@ -45,6 +46,35 @@ describe("A3 Build Sim Tool registry", () => {
     expect(facts.result.content).toMatchObject({ records: [{ skuId: "case.jonsbo-n6", status: "found" }, { skuId: "sku.unknown", status: "unknown-sku" }] });
     const prices = await registry.dispatch("get_price_snapshot", { skuIds: ["case.jonsbo-n6"] }, context());
     expect(prices.result.content).toMatchObject({ asOf: "2026-08-21", quotes: [{ skuId: "case.jonsbo-n6", evidence: "audited" }] });
+  });
+
+  it("discovers governed local SKUs and produces a complete non-mutating initialization proposal", async () => {
+    const registry = new AgentToolRegistry(createBuildSimTools());
+    const searched = await registry.dispatch("search_catalog_skus", { category: "gpu", query: "A2000", limit: 5 }, context());
+    expect(searched.result.content).toMatchObject({ count: 1, records: [{ id: "gpu.rtx-a2000-12gb", category: "gpu" }] });
+    const configuration = structuredClone(baseline) as typeof baseline;
+    configuration.name = "Agent 游戏方案";
+    configuration.selection.gpuId = "gpu.rtx-a2000-12gb";
+    const proposed = await registry.dispatch("propose_plan_initialization", {
+      planId: "plan-agent-init",
+      expectedDraftRevision: 0,
+      expectedConfigHash: await sha256Hex(baseline),
+      summary: "初始化当前目录内的游戏方案",
+      rationale: ["用户要求游戏用途"],
+      intent: { useCase: "游戏", budgetCny: 8000, targetResolution: "1440p", targetFps: 60 },
+      configuration: {
+        name: configuration.name,
+        caseId: configuration.caseId,
+        boardId: configuration.boardId,
+        cpuId: configuration.cpuId,
+        selection: configuration.selection,
+        bom: configuration.bom,
+        notes: ["当前目录覆盖有限"],
+      },
+    }, context());
+    expect(proposed.result.ok).toBe(true);
+    expect(proposed.result.content).toMatchObject({ proposal: { kind: "initialization", intent: { useCase: "游戏", budgetCny: 8000 }, status: "proposed" }, confirmation: { required: true, atomic: true } });
+    expect(baseline.selection.gpuId).not.toBe("gpu.rtx-a2000-12gb");
   });
 
   it("routes external reads only through the configured local service", async () => {

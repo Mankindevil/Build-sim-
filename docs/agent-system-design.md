@@ -26,6 +26,7 @@ Build a provider-neutral, auditable PC-build agent. DeepSeek is the first live p
 |---|---|---|
 | `get_build_evaluation` | read | implemented A3 |
 | `compare_builds` | read | implemented A3 |
+| `search_catalog_skus` | read | implemented plan initialization |
 | `get_sku_facts` | read | implemented A3 |
 | `get_price_snapshot` | read | implemented A3 |
 | `search_official_catalog` | external-read | implemented A3 |
@@ -33,6 +34,8 @@ Build a provider-neutral, auditable PC-build agent. DeepSeek is the first live p
 | `list_official_domain_proposals` | external-read | implemented C6 |
 | `enrich_official_catalog` | write, approval required | implemented C6 |
 | `search_price_candidates` | external-read | implemented A3 |
+| `propose_plan_change` | read proposal | implemented plan lifecycle |
+| `propose_plan_initialization` | read proposal | implemented plan initialization |
 
 A3 registered the original seven read/external-read Tools. C6 adds proposal listing and one narrowly typed write Tool. `enrich_official_catalog` accepts only an inspected candidate id and its immutable expected hash; it cannot submit a URL, trust decision, field name or field value. The dispatcher verifies a short-lived approval envelope against the Tool definition hash, session id, canonical input hash and idempotency key before execution, and successful replay returns the cached result. Approval tokens stay in run memory and are not persisted in sessions or forwarded to a Provider.
 
@@ -46,6 +49,7 @@ External-read Tools connect only to the fixed loopback catalog/price service and
 | `upgrade-advisor` | evaluation, comparison, SKU and price snapshots |
 | `shopping-research` | official discovery, proposal explanation, governed enrichment and price candidates |
 | `assembly-and-wiring` | deterministic evaluation projection |
+| `plan-initializer` | requirement collection, governed local SKU discovery, research, comparison and atomic initialization proposal |
 
 Skill metadata is discovered first. Instructions are loaded only after activation and included in the skill definition hash.
 
@@ -57,7 +61,7 @@ A4 implements a strict frontmatter parser, manifest validation against the live 
 - A1: server/browser evaluation parity.
 - A2: persistent multi-turn DeepSeek streaming chat with cancellation and usage. Implemented with provider fixtures and local disabled-provider HTTP/SSE smoke; live provider behavior remains unverified without an enabled key.
 - A3: registry, schema validation, dispatcher, budgets and seven read-only tools.
-- A4: lazy Skill loader and four built-in skills. Implemented with manifest/hash/integrity tests and runtime enforcement of `allowedTools`.
+- A4: lazy Skill loader and five built-in skills. Implemented with manifest/hash/integrity tests and runtime enforcement of `allowedTools`.
 - A5: real chat UI and browser end-to-end flow. Implemented with model/Skill selection, current BuildConfig snapshots, persistent sessions, SSE text/Tool/usage events, cancellation, disabled-service handling, desktop/mobile QA, and a local DeepSeek-protocol fixture. The fixture is not live-provider evidence.
 - A6: audit, redaction, definition hashes and write-approval contract; writes remain disabled. Implemented with atomic `0600` run records, content hashes rather than raw prompts/results, credential-shaped redaction, integrity verification, a read-only audit endpoint, and a short-lived execution-bound approval envelope contract. The Tool dispatcher still rejects every write Tool.
 - A7: Claude fixture adapter contract, full regression, browser QA, secret scan, documentation and implementation matrix. Implemented against Anthropic's official Messages streaming event flow and client Tool content blocks; live Claude remains unverified without an enabled key.

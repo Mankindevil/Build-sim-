@@ -42,6 +42,22 @@ function validConfig(value: unknown): value is BuildConfig {
   }
 }
 
+function validateInitialization(value: unknown): string[] {
+  const input = record(value);
+  if (!input) return ["initialization must be an object"];
+  const errors: string[] = [];
+  if (input.status !== "pending" && input.status !== "initialized") errors.push("initialization.status invalid");
+  if (input.source !== "agent" && input.source !== "template") errors.push("initialization.source invalid");
+  if (input.proposalId !== undefined && (typeof input.proposalId !== "string" || !input.proposalId)) errors.push("initialization.proposalId invalid");
+  if (input.initializedAt !== undefined) isoDate(input, "initializedAt", errors);
+  if (input.intent !== undefined) {
+    const intent = record(input.intent);
+    if (!intent || typeof intent.useCase !== "string" || !intent.useCase.trim()) errors.push("initialization.intent.useCase invalid");
+    if (intent?.budgetCny !== undefined && intent.budgetCny !== null && (typeof intent.budgetCny !== "number" || !Number.isFinite(intent.budgetCny) || intent.budgetCny < 0)) errors.push("initialization.intent.budgetCny invalid");
+  }
+  return errors;
+}
+
 export function validatePlanDraft(value: unknown): string[] {
   const input = record(value);
   if (!input) return ["draft must be an object"];
@@ -67,7 +83,9 @@ export function validateBuildPlan(value: unknown): string[] {
   if (input.activeVersionId !== null && (typeof input.activeVersionId !== "string" || !input.activeVersionId)) errors.push("activeVersionId invalid");
   if (!Number.isSafeInteger(input.draftRevision) || Number(input.draftRevision) < 0) errors.push("draftRevision invalid");
   errors.push(...validatePlanDraft(input.draft).map((error) => `draft.${error}`));
-  if (!record(input.metadata)) errors.push("metadata must be an object");
+  const metadata = record(input.metadata);
+  if (!metadata) errors.push("metadata must be an object");
+  else if (metadata.initialization !== undefined) errors.push(...validateInitialization(metadata.initialization));
   return errors;
 }
 
@@ -126,6 +144,7 @@ export function validatePlanAgentContext(value: unknown): string[] {
   if ("spatialViewContext" in input && input.spatialViewContext !== null && !record(input.spatialViewContext)) errors.push("spatialViewContext invalid");
   if (!("purchaseSummary" in input)) errors.push("purchaseSummary missing");
   if (!("buildTaskSummary" in input)) errors.push("buildTaskSummary missing");
+  if (input.initialization !== undefined) errors.push(...validateInitialization(input.initialization));
   return errors;
 }
 
@@ -153,6 +172,11 @@ export function validatePlanChangeProposal(value: unknown): string[] {
   if (!Array.isArray(input.operations) || input.operations.length === 0) errors.push("operations must not be empty");
   else input.operations.forEach((operation, index) => errors.push(...validatePlanPatchOperation(operation).map((error) => `operations.${index}.${error}`)));
   if (!["proposed", "applied", "rejected", "stale"].includes(String(input.status))) errors.push("status invalid");
+  if (input.kind !== undefined && input.kind !== "change" && input.kind !== "initialization") errors.push("kind invalid");
+  if (input.kind === "initialization") {
+    const intent = record(input.intent);
+    if (!intent || typeof intent.useCase !== "string" || !intent.useCase.trim()) errors.push("initialization intent invalid");
+  }
   return errors;
 }
 

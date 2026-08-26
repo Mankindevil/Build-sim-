@@ -4,7 +4,7 @@ import { evaluateBuildAuthoritatively } from "../server/evaluation-service";
 import { diffEvaluations } from "./evaluation";
 import { sha256Hex } from "./canonical";
 import { assertExpectedConfigHash, assertExpectedRevision } from "./conflict";
-import { PLAN_SCHEMA_VERSION, type BuildPlan, type PlanChangeProposal, type PlanPatchOperation, type PlanRepository } from "./contracts";
+import { PLAN_SCHEMA_VERSION, type BuildIntent, type BuildPlan, type PlanChangeProposal, type PlanPatchOperation, type PlanRepository } from "./contracts";
 import { assertValidPlanChangeProposal } from "./validation";
 
 export class PlanProposalError extends Error {
@@ -41,6 +41,8 @@ export interface PreviewPlanProposalInput {
   rationale: string[];
   operations: PlanPatchOperation[];
   createdAt?: string;
+  kind?: "change" | "initialization";
+  intent?: BuildIntent;
 }
 
 export async function previewPlanProposal(config: BuildConfig, input: PreviewPlanProposalInput): Promise<{ proposal: PlanChangeProposal; candidate: BuildConfig }> {
@@ -62,6 +64,8 @@ export async function previewPlanProposal(config: BuildConfig, input: PreviewPla
     operations: structuredClone(input.operations),
     predictedImpact: { resolvedFindingIds: impact.resolvedFindingIds, introducedFindingIds: impact.introducedFindingIds, budgetDeltaCny: impact.budgetDeltaCny },
     status: "proposed",
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.intent ? { intent: structuredClone(input.intent) } : {}),
   };
   assertValidPlanChangeProposal(proposal);
   return { proposal, candidate };
@@ -93,6 +97,14 @@ export class PlanProposalService {
     }
     if (operationIndexes && new Set(operationIndexes).size !== operationIndexes.length) throw new PlanProposalError("proposal_indexes_invalid", "Proposal operation indexes must be unique");
     const plan = await this.repository.get(planId);
+    if (proposal.kind === "initialization") {
+      if (plan.metadata.initialization?.status !== "pending") throw new PlanProposalError("initialization_status_invalid", "Only a pending Agent plan can be initialized", 409);
+      if (!proposal.intent?.useCase.trim()) throw new PlanProposalError("initialization_intent_required", "Initialization requires a structured build intent");
+      const allIndexes = proposal.operations.map((_, index) => index);
+      if (operationIndexes && (operationIndexes.length !== allIndexes.length || operationIndexes.some((index, offset) => index !== allIndexes[offset]))) {
+        throw new PlanProposalError("initialization_atomic_required", "Initialization must be approved as one atomic configuration", 409);
+      }
+    }
     assertExpectedRevision(proposal.expectedDraftRevision, plan.draftRevision);
     assertExpectedConfigHash(proposal.expectedConfigHash, await sha256Hex(plan.draft.config));
     const operations = operationIndexes ? operationIndexes.map((index) => proposal.operations[index]!) : proposal.operations;
@@ -109,10 +121,30 @@ export class PlanProposalService {
     const canonical = await this.validate(planId, proposal, operationIndexes);
     const current = await this.repository.get(planId);
     const candidate = applyPlanPatchOperations(current.draft.config, canonical.operations);
-    const afterConfigHash = await sha256Hex(candidate);
     const indexes = requestedIndexes;
     const idempotencyKey = `proposal-${proposal.id}-${indexes.join("-")}`;
-    const plan = await this.repository.updateDraft(planId, { expectedRevision: current.draftRevision, config: candidate, idempotencyKey });
+    const metadata = canonical.kind === "initialization"
+      ? {
+          ...current.metadata,
+          useCase: canonical.intent!.useCase,
+          ...(canonical.intent!.budgetCny !== undefined ? { budgetCny: canonical.intent!.budgetCny } : {}),
+          initialization: {
+            status: "initialized" as const,
+            source: "agent" as const,
+            intent: structuredClone(canonical.intent!),
+            proposalId: canonical.id,
+            initializedAt: this.now(),
+          },
+        }
+      : undefined;
+    const plan = await this.repository.updateDraft(planId, {
+      expectedRevision: current.draftRevision,
+      config: candidate,
+      ...(candidate.name !== current.name ? { name: candidate.name } : {}),
+      ...(metadata ? { metadata } : {}),
+      idempotencyKey,
+    });
+    const afterConfigHash = await sha256Hex(plan.draft.config);
     const applied: PlanChangeProposal = { ...canonical, status: "applied" };
     const result: { proposal: PlanChangeProposal; plan: BuildPlan; audit: ProposalApprovalAudit } = {
       proposal: applied,

@@ -78,4 +78,44 @@ describe("R7 human-approved plan proposals", () => {
     expect((await repository.get(plan.id)).draft.config.selection.diskCount).toBe(1);
     await expect(handleWorkspaceRoute("POST", `/api/workspace/plans/${plan.id}/proposals/apply`, { proposal, approvalConfirmed: true, approvedBy: "api-human" }, repository, { proposalService })).resolves.toMatchObject({ status: 200, payload: { proposal: { status: "applied" }, audit: { approvedBy: "api-human" } } });
   });
+
+  it("applies a pending Agent initialization atomically and records its structured intent", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "build-sim-init-")); roots.push(root);
+    const repository = new FilePlanRepository({ root, now: () => "2026-08-25T03:00:00.000Z" });
+    const created = await repository.create({
+      name: "待 Agent 初始化方案",
+      config: createDefaultN6Config("scaffold", "2026-08-25T00:00:00.000Z"),
+      metadata: { initialization: { status: "pending", source: "agent" } },
+    });
+    const hash = await sha256Hex(created.draft.config);
+    const proposal = (await previewPlanProposal(created.draft.config, {
+      id: "proposal-initialize",
+      planId: created.id,
+      expectedDraftRevision: created.draftRevision,
+      expectedConfigHash: hash,
+      summary: "初始化游戏方案",
+      rationale: ["用户确认 2K 游戏需求"],
+      operations: [
+        { op: "replace", path: "/name", value: "2K 游戏方案" },
+        { op: "replace", path: "/selection/gpuId", value: "gpu.rtx-a2000-12gb" },
+      ],
+      kind: "initialization",
+      intent: { useCase: "游戏", budgetCny: 8000, targetResolution: "1440p", targetFps: 60 },
+      createdAt: "2026-08-25T02:00:00.000Z",
+    })).proposal;
+    const service = new PlanProposalService(repository, () => "2026-08-25T03:00:00.000Z");
+    await expect(repository.saveVersion(created.id, { expectedRevision: created.draftRevision, expectedConfigHash: hash, reason: "manual-save" })).rejects.toMatchObject({ code: "initialization_pending" });
+    await expect(repository.duplicate(created.id, { name: "待初始化副本" })).resolves.toMatchObject({ activeVersionId: null, metadata: { initialization: { status: "pending" } } });
+    await expect(service.apply(created.id, proposal, [0], { confirmed: true, approvedBy: "human-test" })).rejects.toMatchObject({ code: "initialization_atomic_required" });
+    expect((await repository.get(created.id)).metadata.initialization?.status).toBe("pending");
+    const applied = await service.apply(created.id, proposal, undefined, { confirmed: true, approvedBy: "human-test" });
+    expect(applied.plan).toMatchObject({
+      name: "2K 游戏方案",
+      draft: { config: { name: "2K 游戏方案", selection: { gpuId: "gpu.rtx-a2000-12gb" } } },
+      metadata: { useCase: "游戏", budgetCny: 8000, initialization: { status: "initialized", source: "agent", proposalId: proposal.id, intent: { targetResolution: "1440p" } } },
+    });
+    expect(applied.audit.afterConfigHash).toBe(await sha256Hex(applied.plan.draft.config));
+    await expect(repository.saveVersion(applied.plan.id, { expectedRevision: applied.plan.draftRevision, expectedConfigHash: applied.audit.afterConfigHash, reason: "agent-proposal" })).resolves.toMatchObject({ versionNumber: 1 });
+    await expect(service.validate(created.id, proposal)).rejects.toMatchObject({ code: "initialization_status_invalid" });
+  });
 });

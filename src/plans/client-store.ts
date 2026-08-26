@@ -59,6 +59,7 @@ function summary(plan: BuildPlan): BuildPlanSummary {
     activeVersionId: plan.activeVersionId,
     draftRevision: plan.draftRevision,
     dirty: plan.draft.dirty,
+    ...(plan.metadata.initialization ? { initializationStatus: plan.metadata.initialization.status } : {}),
   };
 }
 
@@ -311,6 +312,7 @@ export class PlanStore {
     await this.saveDraftNow();
     const plan = this.state.activePlan;
     if (!plan || this.state.saveStatus === "failed" || this.state.saveStatus === "conflict" || this.state.saveStatus === "offline") throw new Error("Draft must be persisted before saving a version");
+    if (plan.metadata.initialization?.status === "pending") throw new Error("Pending Agent initialization scaffolds cannot be saved as versions");
     const version = await this.options.api.saveVersion(plan.id, {
       expectedRevision: plan.draftRevision,
       expectedConfigHash: await sha256Hex(plan.draft.config),
@@ -332,8 +334,8 @@ export class PlanStore {
     return version;
   }
 
-  async create(name: string, config: BuildConfig): Promise<BuildPlan> {
-    const plan = await this.options.api.create({ name, config, idempotencyKey: `create-${crypto.randomUUID()}` });
+  async create(name: string, config: BuildConfig, metadata?: BuildPlan["metadata"]): Promise<BuildPlan> {
+    const plan = await this.options.api.create({ name, config, ...(metadata ? { metadata } : {}), idempotencyKey: `create-${crypto.randomUUID()}` });
     this.state.plans.push(summary(plan));
     await this.activate(plan.id, true);
     return plan;

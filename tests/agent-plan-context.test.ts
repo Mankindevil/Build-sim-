@@ -42,6 +42,25 @@ describe("R7 plan-bound Agent context", () => {
     expect(isPlanAgentContextStale(base, { ...base, draftRevision: 1 })).toBe(true);
   });
 
+  it("marks pending Agent plans as rendering scaffolds and routes them to atomic initialization", async () => {
+    const plan = makePlan("plan-context-init-12345678", "待 Agent 初始化方案");
+    plan.metadata.initialization = { status: "pending", source: "agent" };
+    const { evaluation } = buildN6Evaluation();
+    evaluation.config.id = plan.id; evaluation.config.name = plan.name; plan.draft.config = evaluation.config;
+    const context = createPlanAgentContext({
+      plan,
+      snapshot: { schemaVersion: "1.0.0", planId: plan.id, planVersionId: null, draftRevision: 0, configHash: await sha256Hex(evaluation.config), evaluationHash: await sha256Hex(evaluation), evaluatedAt: "2026-08-25T00:00:00.000Z", evaluation },
+      selection: null,
+      purchaseSummary: {},
+      buildTaskSummary: {},
+    });
+    expect(context.initialization).toEqual({ status: "pending", source: "agent" });
+    const envelope = planAgentContextEnvelope("我想配一台游戏主机", context);
+    expect(envelope).toContain("internal rendering scaffold");
+    expect(envelope).toContain("propose_plan_initialization");
+    expect(envelope).not.toContain("Only propose changes through the structured propose_plan_change tool");
+  });
+
   it("records the exact authoritative plan and evaluation hashes for every run", async () => {
     const plan = makePlan("plan-audit-12345678", "Audited plan");
     const { evaluation } = buildN6Evaluation();

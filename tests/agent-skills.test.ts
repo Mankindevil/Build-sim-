@@ -15,11 +15,11 @@ function registry(): AgentToolRegistry {
 }
 
 describe("A4 Agent Skill loader", () => {
-  it("discovers four metadata-only catalog entries and loads instructions on activation", async () => {
+  it("discovers five metadata-only catalog entries and loads instructions on activation", async () => {
     const loader = new AgentSkillLoader(path.resolve("skills"), registry());
     const catalog = await loader.catalog();
     expect(catalog.map((entry) => entry.manifest.id)).toEqual([
-      "assembly-and-wiring", "build-diagnosis", "shopping-research", "upgrade-advisor",
+      "assembly-and-wiring", "build-diagnosis", "plan-initializer", "shopping-research", "upgrade-advisor",
     ]);
     expect(catalog.every((entry) => /^[a-f0-9]{64}$/.test(entry.definitionHash))).toBe(true);
     expect(JSON.stringify(catalog)).not.toContain("装机诊断工作流");

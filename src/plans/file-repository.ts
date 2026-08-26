@@ -190,6 +190,7 @@ export class FilePlanRepository implements PlanRepository {
         activeVersionId: plan.activeVersionId,
         draftRevision: plan.draftRevision,
         dirty: plan.draft.dirty,
+        ...(plan.metadata.initialization ? { initializationStatus: plan.metadata.initialization.status } : {}),
       });
     }
     return plans.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
@@ -246,11 +247,15 @@ export class FilePlanRepository implements PlanRepository {
         assertExpectedRevision(input.expectedRevision, plan.draftRevision);
         const timestamp = this.now();
         const config = clone(input.config);
+        const name = input.name?.trim() || plan.name;
+        if (!name || name.length > 120) throw new PlanRepositoryError("invalid_input", "Plan name must contain 1 to 120 characters", 400);
         config.id = planId;
-        config.name = plan.name;
+        config.name = name;
         config.updatedAt = timestamp;
         const updated: BuildPlan = {
           ...plan,
+          name,
+          ...(input.metadata ? { metadata: clone(input.metadata) } : {}),
           updatedAt: timestamp,
           draftRevision: plan.draftRevision + 1,
           draft: { ...plan.draft, config, dirty: true, updatedAt: timestamp },
@@ -300,6 +305,7 @@ export class FilePlanRepository implements PlanRepository {
       async () => {
         const plan = await this.readPlan(planId);
         if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
+        if (plan.metadata.initialization?.status === "pending") throw new PlanRepositoryError("initialization_pending", "Pending Agent initialization scaffolds cannot be saved as versions", 409);
         assertExpectedRevision(input.expectedRevision, plan.draftRevision);
         const actualHash = await sha256Hex(plan.draft.config);
         assertExpectedConfigHash(input.expectedConfigHash, actualHash);
@@ -340,6 +346,9 @@ export class FilePlanRepository implements PlanRepository {
       async () => {
         const source = await this.readPlan(planId);
         const created = await this.create({ name: input.name, config: source.draft.config, metadata: clone(source.metadata) });
+        if (source.metadata.initialization?.status === "pending") {
+          return { value: created, result: { planId: created.id, value: clone(created) } };
+        }
         const hash = await sha256Hex(created.draft.config);
         await this.saveVersion(created.id, { expectedRevision: created.draftRevision, expectedConfigHash: hash, reason: "initial" });
         const saved = await this.get(created.id);

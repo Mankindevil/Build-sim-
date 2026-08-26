@@ -3,7 +3,7 @@ import { loadBundledCatalog, loadBundledPriceSnapshot } from "../sku/catalog";
 import type { BuildConfig, BuildSelection } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
 import { evaluateBuildAuthoritatively } from "./evaluation-service";
-import { PLAN_PATCH_PATHS, type PlanPatchOperation } from "../plans/contracts";
+import { PLAN_PATCH_PATHS, type BuildIntent, type PlanPatchOperation } from "../plans/contracts";
 import { previewPlanProposal } from "../plans/proposals";
 
 const DEFAULT_PRICE_SERVICE = "http://127.0.0.1:5174";
@@ -121,6 +121,49 @@ const selectionProperties: Record<keyof BuildSelection, unknown> = {
   hbaSkuId: { type: "string", minLength: 1, maxLength: 120 },
 };
 
+const searchCatalogSkus: AgentToolSpec = {
+  contractVersion: AGENT_CONTRACT_VERSION,
+  name: "search_catalog_skus",
+  title: "搜索可选 SKU",
+  description: "Search the governed local SKU catalog by category and text. Use this to discover exact selectable SKU ids before comparing or initializing a plan. Results are bounded catalog facts, not open-web recommendations.",
+  effect: "read",
+  approval: "never",
+  timeoutMs: 3_000,
+  maxResultBytes: 120_000,
+  inputSchema: schema({
+    category: { type: "string", enum: ["case", "motherboard", "cpu", "psu", "cooler", "gpu", "memory", "storage", "hba", "fan", "accessory"] },
+    query: { type: "string", maxLength: 160 },
+    limit: { type: "integer", minimum: 1, maximum: 50 },
+  }),
+  async execute(input) {
+    const catalog = loadBundledCatalog();
+    const value = input as { category?: string; query?: string; limit?: number };
+    const needle = value.query?.trim().toLocaleLowerCase() ?? "";
+    const matches = catalog.skus
+      .filter((sku) => !value.category || sku.category === value.category)
+      .filter((sku) => !needle || [sku.id, sku.brand, sku.model, sku.name, sku.mpn ?? "", ...(sku.tags ?? [])].join(" ").toLocaleLowerCase().includes(needle))
+      .slice(0, value.limit ?? 24)
+      .map((sku) => ({
+        id: sku.id,
+        category: sku.category,
+        brand: sku.brand,
+        model: sku.model,
+        name: sku.name,
+        mpn: sku.mpn ?? null,
+        dims: sku.dims,
+        power: sku.power,
+        attrs: sku.attrs ?? {},
+        tags: sku.tags ?? [],
+        price: sku.price,
+      }));
+    return {
+      ok: true,
+      content: { catalogVersion: catalog.catalogVersion ?? `${catalog.schemaVersion}:${catalog.updatedAt}`, count: matches.length, records: matches },
+      provenance: ["data/skus/catalog.json", "data/prices/latest.json"],
+    };
+  },
+};
+
 const compareBuilds: AgentToolSpec = {
   contractVersion: AGENT_CONTRACT_VERSION,
   name: "compare_builds",
@@ -183,6 +226,124 @@ const proposePlanChange: AgentToolSpec = {
       ok: true,
       content: { proposal: preview.proposal, confirmation: { required: true, effect: "update-active-draft", automaticApply: false } },
       provenance: ["PlanAgentContext.configHash", "BuildEvaluation:before", "BuildEvaluation:after", "PLAN_PATCH_PATHS"],
+    };
+  },
+};
+
+const REQUIRED_INITIAL_SELECTION = ["psuId", "psuTopology", "coolerId", "gpuId", "memoryId", "diskCount", "boot", "hbaMode"] as const;
+
+function initializationOperations(baseline: BuildConfig, candidate: BuildConfig): PlanPatchOperation[] {
+  const operations: PlanPatchOperation[] = [
+    { op: "replace", path: "/name", value: candidate.name },
+    { op: "replace", path: "/caseId", value: candidate.caseId },
+    { op: "replace", path: "/boardId", value: candidate.boardId },
+    { op: "replace", path: "/cpuId", value: candidate.cpuId },
+  ];
+  for (const key of Object.keys(selectionProperties) as Array<keyof BuildSelection>) {
+    const path = `/selection/${key}` as Extract<PlanPatchOperation, { path: unknown }>["path"];
+    if (Object.hasOwn(candidate.selection, key) && candidate.selection[key] !== undefined) operations.push({ op: "replace", path, value: candidate.selection[key] });
+    else if (Object.hasOwn(baseline.selection, key)) operations.push({ op: "remove", path });
+  }
+  operations.push({ op: "replace", path: "/bom", value: candidate.bom });
+  if (candidate.notes?.length) operations.push({ op: "replace", path: "/notes", value: candidate.notes });
+  else if (baseline.notes) operations.push({ op: "remove", path: "/notes" });
+  return operations;
+}
+
+const proposePlanInitialization: AgentToolSpec = {
+  contractVersion: AGENT_CONTRACT_VERSION,
+  name: "propose_plan_initialization",
+  title: "生成完整方案初始化提案",
+  description: "Create one atomic, non-mutating initialization proposal for a pending Agent plan. Every selected part must use an exact governed local catalog SKU id. The server validates the complete configuration and recomputes BuildEvaluation; only explicit human approval can replace the scaffold draft.",
+  effect: "read",
+  approval: "never",
+  timeoutMs: 8_000,
+  maxResultBytes: 160_000,
+  inputSchema: schema({
+    planId: { type: "string", minLength: 1, maxLength: 180 },
+    expectedDraftRevision: { type: "integer", minimum: 0 },
+    expectedConfigHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+    summary: { type: "string", minLength: 1, maxLength: 500 },
+    rationale: { type: "array", items: { type: "string", minLength: 1, maxLength: 500 }, minItems: 1, maxItems: 12 },
+    intent: {
+      type: "object",
+      properties: {
+        useCase: { type: "string", minLength: 1, maxLength: 240 },
+        budgetCny: { type: "number", minimum: 0 },
+        region: { type: "string", maxLength: 80 },
+        targetResolution: { type: "string", enum: ["1080p", "1440p", "4k", "other"] },
+        targetFps: { type: "integer", minimum: 1, maximum: 1000 },
+        games: { type: "array", items: { type: "string", maxLength: 120 }, maxItems: 20 },
+        ownedSkuIds: { type: "array", items: { type: "string", maxLength: 120 }, maxItems: 30, uniqueItems: true },
+        preferences: { type: "array", items: { type: "string", maxLength: 200 }, maxItems: 20 },
+      },
+      required: ["useCase"],
+      additionalProperties: false,
+    },
+    configuration: {
+      type: "object",
+      properties: {
+        name: { type: "string", minLength: 1, maxLength: 120 },
+        caseId: { type: "string", minLength: 1, maxLength: 120 },
+        boardId: { type: "string", minLength: 1, maxLength: 120 },
+        cpuId: { type: "string", minLength: 1, maxLength: 120 },
+        selection: { type: "object", properties: selectionProperties, required: REQUIRED_INITIAL_SELECTION, additionalProperties: false },
+        bom: {
+          type: "array",
+          maxItems: 80,
+          items: {
+            type: "object",
+            properties: {
+              skuId: { type: "string", minLength: 1, maxLength: 120 },
+              qty: { type: "integer", minimum: 1, maximum: 100 },
+              bucket: { type: "string", enum: ["owned", "buy_now", "upgrade_later", "optional"] },
+            },
+            required: ["skuId", "qty", "bucket"],
+            additionalProperties: false,
+          },
+        },
+        notes: { type: "array", items: { type: "string", maxLength: 500 }, maxItems: 30 },
+      },
+      required: ["name", "caseId", "boardId", "cpuId", "selection", "bom"],
+      additionalProperties: false,
+    },
+  }, ["planId", "expectedDraftRevision", "expectedConfigHash", "summary", "rationale", "intent", "configuration"]),
+  async execute(input, context) {
+    const baseline = requireConfig(context);
+    const value = input as {
+      planId: string;
+      expectedDraftRevision: number;
+      expectedConfigHash: string;
+      summary: string;
+      rationale: string[];
+      intent: BuildIntent;
+      configuration: Pick<BuildConfig, "name" | "caseId" | "boardId" | "cpuId" | "selection" | "bom" | "notes">;
+    };
+    const candidate: BuildConfig = {
+      ...baseline,
+      name: value.configuration.name,
+      caseId: value.configuration.caseId,
+      boardId: value.configuration.boardId,
+      cpuId: value.configuration.cpuId,
+      selection: structuredClone(value.configuration.selection),
+      bom: structuredClone(value.configuration.bom),
+    };
+    if (value.configuration.notes?.length) candidate.notes = [...value.configuration.notes];
+    else delete candidate.notes;
+    const preview = await previewPlanProposal(baseline, {
+      planId: value.planId,
+      expectedDraftRevision: value.expectedDraftRevision,
+      expectedConfigHash: value.expectedConfigHash,
+      summary: value.summary,
+      rationale: value.rationale,
+      operations: initializationOperations(baseline, candidate),
+      kind: "initialization",
+      intent: value.intent,
+    });
+    return {
+      ok: true,
+      content: { proposal: preview.proposal, confirmation: { required: true, effect: "initialize-active-draft", atomic: true, automaticApply: false } },
+      provenance: ["PlanAgentContext.configHash", "data/skus/catalog.json", "BuildEvaluation:initialization-candidate"],
     };
   },
 };
@@ -339,5 +500,5 @@ function createSearchPriceCandidates(priceServiceUrl: string): AgentToolSpec {
 
 export function createBuildSimTools(options: { priceServiceUrl?: string } = {}): AgentToolSpec[] {
   const priceServiceUrl = options.priceServiceUrl ?? DEFAULT_PRICE_SERVICE;
-  return [getBuildEvaluation, compareBuilds, proposePlanChange, getSkuFacts, getPriceSnapshot, createSearchOfficialCatalog(priceServiceUrl), createGetCatalogSearchJob(priceServiceUrl), createInspectCatalogCandidate(priceServiceUrl), createListOfficialDomainProposals(priceServiceUrl), createEnrichOfficialCatalog(priceServiceUrl), createSearchPriceCandidates(priceServiceUrl)];
+  return [getBuildEvaluation, searchCatalogSkus, compareBuilds, proposePlanChange, proposePlanInitialization, getSkuFacts, getPriceSnapshot, createSearchOfficialCatalog(priceServiceUrl), createGetCatalogSearchJob(priceServiceUrl), createInspectCatalogCandidate(priceServiceUrl), createListOfficialDomainProposals(priceServiceUrl), createEnrichOfficialCatalog(priceServiceUrl), createSearchPriceCandidates(priceServiceUrl)];
 }

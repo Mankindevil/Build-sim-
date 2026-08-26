@@ -27,6 +27,7 @@ export function createPlanAgentContext(input: CreatePlanAgentContextInput): Plan
     ...(input.spatialViewContext ? { spatialViewContext: structuredClone(input.spatialViewContext) } : {}),
     purchaseSummary: structuredClone(input.purchaseSummary),
     buildTaskSummary: structuredClone(input.buildTaskSummary),
+    ...(input.plan.metadata.initialization ? { initialization: structuredClone(input.plan.metadata.initialization) } : {}),
   };
   assertValidPlanAgentContext(context);
   return context;
@@ -48,9 +49,13 @@ export function planAgentContextEnvelope(content: string, context: PlanAgentCont
     ...(context.spatialViewContext ? { spatialViewContext: context.spatialViewContext } : {}),
     purchaseSummary: context.purchaseSummary,
     buildTaskSummary: context.buildTaskSummary,
+    ...(context.initialization ? { initialization: context.initialization } : {}),
     authoritativeFacts: "Use get_build_evaluation; BuildConfig is attached to the Agent session.",
   };
-  return `${content.trim()}\n\n<plan_agent_context schema_version="${context.schemaVersion}">\n${JSON.stringify(promptContext)}\n</plan_agent_context>\nOnly propose changes through the structured propose_plan_change tool. A normal answer never changes the plan.`;
+  const proposalRule = context.initialization?.status === "pending"
+    ? "The attached BuildConfig is an internal rendering scaffold, not a user choice. Collect missing requirements, use only exact catalog SKU ids, and initialize only through propose_plan_initialization. A normal answer never changes the plan."
+    : "Only propose changes through the structured propose_plan_change tool. A normal answer never changes the plan.";
+  return `${content.trim()}\n\n<plan_agent_context schema_version="${context.schemaVersion}">\n${JSON.stringify(promptContext)}\n</plan_agent_context>\n${proposalRule}`;
 }
 
 export function isPlanAgentContextStale(bound: PlanAgentContext | null, current: PlanAgentContext | null): boolean {

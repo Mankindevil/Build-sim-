@@ -21,9 +21,9 @@
 | Config | JSON / checklist export-import in Configure header |
 | Maintainability | Case `profile.json` + shared `needsHba` policy |
 | Price | Auditable JD/TB/PDD **snapshots** (`data/prices/`); variant-level prices, opening prices marked non-auditable, amazon.com reference-only (see `docs/PRICE_SNAPSHOTS.md`) |
-| Plans | Active BuildPlan + PlanStore/PlanRepository, independent drafts, immutable versions, restore/archive, offline cache |
+| Plans | Active BuildPlan + PlanStore/PlanRepository, independent drafts, immutable versions, restore/archive, offline cache, and atomic Agent initialization from a pending blank-plan scaffold |
 | 3D | Evidence-aware lazy Three.js scene with finding/route/dimension/thermal/assembly overlays and SVG fallback |
-| Agent | Plan/evaluation/3D/purchase/task context; allowlisted proposal writes require explicit human approval and server revalidation |
+| Agent | Plan/evaluation/3D/purchase/task context; local SKU discovery; requirement-aware `plan-initializer`; allowlisted change and atomic initialization proposals require explicit human approval and server revalidation |
 | Transactions | Staged review, exact plan-item links, version-at-capture, server archive, retry and privacy deletion |
 | Build execution | Stable sourceRef tasks reconciled from BOM/assembly/wiring/findings; saved-version checklist hashes |
 | Quality gates | Full lifecycle E2E, desktop/tablet/mobile screenshots, offline/corruption/failure tests, accessibility, cleanup and performance budgets |

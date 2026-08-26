@@ -33,7 +33,7 @@ Build Sim is usable as a local alpha and is under active development.
 | Area | Current status |
 | --- | --- |
 | Deterministic build evaluation | Implemented and shared by the UI, Advice service, and Agent tools |
-| Plan lifecycle workspace | Implemented: create, autosave, duplicate, switch, immutable versions, restore, soft delete, and offline cache |
+| Plan lifecycle workspace | Implemented: template or Agent blank initialization, autosave, duplicate, switch, immutable versions, restore, soft delete, and offline cache |
 | Plan-linked transactions and build tasks | Implemented with exact item links, stable task source references, reconciliation, and traceable checklist export |
 | Evidence-aware Three.js scene | Implemented with SVG fallback, findings, routing, dimensions, thermal planning overlays, and assembly workflow |
 | JONSBO N6 geometry, fit, wiring, routing, and assembly | Implemented for the current case profile |
@@ -89,8 +89,9 @@ Build Sim is usable as a local alpha and is under active development.
 
 - Optional DeepSeek-backed structured build advice with local usage and estimated-cost audit records.
 - Provider-neutral, streaming multi-turn Agent service with persistent local sessions, cancellation, Skills, Tools, definition hashes, and tamper-evident audit records.
-- Four deterministic read tools, four external-read tools, and one governed write tool (`enrich_official_catalog`).
-- Built-in Skills: `build-diagnosis`, `upgrade-advisor`, `shopping-research`, and `assembly-and-wiring`.
+- Seven local read/proposal tools, five external-read tools, and one governed write tool (`enrich_official_catalog`).
+- Built-in Skills: `plan-initializer`, `build-diagnosis`, `upgrade-advisor`, `shopping-research`, and `assembly-and-wiring`.
+- **Use Agent to initialize** creates a pending plan whose valid config is explicitly an internal rendering scaffold. The Agent collects intent, selects exact governed catalog SKU ids, and can only return an atomic initialization proposal that requires whole-proposal human approval.
 - Tool schemas, budgets, allowed-tool restrictions, loopback service boundaries, and out-of-band write approval are enforced server-side.
 
 ### Browser interface
@@ -629,9 +630,12 @@ Amazon USD values use a declared exchange rate and remain reference-only. The UI
 ### Use the Agent
 
 1. Enable and start the Agent service and, for external-read tools, the Price service.
-2. In **Build Preview**, select an available model and one of the four Skills.
+2. Choose **Use Agent to initialize** when creating a plan; the UI opens Agent and selects `plan-initializer`. Other Skills remain available for normal plans.
 3. Start a session, ask a build-specific question, and inspect Tool results, evidence, definition hashes, usage, and the per-run local cost estimate.
-4. Cancel a run from the UI if necessary. Sessions persist locally until their files are removed through an appropriate maintenance process.
+4. Review and approve an initialization proposal as a whole before it can replace the scaffold draft. Pending scaffolds cannot be saved as versions.
+5. Cancel a run from the UI if necessary. Sessions persist locally until their files are removed through an appropriate maintenance process.
+
+Initialization currently selects only from the governed local catalog. Out-of-catalog gaming hardware and cross-publication performance benchmarks remain explicit coverage gaps; web-search results never become selected parts directly.
 
 The browser never receives provider API keys. Fixture output is labeled as fixture evidence and must not be treated as proof of live-provider availability.
 

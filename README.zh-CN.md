@@ -33,7 +33,7 @@ Build Sim 当前可作为本地 Alpha 版本使用，仍在持续开发中。
 | 领域 | 当前状态 |
 | --- | --- |
 | 确定性装机评估 | 已实现，由 UI、Advice 服务和 Agent Tool 共用 |
-| 方案生命周期工作台 | 已实现：创建、自动保存、复制、切换、不可变版本、恢复、软删除与离线缓存 |
+| 方案生命周期工作台 | 已实现：模板或 Agent 空白初始化、自动保存、复制、切换、不可变版本、恢复、软删除与离线缓存 |
 | 方案关联交易与装机任务 | 已实现精确部件关联、稳定任务 sourceRef、reconcile 与可追溯清单导出 |
 | evidence-aware Three.js 场景 | 已实现问题、走线、尺寸、规划热场与装配工作流，并保留 SVG fallback |
 | JONSBO N6 几何、适配、接线、路由与装配 | 已在当前机箱配置中实现 |
@@ -89,8 +89,9 @@ Build Sim 当前可作为本地 Alpha 版本使用，仍在持续开发中。
 
 - 可选 DeepSeek 结构化装机建议，并在本地记录 usage 和费用估算审计。
 - Provider-neutral 流式多轮 Agent，支持本地会话持久化、取消、Skills、Tools、定义哈希和可校验审计记录。
-- 当前包含 4 个确定性只读 Tool、4 个外部只读 Tool，以及 1 个受治理的写 Tool：`enrich_official_catalog`。
-- 内置四个 Skill：`build-diagnosis`、`upgrade-advisor`、`shopping-research`、`assembly-and-wiring`。
+- 当前包含 7 个本地只读/提案 Tool、5 个外部只读 Tool，以及 1 个受治理的写 Tool：`enrich_official_catalog`。
+- 内置五个 Skill：`plan-initializer`、`build-diagnosis`、`upgrade-advisor`、`shopping-research`、`assembly-and-wiring`。
+- 新建方案可选择“使用 Agent 初始化”：待初始化方案只保留内部渲染脚手架；Agent 收集用途、预算等需求，只能从受治理目录选择精确 SKU，并生成必须整体人工批准的原子初始化提案。
 - Tool schema、运行预算、Skill 可用 Tool、回环服务边界和带外写审批均由服务端执行，而不是只依赖 Prompt。
 
 ### 浏览器界面
@@ -629,9 +630,12 @@ Amazon 美元价格使用明确汇率，并保持为参考价格。UI 不会把�
 ### 使用 Agent
 
 1. 启用并启动 Agent；使用外部只读 Tool 时还要启动 Price 服务。
-2. 在“装机预览”选择可用模型和四个 Skill 之一。
+2. 新建方案时可选择“使用 Agent 初始化”；界面会进入 Agent 并自动选择 `plan-initializer`。普通方案也可手动选择其他 Skill。
 3. 创建会话，提出与当前装机相关的问题，并检查 Tool 结果、证据、定义哈希、usage 与本次运行的本地费用估算。
-4. 必要时从 UI 取消运行。会话会保存在本地，直到通过合适的维护流程清理文件。
+4. 初始化提案必须整体审阅并勾选批准，批准后才替换脚手架进入 active draft；待初始化脚手架不能保存为版本。
+5. 必要时从 UI 取消运行。会话会保存在本地，直到通过合适的维护流程清理文件。
+
+当前初始化只会选取本地受治理目录中的 SKU；目录外游戏硬件和跨媒体性能基准仍会明确保持为覆盖缺口，不会由联网搜索结果直接写入方案。
 
 浏览器不会收到 Provider API Key。Fixture 输出会明确标注，不能作为真实 Provider 可用性的证据。
 

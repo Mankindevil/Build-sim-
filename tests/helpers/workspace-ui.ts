@@ -33,13 +33,14 @@ export function makeWorkspaceApi(initialPlans: BuildPlan[], initialVersions: Pla
   const api = {
     plans: initialPlans.map((plan) => structuredClone(plan)),
     versions: initialVersions.map((version) => structuredClone(version)),
-    async list() { return this.plans.map((plan) => ({ schemaVersion: plan.schemaVersion, id: plan.id, name: plan.name, status: plan.status, updatedAt: plan.updatedAt, activeVersionId: plan.activeVersionId, draftRevision: plan.draftRevision, dirty: plan.draft.dirty } satisfies BuildPlanSummary)); },
+    async list() { return this.plans.map((plan) => ({ schemaVersion: plan.schemaVersion, id: plan.id, name: plan.name, status: plan.status, updatedAt: plan.updatedAt, activeVersionId: plan.activeVersionId, draftRevision: plan.draftRevision, dirty: plan.draft.dirty, ...(plan.metadata.initialization ? { initializationStatus: plan.metadata.initialization.status } : {}) } satisfies BuildPlanSummary)); },
     async get(id: string) { return structuredClone(this.plans.find((plan) => plan.id === id)!); },
-    async create(input: { name: string; config: BuildConfig }) {
+    async create(input: { name: string; config: BuildConfig; metadata?: BuildPlan["metadata"] }) {
       const created = makePlan(`plan-${String(this.plans.length + 10).padStart(8, "0")}`, input.name, input.config.selection.diskCount);
       created.activeVersionId = null;
       created.draft.baseVersionId = null;
       created.draft.dirty = true;
+      created.metadata = structuredClone(input.metadata ?? {});
       this.plans.push(created);
       return structuredClone(created);
     },

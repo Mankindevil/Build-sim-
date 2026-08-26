@@ -8,6 +8,32 @@ export type PlanStatus = "active" | "archived";
 export type PlanSaveStatus = "clean" | "dirty" | "saving" | "saved" | "conflict" | "failed" | "offline";
 export type PlanVersionReason = "initial" | "manual-save" | "agent-proposal" | "import" | "restore";
 
+export interface BuildIntent {
+  useCase: string;
+  budgetCny?: number | null;
+  region?: string;
+  targetResolution?: "1080p" | "1440p" | "4k" | "other";
+  targetFps?: number | null;
+  games?: string[];
+  ownedSkuIds?: string[];
+  preferences?: string[];
+}
+
+export interface PlanInitializationState {
+  status: "pending" | "initialized";
+  source: "agent" | "template";
+  intent?: BuildIntent;
+  proposalId?: string;
+  initializedAt?: string;
+}
+
+export interface BuildPlanMetadata {
+  useCase?: string;
+  budgetCny?: number | null;
+  tags?: string[];
+  initialization?: PlanInitializationState;
+}
+
 export interface PlanDraft {
   schemaVersion: PlanSchemaVersion;
   baseVersionId: string | null;
@@ -27,11 +53,7 @@ export interface BuildPlan {
   activeVersionId: string | null;
   draftRevision: number;
   draft: PlanDraft;
-  metadata: {
-    useCase?: string;
-    budgetCny?: number | null;
-    tags?: string[];
-  };
+  metadata: BuildPlanMetadata;
 }
 
 export interface BuildPlanSummary {
@@ -43,6 +65,7 @@ export interface BuildPlanSummary {
   activeVersionId: string | null;
   draftRevision: number;
   dirty: boolean;
+  initializationStatus?: PlanInitializationState["status"];
 }
 
 export interface PlanVersion {
@@ -88,6 +111,7 @@ export interface PlanAgentContext {
   spatialViewContext?: unknown;
   purchaseSummary: unknown;
   buildTaskSummary: unknown;
+  initialization?: PlanInitializationState;
 }
 
 export const PLAN_PATCH_PATHS = [
@@ -134,6 +158,8 @@ export interface PlanChangeProposal {
     budgetDeltaCny: number | null;
   };
   status: "proposed" | "applied" | "rejected" | "stale";
+  kind?: "change" | "initialization";
+  intent?: BuildIntent;
 }
 
 export interface PlanTransactionLink {
@@ -177,6 +203,8 @@ export interface CreatePlanInput {
 export interface UpdateDraftInput {
   expectedRevision: number;
   config: BuildConfig;
+  name?: string;
+  metadata?: BuildPlanMetadata;
   idempotencyKey?: string;
 }
 

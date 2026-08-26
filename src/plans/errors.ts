@@ -1,4 +1,4 @@
-export type PlanRepositoryErrorCode = "not_found" | "corrupt_data" | "invalid_id" | "idempotency_conflict" | "invalid_input";
+export type PlanRepositoryErrorCode = "not_found" | "corrupt_data" | "invalid_id" | "idempotency_conflict" | "invalid_input" | "initialization_pending";
 
 export class PlanRepositoryError extends Error {
   constructor(
@@ -10,4 +10,3 @@ export class PlanRepositoryError extends Error {
     this.name = "PlanRepositoryError";
   }
 }
-

@@ -1,4 +1,5 @@
 import type { BuildConfig } from "../config/types";
+import type { BuildPlanMetadata } from "./contracts";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 
 export function createDefaultN6Config(planId: string, timestamp: string): BuildConfig {
@@ -27,3 +28,20 @@ export function createDefaultN6Config(planId: string, timestamp: string): BuildC
   };
 }
 
+/**
+ * A pending Agent plan still carries a valid internal config so the existing
+ * deterministic UI can render while requirements are being collected. The
+ * metadata flag is authoritative: none of these scaffold selections represent
+ * a user recommendation until an initialization proposal is approved.
+ */
+export function createAgentInitializationScaffold(planId: string, timestamp: string): { config: BuildConfig; metadata: BuildPlanMetadata } {
+  const config = createDefaultN6Config(planId, timestamp);
+  config.name = "待 Agent 初始化方案";
+  return {
+    config,
+    metadata: {
+      tags: ["agent-initialization"],
+      initialization: { status: "pending", source: "agent" },
+    },
+  };
+}

@@ -31,6 +31,23 @@
 #n6-lab#n6-lab .workspace-global-shell nav a[aria-current="page"] { color: var(--foreground); border-bottom: 2px solid var(--primary); }
 #n6-lab#n6-lab .workspace-inline-error { margin: 0; color: var(--bad); font-size: 11px; }
 
+#n6-lab#n6-lab .workspace-new-plan-dialog {
+  width: min(520px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--foreground);
+  background: var(--card);
+  box-shadow: 0 24px 80px color-mix(in srgb, #000 42%, transparent);
+}
+#n6-lab#n6-lab .workspace-new-plan-dialog::backdrop { background: color-mix(in srgb, #000 58%, transparent); }
+#n6-lab#n6-lab .workspace-new-plan-dialog form { display: grid; gap: 10px; padding: 22px; }
+#n6-lab#n6-lab .workspace-new-plan-dialog h2,
+#n6-lab#n6-lab .workspace-new-plan-dialog p { margin: 0; }
+#n6-lab#n6-lab .workspace-new-plan-dialog p { color: var(--muted-foreground); }
+#n6-lab#n6-lab .workspace-new-plan-dialog button { display: grid; gap: 3px; justify-items: start; text-align: left; }
+#n6-lab#n6-lab .workspace-new-plan-dialog button span { color: var(--muted-foreground); font-size: 11px; font-weight: 400; }
+
 #n6-lab#n6-lab:is([data-workspace-route="workspace"], [data-workspace-route="editor"], [data-workspace-route="build"]) > :not(.workspace-global-shell):not(.workspace-pages):not(dialog) {
   display: none !important;
 }

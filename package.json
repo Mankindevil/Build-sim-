@@ -16,6 +16,7 @@
     "test:workspace:browser": "node scripts/workspace-browser-smoke.mjs",
     "test:spatial:browser": "node scripts/spatial-browser-smoke.mjs",
     "test:agent-plan:browser": "node scripts/agent-plan-browser-smoke.mjs",
+    "test:agent-initialization:browser": "node scripts/agent-initialization-browser-smoke.mjs",
     "test:transactions:browser": "node scripts/transaction-plan-browser-smoke.mjs",
     "test:build-tasks:browser": "node scripts/build-task-browser-smoke.mjs",
     "test:platform:browser": "node scripts/platform-acceptance-browser.mjs",

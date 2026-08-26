@@ -1,5 +1,5 @@
 import type { BuildConfig } from "../config/types";
-import { createDefaultN6Config } from "../plans/default-plan";
+import { createAgentInitializationScaffold, createDefaultN6Config } from "../plans/default-plan";
 import type { PlanStore, PlanStoreState } from "../plans/client-store";
 import { WorkspaceRouter, type WorkspaceRoute } from "./workspace-router";
 import "./workspace-shell.css";
@@ -15,6 +15,7 @@ const labels: Record<WorkspaceRoute, string> = {
 };
 
 function statusLabel(state: PlanStoreState): string {
+  if (state.activePlan?.metadata.initialization?.status === "pending") return "空白方案 · 等待 Agent 初始化";
   if (state.saveStatus === "offline") return "离线 · 草稿未持久化";
   if (state.saveStatus === "saving") return "正在保存草稿…";
   if (state.saveStatus === "saved") return state.activePlan?.draft.dirty ? "草稿已保存 · 未版本化" : "已保存";
@@ -47,13 +48,22 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
       <button type="button" data-save-version>保存版本</button>
     </div>
     <nav aria-label="工作区导航">${Object.entries(labels).map(([route, label]) => `<a href="#/${route}" data-route="${route}">${label}</a>`).join("")}</nav>
-    <p class="workspace-inline-error" data-workspace-error role="alert" hidden></p>`;
+    <p class="workspace-inline-error" data-workspace-error role="alert" hidden></p>
+    <dialog class="workspace-new-plan-dialog" data-new-plan-dialog aria-labelledby="new-plan-title">
+      <form method="dialog">
+        <h2 id="new-plan-title">新建方案</h2>
+        <p>从空白需求开始和 Agent 对话，或继续使用当前 N6 模板。</p>
+        <button type="button" data-new-agent-plan><strong>使用 Agent 初始化</strong><span>先收集预算与用途，完整提案经你批准后才写入草稿</span></button>
+        <button type="button" data-new-template-plan><strong>使用 N6 模板</strong><span>立即创建现有默认配置</span></button>
+        <button type="submit">取消</button>
+      </form>
+    </dialog>`;
   root.prepend(shell);
 
   const switcher = shell.querySelector<HTMLSelectElement>("[data-plan-switcher]")!;
   const error = shell.querySelector<HTMLElement>("[data-workspace-error]")!;
   const render = (state: PlanStoreState) => {
-    switcher.innerHTML = state.plans.map((plan) => `<option value="${plan.id}">${plan.name}${plan.status === "archived" ? "（已归档）" : ""}</option>`).join("");
+    switcher.innerHTML = state.plans.map((plan) => `<option value="${plan.id}">${plan.name}${plan.initializationStatus === "pending" ? "（待初始化）" : ""}${plan.status === "archived" ? "（已归档）" : ""}</option>`).join("");
     switcher.value = state.activePlan?.id ?? "";
     switcher.disabled = !state.plans.length;
     shell.querySelector<HTMLElement>("[data-plan-name]")!.textContent = state.activePlan?.name ?? "尚无方案";
@@ -61,6 +71,7 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
     const status = shell.querySelector<HTMLElement>("[data-save-status]")!;
     status.textContent = statusLabel(state);
     status.dataset.status = state.saveStatus;
+    shell.querySelector<HTMLButtonElement>("[data-save-version]")!.disabled = state.activePlan?.metadata.initialization?.status === "pending";
     error.hidden = !state.error;
     error.textContent = state.error ?? "";
   };
@@ -73,10 +84,30 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
       switcher.value = store.getState().activePlan?.id ?? "";
     });
   });
+  const dialog = shell.querySelector<HTMLDialogElement>("[data-new-plan-dialog]")!;
   shell.querySelector<HTMLButtonElement>("[data-new-plan]")!.addEventListener("click", () => {
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+  });
+  shell.querySelector<HTMLButtonElement>("[data-new-agent-plan]")!.addEventListener("click", () => {
+    const timestamp = new Date().toISOString();
+    const scaffold = createAgentInitializationScaffold("new-plan", timestamp);
+    void store.create("待 Agent 初始化方案", scaffold.config, scaffold.metadata).then(() => {
+      dialog.close?.();
+      dialog.removeAttribute("open");
+      router.navigate("agent");
+    }).catch((cause) => {
+      error.hidden = false;
+      error.textContent = cause instanceof Error ? cause.message : "无法创建方案";
+    });
+  });
+  shell.querySelector<HTMLButtonElement>("[data-new-template-plan]")!.addEventListener("click", () => {
     const timestamp = new Date().toISOString();
     const config: BuildConfig = createDefaultN6Config("new-plan", timestamp);
-    void store.create(`N6 方案 ${new Date().toLocaleDateString("zh-CN")}`, config).catch((cause) => {
+    void store.create(`N6 方案 ${new Date().toLocaleDateString("zh-CN")}`, config).then(() => {
+      dialog.close?.();
+      dialog.removeAttribute("open");
+    }).catch((cause) => {
       error.hidden = false;
       error.textContent = cause instanceof Error ? cause.message : "无法创建方案";
     });
