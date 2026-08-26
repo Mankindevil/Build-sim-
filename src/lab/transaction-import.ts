@@ -134,6 +134,26 @@ const OFFICIAL_QUERY_NOISE = new Set([
   "pcie", "pci", "express", "edition", "gaming", "video", "显卡", "商品", "型号",
 ]);
 
+const REVIEW_CATEGORY_PATTERNS: Array<[string, RegExp]> = [
+  ["gpu", /\b(?:geforce|radeon|rtx\s*\d{3,4}|gtx\s*\d{3,4}|arc\s+[a-z]\d{3})\b|显卡/iu],
+  ["psu", /\b(?:power\s*supply|psu|focus|vertex|prime|rm\d{3,4}|hx\d{3,4}|ax\d{3,4}|sf\d{3,4}|gx[- ]?\d{3,4}|px[- ]?\d{3,4})\b|电源/iu],
+  ["motherboard", /\b(?:motherboard|mainboard)\b|主板/iu],
+  ["cpu", /\b(?:core\s+i[3579][- ]?\d{4,5}|ryzen\s+[3579]\s+\d{4,5}|processor|cpu)\b|处理器/iu],
+];
+
+export function inferReviewedCategory(name: string): string | null {
+  return REVIEW_CATEGORY_PATTERNS.find(([, pattern]) => pattern.test(name.normalize("NFKC")))?.[0] ?? null;
+}
+
+function brandForReviewedName(originalName: string, reviewedName: string, detectedBrand: string | null | undefined): string | null {
+  const brand = detectedBrand?.trim();
+  if (!brand) return null;
+  const brandKey = comparableIdentity(brand);
+  const reviewedKey = comparableIdentity(reviewedName);
+  if (brandKey && reviewedKey.includes(brandKey)) return brand;
+  return reviewedKey === comparableIdentity(originalName) ? brand : null;
+}
+
 export function compactOfficialQuery(name: string, brand: string | null | undefined, category: string): string {
   const normalized = name.normalize("NFKC").replace(/[™®]/g, " ").replace(/\boverclocked\b/gi, "OC").replace(/[^A-Za-z0-9.+-]+/g, " ").trim();
   if (category !== "gpu") return normalized.slice(0, 120);
@@ -202,7 +222,7 @@ export interface TransactionImportPlanContext {
   planId: string;
   planVersionId: string | null;
   planName: string;
-  items: Array<{ id: string; skuId: string; name: string; category: string }>;
+  items: Array<{ id: string; skuId: string; name: string; category: string; placeholder?: boolean }>;
 }
 
 export interface TransactionImportController { dispose(): void; }
@@ -254,8 +274,8 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
   retry.hidden = true;
   const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "case-view-btn"; cancel.textContent = "取消当前处理"; cancel.hidden = true; cancel.dataset.transactionCancel = ""; retry.insertAdjacentElement("afterend", cancel);
   const readProgress = document.createElement("progress"); readProgress.max = 100; readProgress.hidden = true; readProgress.setAttribute("aria-label", "读取截图进度"); cancel.insertAdjacentElement("afterend", readProgress);
-  const showReview = (record: TransactionImportRecord, screenshot: File, copy: string, reviewOptions: { enrichmentAnalysis?: TransactionAnalysis; ocrText?: string; catalogCandidate?: CatalogCandidate; searchLogs?: string[] } = {}): void => {
-    const { enrichmentAnalysis, ocrText, catalogCandidate, searchLogs = [] } = reviewOptions;
+  const showReview = (record: TransactionImportRecord, screenshot: File, copy: string, reviewOptions: { enrichmentAnalysis?: TransactionAnalysis; searchCompleted?: boolean; ocrText?: string; catalogCandidate?: CatalogCandidate; searchLogs?: string[] } = {}): void => {
+    const { enrichmentAnalysis, searchCompleted = false, ocrText, catalogCandidate, searchLogs = [] } = reviewOptions;
     result.hidden = false;
     result.replaceChildren();
     const heading = document.createElement("div");
@@ -330,7 +350,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
         const option = document.createElement("option");
         option.value = item.id;
         option.textContent = `${CATEGORY_LABELS[item.category] ?? item.category} · ${item.name}`;
-        option.selected = record.planLink?.planItemId === item.id || item.skuId === record.skuId;
+        option.selected = record.planLink?.planItemId === item.id || item.skuId === record.skuId || Boolean(item.placeholder && item.category === record.category);
         group.append(option);
       }
       link.append(group);
@@ -345,6 +365,8 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
         linkHint.textContent = "当前没有活动方案，这笔交易会先进入未关联采购。";
       } else if (!selectedItem) {
         linkHint.textContent = "额外购买或暂不确定用途时选这里，之后仍可重新对应方案位置。";
+      } else if (selectedItem.placeholder) {
+        linkHint.textContent = "当前方案尚未配置这个部件；关联后会记录购买用途，只有匹配正式目录 SKU 时才会更新方案选择。";
       } else if (selectedItem.skuId === record.skuId) {
         linkHint.textContent = "已按相同型号自动对应；这里只记录交易用途，不会改动识别结果。";
       } else {
@@ -461,7 +483,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
     confirm.type = "button";
     confirm.textContent = "加入下方基座";
     confirm.disabled = Boolean(candidateApproval);
-    confirm.hidden = Boolean(enrichmentAnalysis);
+    confirm.hidden = Boolean(enrichmentAnalysis && !searchCompleted);
     candidateApproval?.addEventListener("change", () => { confirm.disabled = !candidateApproval?.checked; });
     const reviewedRecord = (): TransactionImportRecord => {
       const rawPrice = price.value.trim();
@@ -497,15 +519,30 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       result.replaceChildren();
       setPhase("staged", "staged · 已加入编辑区但尚未归档；点击“保存基座/保存更改”后才会成为 archived。", "ok");
     });
-    actions.append(discard);
+    const retryOcr = document.createElement("button");
+    retryOcr.type = "button";
+    retryOcr.className = "case-view-btn transaction-review-retry-ocr";
+    retryOcr.textContent = "重新 OCR";
+    retryOcr.addEventListener("click", () => void processFile(screenshot));
+    actions.append(discard, retryOcr);
     if (enrichmentAnalysis) {
       const enrich = document.createElement("button");
       enrich.type = "button";
       enrich.className = "case-view-btn transaction-review-enrich";
-      enrich.textContent = "确认信息并查询官网";
+      enrich.textContent = searchCompleted ? "修正后重新查询官网" : "确认信息并查询官网";
       enrich.addEventListener("click", async () => {
         const reviewed = reviewedRecord();
-        const officialQuery = compactOfficialQuery(reviewed.name, enrichmentAnalysis.detected.brand, reviewed.category);
+        const inferredCategory = inferReviewedCategory(reviewed.name);
+        if (inferredCategory && inferredCategory !== reviewed.category) {
+          const previousCategory = reviewed.category;
+          category.value = inferredCategory;
+          setPhase("reviewing", `型号名称更像“${CATEGORY_LABELS[inferredCategory] ?? inferredCategory}”，已阻止使用“${CATEGORY_LABELS[previousCategory] ?? previousCategory}”分类联网。请核对自动修正后再次查询。`, "warn");
+          category.focus();
+          return;
+        }
+        const identityChanged = comparableIdentity(reviewed.name) !== comparableIdentity(enrichmentAnalysis.detected.name);
+        const reviewedBrand = brandForReviewedName(enrichmentAnalysis.detected.name, reviewed.name, enrichmentAnalysis.detected.brand);
+        const officialQuery = compactOfficialQuery(reviewed.name, reviewedBrand, reviewed.category);
         const progressMessages: string[] = [];
         const searchLog = document.createElement("section");
         searchLog.className = "transaction-search-log";
@@ -522,6 +559,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
           logList.append(row);
         };
         appendLog(`用户已确认输入 · ${reviewed.name} · ${CATEGORY_LABELS[reviewed.category] ?? reviewed.category}`);
+        if (enrichmentAnalysis.detected.brand && !reviewedBrand) appendLog(`已忽略冲突的 OCR 品牌 · ${enrichmentAnalysis.detected.brand}`);
         appendLog(`官网查询词 · ${officialQuery}`);
         const searchController = new AbortController();
         activeRequest?.abort();
@@ -536,8 +574,10 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               query: officialQuery,
-              ...(enrichmentAnalysis.detected.brand && reviewed.name.toLocaleLowerCase().includes(enrichmentAnalysis.detected.brand.toLocaleLowerCase()) ? { brand: enrichmentAnalysis.detected.brand } : {}),
+              ...(reviewedBrand ? { brand: reviewedBrand } : {}),
               category: reviewed.category,
+              requestId: globalThis.crypto?.randomUUID?.() ?? `${record.receiptId}-${Date.now()}`,
+              trigger: "user-confirmed-review",
             }),
             signal: searchController.signal,
           }));
@@ -547,6 +587,8 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
             detected: {
               ...enrichmentAnalysis.detected,
               name: reviewed.name,
+              brand: reviewedBrand,
+              model: identityChanged ? null : enrichmentAnalysis.detected.model,
               category: reviewed.category,
               qty: reviewed.qty,
               unitPriceCny: reviewed.unitPriceCny,
@@ -559,6 +601,8 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
           setPhase("reviewing", "官网查询完成；请再次核对来源与参数后确认入档。", lookup.record.evidence.officialUrl ? "ok" : "warn");
           const retainedOcrText = enrichmentAnalysis.ocrText ?? ocrText;
           showReview(merged, screenshot, lookup.record.evidence.officialUrl ? "已找到同型号候选 · 需要你确认后才能入档" : "未找到同型号官网来源 · 仍可按人工记录入档", {
+            enrichmentAnalysis: correctedAnalysis,
+            searchCompleted: true,
             ...(retainedOcrText ? { ocrText: retainedOcrText } : {}),
             ...(lookup.candidate ? { catalogCandidate: lookup.candidate } : {}),
             searchLogs: progressMessages,

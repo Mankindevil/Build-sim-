@@ -432,6 +432,7 @@ export function initBuildProgress(args: {
 
   const effectiveLinkStatus = (record: TransactionArchiveRecord): PlanTransactionLink["linkStatus"] => {
     if (record.link.linkStatus !== "linked" || record.link.planId !== activePlanId) return record.link.linkStatus;
+    if (record.link.planItemId === "gpu.primary" && record.item.category === "gpu") return "linked";
     return currentBom.some((line) => line.skuId === record.link.planItemId) ? "linked" : "stale";
   };
 
@@ -441,7 +442,8 @@ export function initBuildProgress(args: {
     const pending = Boolean(record.pendingFile);
     const deletingImage = pendingScreenshotDeletes.has(record.receiptId);
     const officialUrl = safeOfficialUrl(evidence?.officialUrl as string | null | undefined);
-    const activeItems = currentBom.map((line) => state.items[line.skuId]).filter((entry): entry is BuildProgressItem => Boolean(entry));
+    const activeItems: Array<Pick<BuildProgressItem, "id" | "category" | "name">> = currentBom.map((line) => state.items[line.skuId]).filter((entry): entry is BuildProgressItem => Boolean(entry));
+    if (!activeItems.some((entry) => entry.category === "gpu")) activeItems.push({ id: "gpu.primary", category: "gpu", name: "显卡未配置（可关联购买记录）" });
     const linkOptions = [`<option value="">未关联采购项</option>`, ...activeItems.map((entry) => `<option value="${esc(entry.id)}"${record.link.planId === activePlanId && record.link.planItemId === entry.id ? " selected" : ""}>${esc(categoryLabel(entry.category))} · ${esc(entry.name)}</option>`)].join("");
     const planName = args.getPlans?.().find((plan) => plan.id === record.link.planId)?.name ?? record.link.planId;
     const linkStatus = effectiveLinkStatus(record);

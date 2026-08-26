@@ -205,7 +205,7 @@ DEEPSEEK_OCR_MODEL=deepseek-v4-flash-vision-exp
 DEEPSEEK_OCR_API_KEY=
 ```
 
-截图只发送到服务端配置的 DeepSeek 地址，不写入目录；应用仅保存内容哈希、脱敏摘要、识别引擎、provider usage 与本地费用估算。OCR 不可用时请求会明确失败，不会静默换引擎。仍可显式填写自托管 vLLM 地址并把模型设为 `deepseek-ai/DeepSeek-OCR`；需要回滚到本地英文识别时，设置 `TRANSACTION_OCR_PROVIDER=tesseract`。
+截图只发送到服务端配置的 DeepSeek 地址，不写入目录；应用仅保存内容哈希、脱敏摘要、识别引擎、provider usage 与本地费用估算。OCR 遇到瞬时 `408`、`429` 或 `5xx` 时会在不更换引擎的前提下重试一次；即使请求成功，校对页仍始终提供“重新 OCR”，用于处理语义识别错误。官网查询只会在人工确认后发起：高置信度的名称/分类冲突会先被阻断，人工修改身份后会丢弃过期 OCR 品牌，每次重新查询也会生成新的可审计 request id。仍可显式填写自托管 vLLM 地址并把模型设为 `deepseek-ai/DeepSeek-OCR`；需要回滚到本地英文识别时，设置 `TRANSACTION_OCR_PROVIDER=tesseract`。
 
 ### 3. 启动 Agent 服务
 

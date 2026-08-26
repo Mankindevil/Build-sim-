@@ -166,7 +166,11 @@ function detectIdentity(raw, catalog) {
       .filter((sku) => [sku.mpn, sku.model].filter(Boolean).some((identity) => comparable(identity).includes(modelFragment)))
       .map((sku) => sku.category)
     : []);
-  const category = explicitCategory ?? (catalogCategories.size === 1 ? [...catalogCategories][0] : null);
+  // A model fragment that resolves to one governed catalog category is
+  // stronger evidence than unrelated marketplace/navigation copy elsewhere in
+  // the OCR text. For example a GX-850 receipt can also contain a "主板" promo
+  // label; that must not turn the PSU into a motherboard search.
+  const category = catalogCategories.size === 1 ? [...catalogCategories][0] : explicitCategory ?? null;
   return { brand: brand ?? null, model: model ?? null, category: category ?? null, query: [brand, model].filter(Boolean).join(" ") };
 }
 

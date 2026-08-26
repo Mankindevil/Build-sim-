@@ -205,7 +205,7 @@ DEEPSEEK_OCR_MODEL=deepseek-v4-flash-vision-exp
 DEEPSEEK_OCR_API_KEY=
 ```
 
-The screenshot is sent only to the configured DeepSeek endpoint and is not persisted in the catalog; the app retains a content hash, redacted summary, engine id, provider usage, and local cost estimate. OCR failures are explicit and never silently switch engines. A self-hosted vLLM `deepseek-ai/DeepSeek-OCR` endpoint remains supported by setting its URL and model explicitly. Set `TRANSACTION_OCR_PROVIDER=tesseract` only for an intentional rollback to bundled English recognition.
+The screenshot is sent only to the configured DeepSeek endpoint and is not persisted in the catalog; the app retains a content hash, redacted summary, engine id, provider usage, and local cost estimate. Transient OCR failures (`408`, `429`, or `5xx`) are retried once without switching engines, and every successful review still exposes an explicit re-OCR action for semantically wrong results. Official catalog search starts only after review confirmation, rejects high-confidence name/category conflicts, discards stale OCR brands after manual identity edits, and gives each user retry a new audited request id. A self-hosted vLLM `deepseek-ai/DeepSeek-OCR` endpoint remains supported by setting its URL and model explicitly. Set `TRANSACTION_OCR_PROVIDER=tesseract` only for an intentional rollback to bundled English recognition.
 
 ### 3. Start the Agent service
 

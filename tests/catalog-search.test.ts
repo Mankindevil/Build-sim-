@@ -159,6 +159,10 @@ describe("G3 catalog search job", () => {
     expect(completed?.candidates[0]?.fields?.some((field: { field: string }) => field.field === "dims.lengthMm")).toBe(true);
     expect(completed?.candidates[0]?.priceCandidates).toBeUndefined();
     expect(getJob(first.jobId)?.idempotencyKey).toBe(first.idempotencyKey);
+    const retried = queueSearch({ query: "EX-BOARD-X1", category: "motherboard", officialOnly: true, requestId: "transaction-review-retry-0001", trigger: "user-confirmed-review" }, options);
+    expect(retried.jobId).not.toBe(first.jobId);
+    expect(retried.requestContext).toEqual({ source: "transaction-import", trigger: "user-confirmed-review", requestId: "transaction-review-retry-0001" });
+    await waitForJob(retried.jobId);
   });
 
   it("persists candidates atomically with an audit manifest", async () => {

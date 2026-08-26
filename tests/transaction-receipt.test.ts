@@ -38,6 +38,14 @@ describe("transaction screenshot receipt agent", () => {
     });
   });
 
+  it("prefers the governed model category over unrelated OCR navigation copy", () => {
+    const result = analyzeTransactionText("主板专区 今日推荐 GX-850 数量 1 实付 ¥400", catalog);
+    expect(result).toMatchObject({
+      status: "catalog-search-required",
+      detected: { name: "GX-850", category: "psu" },
+    });
+  });
+
   it("matches the FX generation only when the revision is present", () => {
     const result = analyzeTransactionText("Seasonic GX-850 FX 数量 1 实付 ¥400", catalog);
     expect(result).toMatchObject({
@@ -122,6 +130,24 @@ describe("transaction screenshot receipt agent", () => {
     });
     expect(result).toMatchObject({ evidence: { ocrEngine: "deepseek-ocr:deepseek-ai/DeepSeek-OCR" }, billing: null });
     expect(requestBody).toHaveProperty("vllm_xargs");
+  });
+
+  it("retries one transient OCR provider failure but not successful requests", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response("busy", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        model: "deepseek-v4-flash-vision-exp",
+        choices: [{ message: { content: "Intel i5-14500 CPU Total ¥1380" } }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const image = png();
+    const result = await analyzeTransactionScreenshot({ imageDataUrl: `data:image/png;base64,${image.toString("base64")}` }, {
+      catalog,
+      apiUrl: "https://api.deepseek.com",
+      apiKey: "fixture-key",
+      fetchImpl,
+    });
+    expect(result.status).toBe("matched-catalog");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("keeps local Tesseract only as an explicit rollback provider", async () => {

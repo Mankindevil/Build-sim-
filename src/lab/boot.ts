@@ -25,7 +25,7 @@ import { initAdvicePanel } from "./advice-panel";
 import { initAgentPanel, type AgentPanelController } from "./agent-panel";
 import { buildAdviceInput } from "../advice/validate";
 import { initBuildProgress, type BuildProgressController, type BuildProgressItem } from "./build-progress";
-import { initTransactionImport, type TransactionImportController } from "./transaction-import";
+import { initTransactionImport, type TransactionImportController, type TransactionImportPlanContext } from "./transaction-import";
 import { WorkspaceApiClient } from "../plans/client";
 import { PlanStore } from "../plans/client-store";
 import { canonicalJson, sha256Hex } from "../plans/canonical";
@@ -1160,14 +1160,18 @@ async function boot(): Promise<void> {
     getPlanContext: () => {
       const state = planStore?.getState();
       if (!state?.activePlan || !state.evaluation) return null;
+      const items: TransactionImportPlanContext["items"] = state.evaluation.bom.map((line) => {
+        const sku = catalog.skus.find((entry) => entry.id === line.skuId);
+        return { id: line.skuId, skuId: line.skuId, name: sku?.name ?? line.skuId, category: sku?.category ?? "其他" };
+      });
+      if (state.activePlan.draft.config.selection.gpuId === "gpu.none") {
+        items.push({ id: "gpu.primary", skuId: "gpu.none", name: "显卡未配置（可关联本次购买）", category: "gpu", placeholder: true });
+      }
       return {
         planId: state.activePlan.id,
         planVersionId: state.activePlan.activeVersionId,
         planName: state.activePlan.name,
-        items: state.evaluation.bom.map((line) => {
-          const sku = catalog.skus.find((entry) => entry.id === line.skuId);
-          return { id: line.skuId, skuId: line.skuId, name: sku?.name ?? line.skuId, category: sku?.category ?? "其他" };
-        }),
+        items,
       };
     },
   });

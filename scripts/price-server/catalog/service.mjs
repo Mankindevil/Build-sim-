@@ -240,11 +240,14 @@ export function queueSearch(body, options = {}) {
   const query = normalizeModelQuery(String(body.query ?? ""), { brand: body.brand, category: body.category, locale: body.locale ?? "zh-CN" });
   const limit = Math.min(20, Math.max(1, Number(body.limit ?? 10)));
   const providerIds = (options.discoveryProviders ?? []).map((provider) => provider.id);
-  const key = JSON.stringify({ query, officialOnly: body.officialOnly !== false, limit, providerIds: providerIds.length ? providerIds : ["catalog-cache", "registry-search"], registryVersion: OFFICIAL_REGISTRY_VERSION, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION });
+  const requestId = typeof body.requestId === "string" && /^[A-Za-z0-9._:-]{8,160}$/.test(body.requestId) ? body.requestId : null;
+  const trigger = body.trigger === "user-confirmed-review" ? body.trigger : null;
+  const requestContext = trigger ? { source: "transaction-import", trigger, ...(requestId ? { requestId } : {}) } : null;
+  const key = JSON.stringify({ query, officialOnly: body.officialOnly !== false, limit, providerIds: providerIds.length ? providerIds : ["catalog-cache", "registry-search"], registryVersion: OFFICIAL_REGISTRY_VERSION, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, ...(requestId ? { requestId } : {}) });
   const id = jobId(key);
   const existing = jobs.get(id);
   if (existing) return existing;
-  const job = { jobId: id, idempotencyKey: sha256(key), status: "queued", stage: "normalize", query, limit, candidates: [], warnings: [], errors: [], createdAt: now(), updatedAt: now() };
+  const job = { jobId: id, idempotencyKey: sha256(key), status: "queued", stage: "normalize", query, ...(requestContext ? { requestContext } : {}), limit, candidates: [], warnings: [], errors: [], createdAt: now(), updatedAt: now() };
   jobs.set(id, job);
   void processJob(job, options).catch(async (error) => { job.status = "failed"; job.stage = "score"; job.errors.push(error?.message ?? String(error)); job.updatedAt = now(); await persistJob(job, options.persistRoot); job.persisted = true; });
   return job;
