@@ -24,7 +24,7 @@ import v1RuntimeUrl from "./v1-runtime.js?url";
 import { initAdvicePanel } from "./advice-panel";
 import { initAgentPanel, type AgentPanelController } from "./agent-panel";
 import { buildAdviceInput } from "../advice/validate";
-import { initBuildProgress, type BuildProgressController, type BuildProgressItem } from "./build-progress";
+import { initBuildProgress, type BuildProgressController } from "./build-progress";
 import { initTransactionImport, type TransactionImportController, type TransactionImportPlanContext } from "./transaction-import";
 import { WorkspaceApiClient } from "../plans/client";
 import { PlanStore } from "../plans/client-store";
@@ -36,7 +36,6 @@ import { WorkspaceRouter } from "./workspace-router";
 import { mountWorkspacePages, type WorkspacePagesController } from "./workspace-pages";
 import { EvaluationCoordinator } from "../plans/evaluation";
 import { mountSpatialView, type SpatialViewController } from "./spatial-view";
-import { applyArchivedPurchasesAsDefaults } from "./transaction-plan-default";
 import { createPlanAgentContext } from "../agent/plan-context";
 import type { PlanAgentContext } from "../plans/contracts";
 import "./design-system.css";
@@ -56,15 +55,6 @@ let spatialView: SpatialViewController | null = null;
 const evaluationCoordinator = new EvaluationCoordinator((config) => evaluateBuild(config, catalog));
 
 const BOARD_ID = "board.asus-w680m-ace-se";
-
-function setArchivedPurchasesAsPlanDefaults(items: BuildProgressItem[]): string[] {
-  const state = planStore?.getState();
-  if (!planStore || !state?.activePlan) return [];
-  const preview = structuredClone(state.activePlan.draft.config);
-  const changed = applyArchivedPurchasesAsDefaults(preview, items, state.activePlan.id, catalog);
-  if (changed.length) planStore.replaceDraft(preview);
-  return changed;
-}
 
 export interface LabEvaluationOptions {
   ambientC: number;
@@ -1080,7 +1070,6 @@ async function boot(): Promise<void> {
   if (labRoot) {
     router = new WorkspaceRouter();
     planShell = mountPlanShell(labRoot, planStore, router);
-    workspacePages = mountWorkspacePages(labRoot, planStore, router, buildTaskStore);
   }
   window.__N6_LAB__ = {
     ...views,
@@ -1140,8 +1129,13 @@ async function boot(): Promise<void> {
       return state?.activePlan && state.evaluation ? { planId: state.activePlan.id, planVersionId: state.activePlan.activeVersionId, planName: state.activePlan.name, evaluation: state.evaluation } : null;
     },
     getPlans: () => planStore?.getState().plans.map((plan) => ({ id: plan.id, name: plan.name })) ?? [],
-    onTransactionsArchived: setArchivedPurchasesAsPlanDefaults,
   });
+  if (labRoot && router && planStore) {
+    workspacePages = mountWorkspacePages(labRoot, planStore, router, buildTaskStore ?? undefined, buildProgress ?? undefined);
+    // The purchase editor is now a real route surface rather than a modal.
+    // Populate its current-plan projection immediately, before the user visits it.
+    $("build-base-edit")?.click();
+  }
   const syncBuildTasks = () => {
     updatePriceStamp();
     const state = planStore?.getState();
@@ -1178,7 +1172,6 @@ async function boot(): Promise<void> {
   const openTransactionUpload = (): void => {
     router?.navigate("purchases");
     $("build-review-current-tab")?.click();
-    $("transaction-screenshot-input")?.click();
   };
   $("hero-upload-transaction")?.addEventListener("click", openTransactionUpload);
   const syncBuildProgressPlan = () => {

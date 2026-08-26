@@ -1,24 +1,519 @@
-#n6-lab .three-spatial-root { position: relative; min-height: 520px; overflow: hidden; background: radial-gradient(circle at 50% 45%, color-mix(in srgb,var(--primary) 8%,transparent), transparent 58%); }
-#n6-lab .three-spatial-canvas { position: absolute; inset: 0; min-height: 520px; }
-#n6-lab .three-spatial-canvas canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
-#n6-lab .three-spatial-canvas canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--primary); }
-#n6-lab .three-spatial-toolbar { position: absolute; z-index: 2; top: 10px; left: 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; max-width: calc(100% - 230px); }
-#n6-lab .three-spatial-toolbar button,#n6-lab .three-spatial-toolbar summary,#n6-lab .three-spatial-toolbar>label { border: 1px solid color-mix(in srgb,var(--border) 78%,transparent); border-radius: 7px; padding: 6px 8px; background: color-mix(in srgb,var(--card) 88%,transparent); color: var(--foreground); font: inherit; font-size: 11px; cursor: pointer; backdrop-filter: blur(8px); }
-#n6-lab .three-spatial-toolbar button[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); }
-#n6-lab .three-spatial-toolbar details { position: relative; }
-#n6-lab .three-spatial-toolbar details>div { position: absolute; top: 33px; left: 0; display: grid; gap: 5px; min-width: 130px; padding: 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); box-shadow: var(--shadow); }
-#n6-lab .three-spatial-workflow { position:absolute;z-index:3;left:10px;bottom:10px;display:flex;align-items:center;flex-wrap:wrap;gap:5px;max-width:calc(100% - 250px);padding:6px;border:1px solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:9px;background:color-mix(in srgb,var(--card) 90%,transparent);backdrop-filter:blur(9px) }
-#n6-lab .three-spatial-workflow label { display:flex;align-items:center;gap:4px;color:var(--muted-foreground);font-size:10px }
-#n6-lab .three-spatial-workflow select,#n6-lab .three-spatial-workflow button { max-width:220px;border:1px solid var(--border);border-radius:6px;padding:5px 7px;background:var(--card);color:var(--foreground);font:inherit;font-size:10px }
-#n6-lab .three-spatial-workflow small { flex-basis:100%;color:var(--muted-foreground);font-size:9px }
-#n6-lab .three-spatial-inspector { position: absolute; z-index: 2; top: 10px; right: 10px; width: min(220px,32%); max-height: calc(100% - 58px); overflow: auto; padding: 11px 12px; border: 1px solid color-mix(in srgb,var(--border) 75%,transparent); border-radius: 9px; background: color-mix(in srgb,var(--card) 88%,transparent); backdrop-filter: blur(10px); }
-#n6-lab .three-spatial-inspector h4 { margin: 0 0 8px; font-size: 13px; }
-#n6-lab .three-spatial-inspector p { margin: 0; color: var(--muted-foreground); font-size: 11px; }
-#n6-lab .three-spatial-inspector dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 8px; margin: 0; font-size: 10px; line-height: 1.4; }
-#n6-lab .three-spatial-inspector dt { color: var(--muted-foreground); }
-#n6-lab .three-spatial-inspector dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-#n6-lab .three-spatial-status { position: absolute; z-index: 2; right: 10px; bottom: 8px; margin: 0; padding: 4px 7px; border-radius: 5px; background: color-mix(in srgb,var(--card) 82%,transparent); color: var(--muted-foreground); font-size: 9px; }
-#n6-lab .three-spatial-fallback { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--border); background: color-mix(in srgb,var(--warn) 9%,var(--card)); color: var(--muted-foreground); font-size: 11px; }
-#n6-lab .spatial-stage.spatial-three-active>#iso-svg,#n6-lab .spatial-stage.spatial-three-active>.spatial-help { display: none; }
-@media (max-width:736px){#n6-lab .three-spatial-root,#n6-lab .three-spatial-canvas{min-height:560px}#n6-lab .three-spatial-canvas canvas{touch-action:pan-y}#n6-lab .three-spatial-toolbar{max-width:calc(100% - 20px)}#n6-lab .three-spatial-inspector{top:auto;right:8px;bottom:142px;width:calc(100% - 16px);max-height:110px}#n6-lab .three-spatial-workflow{left:8px;bottom:8px;max-width:calc(100% - 16px)}#n6-lab .three-spatial-workflow label{max-width:48%}#n6-lab .three-spatial-workflow select{max-width:135px}#n6-lab .three-spatial-status{display:none}}
-@media (prefers-reduced-motion:reduce){#n6-lab .three-spatial-root *{scroll-behavior:auto!important;transition:none!important}}
+#n6-lab .three-spatial-root {
+  position: relative;
+  min-height: 680px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 60%);
+}
+
+#n6-lab .three-spatial-canvas {
+  position: absolute;
+  inset: 0 0 132px;
+  min-height: 548px;
+}
+
+#n6-lab .three-spatial-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  outline: none;
+  cursor: grab;
+}
+
+#n6-lab .three-spatial-canvas canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+#n6-lab .three-spatial-toolbar {
+  position: absolute;
+  z-index: 4;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100% - 332px);
+}
+
+#n6-lab .three-spatial-control-group {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 4px 5px 4px 11px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--background) 24%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+#n6-lab .three-spatial-control-group > span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+#n6-lab .three-spatial-segmented {
+  display: flex;
+  gap: 3px;
+}
+
+#n6-lab .three-spatial-toolbar button,
+#n6-lab .three-spatial-toolbar summary {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#n6-lab .three-spatial-segmented button {
+  border-color: transparent;
+  background: transparent;
+}
+
+#n6-lab .three-spatial-toolbar button:hover,
+#n6-lab .three-spatial-toolbar summary:hover {
+  border-color: color-mix(in srgb, var(--primary) 38%, var(--border));
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+}
+
+#n6-lab .three-spatial-toolbar button[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 15%, var(--card));
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+#n6-lab .three-spatial-toolbar button:focus-visible,
+#n6-lab .three-spatial-toolbar summary:focus-visible,
+#n6-lab .three-spatial-workflow button:focus-visible,
+#n6-lab .three-spatial-workflow select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+#n6-lab .three-spatial-display-menu {
+  position: relative;
+}
+
+#n6-lab .three-spatial-display-menu > summary {
+  height: 100%;
+  list-style: none;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--background) 24%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+#n6-lab .three-spatial-display-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+#n6-lab .three-spatial-display-menu > summary::after {
+  content: "⌄";
+  margin-left: 8px;
+  color: var(--muted-foreground);
+}
+
+#n6-lab .three-spatial-display-menu[open] > summary::after {
+  content: "⌃";
+}
+
+#n6-lab .three-spatial-display-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  gap: 14px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card) 97%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+}
+
+#n6-lab .three-spatial-display-toggles,
+#n6-lab [data-layer-controls] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+#n6-lab .three-spatial-display-panel label {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: 8px;
+  color: var(--foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#n6-lab .three-spatial-display-panel input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+#n6-lab .three-spatial-display-panel fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+#n6-lab .three-spatial-display-panel legend {
+  padding: 0 5px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#n6-lab .three-spatial-inspector {
+  position: absolute;
+  z-index: 3;
+  top: 16px;
+  right: 16px;
+  bottom: 148px;
+  width: 280px;
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  box-shadow: 0 12px 34px color-mix(in srgb, var(--background) 28%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+#n6-lab .three-spatial-inspector h4 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+#n6-lab .three-spatial-inspector p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+#n6-lab .three-spatial-inspector dl {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px 10px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+#n6-lab .three-spatial-inspector dt {
+  color: var(--muted-foreground);
+}
+
+#n6-lab .three-spatial-inspector dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+#n6-lab .three-spatial-workflow {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: minmax(210px, 1.15fr) minmax(350px, 1.35fr) auto;
+  align-items: end;
+  gap: 8px 12px;
+  min-height: 132px;
+  padding: 12px 16px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--card) 97%, transparent);
+  box-shadow: 0 -12px 32px color-mix(in srgb, var(--background) 22%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+#n6-lab .three-spatial-workflow-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+#n6-lab .three-spatial-workflow-field > span {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#n6-lab .three-spatial-workflow select,
+#n6-lab .three-spatial-workflow button {
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 11px;
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 620;
+}
+
+#n6-lab .three-spatial-workflow select {
+  width: 100%;
+  min-width: 0;
+}
+
+#n6-lab .three-spatial-workflow button {
+  cursor: pointer;
+}
+
+#n6-lab .three-spatial-workflow button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary) 44%, var(--border));
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+}
+
+#n6-lab .three-spatial-workflow button:disabled {
+  cursor: not-allowed;
+  opacity: .42;
+}
+
+#n6-lab .three-spatial-step-field {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+}
+
+#n6-lab .three-spatial-step-nav,
+#n6-lab .three-spatial-workflow-actions {
+  display: flex;
+  gap: 6px;
+}
+
+#n6-lab .three-spatial-step-nav button {
+  min-width: 88px;
+}
+
+#n6-lab .three-spatial-workflow-actions {
+  justify-content: flex-end;
+}
+
+#n6-lab .three-spatial-workflow small {
+  grid-column: 1 / -1;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+#n6-lab .three-spatial-status {
+  position: absolute;
+  z-index: 2;
+  right: 312px;
+  bottom: 144px;
+  margin: 0;
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+#n6-lab .three-spatial-fallback {
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--warn) 9%, var(--card));
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+#n6-lab .spatial-stage:is(.spatial-three-pending, .spatial-three-active) > #iso-svg,
+#n6-lab .spatial-stage:is(.spatial-three-pending, .spatial-three-active) > .spatial-help,
+#n6-lab .spatial-stage:is(.spatial-three-pending, .spatial-three-active) > .spatial-data-strip {
+  display: none;
+}
+
+@media (max-width: 980px) {
+  #n6-lab .three-spatial-toolbar {
+    max-width: calc(100% - 300px);
+  }
+
+  #n6-lab .three-spatial-inspector {
+    width: 252px;
+  }
+
+  #n6-lab .three-spatial-workflow {
+    grid-template-columns: minmax(190px, .9fr) minmax(330px, 1.2fr);
+  }
+
+  #n6-lab .three-spatial-workflow-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 736px) {
+  #n6-lab .spatial-stage {
+    scroll-margin-top: 168px;
+  }
+
+  #n6-lab .three-spatial-root {
+    min-height: 920px;
+  }
+
+  #n6-lab .three-spatial-canvas {
+    bottom: 304px;
+    min-height: 616px;
+  }
+
+  #n6-lab .three-spatial-canvas canvas {
+    touch-action: pan-y;
+  }
+
+  #n6-lab .three-spatial-toolbar {
+    top: 8px;
+    right: 8px;
+    left: 8px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    max-width: none;
+  }
+
+  #n6-lab .three-spatial-control-group {
+    grid-column: 1 / -1;
+    min-height: 52px;
+  }
+
+  #n6-lab .three-spatial-segmented button,
+  #n6-lab .three-spatial-toolbar summary,
+  #n6-lab .three-spatial-reset {
+    min-height: 44px;
+  }
+
+  #n6-lab .three-spatial-segmented button {
+    flex: 1;
+    padding-inline: 8px;
+  }
+
+  #n6-lab .three-spatial-display-menu {
+    min-width: 0;
+  }
+
+  #n6-lab .three-spatial-display-panel {
+    right: auto;
+    left: 0;
+    width: calc(100vw - 32px);
+  }
+
+  #n6-lab .three-spatial-reset {
+    min-width: 96px;
+  }
+
+  #n6-lab .three-spatial-inspector {
+    top: 184px;
+    right: 8px;
+    bottom: 320px;
+    left: 8px;
+    width: auto;
+    max-height: 164px;
+    padding: 13px 14px;
+  }
+
+  #n6-lab .three-spatial-inspector.is-empty {
+    display: none;
+  }
+
+  #n6-lab .three-spatial-inspector dl {
+    grid-template-columns: 52px minmax(0, 1fr);
+  }
+
+  #n6-lab .three-spatial-workflow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+    min-height: 304px;
+    padding: 12px;
+  }
+
+  #n6-lab .three-spatial-step-field {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  #n6-lab .three-spatial-workflow-actions {
+    grid-column: auto;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  #n6-lab .three-spatial-workflow select,
+  #n6-lab .three-spatial-workflow button {
+    min-height: 44px;
+    font-size: 12px;
+  }
+
+  #n6-lab .three-spatial-step-nav button {
+    min-width: 82px;
+    padding-inline: 7px;
+  }
+
+  #n6-lab .three-spatial-status {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  #n6-lab .three-spatial-control-group {
+    grid-template-columns: 46px minmax(0, 1fr);
+    padding-left: 8px;
+  }
+
+  #n6-lab .three-spatial-step-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #n6-lab .three-spatial-step-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #n6-lab .three-spatial-workflow {
+    min-height: 352px;
+  }
+
+  #n6-lab .three-spatial-canvas {
+    bottom: 352px;
+  }
+
+  #n6-lab .three-spatial-inspector {
+    bottom: 368px;
+  }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  #n6-lab .three-spatial-root * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

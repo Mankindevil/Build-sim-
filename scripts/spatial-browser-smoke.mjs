@@ -36,6 +36,7 @@ if (facts.routeCount !== facts.sourceRouteCount || !facts.assemblyCount) throw n
 await page.click('[data-camera="orthographic"]');
 if (await page.locator('[data-camera="orthographic"]').getAttribute("aria-pressed") !== "true") throw new Error("orthographic camera did not activate");
 await page.click('[data-view="top"]');
+await page.click(".three-spatial-display-menu > summary");
 await page.click("[data-explode]");
 await page.click("[data-routes]");
 await page.click("[data-dimensions]");
@@ -52,9 +53,11 @@ await canvas.hover({ position: { x: 480, y: 300 } });
 await page.mouse.wheel(0, -180);
 
 const beforeDriveCount = facts.driveCount ?? 0;
-await page.fill("#disk-range", String(Math.min(8, beforeDriveCount + 1)));
-await page.locator("#disk-range").dispatchEvent("input");
+await page.click('[data-route="editor"]');
+await page.fill('[data-config-field="selection.diskCount"]', String(Math.min(8, beforeDriveCount + 1)));
+await page.locator('[data-config-field="selection.diskCount"]').dispatchEvent("change");
 await page.waitForFunction((count) => window.__BUILD_SIM_SPATIAL__?.getModel()?.nodes.filter((node) => node.kind === "drive").length === count + 1, beforeDriveCount);
+await page.click('[data-route="spatial"]');
 
 if (facts.findingCount) {
   const findingId = await page.locator("[data-finding-select] option").nth(1).getAttribute("value");
@@ -79,7 +82,7 @@ await page.locator('[data-editor-field="selection.diskCount"] input').dispatchEv
 await page.selectOption('[data-editor-field="selection.boot"] select', "bay");
 await page.waitForFunction(() => window.__BUILD_SIM_SPATIAL__?.getOverlays()?.findings.some((finding) => finding.id === "n6.bay9-boot-vs-9hdd" && finding.verdict === "bad"));
 await page.click('[data-route="workspace"]');
-const fixableFinding = page.locator('[data-finding-id="n6.bay9-boot-vs-9hdd"]');
+const fixableFinding = page.locator('[data-workspace-page="workspace"] [data-finding-id="n6.bay9-boot-vs-9hdd"]').first();
 if (!(await fixableFinding.isVisible())) throw new Error("fixable blocker was not surfaced on the workspace");
 await fixableFinding.click();
 await page.waitForFunction(() => location.hash === "#/spatial" && window.__BUILD_SIM_PLAN_STORE__?.getState().selection?.findingId === "n6.bay9-boot-vs-9hdd");

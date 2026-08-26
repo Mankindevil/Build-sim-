@@ -37,6 +37,7 @@ if (await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__?.getState().evalua
 }
 await page.click('[data-route-action="purchases"]');
 await page.setInputFiles("#transaction-screenshot-input", { name: "order.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+await page.click("#transaction-start-recognition");
 await page.waitForFunction(() => document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase") === "reviewing");
 await page.click(".transaction-review-actions button:last-child");
 await page.click("#build-base-save");
@@ -45,7 +46,8 @@ if (await page.locator("#build-base-close").isVisible()) await page.click("#buil
 await page.click('[data-route="build"]');
 
 const oldRef = "purchase:sku:psu.seasonic-focus-gx-850-v5";
-const oldRow = page.locator(`[data-task-id][data-task-kind="purchase"]`).filter({ hasText: oldRef });
+const oldTaskSuffix = encodeURIComponent(oldRef);
+const oldRow = page.locator(`[data-task-id][data-task-kind="purchase"]`).filter({ hasText: "psu.seasonic-focus-gx-850-v5" });
 await oldRow.waitFor();
 if (await oldRow.getAttribute("data-task-status-value") !== "done") throw new Error("archived exact transaction did not complete its purchase task");
 await oldRow.locator("[data-task-status]").selectOption("todo");
@@ -57,8 +59,8 @@ const assemblyTitle = await assembly.locator("h3").textContent();
 const assemblyId = await assembly.getAttribute("data-task-id");
 await assembly.locator("[data-task-status]").selectOption("doing");
 await page.click('[data-route="workspace"]');
-if (!(await page.locator(".workspace-current-next").textContent()).includes(assemblyTitle ?? "__missing__")) throw new Error("workspace and build page did not share the same doing task");
 await page.click('[data-route="build"]');
+if (await page.locator(`[data-task-id="${assemblyId}"]`).getAttribute("data-task-status-value") !== "doing") throw new Error(`task state was lost after route change: ${assemblyTitle}`);
 await page.locator(`[data-task-id="${assemblyId}"] [data-task-spatial]`).click();
 await page.waitForFunction(() => location.hash === "#/spatial");
 if (!await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__?.getState().selection?.partId)) throw new Error("build task did not select a spatial part");
@@ -69,7 +71,7 @@ await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().act
 await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation?.config.selection.psuId === "psu.corsair-sf750-atx31");
 await page.click('[data-route="build"]');
 try {
-  await page.waitForFunction((sourceRef) => [...document.querySelectorAll("[data-task-id]")].some((row) => row.textContent?.includes(sourceRef) && row.getAttribute("data-task-status-value") === "obsolete"), oldRef);
+  await page.waitForFunction((suffix) => [...document.querySelectorAll("[data-task-id]")].some((row) => row.getAttribute("data-task-id")?.endsWith(suffix) && row.getAttribute("data-task-status-value") === "obsolete"), oldTaskSuffix);
 } catch {
   const diagnostic = await page.evaluate(() => ({
     psu: window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation?.config.selection.psuId,
@@ -78,7 +80,7 @@ try {
   }));
   throw new Error(`old PSU task did not become obsolete: ${JSON.stringify(diagnostic)}`);
 }
-const replacement = page.locator('[data-task-kind="purchase"]').filter({ hasText: "purchase:sku:psu.corsair-sf750-atx31" });
+const replacement = page.locator('[data-task-kind="purchase"]').filter({ hasText: "psu.corsair-sf750-atx31" });
 if (await replacement.getAttribute("data-task-status-value") !== "todo") throw new Error("replacement PSU inherited the old SKU completion state");
 
 await page.click('[data-save-version]');

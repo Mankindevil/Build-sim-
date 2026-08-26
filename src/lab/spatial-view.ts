@@ -17,8 +17,8 @@ export interface SpatialViewController {
 
 interface ThreeSpatialRenderer {
   update(model: SpatialSceneModel, overlays: SpatialOverlayModel): void;
-  focus(partId: string | null): void;
-  setFinding(findingId: string | null): void;
+  focus(partId: string | null, frame?: boolean): void;
+  setFinding(findingId: string | null, frame?: boolean): void;
   setRoutesVisible(visible: boolean): void;
   setDimensionsVisible(visible: boolean): void;
   setThermalVisible(visible: boolean): void;
@@ -31,30 +31,59 @@ interface ThreeSpatialRenderer {
 
 function createChrome(stage: HTMLElement) {
   const root = document.createElement("section");
-  root.className = "three-spatial-root case-view";
-  root.dataset.caseView = "iso";
+  root.className = "three-spatial-root";
+  root.dataset.threeSpatialRoot = "";
   root.setAttribute("aria-label", "N6 Three.js 毫米空间场景");
   root.innerHTML = `
     <div class="three-spatial-canvas" data-three-canvas></div>
     <div class="three-spatial-toolbar" aria-label="3D 场景控制">
-      <button type="button" data-camera="perspective" aria-pressed="true">透视</button>
-      <button type="button" data-camera="orthographic" aria-pressed="false">正交</button>
-      <button type="button" data-view="iso">等轴</button><button type="button" data-view="front">前</button><button type="button" data-view="side">侧</button><button type="button" data-view="top">顶</button>
-      <button type="button" data-reset>复位</button>
-      <label><input type="checkbox" data-explode> 爆炸</label>
-      <label><input type="checkbox" data-routes> 走线</label>
-      <label><input type="checkbox" data-dimensions> 关键尺寸</label>
-      <label><input type="checkbox" data-thermal> 热场</label>
-      <details><summary>图层</summary><div data-layer-controls></div></details>
+      <div class="three-spatial-control-group">
+        <span>投影</span>
+        <div class="three-spatial-segmented">
+          <button type="button" data-camera="perspective" aria-pressed="true">透视</button>
+          <button type="button" data-camera="orthographic" aria-pressed="false">正交</button>
+        </div>
+      </div>
+      <div class="three-spatial-control-group">
+        <span>视角</span>
+        <div class="three-spatial-segmented">
+          <button type="button" data-view="iso" aria-pressed="true">等轴</button>
+          <button type="button" data-view="front" aria-pressed="false">正面</button>
+          <button type="button" data-view="side" aria-pressed="false">侧面</button>
+          <button type="button" data-view="top" aria-pressed="false">顶部</button>
+        </div>
+      </div>
+      <details class="three-spatial-display-menu">
+        <summary>显示与图层</summary>
+        <div class="three-spatial-display-panel">
+          <div class="three-spatial-display-toggles">
+            <label><input type="checkbox" data-explode> 爆炸视图</label>
+            <label><input type="checkbox" data-routes> 走线</label>
+            <label><input type="checkbox" data-dimensions> 关键尺寸</label>
+            <label><input type="checkbox" data-thermal> 热场</label>
+          </div>
+          <fieldset><legend>场景图层</legend><div data-layer-controls></div></fieldset>
+        </div>
+      </details>
+      <button type="button" class="three-spatial-reset" data-reset>重置视图</button>
     </div>
     <div class="three-spatial-workflow" aria-label="3D 工作流">
-      <label>问题 <select data-finding-select><option value="">全部事实</option></select></label>
-      <label>装机步骤 <select data-assembly-select><option value="">完整场景</option></select></label>
-      <button type="button" data-assembly-prev aria-label="上一步">←</button><button type="button" data-assembly-next aria-label="下一步">→</button>
-      <button type="button" data-edit-finding>定位配置</button><button type="button" data-ask-agent>询问 Agent</button><button type="button" data-capture>导出当前视图</button>
+      <label class="three-spatial-workflow-field"><span>问题定位</span><select data-finding-select><option value="">全部事实</option></select></label>
+      <div class="three-spatial-step-field">
+        <label class="three-spatial-workflow-field"><span>装机步骤</span><select data-assembly-select><option value="">完整场景</option></select></label>
+        <div class="three-spatial-step-nav" role="group" aria-label="切换装机步骤">
+          <button type="button" data-assembly-prev aria-label="上一步">← 上一步</button>
+          <button type="button" data-assembly-next aria-label="下一步">下一步 →</button>
+        </div>
+      </div>
+      <div class="three-spatial-workflow-actions">
+        <button type="button" data-edit-finding>定位配置</button>
+        <button type="button" data-ask-agent>询问 Agent</button>
+        <button type="button" data-capture>导出视图</button>
+      </div>
       <small data-workflow-note>图层只表达当前 BuildEvaluation，不生成独立结论。</small>
     </div>
-    <aside class="three-spatial-inspector" data-inspector aria-live="polite"><p>点击部件查看尺寸与证据。</p></aside>
+    <aside class="three-spatial-inspector is-empty" data-inspector aria-live="polite"><p>点击部件查看尺寸与证据。</p></aside>
     <p class="three-spatial-status" data-three-status role="status">准备 3D 场景…</p>`;
   stage.insertBefore(root, stage.firstChild);
   const fallback = document.createElement("p");
@@ -65,8 +94,36 @@ function createChrome(stage: HTMLElement) {
   return { root, fallback };
 }
 
+function option(label: string, value: string): HTMLOptionElement {
+  const element = document.createElement("option");
+  element.textContent = label;
+  element.value = value;
+  return element;
+}
+
+export interface SpatialEvaluationIdentity {
+  sourceKey: string;
+  snapshotHash: string | null;
+}
+
+/** Store emissions are frequent; only a changed evaluation identity may rebuild WebGL resources. */
+export function shouldRebuildSpatialModel(
+  previous: SpatialEvaluationIdentity | null,
+  next: SpatialEvaluationIdentity,
+  hasModel: boolean,
+): boolean {
+  if (!hasModel || !previous) return true;
+  if (previous.snapshotHash !== null && next.snapshotHash === null) return true;
+  if (next.snapshotHash !== null) {
+    if (previous.snapshotHash !== null) return next.snapshotHash !== previous.snapshotHash;
+    return previous.sourceKey !== next.sourceKey;
+  }
+  return previous.sourceKey !== next.sourceKey;
+}
+
 function renderInspector(host: HTMLElement, node: SpatialSceneNode | null, overlays: SpatialOverlayModel | null): void {
   host.replaceChildren();
+  host.classList.toggle("is-empty", !node);
   if (!node) {
     const hint = document.createElement("p");
     hint.textContent = "点击部件查看尺寸与证据。";
@@ -97,11 +154,23 @@ function renderInspector(host: HTMLElement, node: SpatialSceneNode | null, overl
 
 export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalog: () => SkuCatalog, router?: WorkspaceRouter): SpatialViewController {
   const { root, fallback } = createChrome(stage);
+  const legacyToolbar = stage.previousElementSibling instanceof HTMLElement && stage.previousElementSibling.classList.contains("case-view-toolbar")
+    ? stage.previousElementSibling
+    : null;
+  const legacyToolbarWasHidden = legacyToolbar?.classList.contains("is-hidden") ?? false;
+  const hideLegacyToolbar = () => legacyToolbar?.classList.add("is-hidden");
+  const restoreLegacyToolbar = () => {
+    if (!legacyToolbarWasHidden) legacyToolbar?.classList.remove("is-hidden");
+  };
+  stage.classList.add("spatial-three-pending");
+  hideLegacyToolbar();
   const canvasHost = root.querySelector<HTMLElement>("[data-three-canvas]")!;
   const status = root.querySelector<HTMLElement>("[data-three-status]")!;
   const inspector = root.querySelector<HTMLElement>("[data-inspector]")!;
   const findingSelect = root.querySelector<HTMLSelectElement>("[data-finding-select]")!;
   const assemblySelect = root.querySelector<HTMLSelectElement>("[data-assembly-select]")!;
+  const assemblyPrev = root.querySelector<HTMLButtonElement>("[data-assembly-prev]")!;
+  const assemblyNext = root.querySelector<HTMLButtonElement>("[data-assembly-next]")!;
   const workflowNote = root.querySelector<HTMLElement>("[data-workflow-note]")!;
   let model: SpatialSceneModel | null = null;
   let overlays: SpatialOverlayModel | null = null;
@@ -110,29 +179,49 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
   let mode: "pending" | "three" | "fallback" = "pending";
   let disposed = false;
   let loading: Promise<void> | null = null;
+  let evaluationIdentity: SpatialEvaluationIdentity | null = null;
+  let syncedPartId: string | null = null;
+  let syncedFindingId: string | null = null;
   const forceFallback = new URLSearchParams(location.search).get("spatialFallback") === "1";
   const capability = detectWebGl(undefined, forceFallback);
   const selection = new SpatialSelectionController({ schemaVersion: "1.0.0", coordinateSystem: { units: "mm", origin: "case-envelope-center", axes: { x: "right", y: "up", z: "rear" }, anchor: "center" }, caseSkuId: "", bounds: { c: [0, 0, 0], w: 0, h: 0, d: 0 }, nodes: [], evaluationFindingIds: [] }, (node) => {
     renderInspector(inspector, node, overlays);
-    store.setSelection(node ? { partId: node.partId, view: "spatial", ...(node.findingIds[0] ? { findingId: node.findingIds[0] } : {}) } : null);
+    publishSelection(node ? { partId: node.partId, view: "spatial" } : null);
   });
+
+  const sameSelection = (left: PlanStoreState["selection"], right: PlanStoreState["selection"]) => left?.partId === right?.partId
+    && left?.view === right?.view
+    && left?.findingId === right?.findingId
+    && Boolean(left) === Boolean(right);
+  function publishSelection(next: PlanStoreState["selection"]): void {
+    if (!sameSelection(store.getState().selection, next)) store.setSelection(next);
+  }
+  const updateAssemblyButtons = () => {
+    const index = assemblySelect.value === "" ? null : Number(assemblySelect.value);
+    assemblyPrev.disabled = index === null;
+    assemblyNext.disabled = !overlays?.assembly.length || index === overlays.assembly.length - 1;
+  };
 
   const populateWorkflow = () => {
     if (!overlays) return;
     const findingValue = findingSelect.value;
-    findingSelect.replaceChildren(new Option("全部事实", ""), ...overlays.findings.filter((finding) => finding.verdict !== "ok").map((finding) => new Option(`${finding.verdict.toUpperCase()} · ${finding.message.slice(0, 46)}`, finding.id)));
+    findingSelect.replaceChildren(option("全部事实", ""), ...overlays.findings.filter((finding) => finding.verdict !== "ok").map((finding) => option(`${finding.verdict.toUpperCase()} · ${finding.message.slice(0, 46)}`, finding.id)));
     findingSelect.value = overlays.findings.some((finding) => finding.id === findingValue) ? findingValue : "";
     const assemblyValue = assemblySelect.value;
-    assemblySelect.replaceChildren(new Option("完整场景", ""), ...overlays.assembly.map((step, index) => new Option(`${index + 1}. ${step.label}`, String(index))));
+    assemblySelect.replaceChildren(option("完整场景", ""), ...overlays.assembly.map((step, index) => option(`${index + 1}. ${step.label}`, String(index))));
     assemblySelect.value = Number(assemblyValue) < overlays.assembly.length ? assemblyValue : "";
+    updateAssemblyButtons();
     workflowNote.textContent = overlays.thermal.available ? `${overlays.thermal.note} · ${overlays.routes.length} 条 BuildEvaluation 走线` : `热场 unavailable · ${overlays.routes.length} 条 BuildEvaluation 走线`;
   };
 
   const showFallback = (reason: string) => {
     mode = "fallback";
-    stage.classList.remove("spatial-three-active");
+    renderer?.dispose();
+    renderer = null;
+    stage.classList.remove("spatial-three-active", "spatial-three-pending");
     root.classList.add("is-hidden");
     fallback.classList.remove("is-hidden");
+    restoreLegacyToolbar();
     fallback.textContent = `3D 不可用（${reason}），已保留可旋转、缩放和键盘操作的 SVG 空间视图。`;
   };
 
@@ -151,13 +240,15 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
         onContextLost: () => showFallback("WebGL context lost"),
       });
       const state = store.getState();
-      if (state.selection?.partId) renderer.focus(state.selection.partId);
-      if (state.selection?.findingId) renderer.setFinding(state.selection.findingId);
+      renderer.setFinding(state.selection?.findingId ?? null, false);
+      renderer.focus(state.selection?.partId ?? null, Boolean(state.selection?.partId));
       renderer.setRoutesVisible(Boolean(root.querySelector<HTMLInputElement>("[data-routes]")?.checked));
       renderer.setDimensionsVisible(Boolean(root.querySelector<HTMLInputElement>("[data-dimensions]")?.checked));
       renderer.setThermalVisible(Boolean(root.querySelector<HTMLInputElement>("[data-thermal]")?.checked));
       mode = "three";
+      stage.classList.remove("spatial-three-pending");
       stage.classList.add("spatial-three-active");
+      hideLegacyToolbar();
       fallback.classList.add("is-hidden");
       status.textContent = "Three.js 场景已加载 · 单位 mm · 结论来自当前 BuildEvaluation";
     }).catch((error: unknown) => showFallback(error instanceof Error ? error.message : "renderer error")).finally(() => { loading = null; });
@@ -165,25 +256,39 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
 
   const onState = (state: PlanStoreState) => {
     if (!state.evaluation) return;
-    model = buildSpatialSceneModel(state.evaluation, getCatalog());
-    overlays = buildSpatialOverlayModel(state.evaluation, model);
-    evaluationHash = state.evaluationSnapshot?.evaluationHash ?? null;
-    populateWorkflow();
-    selection.setModel(model);
-    renderer?.update(model, overlays);
-    if (state.selection?.findingId && !overlays.findings.some((finding) => finding.id === state.selection?.findingId)) {
-      store.setSelection({ partId: state.selection.partId, view: state.selection.view });
-      return;
+    const nextIdentity: SpatialEvaluationIdentity = {
+      sourceKey: `${state.activePlan?.id ?? "no-plan"}:${state.activePlan?.draftRevision ?? -1}:${state.localRevision}`,
+      snapshotHash: state.evaluationSnapshot?.evaluationHash ?? null,
+    };
+    const rebuildModel = shouldRebuildSpatialModel(evaluationIdentity, nextIdentity, Boolean(model && overlays));
+    evaluationIdentity = nextIdentity;
+    evaluationHash = nextIdentity.snapshotHash;
+    if (rebuildModel) {
+      model = buildSpatialSceneModel(state.evaluation, getCatalog());
+      overlays = buildSpatialOverlayModel(state.evaluation, model);
+      populateWorkflow();
+      selection.setModel(model);
+      renderer?.update(model, overlays);
     }
-    if (state.selection) {
-      if (selection.getState().selectedPartId !== state.selection.partId) selection.select(state.selection.partId, false);
-      renderer?.focus(state.selection.partId);
-      renderInspector(inspector, sceneNode(model, state.selection.partId), overlays);
-    }
-    if (state.selection?.findingId) {
-      findingSelect.value = state.selection.findingId;
-      renderer?.setFinding(state.selection.findingId);
-    }
+    if (!model || !overlays) return;
+
+    const partId = state.selection?.partId && sceneNode(model, state.selection.partId) ? state.selection.partId : null;
+    const findingId = state.selection?.findingId && overlays.findings.some((finding) => finding.id === state.selection?.findingId)
+      ? state.selection.findingId
+      : null;
+    const normalizedSelection = partId ? { partId, view: state.selection?.view ?? "spatial", ...(findingId ? { findingId } : {}) } : null;
+    const selectionChanged = partId !== syncedPartId;
+    const findingChanged = findingId !== syncedFindingId;
+    syncedPartId = partId;
+    syncedFindingId = findingId;
+    if (selection.getState().selectedPartId !== partId) selection.select(partId, false);
+    findingSelect.value = findingId ?? "";
+    if (findingChanged) renderer?.setFinding(findingId, false);
+    if (selectionChanged || findingChanged) renderer?.focus(partId, Boolean(partId));
+    renderInspector(inspector, partId ? sceneNode(model, partId) : null, overlays);
+    if (!sameSelection(state.selection, normalizedSelection)) queueMicrotask(() => {
+      if (!disposed) publishSelection(normalizedSelection);
+    });
     ensureRenderer();
   };
   const unsubscribe = store.subscribe(onState);
@@ -193,30 +298,27 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
   }, { rootMargin: "240px" });
   observer?.observe(stage);
   if (!observer) queueMicrotask(ensureRenderer);
-  const resetButton = document.getElementById("spatial-reset");
-  const onReset = () => renderer?.reset();
-  resetButton?.addEventListener("click", onReset);
-
   root.querySelector<HTMLInputElement>("[data-routes]")?.addEventListener("change", (event) => renderer?.setRoutesVisible((event.target as HTMLInputElement).checked));
   root.querySelector<HTMLInputElement>("[data-dimensions]")?.addEventListener("change", (event) => renderer?.setDimensionsVisible((event.target as HTMLInputElement).checked));
   root.querySelector<HTMLInputElement>("[data-thermal]")?.addEventListener("change", (event) => renderer?.setThermalVisible((event.target as HTMLInputElement).checked));
   findingSelect.addEventListener("change", () => {
     const findingId = findingSelect.value || null;
-    renderer?.setFinding(findingId);
     const partId = findingId && overlays ? primaryPartForFinding(overlays, findingId) : null;
     selection.select(partId, false);
     renderInspector(inspector, partId && model ? sceneNode(model, partId) : null, overlays);
-    store.setSelection(partId ? { partId, view: "spatial", ...(findingId ? { findingId } : {}) } : null);
+    publishSelection(partId ? { partId, view: "spatial", ...(findingId ? { findingId } : {}) } : null);
   });
   const setAssembly = (index: number | null) => {
-    assemblySelect.value = index === null ? "" : String(index);
-    renderer?.setAssemblyStep(index);
-    const partId = index === null ? null : overlays?.assembly[index]?.partIds[0] ?? null;
-    if (partId) { selection.select(partId); renderer?.focus(partId); }
+    const normalized = index !== null && Number.isInteger(index) && index >= 0 && index < (overlays?.assembly.length ?? 0) ? index : null;
+    assemblySelect.value = normalized === null ? "" : String(normalized);
+    renderer?.setAssemblyStep(normalized);
+    updateAssemblyButtons();
+    const partId = normalized === null ? null : overlays?.assembly[normalized]?.partIds[0] ?? null;
+    if (partId) { selection.select(partId, false); renderer?.focus(partId); publishSelection({ partId, view: "spatial" }); }
   };
   assemblySelect.addEventListener("change", () => setAssembly(assemblySelect.value === "" ? null : Number(assemblySelect.value)));
-  root.querySelector("[data-assembly-prev]")?.addEventListener("click", () => setAssembly(Math.max(0, (Number(assemblySelect.value || 0) - 1))));
-  root.querySelector("[data-assembly-next]")?.addEventListener("click", () => setAssembly(Math.min((overlays?.assembly.length ?? 1) - 1, Number(assemblySelect.value || -1) + 1)));
+  assemblyPrev.addEventListener("click", () => setAssembly(assemblySelect.value === "" ? null : Number(assemblySelect.value) - 1));
+  assemblyNext.addEventListener("click", () => setAssembly(assemblySelect.value === "" ? 0 : Number(assemblySelect.value) + 1));
   root.querySelector("[data-edit-finding]")?.addEventListener("click", () => {
     const finding = overlays?.findings.find((item) => item.id === findingSelect.value) ?? overlays?.findings.find((item) => item.partIds.includes(selection.getState().selectedPartId ?? ""));
     if (!finding) return;
@@ -240,15 +342,14 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
     const findingId = (event as CustomEvent<{ findingId?: string }>).detail?.findingId;
     if (!findingId || !overlays) return;
     findingSelect.value = findingId;
-    renderer?.setFinding(findingId);
     const partId = primaryPartForFinding(overlays, findingId);
-    if (partId) store.setSelection({ partId, view: "spatial", findingId });
+    if (partId) publishSelection({ partId, view: "spatial", findingId });
   };
   const onEditorFieldFocus = (event: Event) => {
     const field = (event as CustomEvent<{ field?: string }>).detail?.field;
     if (!field || !model) return;
     const partId = configFieldPartIds(field, model)[0];
-    if (partId) store.setSelection({ partId, view: "editor" });
+    if (partId) publishSelection({ partId, view: "editor" });
   };
   const onTaskFocus = (event: Event) => {
     const detail = (event as CustomEvent<{ partId?: string; cableId?: string }>).detail;
@@ -261,12 +362,12 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
       if (stepIndex >= 0) setAssembly(stepIndex);
       const route = overlays.routes.find((candidate) => candidate.id === detail.cableId || candidate.id.includes(detail.cableId!));
       const endpoint = route?.endpointPartIds.find((partId) => model?.nodes.some((node) => node.partId === partId));
-      if (endpoint) store.setSelection({ partId: endpoint, view: "routing" });
+      if (endpoint) publishSelection({ partId: endpoint, view: "routing" });
     }
     if (detail.partId && model?.nodes.some((node) => node.partId === detail.partId)) {
       selection.select(detail.partId, false);
       renderer?.focus(detail.partId);
-      store.setSelection({ partId: detail.partId, view: detail.cableId ? "routing" : "spatial" });
+      publishSelection({ partId: detail.partId, view: detail.cableId ? "routing" : "spatial" });
     }
   };
   document.addEventListener("build-sim:finding-focus", onFindingFocus);
@@ -285,8 +386,9 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
       document.removeEventListener("build-sim:finding-focus", onFindingFocus);
       document.removeEventListener("build-sim:editor-field-focus", onEditorFieldFocus);
       document.removeEventListener("build-sim:task-focus", onTaskFocus);
-      resetButton?.removeEventListener("click", onReset);
       renderer?.dispose();
+      stage.classList.remove("spatial-three-active", "spatial-three-pending");
+      restoreLegacyToolbar();
       root.remove(); fallback.remove();
     },
   };

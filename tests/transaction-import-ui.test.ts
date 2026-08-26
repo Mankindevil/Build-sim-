@@ -1,16 +1,27 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { compactOfficialQuery, initTransactionImport } from "../src/lab/transaction-import";
-import { loadBundledCatalog } from "../src/sku/catalog";
 
 function mount(): void {
   document.body.innerHTML = `
     <label id="transaction-screenshot-drop" for="transaction-screenshot-input">
       <input id="transaction-screenshot-input" type="file">
-      <img id="transaction-screenshot-preview" hidden>
     </label>
+    <section id="transaction-screenshot-selection" hidden>
+      <img id="transaction-screenshot-preview" role="button" tabindex="0" aria-expanded="false" hidden>
+      <p id="transaction-screenshot-meta"></p>
+      <button id="transaction-start-recognition" type="button">开始识别</button>
+      <button id="transaction-replace-image" type="button">更换图片</button>
+      <button id="transaction-manual-entry" type="button">手动录入</button>
+    </section>
     <p id="transaction-screenshot-status"></p>
+    <button id="transaction-retry" type="button" hidden>重试当前步骤</button>
+    <button id="transaction-cancel" type="button" hidden>取消当前处理</button>
     <div id="transaction-screenshot-result" hidden></div>`;
+}
+
+function startRecognition(): void {
+  document.querySelector<HTMLButtonElement>("#transaction-start-recognition")!.click();
 }
 
 describe("transaction screenshot review UI", () => {
@@ -38,6 +49,18 @@ describe("transaction screenshot review UI", () => {
     const file = new File([new Uint8Array([137, 80, 78, 71])], "order.png", { type: "image/png", lastModified: Date.now() });
     Object.defineProperty(input, "files", { configurable: true, value: [file] });
     input.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(document.querySelector<HTMLElement>("#transaction-screenshot-selection")?.hidden).toBe(false);
+    const preview = document.querySelector<HTMLImageElement>("#transaction-screenshot-preview")!;
+    const selection = document.querySelector<HTMLElement>("#transaction-screenshot-selection")!;
+    expect(preview.src).toContain("blob:");
+    preview.click();
+    expect(selection.classList.contains("is-expanded")).toBe(true);
+    expect(preview.getAttribute("aria-expanded")).toBe("true");
+    preview.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+    expect(selection.classList.contains("is-expanded")).toBe(false);
+    expect(preview.getAttribute("aria-expanded")).toBe("false");
+    expect(fetch).not.toHaveBeenCalled();
+    startRecognition();
 
     await vi.waitFor(() => expect(document.querySelector(".transaction-review-fields")).not.toBeNull());
     expect(onImport).not.toHaveBeenCalled();
@@ -52,7 +75,27 @@ describe("transaction screenshot review UI", () => {
     document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")!.click();
 
     expect(onImport).toHaveBeenCalledWith(expect.objectContaining({ name: "Seasonic VERTEX GX-1000", category: "psu", qty: 2, unitPriceCny: 1250, stage: "purchased", planLink: expect.objectContaining({ planId: "plan-ui-12345678", planItemId: null, linkStatus: "unlinked" }) }), expect.any(File));
-    expect(document.querySelector("#transaction-screenshot-status")?.textContent).toContain("保存基座");
+    expect(document.querySelector("#transaction-screenshot-status")?.textContent).toContain("保存采购记录");
+  });
+
+  it("allows direct manual entry from the retained preview without OCR or official lookup", async () => {
+    const onImport = vi.fn();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({ onImport });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    const file = new File(["manual receipt"], "manual.png", { type: "image/png" });
+    Object.defineProperty(input, "files", { configurable: true, value: [file] });
+    input.dispatchEvent(new Event("change"));
+    document.querySelector<HTMLButtonElement>("#transaction-manual-entry")!.click();
+
+    await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>(".transaction-review-name")?.value).toBe("待填写交易部件"));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLElement>("#transaction-screenshot-selection")?.hidden).toBe(false);
+    document.querySelector<HTMLInputElement>(".transaction-review-name")!.value = "人工记录电源";
+    document.querySelector<HTMLSelectElement>(".transaction-review-category")!.value = "psu";
+    document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")!.click();
+    expect(onImport).toHaveBeenCalledWith(expect.objectContaining({ name: "人工记录电源", category: "psu", evidence: expect.objectContaining({ verification: "identity-review-required", ocrEngine: "人工录入" }) }), file);
   });
 
   it("keeps the selected screenshot available for retry after service failure", async () => {
@@ -68,6 +111,7 @@ describe("transaction screenshot review UI", () => {
     const file = new File([new Uint8Array([137, 80, 78, 71])], "retry.png", { type: "image/png" });
     Object.defineProperty(input, "files", { configurable: true, value: [file] });
     input.dispatchEvent(new Event("change"));
+    startRecognition();
     await vi.waitFor(() => expect(document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase")).toBe("failed"));
     const retry = document.querySelector<HTMLButtonElement>("#transaction-retry")!;
     expect(retry.hidden).toBe(false);
@@ -91,6 +135,7 @@ describe("transaction screenshot review UI", () => {
     const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
     Object.defineProperty(input, "files", { configurable: true, value: [new File(["gpu"], "retry-success.png", { type: "image/png" })] });
     input.dispatchEvent(new Event("change"));
+    startRecognition();
     await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>(".transaction-review-name")?.value).toBe("Intel I41-PO-15053045"));
     document.querySelector<HTMLButtonElement>(".transaction-review-retry-ocr")!.click();
     await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>(".transaction-review-name")?.value).toBe("MSI RTX 3070"));
@@ -125,6 +170,7 @@ describe("transaction screenshot review UI", () => {
     const file = new File([new Uint8Array([137, 80, 78, 71])], "alternate.png", { type: "image/png" });
     Object.defineProperty(input, "files", { configurable: true, value: [file] });
     input.dispatchEvent(new Event("change"));
+    startRecognition();
 
     await vi.waitFor(() => expect(document.querySelector(".transaction-review-link")).not.toBeNull());
     expect(document.querySelector<HTMLInputElement>(".transaction-review-name")?.readOnly).toBe(false);
@@ -145,7 +191,7 @@ describe("transaction screenshot review UI", () => {
     }), expect.any(File));
   });
 
-  it("shows bundled official parameters for an exact GX-850 FX match before staging", async () => {
+  it("shows an exact SKU as a directory match without presenting bundled data as official", async () => {
     const onImport = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       receiptId: "receipt-fx", status: "matched-catalog",
@@ -153,17 +199,17 @@ describe("transaction screenshot review UI", () => {
       catalogMatch: { skuId: "psu.seasonic-focus-plus-gold-850-fx", kind: "exact-mpn", score: 1 },
       evidence: { receiptId: "receipt-fx", fileName: "fx.png", contentHash: "7".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 99, excerpt: "SSR-850FX" }, catalogSearch: null,
     }), { status: 200, headers: { "Content-Type": "application/json" } })));
-    const catalog = loadBundledCatalog();
-    initTransactionImport({ onImport, getCatalogSku: (skuId) => catalog.skus.find((sku) => sku.id === skuId) ?? null });
+    initTransactionImport({ onImport });
     const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
     Object.defineProperty(input, "files", { configurable: true, value: [new File(["fx"], "fx.png", { type: "image/png" })] });
     input.dispatchEvent(new Event("change"));
-    await vi.waitFor(() => expect(document.querySelector(".transaction-candidate-fields")?.textContent).toContain("harness.peripheralLeads"));
-    expect(document.querySelector(".transaction-candidate-fields")?.textContent).toContain("850");
-    expect(document.querySelector(".transaction-candidate-fields")?.textContent).toContain("4");
-    expect(document.querySelector<HTMLAnchorElement>(".transaction-candidate-review a")?.href).toContain("seasonic.com/product/focus-plus-gold");
+    startRecognition();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-catalog-match")?.textContent).toContain("psu.seasonic-focus-plus-gold-850-fx"));
+    expect(document.querySelector(".transaction-catalog-match")?.textContent).toContain("本地目录匹配");
+    expect(document.querySelector(".transaction-candidate-review")).toBeNull();
     const confirm = document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")!;
-    expect(confirm.disabled).toBe(true);
+    expect(confirm.disabled).toBe(false);
+    expect(confirm.textContent).toBe("按当前内容保存");
     expect(onImport).not.toHaveBeenCalled();
   });
 
@@ -190,7 +236,7 @@ describe("transaction screenshot review UI", () => {
         return new Response(JSON.stringify({
           jobId: "job-corrected",
           status: "completed",
-          candidates: [{ skuId: "psu.seasonic-focus-plus-gold-850-fx", title: "Seasonic FOCUS Plus Gold 850 SSR-850FX", canonicalUrl: "https://seasonic.com/product/focus-plus-gold/", match: { kind: "brand-model", score: 0.85 }, extraction: { status: "partial", fieldsFound: 1 }, fields: [{ field: "power.ratedW", value: 850, evidence: "official" }] }],
+          candidates: [{ skuId: "psu.seasonic-focus-plus-gold-850-fx", candidateId: "candidate-user-review", expectedHash: "e".repeat(64), title: "Seasonic FOCUS Plus Gold 850 SSR-850FX", canonicalUrl: "https://seasonic.com/product/focus-plus-gold/", match: { kind: "brand-model", score: 0.85 }, extraction: { status: "partial", fieldsFound: 1 }, fields: [{ field: "power.ratedW", value: 850, evidence: "official" }] }],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       throw new Error(`unexpected request ${url}`);
@@ -202,23 +248,25 @@ describe("transaction screenshot review UI", () => {
     const file = new File([new Uint8Array([137, 80, 78, 71])], "two-phase.png", { type: "image/png" });
     Object.defineProperty(input, "files", { configurable: true, value: [file] });
     input.dispatchEvent(new Event("change"));
+    startRecognition();
 
     await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")?.hidden).toBe(true);
+    expect(document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")?.hidden).toBe(false);
     expect(document.querySelector<HTMLTextAreaElement>(".transaction-review-ocr textarea")?.value).toContain("SSR-850FX");
     document.querySelector<HTMLInputElement>(".transaction-review-name")!.value = "Seasonic GX-850 FX";
     document.querySelector<HTMLSelectElement>(".transaction-review-category")!.value = "psu";
     document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
 
-    await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")?.textContent).toContain("重新查询官网"));
+    await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")?.textContent).toContain("重新核验官网"));
     const searchCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/price/transactions/catalog-search");
     expect(JSON.parse(String(searchCall?.[1]?.body))).toMatchObject({ query: "Seasonic GX-850 FX", category: "psu" });
     expect(document.querySelector(".transaction-search-log")?.textContent).toContain("候选发现完成");
     expect(document.querySelector(".transaction-candidate-fields")?.textContent).toContain("850");
     const finalConfirm = document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")!;
     expect(finalConfirm.hidden).toBe(false);
-    expect(finalConfirm.disabled).toBe(true);
+    expect(finalConfirm.disabled).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/enrich"))).toBe(false);
     const approval = document.querySelector<HTMLInputElement>(".transaction-candidate-approval")!;
     approval.checked = true;
     approval.dispatchEvent(new Event("change"));
@@ -256,6 +304,7 @@ describe("transaction screenshot review UI", () => {
     const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
     Object.defineProperty(input, "files", { configurable: true, value: [new File(["gpu"], "gpu.png", { type: "image/png" })] });
     input.dispatchEvent(new Event("change"));
+    startRecognition();
     await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
     expect(document.querySelector<HTMLSelectElement>(".transaction-review-link")?.value).toBe("gpu.primary");
     expect(document.querySelector(".transaction-review-link-hint")?.textContent).toContain("尚未配置");
@@ -288,6 +337,7 @@ describe("transaction screenshot review UI", () => {
     const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
     Object.defineProperty(input, "files", { configurable: true, value: [new File(["psu"], "psu.png", { type: "image/png" })] });
     input.dispatchEvent(new Event("change"));
+    startRecognition();
     await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
     const enrich = document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!;
     enrich.click();
@@ -316,14 +366,15 @@ describe("transaction screenshot review UI", () => {
     const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
     Object.defineProperty(input, "files", { configurable: true, value: [new File(["gpu"], "gpu.png", { type: "image/png" })] });
     input.dispatchEvent(new Event("change"));
+    startRecognition();
     await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
     document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
     await vi.waitFor(() => expect(document.querySelector('[data-state="empty"]')?.textContent).toContain("0 个可用候选"));
     expect(document.querySelector(".transaction-search-log")?.textContent).toContain("官网查询词 · MSI RTX 3070 Ventus 2X OC 8GB");
     expect(document.querySelector(".transaction-search-log")?.textContent).toContain("服务警告 · 未找到官方候选");
     expect(document.querySelector(".transaction-search-log")?.textContent).toContain("候选漏斗 · 发现 3 · 成功读取 1 · 产品/规格页 1 · 精确型号 0 · 同系列 1 · 冲突 1");
-    expect(document.querySelector<HTMLButtonElement>(".transaction-review-enrich")?.textContent).toContain("重新查询官网");
-    expect(document.querySelector<HTMLButtonElement>(".transaction-review-retry-ocr")?.textContent).toBe("重新 OCR");
+    expect(document.querySelector<HTMLButtonElement>(".transaction-review-enrich")?.textContent).toContain("重新核验官网");
+    expect(document.querySelector<HTMLButtonElement>(".transaction-review-retry-ocr")?.textContent).toBe("重新识别");
     const finalConfirm = document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")!;
     expect(finalConfirm.hidden).toBe(false);
     finalConfirm.click();
@@ -344,8 +395,9 @@ describe("transaction screenshot review UI", () => {
     const file = new File([new Uint8Array([137, 80, 78, 71])], "cancel.png", { type: "image/png" });
     Object.defineProperty(input, "files", { configurable: true, value: [file] });
     input.dispatchEvent(new Event("change"));
+    startRecognition();
     await vi.waitFor(() => expect(document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase")).toBe("recognizing"));
-    document.querySelector<HTMLButtonElement>("[data-transaction-cancel]")!.click();
+    document.querySelector<HTMLButtonElement>("#transaction-cancel")!.click();
     await vi.waitFor(() => expect(document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase")).toBe("cancelled"));
     expect(onImport).not.toHaveBeenCalled();
     expect(document.querySelector<HTMLButtonElement>("#transaction-retry")!.hidden).toBe(false);

@@ -89,6 +89,32 @@ function messageNode(role: "user" | "assistant" | "notice", content: string): HT
   return row;
 }
 
+function welcomeNode(): HTMLElement {
+  const card = document.createElement("section");
+  card.className = "agent-welcome";
+  card.setAttribute("aria-label", "装机助手使用说明");
+  card.innerHTML = `
+    <p>第一次装机也没关系</p>
+    <h4>直接说目标，我来把术语翻译成下一步</h4>
+    <ul>
+      <li><strong>先了解你：</strong>用途、预算、摆放位置，以及对噪音和耗电的在意程度。</li>
+      <li><strong>再解释取舍：</strong>哪些能买、哪些会冲突、为什么要改，以及大概多花多少钱。</li>
+      <li><strong>最后由你确认：</strong>助手只提出修改建议，不会静默改配置或替你下单。</li>
+    </ul>`;
+  return card;
+}
+
+function proposalFieldLabel(path: string): string {
+  return ({
+    "/name": "方案名称", "/caseId": "机箱", "/boardId": "主板", "/cpuId": "处理器",
+    "/selection/psuId": "电源", "/selection/psuTopology": "电源安装方式",
+    "/selection/secondaryPsuId": "第二颗电源", "/selection/dualStart": "双电源启动方式",
+    "/selection/coolerId": "CPU 散热器", "/selection/diskCount": "硬盘数量",
+    "/selection/boot": "启动盘", "/selection/nvmeCount": "NVMe 数量",
+    "/selection/hbaMode": "硬盘扩展卡", "/selection/gpuId": "显卡", "/selection/memoryId": "内存",
+  } as Record<string, string>)[path] ?? "方案设置";
+}
+
 function proposalNode(
   proposal: PlanChangeProposal,
   onApply: (indexes: number[], card: HTMLElement) => Promise<void>,
@@ -99,33 +125,36 @@ function proposalNode(
   card.dataset.planProposal = proposal.id;
   const heading = document.createElement("h4"); heading.textContent = proposal.summary;
   const initialization = proposal.kind === "initialization";
+  const technical = document.createElement("details"); technical.className = "agent-proposal-technical";
+  const technicalSummary = document.createElement("summary"); technicalSummary.textContent = "查看技术校验信息";
   const meta = document.createElement("p"); meta.textContent = `${initialization ? "完整初始化" : "方案修改"} · 方案 ${proposal.planId} · revision ${proposal.expectedDraftRevision} · config ${proposal.expectedConfigHash.slice(0, 12)}`;
+  technical.append(technicalSummary, meta);
   const list = document.createElement("ol");
   proposal.operations.forEach((operation, index) => {
     const item = document.createElement("li");
     const label = document.createElement("label"); const checkbox = document.createElement("input");
     checkbox.type = "checkbox"; checkbox.checked = true; checkbox.disabled = initialization; checkbox.dataset.proposalOperation = String(index);
-    const value = operation.op === "remove" ? "移除" : JSON.stringify(operation.value);
-    label.append(checkbox, ` ${operation.op} ${operation.path} → ${value.length > 120 ? `${value.slice(0, 120)}…` : value}`); item.append(label); list.append(item);
+    const value = operation.op === "remove" ? "不再使用" : JSON.stringify(operation.value);
+    label.append(checkbox, ` ${proposalFieldLabel(operation.path)}：${value.length > 80 ? `${value.slice(0, 80)}…` : value}`); item.append(label); list.append(item);
   });
   const impact = document.createElement("p");
   impact.className = "agent-proposal-impact";
-  impact.textContent = `确定性预览：解决 ${proposal.predictedImpact.resolvedFindingIds.length} · 新增 ${proposal.predictedImpact.introducedFindingIds.length} · 预算 ${proposal.predictedImpact.budgetDeltaCny === null ? "unknown" : `${proposal.predictedImpact.budgetDeltaCny >= 0 ? "+" : ""}${proposal.predictedImpact.budgetDeltaCny} CNY`}`;
+  impact.textContent = `预计解决 ${proposal.predictedImpact.resolvedFindingIds.length} 个问题 · 可能新增 ${proposal.predictedImpact.introducedFindingIds.length} 个提醒 · ${proposal.predictedImpact.budgetDeltaCny === null ? "价格影响仍需确认" : `预算变化 ${proposal.predictedImpact.budgetDeltaCny >= 0 ? "+" : ""}${proposal.predictedImpact.budgetDeltaCny} 元`}`;
   const approvalLabel = document.createElement("label"); const approval = document.createElement("input");
   approval.type = "checkbox"; approval.dataset.proposalApproval = ""; approvalLabel.append(approval, initialization ? " 我已审阅完整配置与需求摘要，并批准整体替换初始化脚手架" : " 我已审阅所选字段并批准写入当前草稿");
   const actions = document.createElement("div"); const apply = document.createElement("button"); const reject = document.createElement("button");
   apply.type = "button"; apply.textContent = "应用所选项"; apply.disabled = true; apply.dataset.applyProposal = "";
   reject.type = "button"; reject.textContent = "拒绝"; reject.dataset.rejectProposal = "";
-  const state = document.createElement("p"); state.dataset.proposalState = ""; state.textContent = "proposed · 未修改方案";
+  const state = document.createElement("p"); state.dataset.proposalState = ""; state.textContent = "等待你确认 · 方案尚未改变";
   approval.addEventListener("change", () => { apply.disabled = !approval.checked; });
   apply.addEventListener("click", async () => {
     const indexes = [...card.querySelectorAll<HTMLInputElement>("[data-proposal-operation]:checked")].map((entry) => Number(entry.dataset.proposalOperation));
     if (!indexes.length) { state.textContent = "至少选择一项修改。"; return; }
-    apply.disabled = true; reject.disabled = true; state.textContent = "正在重新验证 revision/hash/SKU 并运行确定性评估…";
-    try { await onApply(indexes, card); } catch (error) { state.textContent = `stale/rejected · ${text((error as Error).message)}`; reject.disabled = false; }
+    apply.disabled = true; reject.disabled = true; state.textContent = "正在重新检查型号、兼容性和预算影响…";
+    try { await onApply(indexes, card); } catch (error) { state.textContent = `无法应用：${text((error as Error).message)}`; reject.disabled = false; }
   });
   reject.addEventListener("click", () => onReject(card));
-  actions.append(apply, reject); card.append(heading, meta, list, impact, approvalLabel, actions, state);
+  actions.append(apply, reject); card.append(heading, list, impact, approvalLabel, actions, state, technical);
   return card;
 }
 
@@ -143,7 +172,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
   const usage = byId<HTMLElement>("agent-usage");
   if (!model || !skill || !status || !transcript || !events || !form || !input || !send || !cancel || !reset || !usage) return null;
 
-  const contextBadge = document.createElement("p");
+  const contextBadge = document.createElement("details");
   contextBadge.className = "agent-plan-context";
   contextBadge.dataset.agentPlanContext = "";
   contextBadge.setAttribute("aria-live", "polite");
@@ -164,17 +193,28 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
   let boundContext: PlanAgentContext | null = null;
 
   const currentContext = () => options.getPlanContext?.() ?? null;
+  const setContextCopy = (summaryText: string, detailText: string) => {
+    const summary = document.createElement("summary");
+    const detail = document.createElement("small");
+    summary.textContent = summaryText;
+    detail.textContent = detailText;
+    contextBadge.replaceChildren(summary, detail);
+  };
   const refreshContextBadge = () => {
     const current = currentContext();
     if (!current) {
-      contextBadge.textContent = "未绑定方案 evaluation；普通对话仍可用，不能生成可应用提案。";
+      setContextCopy("尚未同步装机方案", "普通问答仍可使用；同步方案后才能给出可直接确认的配置建议。");
       contextBadge.dataset.stale = "true";
       return;
     }
     const stale = isPlanAgentContextStale(boundContext, current);
     contextBadge.dataset.stale = String(stale);
     const pending = current.initialization?.status === "pending";
-    contextBadge.textContent = `${pending ? "空白方案待初始化" : "绑定方案"} ${current.planId} · revision ${current.draftRevision} · evaluation ${current.evaluationHash.slice(0, 12)}${pending ? " · 当前配置仅为内部脚手架" : ""}${boundContext ? stale ? " · context stale，发送时刷新" : " · context current" : " · 尚未发送"}`;
+    const friendly = pending ? "空白方案待初始化 · 请先告诉我用途和预算"
+      : boundContext && stale ? "方案刚有变化 · 下次发送时会自动同步"
+        : "已同步当前装机方案";
+    const technicalState = boundContext ? stale ? "context stale，发送时刷新" : "context current" : "尚未发送";
+    setContextCopy(friendly, `方案 ${current.planId} · revision ${current.draftRevision} · evaluation ${current.evaluationHash.slice(0, 12)} · ${technicalState}${pending ? " · 当前配置仅为初始化脚手架" : ""}`);
     if (pending && [...skill.options].some((entry) => entry.value === "plan-initializer") && !activeRunId) skill.value = "plan-initializer";
     input.placeholder = pending ? "例如：我想配一台预算 8000 元的 2K 游戏主机，请先问我必要问题" : "输入问题，Ctrl/⌘ + Enter 发送";
   };
@@ -198,10 +238,10 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
         });
         options.acceptServerPlan?.(result.plan);
         target.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach((control) => { control.disabled = true; });
-        target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = `applied · ${result.audit.approvalId} · ${validated.proposal.kind === "initialization" ? "初始化完成，已写入 active draft" : "已进入 active draft"}，未自动保存版本`;
+        target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = `${validated.proposal.kind === "initialization" ? "初始化完成" : "修改已应用"} · 已进入当前方案，尚未保存为检查点`;
       }, (target) => {
         target.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach((control) => { control.disabled = true; });
-        target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = "rejected · 方案未改变";
+        target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = "已放弃这条建议 · 方案没有改变";
       });
       proposalHost.prepend(card);
     } catch (error) {
@@ -243,9 +283,9 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
     activeRunId = null;
     stream?.close();
     stream = null;
-    transcript.replaceChildren(messageNode("notice", "新会话会绑定当前模型；每条消息都会附带当前 BuildConfig 快照。"));
+    transcript.replaceChildren(welcomeNode());
     events.replaceChildren();
-    usage.textContent = "尚无 token usage";
+    usage.textContent = "尚无用量记录";
     assistantBody = null;
     boundContext = null;
     refreshContextBadge();
@@ -393,7 +433,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
     if (!modelPayload.models.length) throw new Error("服务端没有可用模型");
     catalogReady = true;
     setBusy(false);
-    setStatus(`Agent 服务可用 · ${modelPayload.models.length} 模型 · ${skillPayload.skills.length} Skills`, "ok");
+    setStatus(`装机助手已就绪 · ${modelPayload.models.length} 个模型 · ${skillPayload.skills.length} 项能力`, "ok");
   } catch (error) {
     setStatus(`Agent 服务不可用：${text((error as Error).message)}`, "warn");
     send.disabled = true;

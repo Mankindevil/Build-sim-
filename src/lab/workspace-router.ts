@@ -2,13 +2,13 @@ export const WORKSPACE_ROUTES = ["workspace", "editor", "evaluation", "spatial",
 export type WorkspaceRoute = (typeof WORKSPACE_ROUTES)[number];
 
 const routeTargets: Record<WorkspaceRoute, string> = {
-  workspace: "top",
-  editor: "lab-config-title",
-  evaluation: "workspace-results",
-  spatial: "spatial-stage",
-  purchases: "build-base-dialog",
-  build: "build-progress-summary",
-  agent: "agent-title",
+  workspace: "workspace-page-workspace",
+  editor: "workspace-page-editor",
+  evaluation: "workspace-page-evaluation",
+  spatial: "workspace-page-spatial",
+  purchases: "workspace-page-purchases",
+  build: "workspace-page-build",
+  agent: "workspace-page-agent",
 };
 
 export function parseWorkspaceRoute(hash: string): WorkspaceRoute {
@@ -61,4 +61,3 @@ export class WorkspaceRouter {
     for (const listener of this.listeners) listener(this.route);
   }
 }
-

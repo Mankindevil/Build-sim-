@@ -53,7 +53,7 @@ describe("A5 Agent panel", () => {
     expect((document.querySelector("#agent-model") as HTMLSelectElement).value).toBe(model.id);
     expect((document.querySelector("#agent-skill") as HTMLSelectElement).value).toBe("build-diagnosis");
     expect((document.querySelector("#agent-model") as HTMLSelectElement).options).toHaveLength(3);
-    expect(document.querySelector("#agent-status")?.textContent).toContain("3 模型 · 1 Skills");
+    expect(document.querySelector("#agent-status")?.textContent).toContain("3 个模型 · 1 项能力");
     expect(document.body.textContent).not.toContain("装机诊断工作流");
   });
 
@@ -90,7 +90,7 @@ describe("A5 Agent panel", () => {
       throw new Error(`unexpected ${url}`);
     });
     await initAgentPanel({ getBuildConfig: () => ({}), fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => new FakeEventSource() });
-    expect(document.querySelector("#agent-status")?.textContent).toContain("1 模型");
+    expect(document.querySelector("#agent-status")?.textContent).toContain("1 个模型");
     expect((document.querySelector("#agent-model") as HTMLSelectElement).value).toBe(model.id);
     (document.querySelector("#agent-input") as HTMLTextAreaElement).value = "刷新模型";
     document.querySelector("#agent-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));

@@ -61,22 +61,38 @@
         <div id="build-review-current-summary" class="build-review-current-summary" aria-live="polite"></div>
         <section class="transaction-import" aria-labelledby="transaction-import-title">
           <div class="transaction-import-copy">
-            <div><p class="lab-kicker">SMART IMPORT</p><h3 id="transaction-import-title">导入一笔交易</h3></div>
-            <p>上传订单或支付截图，我们会提取商品、数量和成交价。确认前不会写入档案。</p>
+            <div><p class="lab-kicker">交易导入</p><h3 id="transaction-import-title">导入一笔交易</h3></div>
+            <p>先预览并确认截图，再识别商品、数量和成交价。识别与官网核验都不会自动写入档案或目录。</p>
           </div>
           <ol id="transaction-flow" class="transaction-flow" aria-label="交易导入进度">
-            <li data-step="upload" data-state="current"><i>1</i><span>选择截图<small>等待上传</small></span></li>
-            <li data-step="recognize" data-state="idle"><i>2</i><span>识别交易<small>商品与价格</small></span></li>
-            <li data-step="enrich" data-state="idle"><i>3</i><span>核验型号<small>匹配官方参数</small></span></li>
-            <li data-step="review" data-state="idle"><i>4</i><span>确认入档<small>由你最终确认</small></span></li>
+            <li data-step="upload" data-state="current"><i>1</i><span>预览截图<small>确认图片无误</small></span></li>
+            <li data-step="recognize" data-state="idle"><i>2</i><span>识别交易<small>提取商品与价格</small></span></li>
+            <li data-step="enrich" data-state="idle"><i>3</i><span>可选核验<small>由你主动查询官网</small></span></li>
+            <li data-step="review" data-state="idle"><i>4</i><span>确认保存<small>加入待保存清单</small></span></li>
           </ol>
           <label id="transaction-screenshot-drop" class="transaction-drop" for="transaction-screenshot-input">
             <input id="transaction-screenshot-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
-            <img id="transaction-screenshot-preview" alt="待识别交易截图预览" hidden>
             <span class="transaction-drop-icon" aria-hidden="true">↑</span>
-            <span><b>拖入截图，或点击选择</b><small>支持 PNG / JPEG / WebP · 最大 5MB · 建议隐藏无关隐私信息</small></span>
+            <span><b>拖入截图，或点击选择</b><small>支持 PNG / JPEG / WebP · 最大 5MB · 识别前可完整预览并更换图片</small></span>
           </label>
-          <div class="transaction-live-status"><span class="status-dot" aria-hidden="true"></span><p id="transaction-screenshot-status" class="transaction-status" data-level="idle" aria-live="polite">准备就绪。截图仅在你确认保存后归档。</p><button id="transaction-retry" type="button" class="case-view-btn" hidden>重试</button></div>
+          <section id="transaction-screenshot-selection" class="transaction-selection" aria-label="已选交易截图" hidden>
+            <img id="transaction-screenshot-preview" alt="待识别交易截图完整预览" role="button" tabindex="0" aria-label="放大或还原交易截图预览" aria-expanded="false">
+            <div class="transaction-selection-copy">
+              <p id="transaction-screenshot-meta">尚未选择图片</p>
+              <small>请先检查商品、金额与隐私信息。只有点击“开始识别”后，图片才会发送给识别服务。</small>
+              <div class="transaction-selection-actions">
+                <button id="transaction-start-recognition" type="button">开始识别</button>
+                <button id="transaction-replace-image" type="button" class="case-view-btn">更换图片</button>
+                <button id="transaction-manual-entry" type="button" class="case-view-btn">不识别，手动录入</button>
+              </div>
+            </div>
+          </section>
+          <div class="transaction-live-status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <p id="transaction-screenshot-status" class="transaction-status" data-level="idle" aria-live="polite">请选择一张交易截图。确认前不会识别或归档。</p>
+            <button id="transaction-retry" type="button" class="case-view-btn" hidden>重试当前步骤</button>
+            <button id="transaction-cancel" type="button" class="case-view-btn" hidden>取消当前处理</button>
+          </div>
           <div id="transaction-screenshot-result" class="transaction-result" aria-live="polite" hidden></div>
         </section>
         <section class="build-list-section"><header><div><p class="lab-kicker">COMPONENTS</p><h3>当前部件</h3></div><button id="build-add-custom" type="button" class="case-view-btn">＋ 手动添加</button></header><div class="build-editor-labels" aria-hidden="true"><span>部件</span><span>分类</span><span>数量</span><span>单价</span><span>状态</span><span></span></div><div id="build-base-editor" class="build-base-editor"></div></section>
@@ -436,20 +452,28 @@
           <div><p class="lab-kicker">AGENT CHAT · PROVIDER NEUTRAL</p><h3 id="agent-title">装机 Agent</h3><p id="agent-status" class="agent-status" data-level="warn" aria-live="polite">正在连接本地 Agent 服务…</p></div>
           <button id="agent-new-session" type="button" class="case-view-btn">新建会话</button>
         </div>
-        <div class="agent-controls">
-          <label>模型<select id="agent-model" class="form-select" aria-label="Agent 模型"><option>读取模型…</option></select></label>
-          <label>Skill<select id="agent-skill" class="form-select" aria-label="Agent Skill"><option>读取 Skills…</option></select></label>
-          <p>浏览器只连接本地服务；API key 不进入页面。当前配置会随每条消息在服务端重新校验。</p>
-        </div>
+        <details class="agent-controls-details"><summary>高级设置：模型与能力</summary><div class="agent-controls">
+          <label>对话模型<select id="agent-model" class="form-select" aria-label="Agent 模型"><option>读取模型…</option></select></label>
+          <label>装机能力<select id="agent-skill" class="form-select" aria-label="Agent Skill"><option>读取能力…</option></select></label>
+          <p>不了解时保持默认。浏览器只连接本地服务；密钥不会进入页面，每条回答都会重新核对当前方案。</p>
+        </div></details>
         <div class="agent-layout">
           <div id="agent-transcript" class="agent-transcript" aria-live="polite" aria-label="Agent 对话">
-            <div class="agent-message agent-message-notice" data-role="notice"><span class="agent-message-role">运行事件</span><div class="agent-message-body">新会话会绑定当前模型；每条消息都会附带当前 BuildConfig 快照。</div></div>
+            <section class="agent-welcome" aria-label="装机助手使用说明">
+              <p>第一次装机也没关系</p>
+              <h4>直接说目标，我来把术语翻译成下一步</h4>
+              <ul>
+                <li><strong>先了解你：</strong>用途、预算、摆放位置，以及对噪音和耗电的在意程度。</li>
+                <li><strong>再解释取舍：</strong>哪些能买、哪些会冲突、为什么要改，以及大概多花多少钱。</li>
+                <li><strong>最后由你确认：</strong>助手只提出修改建议，不会静默改配置或替你下单。</li>
+              </ul>
+            </section>
           </div>
-          <aside class="agent-run-log" aria-label="Agent 运行审计摘要">
-            <h4>本次运行</h4>
+          <details class="agent-run-log" aria-label="Agent 运行审计摘要">
+            <summary>查看本次运行详情</summary>
             <ul id="agent-events"></ul>
-            <p id="agent-usage">尚无 token usage</p>
-          </aside>
+            <p id="agent-usage">尚无用量记录</p>
+          </details>
         </div>
         <form id="agent-form" class="agent-composer">
           <label for="agent-input">消息</label>

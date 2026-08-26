@@ -33,7 +33,7 @@ describe("R10 browser resource cleanup", () => {
   });
 
   it("aborts OCR and revokes the transaction preview object URL on dispose", async () => {
-    document.body.innerHTML = `<label id="transaction-screenshot-drop"><input id="transaction-screenshot-input" type="file"><img id="transaction-screenshot-preview"><span></span></label><p id="transaction-screenshot-status"></p><div id="transaction-screenshot-result"></div>`;
+    document.body.innerHTML = `<label id="transaction-screenshot-drop"><input id="transaction-screenshot-input" type="file"><span></span></label><section id="transaction-screenshot-selection" hidden><img id="transaction-screenshot-preview"><p id="transaction-screenshot-meta"></p><button id="transaction-start-recognition"></button><button id="transaction-replace-image"></button><button id="transaction-manual-entry"></button></section><p id="transaction-screenshot-status"></p><button id="transaction-retry" hidden></button><button id="transaction-cancel" hidden></button><div id="transaction-screenshot-result"></div>`;
     const revoke = vi.fn();
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:cleanup");
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(revoke);
@@ -42,9 +42,10 @@ describe("R10 browser resource cleanup", () => {
     const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
     Object.defineProperty(input, "files", { configurable: true, value: [new File([new Uint8Array([1])], "receipt.png", { type: "image/png" })] });
     input.dispatchEvent(new Event("change"));
+    document.querySelector<HTMLButtonElement>("#transaction-start-recognition")!.click();
     await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledOnce());
     controller?.dispose();
     expect(revoke).toHaveBeenCalledWith("blob:cleanup");
-    expect(document.querySelector("[data-transaction-cancel]")).toBeNull();
+    expect(document.querySelector("#transaction-cancel")).not.toBeNull();
   });
 });

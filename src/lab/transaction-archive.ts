@@ -46,6 +46,8 @@ export interface TransactionArchiveRecord {
     imageUrl: string;
   } | null;
   pendingFile?: File;
+  /** A recoverable local projection shown when the archive service has no matching record. */
+  localOnly?: boolean;
 }
 
 export interface TransactionArchiveBatchResult {

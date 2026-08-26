@@ -4,31 +4,25 @@ import type { PlanStore, PlanStoreState } from "../plans/client-store";
 import { WorkspaceRouter, type WorkspaceRoute } from "./workspace-router";
 import "./workspace-shell.css";
 
-const labels: Record<WorkspaceRoute, string> = {
-  workspace: "工作台",
-  editor: "方案编辑",
-  evaluation: "评估中心",
-  spatial: "空间预览",
-  purchases: "采购与交易",
-  build: "装机执行",
-  agent: "Agent",
+const navigation: Record<WorkspaceRoute, { step: string; label: string; hint: string }> = {
+  workspace: { step: "01", label: "从这里开始", hint: "下一步做什么" },
+  editor: { step: "02", label: "选择硬件", hint: "搭出可行方案" },
+  evaluation: { step: "03", label: "安全检查", hint: "兼容、散热与噪音" },
+  spatial: { step: "04", label: "空间预演", hint: "尺寸、走线与安装" },
+  purchases: { step: "05", label: "放心采购", hint: "价格、清单与凭证" },
+  build: { step: "06", label: "开始装机", hint: "按顺序完成任务" },
+  agent: { step: "?", label: "问问助手", hint: "不懂就随时问" },
 };
 
 function statusLabel(state: PlanStoreState): string {
-  if (state.activePlan?.metadata.initialization?.status === "pending") return "空白方案 · 等待 Agent 初始化";
-  if (state.saveStatus === "offline") return "离线 · 草稿未持久化";
-  if (state.saveStatus === "saving") return "正在保存草稿…";
-  if (state.saveStatus === "saved") return state.activePlan?.draft.dirty ? "草稿已保存 · 未版本化" : "已保存";
-  if (state.saveStatus === "conflict") return "保存冲突 · 需要重新加载";
-  if (state.saveStatus === "failed") return "保存失败 · 可重试";
-  if (state.saveStatus === "dirty") return "有未保存修改";
-  return "已保存版本";
-}
-
-function showLegacyPanel(root: HTMLElement, route: WorkspaceRoute): void {
-  const panel = route === "agent" ? "agent" : "overview";
-  for (const tab of root.querySelectorAll<HTMLElement>(".lab-tab[data-tab]")) tab.setAttribute("aria-selected", String(tab.dataset.tab === panel));
-  for (const candidate of root.querySelectorAll<HTMLElement>(".lab-panel[data-panel]")) candidate.classList.toggle("is-hidden", candidate.dataset.panel !== panel);
+  if (state.activePlan?.metadata.initialization?.status === "pending") return "先告诉助手你的用途和预算";
+  if (state.saveStatus === "offline") return "离线使用 · 修改仅保存在此设备";
+  if (state.saveStatus === "saving") return "正在自动保存…";
+  if (state.saveStatus === "saved") return state.activePlan?.draft.dirty ? "修改已自动保存" : "已保存";
+  if (state.saveStatus === "conflict") return "检测到另一处修改，请重新载入";
+  if (state.saveStatus === "failed") return "自动保存失败，请重试";
+  if (state.saveStatus === "dirty") return "有新修改，正在等待保存";
+  return "已保存";
 }
 
 export interface PlanShellController { dispose(): void; }
@@ -36,18 +30,21 @@ export interface PlanShellController { dispose(): void; }
 export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new WorkspaceRouter()): PlanShellController {
   const existing = root.querySelector(".workspace-global-shell");
   existing?.remove();
-  const shell = document.createElement("section");
+  const shell = document.createElement("aside");
   shell.className = "workspace-global-shell";
   shell.setAttribute("aria-label", "方案工作区");
   shell.innerHTML = `
-    <div class="workspace-plan-row">
-      <label><span>当前方案</span><select data-plan-switcher aria-label="切换当前方案"></select></label>
-      <div class="workspace-plan-identity"><strong data-plan-name>读取方案…</strong><small data-plan-version>版本 —</small></div>
-      <p data-save-status aria-live="polite">正在连接 workspace…</p>
-      <button type="button" data-new-plan>新建方案</button>
-      <button type="button" data-save-version>保存版本</button>
-    </div>
-    <nav aria-label="工作区导航">${Object.entries(labels).map(([route, label]) => `<a href="#/${route}" data-route="${route}">${label}</a>`).join("")}</nav>
+    <header class="workspace-brand"><span aria-hidden="true">B</span><div><strong>BUILD LAB</strong><small>零基础装机向导</small></div></header>
+    <section class="workspace-plan-card" aria-label="当前方案">
+      <label><span>正在进行的方案</span><select data-plan-switcher aria-label="切换当前方案"></select></label>
+      <div class="workspace-plan-identity"><strong data-plan-name>读取方案…</strong><small data-plan-version>正在准备…</small></div>
+      <p data-save-status aria-live="polite">正在连接工作区…</p>
+    </section>
+    <nav aria-label="装机向导">${Object.entries(navigation).map(([route, item]) => `<a href="#/${route}" data-route="${route}"><i>${item.step}</i><span><strong>${item.label}</strong><small>${item.hint}</small></span></a>`).join("")}</nav>
+    <footer class="workspace-shell-actions">
+      <button type="button" data-save-version>保存当前版本</button>
+      <button type="button" data-new-plan>＋ 新建装机方案</button>
+    </footer>
     <p class="workspace-inline-error" data-workspace-error role="alert" hidden></p>
     <dialog class="workspace-new-plan-dialog" data-new-plan-dialog aria-labelledby="new-plan-title">
       <form method="dialog">
@@ -67,7 +64,7 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
     switcher.value = state.activePlan?.id ?? "";
     switcher.disabled = !state.plans.length;
     shell.querySelector<HTMLElement>("[data-plan-name]")!.textContent = state.activePlan?.name ?? "尚无方案";
-    shell.querySelector<HTMLElement>("[data-plan-version]")!.textContent = state.activePlan?.activeVersionId ? `版本 ${state.activePlan.activeVersionId.slice(-8)}` : "尚未保存版本";
+    shell.querySelector<HTMLElement>("[data-plan-version]")!.textContent = state.activePlan?.activeVersionId ? "已有保存检查点" : "还没有保存检查点";
     const status = shell.querySelector<HTMLElement>("[data-save-status]")!;
     status.textContent = statusLabel(state);
     status.dataset.status = state.saveStatus;
@@ -86,8 +83,10 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
   });
   const dialog = shell.querySelector<HTMLDialogElement>("[data-new-plan-dialog]")!;
   shell.querySelector<HTMLButtonElement>("[data-new-plan]")!.addEventListener("click", () => {
-    if (typeof dialog.showModal === "function") dialog.showModal();
-    else dialog.setAttribute("open", "");
+    const guidedDialog = root.querySelector<HTMLDialogElement>("[data-create-dialog]");
+    const target = guidedDialog ?? dialog;
+    if (typeof target.showModal === "function") target.showModal();
+    else target.setAttribute("open", "");
   });
   shell.querySelector<HTMLButtonElement>("[data-new-agent-plan]")!.addEventListener("click", () => {
     const timestamp = new Date().toISOString();
@@ -129,13 +128,12 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
   const unsubscribeRoute = router.subscribe((route) => {
     root.dataset.workspaceRoute = route;
     for (const link of routeLinks) link.setAttribute("aria-current", link.dataset.route === route ? "page" : "false");
-    showLegacyPanel(root, route);
-    const target = document.getElementById(router.target(route));
-    if (target && route !== "workspace") target.scrollIntoView({ block: "start" });
-    if (route === "purchases") {
-      const dialog = document.querySelector<HTMLDialogElement>("#build-base-dialog");
-      if (dialog && !dialog.open) dialog.showModal();
+    const activeLink = routeLinks.find((link) => link.dataset.route === route);
+    const nav = activeLink?.parentElement;
+    if (activeLink && nav && nav.scrollWidth > nav.clientWidth && typeof activeLink.scrollIntoView === "function") {
+      requestAnimationFrame(() => activeLink.scrollIntoView({ block: "nearest", inline: "center" }));
     }
+    document.title = `${navigation[route].label} · Build Lab`;
   });
   router.start();
 

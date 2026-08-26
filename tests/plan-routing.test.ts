@@ -19,7 +19,7 @@ describe("R2 workspace routing", () => {
     router.start();
     router.navigate("agent");
     expect(history.pushState).toHaveBeenCalledWith({}, "", "#/agent");
-    expect(router.target()).toBe("agent-title");
+    expect(router.target()).toBe("workspace-page-agent");
     expect(routes).toEqual(["workspace", "agent"]);
     router.stop();
   });

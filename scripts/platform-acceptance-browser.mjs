@@ -38,7 +38,6 @@ const firstLoadMs = Date.now() - started;
 
 await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
 await page.fill("[data-create-name]", "R10 完整验收方案");
-await page.selectOption("[data-create-mode]", "template");
 await page.click("[data-create-submit]");
 await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.name === "R10 完整验收方案");
 const firstPlan = await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.id);
@@ -59,6 +58,7 @@ await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().act
 
 await page.click('[data-route="workspace"]');
 await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
+await page.click('[data-create-dialog] details > summary');
 await page.selectOption("[data-create-mode]", "duplicate");
 await page.fill("[data-create-name]", "R10 独立副本");
 await page.click("[data-create-submit]");
@@ -108,6 +108,7 @@ const saved = await page.evaluate(() => ({ id: window.__BUILD_SIM_PLAN_STORE__.g
 
 await page.click('[data-route="purchases"]');
 await page.setInputFiles("#transaction-screenshot-input", { name: "sf750.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+await page.click("#transaction-start-recognition");
 await page.waitForFunction(() => document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase") === "reviewing");
 if (await page.locator(".transaction-review-link").inputValue() !== "psu.corsair-sf750-atx31") throw new Error("transaction was not linked to the v2 PSU");
 await page.click(".transaction-review-actions button:last-child");
@@ -115,7 +116,7 @@ await page.click("#build-base-save");
 await page.waitForFunction(() => document.querySelector("#build-base-save-status")?.getAttribute("data-phase") === "archived");
 if (await page.locator("#build-base-close").isVisible()) await page.click("#build-base-close");
 await page.click('[data-route="build"]');
-const purchaseTask = page.locator('[data-task-kind="purchase"]').filter({ hasText: "purchase:sku:psu.corsair-sf750-atx31" });
+const purchaseTask = page.locator('[data-task-kind="purchase"]').filter({ hasText: "psu.corsair-sf750-atx31" });
 await purchaseTask.waitFor();
 if (await purchaseTask.getAttribute("data-task-status-value") !== "done") throw new Error("archived transaction did not update build task");
 
@@ -128,15 +129,22 @@ if (a11y.unnamedButtons || a11y.brokenDialogs || a11y.liveRegions < 5) throw new
 
 const screenshots = [];
 for (const [name, width, height, route] of [["desktop", 1440, 1000, "workspace"], ["tablet", 1024, 768, "build"], ["mobile", 390, 844, "editor"]]) {
-  await page.setViewportSize({ width, height }); await page.click(`[data-route="${route}"]`); const file = path.join(visualRoot, `${name}.png`); await page.screenshot({ path: file, fullPage: true });
-  const buffer = await readFile(file); screenshots.push({ name, width, height, bytes: buffer.byteLength, sha256: createHash("sha256").update(buffer).digest("hex") });
+  await page.setViewportSize({ width, height }); await page.click(`[data-route="${route}"]`); await page.waitForTimeout(80);
+  const layout = await page.evaluate(() => {
+    const active = document.querySelector('.workspace-global-shell [aria-current="page"]')?.getBoundingClientRect();
+    const nav = document.querySelector(".workspace-global-shell nav")?.getBoundingClientRect();
+    return { clientWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth, activeLeft: active?.left, activeRight: active?.right, navLeft: nav?.left, navRight: nav?.right };
+  });
+  if (layout.scrollWidth > layout.clientWidth + 1) throw new Error(`${name} layout overflows horizontally: ${JSON.stringify(layout)}`);
+  if (layout.activeLeft !== undefined && layout.navLeft !== undefined && (layout.activeLeft < layout.navLeft - 4 || layout.activeRight > layout.navRight + 4)) throw new Error(`${name} active route is outside the visible navigation: ${JSON.stringify(layout)}`);
+  const file = path.join(visualRoot, `${name}.png`); await page.screenshot({ path: file, fullPage: true });
+  const buffer = await readFile(file); screenshots.push({ name, width, height, bytes: buffer.byteLength, sha256: createHash("sha256").update(buffer).digest("hex"), layout });
 }
 
 // Mobile completion path: create, edit, save a version, review and archive a transaction.
 await page.click('[data-route="workspace"]');
 await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
 await page.fill("[data-create-name]", "R10 手机方案");
-await page.selectOption("[data-create-mode]", "template");
 await page.click("[data-create-submit]");
 await page.fill('[data-config-field="selection.diskCount"]', "3");
 await page.locator('[data-config-field="selection.diskCount"]').dispatchEvent("change");
@@ -148,6 +156,7 @@ await page.click("[data-version-submit]");
 await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.dirty === false);
 await page.click('[data-route="purchases"]');
 await page.setInputFiles("#transaction-screenshot-input", { name: "sf750-mobile.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+await page.click("#transaction-start-recognition");
 await page.waitForFunction(() => document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase") === "reviewing");
 if (!await page.locator(".transaction-review-fields").isVisible()) throw new Error("mobile transaction review is not operable");
 await page.click(".transaction-review-actions button:last-child");

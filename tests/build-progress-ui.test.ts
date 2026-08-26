@@ -26,7 +26,20 @@ function evaluation(): BuildEvaluation {
 }
 
 describe("build progress transaction import", () => {
-  beforeEach(() => { localStorage.clear(); mount(); });
+  beforeEach(() => { vi.restoreAllMocks(); localStorage.clear(); mount(); });
+
+  it("shows every evaluated BOM item instead of a hard-coded three-item hero", () => {
+    const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: ["case.jonsbo-n6"] });
+    controller.syncEvaluation({ bom: [
+      { skuId: "case.jonsbo-n6", qty: 1, bucket: "required" },
+      { skuId: "board.asus-w680m-ace-se", qty: 1, bucket: "required" },
+      { skuId: "cpu.i5-14500", qty: 1, bucket: "required" },
+      { skuId: "psu.seasonic-focus-gx-850-v5", qty: 1, bucket: "required" },
+    ] } as unknown as BuildEvaluation);
+    expect(document.querySelectorAll("#build-base-summary .build-base-row")).toHaveLength(4);
+    expect(document.querySelector("#build-hero-progress")?.textContent).toContain("/ 4 已购买");
+    expect(controller.items()).toHaveLength(4);
+  });
 
   it("updates a matched catalog row to purchased and persists receipt evidence", () => {
     const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: ["case.jonsbo-n6"] });
@@ -152,6 +165,7 @@ describe("build progress transaction import", () => {
   });
 
   it("discards a staged screenshot result when the editor is cancelled", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: ["case.jonsbo-n6"] });
     controller.syncEvaluation(evaluation());
     document.querySelector<HTMLButtonElement>("#build-base-edit")?.click();
@@ -168,6 +182,67 @@ describe("build progress transaction import", () => {
     document.querySelector<HTMLButtonElement>("#build-base-edit")?.click();
     expect(document.querySelector('[data-progress-id="transaction-receipt-cancelled"]')).toBeNull();
     expect(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY)).toBeNull();
+  });
+
+  it("protects route-surface form edits and staged screenshots from cancel and store refresh", () => {
+    document.querySelector<HTMLDialogElement>("#build-base-dialog")!.dataset.routeSurface = "true";
+    const discard = vi.fn();
+    const archive: TransactionScreenshotArchive = {
+      stage: vi.fn(), discard, commit: vi.fn(async () => ({ archived: [], failures: [] })), list: vi.fn(async () => []), pendingRecord: vi.fn(() => null),
+      deleteScreenshot: vi.fn(async () => undefined), deleteRecord: vi.fn(async () => undefined), updateRecord: vi.fn(async () => { throw new Error("unused"); }),
+    };
+    const context = { planId: "plan-dirty-12345678", planVersionId: null, planName: "Dirty", evaluation: evaluation() } satisfies BuildProgressPlanContext;
+    const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: [], getPlanContext: () => context, screenshotArchive: archive });
+    controller.activatePlan(context);
+    const file = new File(["receipt"], "dirty.png", { type: "image/png" });
+    controller.stageTransaction({
+      receiptId: "receipt-dirty", skuId: null, name: "待保存电源", category: "psu", qty: 1, unitPriceCny: 800,
+      evidence: { receiptId: "receipt-dirty", fileName: "dirty.png", contentHash: "d".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: null, excerpt: "evidence", verification: "identity-review-required" },
+    }, file);
+    const name = document.querySelector<HTMLInputElement>('[data-progress-id="transaction-receipt-dirty"] .build-editor-name')!;
+    name.value = "用户修正后的电源";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    document.querySelector<HTMLButtonElement>("#build-base-cancel")!.click();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("尚未保存"));
+    expect(document.querySelector<HTMLInputElement>('[data-progress-id="transaction-receipt-dirty"] .build-editor-name')?.value).toBe("用户修正后的电源");
+    expect(discard).not.toHaveBeenCalled();
+
+    controller.activatePlan({ ...context, evaluation: { bom: [{ skuId: "case.jonsbo-n6", qty: 2, bucket: "required" }] } as unknown as BuildEvaluation });
+    expect(document.querySelector<HTMLInputElement>('[data-progress-id="transaction-receipt-dirty"] .build-editor-name')?.value).toBe("用户修正后的电源");
+    expect(document.querySelector("#build-base-save-status")?.textContent).toContain("保存采购记录");
+    expect(archive.stage).toHaveBeenCalledWith("receipt-dirty", file, "d".repeat(64), "now");
+    expect(discard).not.toHaveBeenCalled();
+  });
+
+  it("requires explicit confirmation before an external plan switch discards purchase changes", () => {
+    document.querySelector<HTMLDialogElement>("#build-base-dialog")!.dataset.routeSurface = "true";
+    const discard = vi.fn();
+    const archive: TransactionScreenshotArchive = {
+      stage: vi.fn(), discard, commit: vi.fn(async () => ({ archived: [], failures: [] })), list: vi.fn(async () => []), pendingRecord: vi.fn(() => null),
+      deleteScreenshot: vi.fn(async () => undefined), deleteRecord: vi.fn(async () => undefined), updateRecord: vi.fn(async () => { throw new Error("unused"); }),
+    };
+    const planA = { planId: "plan-dirty-a", planVersionId: null, planName: "A", evaluation: evaluation() } satisfies BuildProgressPlanContext;
+    const planB = { planId: "plan-dirty-b", planVersionId: null, planName: "B", evaluation: { bom: [] } as unknown as BuildEvaluation } satisfies BuildProgressPlanContext;
+    const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: [], getPlanContext: () => planA, screenshotArchive: archive });
+    controller.activatePlan(planA);
+    controller.stageTransaction({
+      receiptId: "receipt-switch", skuId: null, name: "切换前记录", category: "accessory", qty: 1, unitPriceCny: null,
+      evidence: { receiptId: "receipt-switch", fileName: "switch.png", contentHash: "e".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: null, excerpt: "evidence", verification: "identity-review-required" },
+    }, new File(["receipt"], "switch.png", { type: "image/png" }));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    controller.activatePlan(planB);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("切换方案会放弃"));
+    expect(document.querySelector('[data-progress-id="transaction-receipt-switch"]')).not.toBeNull();
+    expect(document.querySelector("#build-base-save-status")?.textContent).toContain("已保留当前采购更改");
+    expect(discard).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    controller.activatePlan(planB);
+    expect(discard).toHaveBeenCalledOnce();
+    expect(document.querySelector('[data-progress-id="transaction-receipt-switch"]')).toBeNull();
   });
 
   it("archives a staged screenshot on the server only when Save base succeeds", async () => {
@@ -206,6 +281,7 @@ describe("build progress transaction import", () => {
     const stored = JSON.parse(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY) ?? "{}");
     expect(stored.items["transaction-receipt-server"].transaction).toMatchObject({ screenshotArchive: "server", screenshotStoredAt: "2026-08-25T01:00:00.000Z", screenshotMimeType: "image/png", screenshotSize: 4 });
     expect(document.querySelector("#build-base-save-status")?.textContent).toContain("已将 Server saved PSU 设为方案默认部件");
+    expect(document.querySelector("#build-base-save-status")?.getAttribute("data-phase")).toBe("archived");
   });
 
   it("isolates purchase state per active plan and restores it when switching back", () => {
@@ -237,6 +313,7 @@ describe("build progress transaction import", () => {
     controller.stageTransaction({ receiptId: "receipt-failed", skuId: null, name: "Failed", category: "gpu", qty: 1, unitPriceCny: 900, evidence: evidence("receipt-failed") });
     document.querySelector<HTMLButtonElement>("#build-base-save")!.click();
     await vi.waitFor(() => expect(document.querySelector("#build-base-save-status")?.textContent).toContain("部分保存"));
+    expect(document.querySelector("#build-base-save-status")?.getAttribute("data-phase")).toBe("staged");
     const stored = JSON.parse(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY) ?? "{}");
     expect(stored.items["transaction-receipt-ok"]).toBeTruthy();
     expect(stored.items["transaction-receipt-failed"]).toBeUndefined();

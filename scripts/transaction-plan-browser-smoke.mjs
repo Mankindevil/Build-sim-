@@ -71,6 +71,7 @@ await page.evaluate(() => {
 });
 await page.waitForFunction(() => document.querySelector("#build-base-dialog")?.hasAttribute("open"));
 await page.setInputFiles("#transaction-screenshot-input", { name: "order.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+await page.click("#transaction-start-recognition");
 await page.waitForFunction(() => document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase") === "reviewing");
 if (!(await page.locator(".transaction-review-evidence").textContent()).includes("97%")) throw new Error("OCR confidence/evidence was not shown in review");
 if (await page.locator(".transaction-review-link").inputValue() !== activePsuId) throw new Error("matched PSU was not linked to the active plan item by default");
@@ -89,7 +90,6 @@ await page.waitForFunction((baseline) => {
   return current === baseline + 899 && document.querySelector("#next-buy-list")?.textContent?.includes("¥899");
 }, baselineKnownSpent);
 
-await page.click("#build-base-edit");
 await page.click("#build-review-transactions-tab");
 await page.waitForSelector('[data-archive-receipt="receipt-browser-r8"]');
 if (!(await page.locator('[data-archive-receipt="receipt-browser-r8"] [data-link-status="linked"]').isVisible())) throw new Error("linked archive was not visible for active plan");
@@ -105,6 +105,7 @@ await page.evaluate(() => {
 await page.waitForFunction(() => document.querySelector("#build-base-dialog")?.hasAttribute("open"));
 await page.click("#build-review-current-tab");
 await page.setInputFiles("#transaction-screenshot-input", { name: "gpu.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+await page.click("#transaction-start-recognition");
 await page.waitForFunction(() => document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase") === "reviewing");
 const gpuLink = await page.locator(".transaction-review-link").evaluate((select) => ({ value: select.value, options: [...select.options].map((option) => ({ value: option.value, text: option.textContent })) }));
 const gpuPlanOption = gpuLink.options.find((option) => option.value === "gpu.primary" || option.text?.startsWith("显卡 ·"));
@@ -116,7 +117,7 @@ await page.waitForSelector('.transaction-candidate-review[data-state="empty"]');
 if (transactionSearchBody?.query !== "MSI RTX 3070 Ventus 2X OC 8GB" || transactionSearchBody?.brand) throw new Error(`stale OCR brand polluted corrected search: ${JSON.stringify(transactionSearchBody)}`);
 if (transactionSearchBody?.trigger !== "user-confirmed-review") throw new Error("transaction search trigger was not audited");
 if (!(await page.locator(".transaction-search-log").textContent()).includes("已忽略冲突的 OCR 品牌 · Intel")) throw new Error("stale OCR brand removal was not visible");
-if (!(await page.locator(".transaction-review-enrich").textContent()).includes("重新查询官网")) throw new Error("catalog search retry was not offered");
+if (!(await page.locator(".transaction-review-enrich").textContent()).includes("重新核验官网")) throw new Error("catalog search retry was not offered");
 if (!(await page.locator(".transaction-review-retry-ocr").isVisible())) throw new Error("successful OCR could not be retried");
 
 if (errors.length) throw new Error(`page errors:\n${errors.join("\n")}`);

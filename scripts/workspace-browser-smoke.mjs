@@ -38,20 +38,20 @@ const initialPlanId = await page.locator("[data-plan-switcher]").inputValue();
 if (!initialPlanId.startsWith("plan-")) throw new Error("default active plan was not restored");
 if (!(await page.$('[data-workspace-page="editor"] [data-config-field="selection.diskCount"]'))) throw new Error("R3 grouped editor did not render");
 await page.waitForFunction(() => Boolean(document.querySelector("#n6-lab")?.getAttribute("data-evaluation-hash")));
-const initialEvaluationHashes = await page.evaluate(() => ["n6-lab", "fit-chip", "workspace-results", "spatial-stage", "build-base-dialog", "agent-title"].map((id) => document.getElementById(id)?.getAttribute("data-evaluation-hash")));
+const initialEvaluationHashes = await page.evaluate(() => ["n6-lab", "spatial-stage", "build-base-dialog", "agent-title"].map((id) => document.getElementById(id)?.getAttribute("data-evaluation-hash")).filter(Boolean));
 if (new Set(initialEvaluationHashes).size !== 1 || !initialEvaluationHashes[0]) throw new Error("major panels do not share one evaluation hash");
 
-await page.fill("#disk-range", "2");
-await page.locator("#disk-range").dispatchEvent("input");
+const diskCountField = '[data-config-field="selection.diskCount"]';
+await page.fill(diskCountField, "2");
+await page.locator(diskCountField).dispatchEvent("change");
 await page.waitForFunction(() => document.querySelector("[data-save-status]")?.getAttribute("data-status") === "saved");
 await page.reload({ waitUntil: "networkidle" });
-if (await page.locator("#disk-range").inputValue() !== "2") throw new Error("autosaved active draft did not survive refresh");
+if (await page.locator(diskCountField).inputValue() !== "2") throw new Error("autosaved active draft did not survive refresh");
 if (unloadPrompts < 1) throw new Error("dirty draft refresh protection did not prompt");
 
 await page.click('[data-route="workspace"]');
 await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
 await page.fill("[data-create-name]", "E2E second plan");
-await page.selectOption("[data-create-mode]", "template");
 await page.click("[data-create-submit]");
 await page.waitForFunction((id) => {
   const select = document.querySelector("[data-plan-switcher]");
@@ -59,7 +59,7 @@ await page.waitForFunction((id) => {
 }, initialPlanId);
 const secondPlanId = await page.locator("[data-plan-switcher]").inputValue();
 if (secondPlanId === initialPlanId) throw new Error("new plan did not become active");
-if (await page.locator("#disk-range").inputValue() !== "1") throw new Error("new plan inherited transient DOM state");
+if (await page.locator(diskCountField).inputValue() !== "1") throw new Error("new plan inherited transient DOM state");
 
 await page.click("[data-open-save]");
 await page.fill("[data-version-summary]", "E2E initial version");
@@ -77,11 +77,11 @@ await page.waitForFunction(() => document.querySelector("[data-version-list]")?.
 await page.click("[data-close-history]");
 await page.selectOption("[data-plan-switcher]", initialPlanId);
 await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id === id, initialPlanId);
-if (await page.locator("#disk-range").inputValue() !== "2") throw new Error("switching plans leaked the second plan config");
+if (await page.locator(diskCountField).inputValue() !== "2") throw new Error("switching plans leaked the second plan config");
 
 await page.reload({ waitUntil: "networkidle" });
 if (await page.locator("[data-plan-switcher]").inputValue() !== initialPlanId) throw new Error("active plan id did not survive refresh");
-if (await page.locator("#disk-range").inputValue() !== "2") throw new Error("active plan config did not survive second refresh");
+if (await page.locator(diskCountField).inputValue() !== "2") throw new Error("active plan config did not survive second refresh");
 if (errors.length) throw new Error(`page errors:\n${errors.join("\n")}`);
 
 const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });

@@ -26,7 +26,7 @@ describe("Agent plan initialization entry", () => {
     });
     expect(window.location.hash).toBe("#/agent");
     expect(document.querySelector<HTMLButtonElement>("[data-save-version]")?.disabled).toBe(true);
-    expect(document.querySelector("[data-save-status]")?.textContent).toContain("等待 Agent 初始化");
+    expect(document.querySelector("[data-save-status]")?.textContent).toContain("先告诉助手");
     controller.dispose();
     store.dispose();
   });
