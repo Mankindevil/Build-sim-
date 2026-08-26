@@ -1,4 +1,4 @@
-const BRANDS = ["JONSBO", "ASUS", "Seagate", "Corsair", "Intel", "Kingston", "Samsung", "Seasonic", "SilverStone", "FSP", "Thermalright", "Noctua", "ID-COOLING", "LSI", "NVIDIA"];
+const BRANDS = ["JONSBO", "ASUS", "Seagate", "Corsair", "Intel", "Kingston", "Samsung", "Seasonic", "SilverStone", "FSP", "Thermalright", "Noctua", "ID-COOLING", "LSI", "NVIDIA", "MSI"];
 const CATEGORIES = [["case", ["case", "机箱"]], ["motherboard", ["motherboard", "mainboard", "主板"]], ["cpu", ["cpu", "processor", "处理器"]], ["psu", ["psu", "power supply", "电源"]], ["cooler", ["cooler", "散热器", "水冷"]], ["gpu", ["gpu", "显卡", "graphics"]], ["memory", ["memory", "ram", "内存"]], ["storage", ["ssd", "hdd", "硬盘", "固态", "机械盘"]], ["hba", ["hba", "sas card", "阵列卡"]]];
 const INTERFACES = ["slimsas", "sff-8643", "sata", "nvme", "pcie", "ddr5", "ddr4", "ecc", "sfx", "atx"];
 const clean = (value) => value.normalize("NFKC").replace(/[‐‑‒–—−]/g, "-").replace(/[，、；]/g, " ").replace(/\s+/g, " ").trim();

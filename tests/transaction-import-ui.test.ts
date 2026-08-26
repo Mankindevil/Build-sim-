@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { initTransactionImport } from "../src/lab/transaction-import";
+import { compactOfficialQuery, initTransactionImport } from "../src/lab/transaction-import";
+import { loadBundledCatalog } from "../src/sku/catalog";
 
 function mount(): void {
   document.body.innerHTML = `
@@ -15,6 +16,11 @@ function mount(): void {
 describe("transaction screenshot review UI", () => {
   beforeEach(mount);
   afterEach(() => vi.unstubAllGlobals());
+
+  it("reduces verbose GPU marketplace titles to a focused official query", () => {
+    expect(compactOfficialQuery("MSI GeForce RTX 3070 Ventus 2X Overclocked Dual-Fan 8GB GDDR6 PCIe 4.0", "MSI", "gpu"))
+      .toBe("MSI RTX 3070 Ventus 2X OC 8GB");
+  });
 
   it("requires editable review and explicit confirmation before staging a record", async () => {
     const onImport = vi.fn();
@@ -115,6 +121,28 @@ describe("transaction screenshot review UI", () => {
     }), expect.any(File));
   });
 
+  it("shows bundled official parameters for an exact GX-850 FX match before staging", async () => {
+    const onImport = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      receiptId: "receipt-fx", status: "matched-catalog",
+      detected: { name: "Seasonic FOCUS Plus Gold 850 (SSR-850FX)", brand: "Seasonic", model: "GX-850 FX", category: "psu", qty: 1, unitPriceCny: 400 },
+      catalogMatch: { skuId: "psu.seasonic-focus-plus-gold-850-fx", kind: "exact-mpn", score: 1 },
+      evidence: { receiptId: "receipt-fx", fileName: "fx.png", contentHash: "7".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 99, excerpt: "SSR-850FX" }, catalogSearch: null,
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const catalog = loadBundledCatalog();
+    initTransactionImport({ onImport, getCatalogSku: (skuId) => catalog.skus.find((sku) => sku.id === skuId) ?? null });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["fx"], "fx.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(document.querySelector(".transaction-candidate-fields")?.textContent).toContain("harness.peripheralLeads"));
+    expect(document.querySelector(".transaction-candidate-fields")?.textContent).toContain("850");
+    expect(document.querySelector(".transaction-candidate-fields")?.textContent).toContain("4");
+    expect(document.querySelector<HTMLAnchorElement>(".transaction-candidate-review a")?.href).toContain("seasonic.com/product/focus-plus-gold");
+    const confirm = document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")!;
+    expect(confirm.disabled).toBe(true);
+    expect(onImport).not.toHaveBeenCalled();
+  });
+
   it("waits for corrected identity and category before starting catalog search", async () => {
     const onImport = vi.fn();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -153,6 +181,7 @@ describe("transaction screenshot review UI", () => {
 
     await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")?.hidden).toBe(true);
     expect(document.querySelector<HTMLTextAreaElement>(".transaction-review-ocr textarea")?.value).toContain("SSR-850FX");
     document.querySelector<HTMLInputElement>(".transaction-review-name")!.value = "Seasonic GX-850 FX";
     document.querySelector<HTMLSelectElement>(".transaction-review-category")!.value = "psu";
@@ -175,6 +204,32 @@ describe("transaction screenshot review UI", () => {
       category: "psu",
       evidence: expect.objectContaining({ officialUrl: "https://seasonic.com/product/focus-plus-gold/", sourceReview: "user-confirmed" }),
     }), expect.any(File));
+  });
+
+  it("shows an explicit zero-candidate result instead of silently omitting official parameters", async () => {
+    const onImport = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
+        receiptId: "receipt-msi", status: "catalog-search-required",
+        detected: { name: "MSI GeForce RTX 3070 Ventus 2X Overclocked Dual-Fan 8GB GDDR6 PCIe 4.0", brand: "MSI", model: "RTX 3070 Ventus 2X", category: "gpu", qty: 1, unitPriceCny: 1800 },
+        catalogMatch: null, evidence: { receiptId: "receipt-msi", fileName: "gpu.png", contentHash: "8".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 90, excerpt: "RTX 3070" }, catalogSearch: null,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/price/transactions/catalog-search") return new Response(JSON.stringify({ jobId: "job-msi", status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/search/job-msi") return new Response(JSON.stringify({ jobId: "job-msi", status: "completed", stage: "score", candidates: [], warnings: ["未找到官方候选"] }), { status: 200, headers: { "Content-Type": "application/json" } });
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({ onImport });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["gpu"], "gpu.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-state="empty"]')?.textContent).toContain("0 个可用候选"));
+    expect(document.querySelector(".transaction-search-log")?.textContent).toContain("官网查询词 · MSI RTX 3070 Ventus 2X OC 8GB");
+    expect(document.querySelector(".transaction-search-log")?.textContent).toContain("服务警告 · 未找到官方候选");
+    expect(onImport).not.toHaveBeenCalled();
   });
 
   it("cancels an in-flight OCR request without staging or losing retry state", async () => {

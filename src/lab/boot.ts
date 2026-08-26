@@ -1126,6 +1126,7 @@ async function boot(): Promise<void> {
   buildProgress.subscribe(syncBuildTasks);
   transactionImport = initTransactionImport({
     onImport: (record, screenshot) => buildProgress?.stageTransaction(record, screenshot),
+    getCatalogSku: (skuId) => catalog.skus.find((entry) => entry.id === skuId) ?? null,
     getPlanContext: () => {
       const state = planStore?.getState();
       if (!state?.activePlan || !state.evaluation) return null;

@@ -1,5 +1,6 @@
 import { BUILD_STAGE_LABELS, BUILD_STAGES, type BuildStage, type TransactionEvidence, type TransactionImportRecord } from "./build-progress";
 import type { PlanTransactionLink } from "../plans/contracts";
+import type { SkuRecord } from "../sku/types";
 
 const MAX_FILE_BYTES = 5_000_000;
 const TERMINAL_JOB_STATUS = new Set(["completed", "partial", "failed"]);
@@ -36,7 +37,7 @@ interface CatalogCandidate {
   canonicalUrl?: string;
   url?: string;
   match?: { score?: number; kind?: string };
-  extraction?: { status?: string; fieldsFound?: number };
+  extraction?: { status?: string; fieldsFound?: number; error?: string };
   fields?: Array<{ field?: string; value?: unknown; evidence?: string }>;
 }
 
@@ -52,6 +53,40 @@ interface CatalogJob {
 interface CatalogLookupResult {
   record: TransactionImportRecord;
   candidate: CatalogCandidate | null;
+}
+
+function catalogCandidateFromSku(sku: SkuRecord): CatalogCandidate {
+  const sourceUrl = sku.appearance?.page ?? sku.harness?.sourceUrl ?? sku.price.listingUrl;
+  const fields: NonNullable<CatalogCandidate["fields"]> = [];
+  const add = (field: string, value: unknown, evidence: string) => {
+    if (value !== undefined && value !== null && value !== "") fields.push({ field, value, evidence });
+  };
+  add("brand", sku.brand, "catalog");
+  add("model", sku.model, "catalog");
+  add("mpn", sku.mpn, "catalog");
+  for (const [field, value] of Object.entries(sku.dims)) if (field !== "evidence" && field !== "note") add(`dims.${field}`, value, sku.dims.evidence);
+  for (const [field, value] of Object.entries(sku.power)) if (field !== "evidence" && field !== "note") add(`power.${field}`, value, sku.power.evidence);
+  if (sku.harness) {
+    for (const [field, value] of Object.entries(sku.harness)) {
+      if (["evidence", "leadEvidence", "sourceUrl", "crossCheck", "note"].includes(field)) continue;
+      add(`harness.${field}`, value, field.includes("Leads") ? sku.harness.leadEvidence ?? sku.harness.evidence : sku.harness.evidence);
+    }
+  }
+  for (const [field, value] of Object.entries(sku.attrs ?? {})) {
+    if (/Evidence$|Note$|SourceUrl$/.test(field)) continue;
+    add(`attrs.${field}`, value, String(sku.attrs?.[`${field}Evidence`] ?? "catalog"));
+  }
+  return {
+    skuId: sku.id,
+    title: sku.name,
+    brand: sku.brand,
+    model: sku.model,
+    ...(sku.mpn ? { mpn: sku.mpn } : {}),
+    ...(sourceUrl ? { canonicalUrl: sourceUrl } : {}),
+    match: { kind: "exact-mpn", score: 1 },
+    extraction: { status: "ok", fieldsFound: fields.length },
+    fields,
+  };
 }
 
 function $(id: string): HTMLElement | null { return document.getElementById(id); }
@@ -83,6 +118,21 @@ function billingCopy(analysis: TransactionAnalysis): string {
 
 function comparableIdentity(value: unknown): string {
   return String(value ?? "").normalize("NFKC").toLocaleLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+const OFFICIAL_QUERY_NOISE = new Set([
+  "graphics", "card", "geforce", "overclocked", "dual-fan", "dual", "fan", "gddr6", "gddr6x",
+  "pcie", "pci", "express", "edition", "gaming", "video", "显卡", "商品", "型号",
+]);
+
+export function compactOfficialQuery(name: string, brand: string | null | undefined, category: string): string {
+  const normalized = name.normalize("NFKC").replace(/[™®]/g, " ").replace(/\boverclocked\b/gi, "OC").replace(/[^A-Za-z0-9.+-]+/g, " ").trim();
+  if (category !== "gpu") return normalized.slice(0, 120);
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const useful = tokens.filter((token) => !OFFICIAL_QUERY_NOISE.has(token.toLocaleLowerCase()) && !/^\d+\.\d+$/.test(token));
+  const brandToken = brand?.trim();
+  const selected = [...new Set([...(brandToken ? [brandToken] : []), ...useful])].slice(0, 8);
+  return (selected.join(" ") || normalized).slice(0, 120);
 }
 
 export function selectBestCatalogCandidate(candidates: CatalogCandidate[] = [], expected?: { name?: string; brand?: string | null; model?: string | null }): CatalogCandidate | null {
@@ -141,7 +191,7 @@ export interface TransactionImportPlanContext {
 
 export interface TransactionImportController { dispose(): void; }
 
-export function initTransactionImport(options: { onImport: (record: TransactionImportRecord, screenshot: File) => void; getPlanContext?: () => TransactionImportPlanContext | null }): TransactionImportController | null {
+export function initTransactionImport(options: { onImport: (record: TransactionImportRecord, screenshot: File) => void; getPlanContext?: () => TransactionImportPlanContext | null; getCatalogSku?: (skuId: string) => SkuRecord | null }): TransactionImportController | null {
   const input = $("transaction-screenshot-input") as HTMLInputElement | null;
   const drop = $("transaction-screenshot-drop");
   const preview = $("transaction-screenshot-preview") as HTMLImageElement | null;
@@ -330,6 +380,9 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       candidateTitle.textContent = "校验官网候选";
       const candidateMeta = document.createElement("p");
       candidateMeta.textContent = `${catalogCandidate.title ?? "未命名候选"} · 匹配 ${Math.round(Number(catalogCandidate.match?.score ?? 0) * 100)}% · 参数 ${catalogCandidate.extraction?.status ?? "unknown"}`;
+      const candidateWarning = document.createElement("p");
+      candidateWarning.className = "transaction-candidate-warning";
+      candidateWarning.textContent = catalogCandidate.extraction?.error ? `仍缺参数：${catalogCandidate.extraction.error}` : "已展示当前来源明确提供的参数；未列出的字段保持 unknown。";
       const candidateLink = document.createElement("a");
       candidateLink.href = record.evidence.officialUrl;
       candidateLink.target = "_blank";
@@ -341,7 +394,8 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
         const term = document.createElement("dt");
         term.textContent = field.field ?? "字段";
         const value = document.createElement("dd");
-        value.textContent = typeof field.value === "string" ? field.value : JSON.stringify(field.value);
+        const renderedValue = typeof field.value === "string" ? field.value : JSON.stringify(field.value);
+        value.textContent = `${renderedValue}${field.evidence ? ` · 证据 ${field.evidence}` : ""}`;
         fieldsList.append(term, value);
       }
       if (!fieldsList.childElementCount) {
@@ -365,7 +419,16 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
         };
         showReview(cleaned, screenshot, "候选来源已移除 · 可修改信息后直接入档", { ...(ocrText ? { ocrText } : {}) });
       });
-      candidateReview.append(candidateTitle, candidateMeta, candidateLink, fieldsList, approvalLabel, removeSource);
+      candidateReview.append(candidateTitle, candidateMeta, candidateWarning, candidateLink, fieldsList, approvalLabel, removeSource);
+    } else if (searchLogs.length) {
+      candidateReview = document.createElement("section");
+      candidateReview.className = "transaction-candidate-review";
+      candidateReview.dataset.state = "empty";
+      const candidateTitle = document.createElement("strong");
+      candidateTitle.textContent = "官网参数校验结果 · 0 个可用候选";
+      const empty = document.createElement("p");
+      empty.textContent = "没有找到能同时证明品牌、型号并提供参数的官网页面。本次不会附加来源或猜测尺寸、功耗等参数。";
+      candidateReview.append(candidateTitle, empty);
     }
 
     const actions = document.createElement("div");
@@ -378,6 +441,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
     confirm.type = "button";
     confirm.textContent = "加入下方基座";
     confirm.disabled = Boolean(candidateApproval);
+    confirm.hidden = Boolean(enrichmentAnalysis);
     candidateApproval?.addEventListener("change", () => { confirm.disabled = !candidateApproval?.checked; });
     const reviewedRecord = (): TransactionImportRecord => {
       const rawPrice = price.value.trim();
@@ -421,6 +485,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       enrich.textContent = "确认信息并查询官网";
       enrich.addEventListener("click", async () => {
         const reviewed = reviewedRecord();
+        const officialQuery = compactOfficialQuery(reviewed.name, enrichmentAnalysis.detected.brand, reviewed.category);
         const progressMessages: string[] = [];
         const searchLog = document.createElement("section");
         searchLog.className = "transaction-search-log";
@@ -437,6 +502,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
           logList.append(row);
         };
         appendLog(`用户已确认输入 · ${reviewed.name} · ${CATEGORY_LABELS[reviewed.category] ?? reviewed.category}`);
+        appendLog(`官网查询词 · ${officialQuery}`);
         const searchController = new AbortController();
         activeRequest?.abort();
         activeRequest = searchController;
@@ -449,7 +515,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              query: reviewed.name,
+              query: officialQuery,
               ...(enrichmentAnalysis.detected.brand && reviewed.name.toLocaleLowerCase().includes(enrichmentAnalysis.detected.brand.toLocaleLowerCase()) ? { brand: enrichmentAnalysis.detected.brand } : {}),
               category: reviewed.category,
             }),
@@ -484,6 +550,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
             setPhase("reviewing", `官网查询失败：${error instanceof Error ? error.message : "服务不可用"}；可修改后重试或直接入档。`, "warn");
           }
           enrich.disabled = false;
+          confirm.hidden = false;
           confirm.disabled = false;
         } finally {
           cancel.hidden = true;
@@ -518,6 +585,8 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       return { record: timedOut, candidate: null };
     }
     onProgress?.(`候选发现完成 · ${job.candidates?.length ?? 0} 个页面`);
+    for (const warning of job.warnings ?? []) onProgress?.(`服务警告 · ${warning}`);
+    for (const error of job.errors ?? []) onProgress?.(`服务错误 · ${error}`);
     const candidate = selectBestCatalogCandidate(job.candidates, analysis.detected);
     if (!candidate || Number(candidate.extraction?.fieldsFound ?? 0) < 1) {
       const noResult = recordFromAnalysis(analysis, job.status === "failed" ? "search-failed" : "search-no-result");
@@ -604,7 +673,10 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
         setPhase("reviewing", "reviewing · 型号证据不足；请手动修正，unknown 保持 unknown。", "warn");
         resultCopy = `待确认型号 · 参数保持 unknown${costCopy} · 尚未保存`;
       }
-      showReview(record, file, resultCopy, { ...(analysis.ocrText ? { ocrText: analysis.ocrText } : {}) });
+      const catalogSku = analysis.catalogMatch?.skuId ? options.getCatalogSku?.(analysis.catalogMatch.skuId) ?? null : null;
+      const catalogCandidate = catalogSku ? catalogCandidateFromSku(catalogSku) : null;
+      if (catalogCandidate?.canonicalUrl) record = { ...record, evidence: { ...record.evidence, officialUrl: catalogCandidate.canonicalUrl } };
+      showReview(record, file, resultCopy, { ...(analysis.ocrText ? { ocrText: analysis.ocrText } : {}), ...(catalogCandidate ? { catalogCandidate } : {}) });
     } catch (error) {
       const aborted = controller.signal.aborted;
       setPhase(aborted && !timedOut ? "cancelled" : "failed", timedOut ? "识别超时；已保留截图，可直接重试或重新选择。" : aborted ? "已取消处理；截图未归档，可直接重试或重新选择。" : `识别失败：${error instanceof Error ? error.message : "本地服务不可用"}。已保留截图，可直接重试。`, aborted && !timedOut ? "warn" : "bad");

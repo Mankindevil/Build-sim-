@@ -40,7 +40,7 @@ import { buildAuditedQuote } from "./price-audit.mjs";
 import { createAdviceJob, getAdviceBillingSummary, getAdviceJob } from "../deepseek/advice.mjs";
 import { intEnv, loadEnv } from "./env.mjs";
 import { analyzeTransactionScreenshot } from "./transactions/receipt.mjs";
-import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./catalog/discovery.mjs";
+import { CatalogCacheDiscoveryProvider, MsiProductDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./catalog/discovery.mjs";
 import { createSearXngDiscoveryProvider } from "./catalog/searxng-discovery.mjs";
 import { archiveTransaction, deleteTransactionArchive, deleteTransactionImage, listTransactionArchives, readTransactionImage, updateTransactionArchive } from "./transactions/archive.mjs";
 
@@ -258,6 +258,7 @@ const server = http.createServer(async (req, res) => {
       if (!["registry", "searxng"].includes(transactionDiscoveryMode)) throw new Error("TRANSACTION_CATALOG_DISCOVERY_PROVIDER must be registry or searxng");
       const discoveryProviders = [
         new CatalogCacheDiscoveryProvider(catalog),
+        new MsiProductDiscoveryProvider(),
         ...(transactionDiscoveryMode === "searxng" ? [createSearXngDiscoveryProvider(env)] : []),
         new RegistrySearchDiscoveryProvider(),
       ];

@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { CatalogDiscoveryRegistry, discoverOfficialUrls } from "../scripts/price-server/catalog/discovery.mjs";
+import { CatalogDiscoveryRegistry, discoverOfficialUrls, MsiProductDiscoveryProvider } from "../scripts/price-server/catalog/discovery.mjs";
 import { normalizeModelQuery } from "../scripts/price-server/catalog/normalize.mjs";
 import { queueSearch, waitForJob } from "../scripts/price-server/catalog/service.mjs";
+import { registryForBrand } from "../scripts/price-server/catalog/registry.mjs";
 
 const query = normalizeModelQuery("ASUS-G4-001 motherboard", { brand: "ASUS", category: "motherboard" });
 
 describe("C3 provider-neutral catalog discovery", () => {
+  it("recognizes MSI GPU queries and restricts discovery to the official MSI domain", () => {
+    const normalized = normalizeModelQuery("MSI RTX 3070 Ventus 2X 8GB", { category: "gpu" });
+    expect(normalized.brand).toBe("MSI");
+    expect(registryForBrand(normalized.brand)?.domains).toContain("msi.com");
+  });
+
+  it("derives bounded MSI official product candidates when search engines return nothing", async () => {
+    const normalized = normalizeModelQuery("MSI RTX 3070 Ventus 2X OC 8GB", { category: "gpu" });
+    const rows = await new MsiProductDiscoveryProvider().discover({ query: normalized, limit: 4 });
+    expect(rows[0]?.url).toBe("https://www.msi.com/Graphics-Card/GeForce-RTX-3070-VENTUS-2X-OC/Specification");
+    expect(rows).toHaveLength(1);
+  });
+
   it("validates provider registration", () => {
     expect(() => new CatalogDiscoveryRegistry([{ id: "same", discover: async () => [] }, { id: "same", discover: async () => [] }])).toThrow(/duplicate/);
   });

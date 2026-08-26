@@ -162,8 +162,8 @@ describe("G3 catalog search job", () => {
 });
 
 describe("G4 official adapters and audited writes", () => {
-  it("selects the three vendor adapters and keeps HTML/PDF fixtures vendor-labelled", async () => {
-    expect(OFFICIAL_ADAPTERS.map((adapter) => adapter.id)).toEqual(["asus-product-v1", "seagate-product-v1", "corsair-product-v1"]);
+  it("selects vendor adapters and keeps HTML/PDF fixtures vendor-labelled", async () => {
+    expect(OFFICIAL_ADAPTERS.map((adapter) => adapter.id)).toEqual(["msi-gpu-spec-v1", "asus-product-v1", "seagate-product-v1", "corsair-product-v1"]);
     for (const [brand, filename, url] of [
       ["ASUS", "asus-product.html", "https://www.asus.com/example/g4"],
       ["Seagate", "seagate-product.html", "https://www.seagate.com/example/g4"],
@@ -179,6 +179,25 @@ describe("G4 official adapters and audited writes", () => {
       const pdfExtracted = adapter?.extract({ ...fetchResult, finalUrl: url, contentType: "application/pdf", body: pdfBody, contentHash: crypto.createHash("sha256").update(pdfBody).digest("hex") });
       expect(pdfExtracted?.fields.every((field) => field.sourceKind === "official-pdf")).toBe(true);
     }
+  });
+
+  it("extracts explicit MSI GPU dimensions, power, memory and connector rows", () => {
+    const body = `<meta property="og:title" content="GeForce RTX 3070 VENTUS 2X OC">
+      <div class="tr"><div class="td"><ul><li class="specName">Model Name</li></ul>GeForce RTX 3070 VENTUS 2X OC</div></div>
+      <div class="tr"><div class="td"><ul><li class="specName">Memory</li></ul>8GB GDDR6</div></div>
+      <div class="tr"><div class="td"><ul><li class="specName">Power consumption</li></ul>220W</div></div>
+      <div class="tr"><div class="td"><ul><li class="specName">Power connectors</li></ul>8-pin x 2</div></div>
+      <div class="tr"><div class="td"><ul><li class="specName">Card Dimension (mm)</li></ul>232 x 124 x 52 mm</div></div>`;
+    const url = "https://www.msi.com/Graphics-Card/GeForce-RTX-3070-VENTUS-2X-OC/Specification";
+    const extracted = adapterForUrl(url)?.extract({ ...fetchResult, finalUrl: url, body, contentHash: crypto.createHash("sha256").update(body).digest("hex") });
+    expect(extracted?.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "brand", value: "MSI" }),
+      expect.objectContaining({ field: "attrs.capacity", value: "8GB GDDR6" }),
+      expect.objectContaining({ field: "power.tgpW", value: 220 }),
+      expect.objectContaining({ field: "dims.lengthMm", value: 232 }),
+      expect.objectContaining({ field: "dims.thicknessMm", value: 52 }),
+    ]));
+    expect(extracted?.warnings.join(" ")).toContain("dims.slots remains unknown");
   });
 
   it("requires the write flag and six direct-accept checks before changing catalog", async () => {

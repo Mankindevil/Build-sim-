@@ -101,7 +101,10 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
     showLegacyPanel(root, route);
     const target = document.getElementById(router.target(route));
     if (target && route !== "workspace") target.scrollIntoView({ block: "start" });
-    if (route === "purchases") document.querySelector<HTMLDialogElement>("#build-base-dialog")?.showModal?.();
+    if (route === "purchases") {
+      const dialog = document.querySelector<HTMLDialogElement>("#build-base-dialog");
+      if (dialog && !dialog.open) dialog.showModal();
+    }
   });
   router.start();
 

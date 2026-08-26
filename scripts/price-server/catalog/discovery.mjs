@@ -49,6 +49,29 @@ export class RegistrySearchDiscoveryProvider {
   }
 }
 
+export class MsiProductDiscoveryProvider {
+  id = "msi-product-pattern";
+  async discover({ query, limit }) {
+    if (registryForBrand(query.brand)?.brand !== "MSI" || query.category !== "gpu") return [];
+    const text = String(query.raw ?? "").normalize("NFKC");
+    const chip = text.match(/\b(RTX|GTX)\s*([0-9]{3,4})(?:\s*(Ti|SUPER))?/i);
+    const ventus = text.match(/\bVENTUS\s*([23]X)\b/i);
+    if (!chip || !ventus) return [];
+    const chipSlug = `${chip[1].toUpperCase()}-${chip[2]}${chip[3] ? `-${chip[3].toUpperCase()}` : ""}`;
+    const familySlug = `VENTUS-${ventus[1].toUpperCase()}`;
+    const base = `GeForce-${chipSlug}-${familySlug}`;
+    const memory = text.match(/\b(\d+)\s*GB\b/i)?.[1];
+    const slug = /\bLHR\b/i.test(text) && memory ? `${base}-${memory}G-OC-LHR` : /\bOC\b/i.test(text) ? `${base}-OC` : base;
+    return [{
+      url: `https://www.msi.com/Graphics-Card/${slug}/Specification`,
+      title: slug.replace(/-/g, " "),
+      provider: this.id,
+      retrievedAt: now(),
+      rank: 0,
+    }];
+  }
+}
+
 export class CatalogDiscoveryRegistry {
   constructor(providers = []) {
     this.providers = [];

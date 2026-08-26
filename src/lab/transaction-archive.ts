@@ -105,7 +105,11 @@ export function createTransactionScreenshotArchive(): TransactionScreenshotArchi
       for (const item of items) {
         const receiptId = item.transaction?.receiptId;
         const screenshot = receiptId ? pending.get(receiptId) : null;
-        if (!receiptId || !screenshot) continue;
+        if (!receiptId) continue;
+        if (!screenshot) {
+          failures.push({ receiptId, message: "待归档截图已丢失，请重新选择原图后再保存" });
+          continue;
+        }
         try {
           if (screenshot.contentHash !== item.transaction?.contentHash) throw new Error("待归档截图与交易证据不一致");
           const record = await jsonResponse<TransactionArchiveRecord>(await fetch("/api/price/transactions/archive", {

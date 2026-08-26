@@ -63,7 +63,7 @@ describe("build progress transaction import", () => {
     expect(stored.items["transaction-receipt-new"]).toMatchObject({ source: "transaction", skuId: null, stage: "purchased", transaction: { catalogJobId: "job-1" } });
   });
 
-  it("stages an OCR result for editing and persists only after Save base", async () => {
+  it("refuses to report a staged transaction as saved when its screenshot is unavailable", async () => {
     const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: ["case.jonsbo-n6"] });
     controller.syncEvaluation(evaluation());
     document.querySelector<HTMLButtonElement>("#build-base-edit")?.click();
@@ -78,7 +78,8 @@ describe("build progress transaction import", () => {
       evidence: { receiptId: "receipt-review", fileName: "order.png", contentHash: "c".repeat(64), capturedAt: "2026-08-25T00:00:00.000Z", ocrEngine: "fixture", ocrConfidence: 81, excerpt: "识别结果", verification: "identity-review-required" },
     });
 
-    expect(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY)).toBeNull();
+    const stored = JSON.parse(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY) ?? "{}");
+    expect(stored.items?.["transaction-receipt-review"]).toBeUndefined();
     expect(document.querySelector("#build-base-save")?.textContent).toContain("1 项待保存");
     const row = document.querySelector<HTMLElement>('[data-progress-id="transaction-receipt-review"]');
     expect(row?.classList.contains("is-pending")).toBe(true);
@@ -90,9 +91,31 @@ describe("build progress transaction import", () => {
     if (price) price.value = "1250";
 
     document.querySelector<HTMLButtonElement>("#build-base-save")?.click();
-    await vi.waitFor(() => expect(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY)).not.toBeNull());
-    const stored = JSON.parse(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY) ?? "{}");
-    expect(stored.items["transaction-receipt-review"]).toMatchObject({ name: "Seasonic VERTEX GX-1000", category: "psu", unitPriceCny: 1250, source: "transaction" });
+    await vi.waitFor(() => expect(document.querySelector("#build-base-save-status")?.textContent).toContain("待归档截图已丢失"));
+    const saved = JSON.parse(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY) ?? "{}");
+    expect(saved.items?.["transaction-receipt-review"]).toBeUndefined();
+    expect(document.querySelector('[data-progress-id="transaction-receipt-review"]')).not.toBeNull();
+  });
+
+  it("does not clear a staged screenshot when the already-open editor is opened again", async () => {
+    const commit = vi.fn(async (_items: unknown[]) => ({ archived: [{
+      schemaVersion: 2 as const, receiptId: "receipt-preserved", storedAt: "2026-08-26T04:30:00.000Z", updatedAt: "2026-08-26T04:30:00.000Z",
+      item: {} as never, link: { schemaVersion: "1.0.0" as const, planId: null, planVersionIdAtCapture: null, planItemId: null, linkStatus: "unlinked" as const }, image: null,
+    }], failures: [] }));
+    const archive: TransactionScreenshotArchive = {
+      stage: vi.fn(), discard: vi.fn(), commit, list: vi.fn(async () => []), pendingRecord: vi.fn(() => null),
+      deleteScreenshot: vi.fn(async () => undefined), deleteRecord: vi.fn(async () => undefined), updateRecord: vi.fn(async () => { throw new Error("unused"); }),
+    };
+    const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: [], screenshotArchive: archive });
+    controller.syncEvaluation({ bom: [] } as unknown as BuildEvaluation);
+    controller.stageTransaction({
+      receiptId: "receipt-preserved", skuId: null, name: "MSI RTX 3070", category: "gpu", qty: 1, unitPriceCny: 1800,
+      evidence: { receiptId: "receipt-preserved", fileName: "gpu.png", contentHash: "9".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 90, excerpt: "RTX 3070", verification: "search-no-result" },
+    }, new File(["gpu"], "gpu.png", { type: "image/png" }));
+    document.querySelector<HTMLButtonElement>("#build-base-edit")!.click();
+    document.querySelector<HTMLButtonElement>("#build-base-save")!.click();
+    await vi.waitFor(() => expect(commit).toHaveBeenCalledOnce());
+    expect(commit.mock.calls[0]?.[0]).toHaveLength(1);
   });
 
   it("discards a staged screenshot result when the editor is cancelled", () => {

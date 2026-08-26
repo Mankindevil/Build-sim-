@@ -505,12 +505,9 @@ export function initBuildProgress(args: {
 
   const openEditor = (): void => {
     if (!dialog || !editor) return;
-    pendingTransactions.clear();
-    pendingScreenshotDeletes.clear();
-    pendingArchiveDeletes.clear();
     renderEditor();
     setReviewTab("current");
-    dialog.showModal();
+    if (!dialog.open) dialog.showModal();
   };
 
   const closeEditor = (discardPending = true, protectPending = false): void => {
@@ -622,7 +619,10 @@ export function initBuildProgress(args: {
       saveStatus.dataset.phase = "archiving";
     }
     try {
-      const batch = await screenshotArchive.commit(Object.values(nextState.items).filter((item) => item.transaction));
+      const stagedItems = [...pendingTransactions.keys()]
+        .map((id) => nextState.items[id])
+        .filter((item): item is BuildProgressItem => Boolean(item?.transaction));
+      const batch = await screenshotArchive.commit(stagedItems);
       for (const record of batch.archived) {
         const item = Object.values(nextState.items).find((candidate) => candidate.transaction?.receiptId === record.receiptId);
         if (!item?.transaction) continue;
@@ -663,7 +663,7 @@ export function initBuildProgress(args: {
       else {
         renderEditor();
         if (saveStatus) {
-          saveStatus.textContent = `部分保存：${batch.archived.length} 笔已归档，${failures.length} 笔仍为 staged，可直接重试。`;
+          saveStatus.textContent = `部分保存：${batch.archived.length} 笔已归档，${failures.length} 笔仍为 staged。${failures.map((failure) => `${failure.receiptId}：${failure.message}`).join("；")}`;
           saveStatus.dataset.level = "bad";
           saveStatus.dataset.phase = "staged";
         }
