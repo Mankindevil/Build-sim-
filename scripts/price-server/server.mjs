@@ -40,6 +40,7 @@ import { buildAuditedQuote } from "./price-audit.mjs";
 import { createAdviceJob, getAdviceBillingSummary, getAdviceJob } from "../deepseek/advice.mjs";
 import { intEnv, loadEnv } from "./env.mjs";
 import { analyzeTransactionScreenshot } from "./transactions/receipt.mjs";
+import { transactionCatalogSearchRequest } from "./transactions/catalog-search-request.mjs";
 import { CatalogCacheDiscoveryProvider, MsiProductDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./catalog/discovery.mjs";
 import { createSearXngDiscoveryProvider } from "./catalog/searxng-discovery.mjs";
 import { archiveTransaction, deleteTransactionArchive, deleteTransactionImage, listTransactionArchives, readTransactionImage, updateTransactionArchive } from "./transactions/archive.mjs";
@@ -262,13 +263,7 @@ const server = http.createServer(async (req, res) => {
         ...(transactionDiscoveryMode === "searxng" ? [createSearXngDiscoveryProvider(env)] : []),
         new RegistrySearchDiscoveryProvider(),
       ];
-      return send(res, 202, queueSearch({
-        query: body.query,
-        ...(body.brand ? { brand: body.brand } : {}),
-        category: body.category,
-        officialOnly: true,
-        limit: 8,
-      }, { discoveryProviders, catalog, persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd(), browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
+      return send(res, 202, queueSearch(transactionCatalogSearchRequest(body), { discoveryProviders, catalog, persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd(), browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
     }
     if (route === "POST /api/catalog/search") {
       const body = await readBody(req);

@@ -114,7 +114,7 @@ if (gpuPlanOption.value === "gpu.primary" && gpuLink.value !== "gpu.primary") th
 await page.locator(".transaction-review-name").fill("MSI GeForce RTX 3070 Ventus 2X Overclocked Dual-Fan 8GB GDDR6 PCIe 4.0");
 await page.click(".transaction-review-enrich");
 await page.waitForSelector('.transaction-candidate-review[data-state="empty"]');
-if (transactionSearchBody?.query !== "MSI RTX 3070 Ventus 2X OC 8GB" || transactionSearchBody?.brand) throw new Error(`stale OCR brand polluted corrected search: ${JSON.stringify(transactionSearchBody)}`);
+if (transactionSearchBody?.query !== "MSI RTX 3070 Ventus 2X OC 8GB GDDR6" || transactionSearchBody?.brand) throw new Error(`stale OCR brand polluted corrected search: ${JSON.stringify(transactionSearchBody)}`);
 if (transactionSearchBody?.trigger !== "user-confirmed-review") throw new Error("transaction search trigger was not audited");
 if (!(await page.locator(".transaction-search-log").textContent()).includes("已忽略冲突的 OCR 品牌 · Intel")) throw new Error("stale OCR brand removal was not visible");
 if (!(await page.locator(".transaction-review-enrich").textContent()).includes("重新核验官网")) throw new Error("catalog search retry was not offered");

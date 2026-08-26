@@ -30,7 +30,7 @@ describe("transaction screenshot review UI", () => {
 
   it("reduces verbose GPU marketplace titles to a focused official query", () => {
     expect(compactOfficialQuery("MSI GeForce RTX 3070 Ventus 2X Overclocked Dual-Fan 8GB GDDR6 PCIe 4.0", "MSI", "gpu"))
-      .toBe("MSI RTX 3070 Ventus 2X OC 8GB");
+      .toBe("MSI RTX 3070 Ventus 2X OC 8GB GDDR6");
   });
 
   it("requires editable review and explicit confirmation before staging a record", async () => {
@@ -290,7 +290,27 @@ describe("transaction screenshot review UI", () => {
         evidence: { receiptId: "receipt-stale-brand", fileName: "gpu.png", contentHash: "9".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: null, excerpt: "Intel I41-PO-15053045" }, catalogSearch: null,
       }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url === "/api/price/transactions/catalog-search") return new Response(JSON.stringify({ jobId: "job-stale-brand", status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
-      if (url === "/api/catalog/search/job-stale-brand") return new Response(JSON.stringify({ jobId: "job-stale-brand", status: "completed", stage: "score", candidates: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/search/job-stale-brand") return new Response(JSON.stringify({
+        jobId: "job-stale-brand",
+        status: "partial",
+        stage: "score",
+        candidates: [{
+          candidateId: "candidate-msi-3070",
+          title: "GeForce RTX 3070 VENTUS 2X OC",
+          canonicalUrl: "https://www.msi.com/Graphics-Card/GeForce-RTX-3070-VENTUS-2X-OC/Specification",
+          official: { trustStatus: "trusted", pageKind: "spec", reasons: ["official specification path with identity fields"] },
+          identity: { verdict: "exact", score: 0.9167, reasons: ["all supplied category discriminators match"], unknowns: [], criticalConflicts: [] },
+          match: { kind: "brand-model", score: 0.9167 },
+          extraction: { status: "partial", fieldsFound: 4 },
+          fields: [
+            { field: "attrs.capacity", value: "8GB GDDR6", evidence: "official" },
+            { field: "power.tgpW", value: 220, evidence: "official" },
+            { field: "dims.lengthMm", value: 232, evidence: "official" },
+            { field: "dims.thicknessMm", value: 52, evidence: "official" },
+          ],
+        }],
+        summary: { discovered: 1, inspected: 1, fetchSucceeded: 1, productPages: 1, exact: 1, sameFamily: 0, conflicts: 0 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
       throw new Error(`unexpected request ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -310,13 +330,15 @@ describe("transaction screenshot review UI", () => {
     expect(document.querySelector(".transaction-review-link-hint")?.textContent).toContain("尚未配置");
     document.querySelector<HTMLInputElement>(".transaction-review-name")!.value = "MSI GeForce RTX 3070 Ventus 2X Overclocked Dual-Fan 8GB GDDR6 PCIe 4.0";
     document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
-    await vi.waitFor(() => expect(document.querySelector('[data-state="empty"]')).not.toBeNull());
+    await vi.waitFor(() => expect(document.querySelector(".transaction-candidate-fields")?.textContent).toContain("8GB GDDR6"));
     const searchCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/price/transactions/catalog-search");
     const searchBody = JSON.parse(String(searchCall?.[1]?.body));
-    expect(searchBody).toMatchObject({ query: "MSI RTX 3070 Ventus 2X OC 8GB", category: "gpu", trigger: "user-confirmed-review" });
+    expect(searchBody).toMatchObject({ query: "MSI RTX 3070 Ventus 2X OC 8GB GDDR6", category: "gpu", trigger: "user-confirmed-review" });
     expect(searchBody).not.toHaveProperty("brand");
     expect(searchBody.query).not.toContain("Intel");
     expect(document.querySelector(".transaction-search-log")?.textContent).toContain("已忽略冲突的 OCR 品牌 · Intel");
+    expect(document.querySelector<HTMLAnchorElement>(".transaction-candidate-review a")?.href).toBe("https://www.msi.com/Graphics-Card/GeForce-RTX-3070-VENTUS-2X-OC/Specification");
+    expect(document.querySelector('[data-state="empty"]')).toBeNull();
   });
 
   it("blocks a category-conflicted search, corrects it, and requires a second confirmation", async () => {
@@ -370,7 +392,7 @@ describe("transaction screenshot review UI", () => {
     await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
     document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
     await vi.waitFor(() => expect(document.querySelector('[data-state="empty"]')?.textContent).toContain("0 个可用候选"));
-    expect(document.querySelector(".transaction-search-log")?.textContent).toContain("官网查询词 · MSI RTX 3070 Ventus 2X OC 8GB");
+    expect(document.querySelector(".transaction-search-log")?.textContent).toContain("官网查询词 · MSI RTX 3070 Ventus 2X OC 8GB GDDR6");
     expect(document.querySelector(".transaction-search-log")?.textContent).toContain("服务警告 · 未找到官方候选");
     expect(document.querySelector(".transaction-search-log")?.textContent).toContain("候选漏斗 · 发现 3 · 成功读取 1 · 产品/规格页 1 · 精确型号 0 · 同系列 1 · 冲突 1");
     expect(document.querySelector<HTMLButtonElement>(".transaction-review-enrich")?.textContent).toContain("重新核验官网");

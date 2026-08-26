@@ -6,7 +6,7 @@ const GENERIC_TOKENS = new Set([
 const CATEGORY_DIMENSIONS = Object.freeze({
   psu: ["psuSeries", "psuVariant", "psuMpnSuffix", "wattage", "generation", "atxVersion"],
   storage: ["storageFamily", "storageTier", "capacity", "interface", "generation"],
-  gpu: ["gpuChip", "coolerVariant", "capacity", "generation"],
+  gpu: ["gpuChip", "coolerVariant", "capacity", "memoryTechnology", "generation"],
   memory: ["memoryGeneration", "memorySpeed", "capacity", "memoryKind", "kitCount"],
   motherboard: ["chipset", "memoryGeneration", "generation"],
 });
@@ -35,6 +35,12 @@ function capacity(text) {
   return first(text, /\b(\d+(?:\.\d+)?)\s*(tb|gb|mb)\b/i, (match) => `${Number(match[1])}${match[2].toLocaleUpperCase()}`);
 }
 
+function explicitCapacity(value) {
+  const text = String(value ?? "").trim();
+  const single = text.match(/^(\d+(?:\.\d+)?)\s*(tb|gb|mb)(?:\s*\(?\s*(?:gddr\d+x?|ddr\d+|lpddr\d+x?|hbm\d*[a-z]?)\s*\)?)?$/i);
+  return single ? `${Number(single[1])}${single[2].toLocaleUpperCase()}` : text.toLocaleUpperCase().replace(/\s+/g, "");
+}
+
 function wattage(text) {
   return first(text, /\b(\d{3,4})\s*w\b/i, (match) => `${Number(match[1])}W`)
     ?? first(text, /\b(?:gx|px|fx)[-\s]?(\d{3,4})\b/i, (match) => `${Number(match[1])}W`);
@@ -46,7 +52,10 @@ function fingerprint(textValue, category, explicit = {}) {
     brand: explicit.brand ? clean(explicit.brand) : undefined,
     mpn: explicit.mpn ? comparable(explicit.mpn) : undefined,
     model: explicit.model ? clean(explicit.model) : undefined,
-    capacity: explicit.capacity ? String(explicit.capacity).toLocaleUpperCase().replace(/\s+/g, "") : capacity(text),
+    // Official pages often publish capacity and memory technology together
+    // (for example, "8GB GDDR6"). Identity matching compares the capacity
+    // dimension only; the technology suffix is a separate product attribute.
+    capacity: explicit.capacity ? explicitCapacity(explicit.capacity) : capacity(text),
     interface: explicit.interface ? clean(explicit.interface) : first(text, /\b(sata|sas|nvme|pcie|pci-e|ide)\b/i),
     generation: first(text, /\b(?:v|gen(?:eration)?)[-\s]?(\d+)\b/i, (match) => `v${Number(match[1])}`),
     tokens: identityTokens(text),
@@ -65,6 +74,7 @@ function fingerprint(textValue, category, explicit = {}) {
   if (category === "gpu") {
     result.gpuChip = first(text, /\b(rtx|gtx|rx)\s*[- ]?(\d{3,4})(?:\s*[- ]?(ti|super|xtx|xt))?\b/i, (match) => [match[1], match[2], match[3]].filter(Boolean).join("-"));
     result.coolerVariant = first(text, /\b(ventus\s*[23]x|gaming\s*x\s*trio|gaming\s*trio|suprim\s*x|tuf\s*gaming|dual|strix)\b/i, (match) => clean(match[1]).replace(/\s+/g, "-"));
+    result.memoryTechnology = first(`${text} ${clean(explicit.capacity)}`, /\b(gddr\d+x?|hbm\d*[a-z]?)\b/i);
   }
   if (category === "memory" || category === "motherboard") {
     result.memoryGeneration = first(text, /\bddr\s*([345])\b/i, (match) => `ddr${match[1]}`);
@@ -135,7 +145,8 @@ export function assessCatalogIdentity(candidate, extracted, officialEntry) {
   compare("mpn", query.mpn, found.mpn, evidenceId(fields, "mpn"));
   const modelEvidenceId = evidenceId(fields, "model");
   for (const dimension of CATEGORY_DIMENSIONS[category] ?? ["capacity", "interface", "generation"]) {
-    compare(dimension, query[dimension], found[dimension], evidenceId(fields, dimension === "capacity" ? "attrs.capacity" : dimension === "interface" ? "attrs.interface" : dimension) ?? modelEvidenceId);
+    const field = ["capacity", "memoryTechnology"].includes(dimension) ? "attrs.capacity" : dimension === "interface" ? "attrs.interface" : dimension;
+    compare(dimension, query[dimension], found[dimension], evidenceId(fields, field) ?? modelEvidenceId);
   }
   if (criticalConflicts.length) {
     return { verdict: "conflict", score: 0, criticalMatches, criticalConflicts, unknowns: unique(unknowns), queryFingerprint: query, candidateFingerprint: found, reasons: criticalConflicts.map((entry) => `${entry.field} conflicts: ${entry.input} != ${entry.candidate}`), agentReviewRequired: false };

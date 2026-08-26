@@ -9,6 +9,8 @@ import { extractPdfText, fetchOfficial } from "../scripts/price-server/catalog/f
 import { validateOfficialUrl, validateRedirect } from "../scripts/price-server/catalog/security.mjs";
 import { getJob, queueSearch, waitForJob } from "../scripts/price-server/catalog/service.mjs";
 import { OFFICIAL_ADAPTERS, adapterForUrl } from "../scripts/price-server/catalog/adapters.mjs";
+import { MsiProductDiscoveryProvider } from "../scripts/price-server/catalog/discovery.mjs";
+import { transactionCatalogSearchRequest } from "../scripts/price-server/transactions/catalog-search-request.mjs";
 import { acceptOfficial, confirmDraft, createDraft, rejectDraft, rollbackCatalogAcceptance } from "../scripts/price-server/catalog/write.mjs";
 import type { SkuCatalog } from "../src/sku/types";
 
@@ -163,6 +165,69 @@ describe("G3 catalog search job", () => {
     expect(retried.jobId).not.toBe(first.jobId);
     expect(retried.requestContext).toEqual({ source: "transaction-import", trigger: "user-confirmed-review", requestId: "transaction-review-retry-0001" });
     await waitForJob(retried.jobId);
+  });
+
+  it("preserves manual-review request identity across the transaction HTTP boundary", async () => {
+    const firstBody = transactionCatalogSearchRequest({
+      query: "MSI RTX 3070 Ventus 2X OC 8GB GDDR6",
+      category: "gpu",
+      requestId: "transaction-route-review-0001",
+      trigger: "user-confirmed-review",
+      officialOnly: false,
+      limit: 100,
+    });
+    expect(firstBody).toEqual({
+      query: "MSI RTX 3070 Ventus 2X OC 8GB GDDR6",
+      category: "gpu",
+      requestId: "transaction-route-review-0001",
+      trigger: "user-confirmed-review",
+      officialOnly: true,
+      limit: 8,
+    });
+    const provider = { id: `transaction-route-${Date.now()}`, discover: async () => [] };
+    const first = queueSearch(firstBody, { discoveryProviders: [provider], inspect: false });
+    const second = queueSearch(transactionCatalogSearchRequest({ ...firstBody, requestId: "transaction-route-review-0002" }), { discoveryProviders: [provider], inspect: false });
+    expect(first.jobId).not.toBe(second.jobId);
+    expect(first.requestContext).toEqual({ source: "transaction-import", trigger: "user-confirmed-review", requestId: "transaction-route-review-0001" });
+    expect(second.requestContext).toEqual({ source: "transaction-import", trigger: "user-confirmed-review", requestId: "transaction-route-review-0002" });
+    await Promise.all([waitForJob(first.jobId), waitForJob(second.jobId)]);
+  });
+
+  it("keeps a matching MSI GPU specification page eligible when memory includes its technology", async () => {
+    const url = "https://www.msi.com/Graphics-Card/GeForce-RTX-3070-VENTUS-2X-OC/Specification";
+    const body = `<meta property="og:title" content="GeForce RTX 3070 VENTUS 2X OC">
+      <div class="tr"><div class="td"><ul><li class="specName">Model Name</li></ul>GeForce RTX 3070 VENTUS 2X OC</div></div>
+      <div class="tr"><div class="td"><ul><li class="specName">Memory</li></ul>8GB GDDR6</div></div>
+      <div class="tr"><div class="td"><ul><li class="specName">Power consumption</li></ul>220W</div></div>
+      <div class="tr"><div class="td"><ul><li class="specName">Card Dimension (mm)</li></ul>232 x 124 x 52 mm</div></div>`;
+    const officialResult = {
+      ...fetchResult,
+      requestedUrl: url,
+      finalUrl: url,
+      body,
+      contentHash: crypto.createHash("sha256").update(body).digest("hex"),
+    };
+    const queued = queueSearch({
+      query: "MSI RTX 3070 Ventus 2X OC 8GB GDDR6",
+      category: "gpu",
+      requestId: "transaction-msi-capacity-regression",
+      trigger: "user-confirmed-review",
+    }, {
+      discoveryProviders: [new MsiProductDiscoveryProvider()],
+      fetcher: async (requestedUrl: string) => {
+        expect(requestedUrl).toBe(url);
+        return officialResult;
+      },
+      inspect: true,
+    });
+    const completed = await waitForJob(queued.jobId);
+    expect(completed?.summary).toMatchObject({ discovered: 1, fetchSucceeded: 1, productPages: 1, exact: 1, conflicts: 0 });
+    expect(completed?.candidates[0]).toMatchObject({
+      canonicalUrl: url,
+      official: { trustStatus: "trusted", pageKind: "spec" },
+      identity: { verdict: "exact" },
+    });
+    expect(completed?.candidates[0]?.identity.candidateFingerprint.capacity).toBe("8GB");
   });
 
   it("persists candidates atomically with an audit manifest", async () => {

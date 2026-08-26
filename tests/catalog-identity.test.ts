@@ -58,6 +58,69 @@ describe("catalog identity assessment", () => {
     expect(result.criticalConflicts).toHaveLength(0);
   });
 
+  it("compares GPU capacity without treating the memory technology as part of its size", () => {
+    const base = candidate("MSI RTX 3070 Ventus 2X OC 8GB GDDR6", "gpu", "MSI");
+    const input = { ...base, query: { ...base.query, model: "RTX 3070 Ventus 2X OC", capacity: "8GB" } };
+    const result = assessCatalogIdentity(
+      input,
+      extracted("GeForce RTX 3070 VENTUS 2X OC", [
+        { field: "model", value: "GeForce RTX 3070 VENTUS 2X OC", provenanceId: "prov-model" },
+        { field: "attrs.capacity", value: "8GB GDDR6", provenanceId: "prov-capacity" },
+      ]),
+      { brand: "MSI" },
+    );
+    expect(result.verdict).toBe("exact");
+    expect(result.candidateFingerprint.capacity).toBe("8GB");
+    expect(result.criticalMatches).toContainEqual(expect.objectContaining({ field: "capacity", input: "8GB", candidate: "8GB", evidenceId: "prov-capacity" }));
+    expect(result.criticalMatches).toContainEqual(expect.objectContaining({ field: "memoryTechnology", input: "gddr6", candidate: "gddr6", evidenceId: "prov-capacity" }));
+    expect(result.criticalConflicts).toHaveLength(0);
+  });
+
+  it("still rejects a genuinely different GPU memory capacity", () => {
+    const base = candidate("MSI RTX 3070 Ventus 2X OC 8GB GDDR6", "gpu", "MSI");
+    const input = { ...base, query: { ...base.query, model: "RTX 3070 Ventus 2X OC", capacity: "8GB" } };
+    const result = assessCatalogIdentity(
+      input,
+      extracted("GeForce RTX 3070 VENTUS 2X OC", [
+        { field: "model", value: "GeForce RTX 3070 VENTUS 2X OC" },
+        { field: "attrs.capacity", value: "12GB GDDR6" },
+      ]),
+      { brand: "MSI" },
+    );
+    expect(result.verdict).toBe("conflict");
+    expect(result.criticalConflicts).toContainEqual(expect.objectContaining({ field: "capacity", input: "8GB", candidate: "12GB" }));
+  });
+
+  it("rejects an ambiguous multi-capacity GPU page instead of taking its first value", () => {
+    const base = candidate("MSI RTX 3070 Ventus 2X OC 8GB GDDR6", "gpu", "MSI");
+    const input = { ...base, query: { ...base.query, model: "RTX 3070 Ventus 2X OC", capacity: "8GB" } };
+    const result = assessCatalogIdentity(
+      input,
+      extracted("GeForce RTX 3070 VENTUS 2X OC", [
+        { field: "model", value: "GeForce RTX 3070 VENTUS 2X OC" },
+        { field: "attrs.capacity", value: "8GB GDDR6 / 12GB GDDR6" },
+      ]),
+      { brand: "MSI" },
+    );
+    expect(result.verdict).toBe("conflict");
+    expect(result.criticalConflicts).toContainEqual(expect.objectContaining({ field: "capacity", input: "8GB", candidate: "8GBGDDR6/12GBGDDR6" }));
+  });
+
+  it("keeps GPU memory technology as a separate variant discriminator", () => {
+    const base = candidate("MSI RTX 3070 Ventus 2X OC 8GB GDDR6", "gpu", "MSI");
+    const input = { ...base, query: { ...base.query, model: "RTX 3070 Ventus 2X OC", capacity: "8GB" } };
+    const result = assessCatalogIdentity(
+      input,
+      extracted("GeForce RTX 3070 VENTUS 2X OC", [
+        { field: "model", value: "GeForce RTX 3070 VENTUS 2X OC" },
+        { field: "attrs.capacity", value: "8GB GDDR5" },
+      ]),
+      { brand: "MSI" },
+    );
+    expect(result.verdict).toBe("conflict");
+    expect(result.criticalConflicts).toContainEqual(expect.objectContaining({ field: "memoryTechnology", input: "gddr6", candidate: "gddr5", evidenceId: "prov-1" }));
+  });
+
   it("keeps a related family unknown when a requested tier is absent", () => {
     const result = assessCatalogIdentity(
       candidate("Western Digital WD Red Plus 8TB", "storage", "Western Digital"),

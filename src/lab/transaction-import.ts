@@ -118,7 +118,7 @@ function comparableIdentity(value: unknown): string {
 }
 
 const OFFICIAL_QUERY_NOISE = new Set([
-  "graphics", "card", "geforce", "overclocked", "dual-fan", "dual", "fan", "gddr6", "gddr6x",
+  "graphics", "card", "geforce", "overclocked", "dual-fan", "dual", "fan",
   "pcie", "pci", "express", "edition", "gaming", "video", "显卡", "商品", "型号",
 ]);
 
