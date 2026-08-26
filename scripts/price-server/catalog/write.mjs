@@ -125,6 +125,7 @@ function validateOfficialCandidate(candidate) {
     try { validateOfficialUrl(candidate.source.finalUrl); } catch (error) { errors.push(`final URL blocked: ${error.message}`); }
   } else errors.push("final URL is required");
   if (candidate.extraction?.status !== "ok") errors.push(`extraction status is ${candidate.extraction?.status ?? "unknown"}`);
+  if (candidate.identity && candidate.identity.verdict !== "exact") errors.push(`identity verdict is ${candidate.identity.verdict}`);
   if (!candidate.extraction?.contentHash) errors.push("content hash is required");
   const fields = canonicalFields(candidate);
   const fieldResult = validateFields(candidate, fields);
@@ -234,7 +235,7 @@ export async function acceptOfficial(candidateId, options = {}) {
   // The idempotency key must include every acceptance-relevant fact. A later
   // candidate with the same content hash but a new canonical URL or conflict
   // finding must never replay an earlier accepted result.
-  const inputHash = candidate ? jsonHash({ candidateId, canonicalUrl: candidate.canonicalUrl, source: candidate.source, extraction: candidate.extraction, fields: candidate.fields, conflicts: candidate.conflicts ?? [] }) : sha256(candidateId);
+  const inputHash = candidate ? jsonHash({ candidateId, canonicalUrl: candidate.canonicalUrl, source: candidate.source, official: candidate.official, identity: candidate.identity, extraction: candidate.extraction, fields: candidate.fields, conflicts: candidate.conflicts ?? [] }) : sha256(candidateId);
   const idempotencyKey = `accept-official:${candidateId}:${inputHash}`;
   const existingEvent = (await loadEvents(resolved)).events.find((event) => event.idempotencyKey === idempotencyKey);
   if (existingEvent?.result) return existingEvent.result;

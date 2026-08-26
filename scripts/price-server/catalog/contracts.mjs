@@ -12,7 +12,7 @@ import crypto from "node:crypto";
  * @typedef {{status:"accepted"|"draft"|"blocked", candidateId:string, inputHash:string, registryVersion:string, extractorVersion?:string, contentHash?:string, changedFields:string[], conflicts:unknown[], rollbackManifest?:string}} EnrichmentResult
  */
 
-export const CATALOG_CONTRACT_VERSION = "1.0.0";
+export const CATALOG_CONTRACT_VERSION = "1.1.0";
 export const DISCOVERY_EVIDENCE_KINDS = Object.freeze(["catalog", "registry-search", "searxng"]);
 export const OFFICIAL_FIELD_SOURCE_KINDS = Object.freeze(["official-page", "official-pdf", "official-ocr-pdf", "official-rendered-page"]);
 
@@ -37,7 +37,7 @@ export function assertDiscoveryResult(value) {
 }
 
 export function catalogCandidateInputHash(candidate) {
-  const value = { candidateId: candidate?.candidateId, canonicalUrl: candidate?.canonicalUrl, source: candidate?.source, extraction: candidate?.extraction, fields: candidate?.fields, conflicts: candidate?.conflicts ?? [] };
+  const value = { candidateId: candidate?.candidateId, canonicalUrl: candidate?.canonicalUrl, source: candidate?.source, official: candidate?.official, identity: candidate?.identity, extraction: candidate?.extraction, fields: candidate?.fields, conflicts: candidate?.conflicts ?? [] };
   const stable = (entry) => {
     if (Array.isArray(entry)) return `[${entry.map(stable).join(",")}]`;
     if (entry && typeof entry === "object") return `{${Object.entries(entry).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`).join(",")}}`;

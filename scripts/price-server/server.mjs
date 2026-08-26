@@ -268,11 +268,20 @@ const server = http.createServer(async (req, res) => {
         category: body.category,
         officialOnly: true,
         limit: 8,
-      }, { discoveryProviders, catalog, persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd() }));
+      }, { discoveryProviders, catalog, persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd(), browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
     }
     if (route === "POST /api/catalog/search") {
       const body = await readBody(req);
-      return send(res, 202, queueSearch(body, { persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd() }));
+      const catalog = await loadCatalog();
+      const discoveryMode = env.CATALOG_DISCOVERY_PROVIDER || "registry";
+      if (!["registry", "searxng"].includes(discoveryMode)) throw new Error("CATALOG_DISCOVERY_PROVIDER must be registry or searxng");
+      const discoveryProviders = [
+        new CatalogCacheDiscoveryProvider(catalog),
+        new MsiProductDiscoveryProvider(),
+        ...(discoveryMode === "searxng" ? [createSearXngDiscoveryProvider(env)] : []),
+        new RegistrySearchDiscoveryProvider(),
+      ];
+      return send(res, 202, queueSearch(body, { discoveryProviders, catalog, persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd(), browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
     }
     if (route === "POST /api/advice/build") {
       const flags = await loadRuntimeFlags();

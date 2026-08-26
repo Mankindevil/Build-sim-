@@ -4,10 +4,20 @@ import { OFFICIAL_DOMAIN_REGISTRY, OFFICIAL_REGISTRY_VERSION, registryForBrand }
 import { validateOfficialUrl } from "./security.mjs";
 
 const bundledCatalog = createRequire(import.meta.url)("../../../data/skus/catalog.json");
-export const QUERY_NORMALIZATION_VERSION = "1.0.0";
+export const QUERY_NORMALIZATION_VERSION = "1.1.0";
 
 function now() { return new Date().toISOString(); }
 function safeText(value, limit = 240) { return String(value ?? "").slice(0, limit); }
+
+export function discoveredPageHint(rawUrl) {
+  const url = new URL(rawUrl);
+  const path = url.pathname.toLocaleLowerCase();
+  if (path === "/" || path === "") return "root";
+  if (/(?:forum|community)/.test(url.hostname) || /\/(?:forum|community|t5)\//.test(path)) return "forum";
+  if (/\/(?:news|blog|insights|press)(?:\/|$)/.test(path)) return "article";
+  if (/\/(?:search|search-result)(?:\/|$)/.test(path)) return "search";
+  return "candidate";
+}
 
 export function canonicalizeDiscoveredUrl(raw) {
   const url = validateOfficialUrl(raw);
@@ -89,7 +99,7 @@ export class CatalogDiscoveryRegistry {
 export function allowedDomainsForQuery(query, registry = OFFICIAL_DOMAIN_REGISTRY) {
   const brand = registryForBrand(query.brand, registry);
   if (brand?.trustStatus === "trusted") return [...brand.domains];
-  return registry.brands.filter((entry) => entry.trustStatus === "trusted").flatMap((entry) => entry.domains);
+  return [];
 }
 
 /** @param {{query:any, catalog?:any, providers?:Array<any>, limit?:number, signal?:AbortSignal, registry?:any}} options */
@@ -97,7 +107,7 @@ export async function discoverOfficialUrls({ query, catalog = bundledCatalog, pr
   const selected = providers ?? [new CatalogCacheDiscoveryProvider(catalog), new RegistrySearchDiscoveryProvider()];
   const providerRegistry = new CatalogDiscoveryRegistry(selected);
   const allowedDomains = allowedDomainsForQuery(query, registry);
-  const warnings = [];
+  const warnings = allowedDomains.length ? [] : ["品牌未识别或未进入可信域名表；已跳过跨品牌官网搜索"];
   const proposals = [];
   const byCanonical = new Map();
   for (const provider of providerRegistry.providers) {
@@ -113,7 +123,12 @@ export async function discoverOfficialUrls({ query, catalog = bundledCatalog, pr
       try {
         const result = assertDiscoveryResult({ ...raw, provider: provider.id });
         const url = canonicalizeDiscoveredUrl(result.url);
-        if (!byCanonical.has(url)) byCanonical.set(url, { ...result, url, title: safeText(result.title), snippet: safeText(result.snippet), provider: provider.id });
+        const pageHint = discoveredPageHint(url);
+        if (provider.id !== "catalog-cache" && provider.id !== "registry-search" && pageHint !== "candidate") {
+          warnings.push(`${provider.id}: skipped ${pageHint} page: ${url}`);
+          continue;
+        }
+        if (!byCanonical.has(url)) byCanonical.set(url, { ...result, url, title: safeText(result.title), snippet: safeText(result.snippet), provider: provider.id, pageHint });
       } catch (error) {
         try {
           const proposedUrl = new URL(raw?.url);

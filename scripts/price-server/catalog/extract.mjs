@@ -1,7 +1,7 @@
 import { detectAccessBarrier } from "./access-barrier.mjs";
 
 const FIELD_ALIASES = [
-  ["mpn", /^(mpn|sku|part\s*(number|no\.?))$/i],
+  ["mpn", /^(mpn|sku|part\s*(number|no\.?)|model\s*(number|no\.?))$/i],
   ["brand", /^brand$/i],
   ["model", /^(model|product\s*name)$/i],
   ["dims.lengthMm", /^(length|depth|长度|深度)$/i],
@@ -10,6 +10,7 @@ const FIELD_ALIASES = [
   ["dims.slots", /^(slot|slots|pci\s+expansion\s+slot|槽位)$/i],
   ["power.tdpW", /^(tdp|tdp\s*power|热设计功耗)$/i],
   ["power.tgpW", /^(tgp|graphics\s*power|显卡功耗)$/i],
+  ["power.ratedW", /^(rated\s*(power|output)|continuous\s*power|output\s*capacity|power\s*output|额定功率)$/i],
   ["attrs.capacity", /^(capacity|容量)$/i],
   ["attrs.interface", /^(interface|接口)$/i],
 ];
@@ -27,7 +28,7 @@ function numberWithUnit(value) {
   return number;
 }
 function fieldValue(field, value) {
-  if (field === "dims.lengthMm" || field === "dims.widthMm" || field === "dims.heightMm" || field === "dims.slots" || field === "power.tdpW" || field === "power.tgpW") return numberWithUnit(value);
+  if (field === "dims.lengthMm" || field === "dims.widthMm" || field === "dims.heightMm" || field === "dims.slots" || field === "power.tdpW" || field === "power.tgpW" || field === "power.ratedW") return numberWithUnit(value);
   return strip(value);
 }
 function addField(fields, conflicts, fetch, field, value, locator, snippet, sourceKind = "official-page") {
@@ -77,6 +78,10 @@ export function extractOfficialHtml(fetch, { sourceKind = "official-page" } = {}
   const warnings = [];
   const accessBarrier = detectAccessBarrier(fetch);
   if (accessBarrier) warnings.push(`access barrier detected: ${accessBarrier.kind}; ${accessBarrier.manualAction}`);
+  if (fetch.status < 200 || fetch.status >= 300 || accessBarrier) {
+    if (fetch.status >= 400) warnings.push(`official page returned HTTP ${fetch.status}`);
+    return { fields, conflicts, warnings, adapter: "generic-official-html-v1", ...(accessBarrier ? { accessBarrier } : {}) };
+  }
   parseJsonLd(html, fetch, fields, conflicts);
   const title = strip(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)?.[1]);
   if (title) addField(fields, conflicts, fetch, "model", title, "HTML title", title, sourceKind);
@@ -87,7 +92,6 @@ export function extractOfficialHtml(fetch, { sourceKind = "official-page" } = {}
     const value = fieldValue(alias[0], row[2]);
     addField(fields, conflicts, fetch, alias[0], value, `spec label: ${label}`, `${label}: ${strip(row[2])}`, sourceKind);
   }
-  if (fetch.status >= 400) warnings.push(`official page returned HTTP ${fetch.status}`);
   if (fetch.contentType.includes("pdf")) warnings.push("PDF content requires a PDF extractor; HTML field extraction skipped");
   const expected = ["brand", "model", "mpn", "dims.lengthMm", "power.tdpW", "power.tgpW"];
   const missing = expected.filter((field) => !fields.some((entry) => entry.field === field));

@@ -48,6 +48,11 @@ describe("G3 model query normalization", () => {
     expect(query.brand).toBeUndefined();
     expect(query.category).toBe("psu");
   });
+
+  it("recognizes the WD alias without matching it inside unrelated words", () => {
+    expect(normalizeModelQuery("WD Red Plus 8TB SATA").brand).toBe("Western Digital");
+    expect(normalizeModelQuery("hardware GX-850").brand).toBeUndefined();
+  });
 });
 
 describe("G3 official extraction and provenance", () => {
@@ -58,6 +63,15 @@ describe("G3 official extraction and provenance", () => {
     expect(extracted.fields.every((field) => field.sourceUrl === fetchResult.finalUrl)).toBe(true);
     expect(extracted.fields.every((field) => field.provenanceId.startsWith("prov-"))).toBe(true);
     expect(extracted.fields.every((field) => field.snippet && field.snippet.length <= 240)).toBe(true);
+  });
+
+  it("extracts explicit vendor Model Number and Rated Power labels", () => {
+    const body = `<title>WD Red Plus 8TB</title><div><span>Model Number</span><span>WD80EFPX</span></div><div><span>Capacity</span><span>8TB</span></div><div><span>Interface</span><span>SATA</span></div><div><span>Rated Power</span><span>850 W</span></div>`;
+    const extracted = extractOfficialHtml({ ...fetchResult, body, contentHash: "explicit-model-rated-power" });
+    expect(extracted.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "mpn", value: "WD80EFPX" }),
+      expect.objectContaining({ field: "power.ratedW", value: 850 }),
+    ]));
   });
 
   it("keeps conflicting field values and missing facts visible", async () => {
@@ -138,6 +152,9 @@ describe("G3 catalog search job", () => {
     const completed = await waitForJob(first.jobId);
     expect(completed?.status).toBe("partial");
     expect(completed?.candidates[0]?.match.kind).toBe("exact-mpn");
+    expect(completed?.candidates[0]?.identity.verdict).toBe("exact");
+    expect(completed?.candidates[0]?.official.pageKind).toBe("product");
+    expect(completed?.summary).toMatchObject({ exact: 1, productPages: 1 });
     expect(completed?.candidates[0]?.canonicalUrl).toBe("https://www.asus.com/example");
     expect(completed?.candidates[0]?.fields?.some((field: { field: string }) => field.field === "dims.lengthMm")).toBe(true);
     expect(completed?.candidates[0]?.priceCandidates).toBeUndefined();

@@ -39,16 +39,19 @@ function cny(value: number): string {
 
 export function formatCatalogToolResult(toolName: string, content: unknown): string {
   const value = content && typeof content === "object" ? content as Record<string, unknown> : {};
-  if (toolName === "search_official_catalog") {
+  if (toolName === "search_official_catalog" || toolName === "get_catalog_search_job") {
     const candidates = Array.isArray(value.candidates) ? value.candidates : [];
     const proposals = Array.isArray(value.domainProposals) ? value.domainProposals : [];
     const discovery = value.discovery && typeof value.discovery === "object" ? value.discovery as { providerIds?: string[] } : {};
-    return `搜索候选 ${candidates.length} · provider ${(discovery.providerIds ?? []).join(",") || "unknown"} · 待治理域名 ${proposals.length} · job ${text(value.status ?? "unknown")}`;
+    const summary = value.summary && typeof value.summary === "object" ? value.summary as { exact?: number; sameFamily?: number; conflicts?: number; blocked?: number } : {};
+    return `搜索候选 ${candidates.length} · 精确 ${summary.exact ?? 0} · 同系列 ${summary.sameFamily ?? 0} · 冲突 ${summary.conflicts ?? 0} · 读取受阻 ${summary.blocked ?? 0} · provider ${(discovery.providerIds ?? []).join(",") || "unknown"} · 待治理域名 ${proposals.length} · job ${text(value.status ?? "unknown")}`;
   }
   if (toolName === "inspect_catalog_candidate") {
     const extraction = value.extraction && typeof value.extraction === "object" ? value.extraction as { status?: string; fieldsFound?: number } : {};
     const source = value.source && typeof value.source === "object" ? value.source as { domain?: string } : {};
-    return `官方检查 ${text(extraction.status ?? "unknown")} · ${text(source.domain ?? "unknown domain")} · 字段 ${extraction.fieldsFound ?? 0} · ${value.expectedHash ? "expected hash 已生成" : "无可写 hash"}`;
+    const official = value.official && typeof value.official === "object" ? value.official as { pageKind?: string } : {};
+    const identity = value.identity && typeof value.identity === "object" ? value.identity as { verdict?: string; unknowns?: string[] } : {};
+    return `官方检查 ${text(extraction.status ?? "unknown")} · ${text(source.domain ?? "unknown domain")} · 页面 ${text(official.pageKind ?? "unknown")} · 身份 ${text(identity.verdict ?? "unknown")} · 未知项 ${(identity.unknowns ?? []).join(",") || "无"} · 字段 ${extraction.fieldsFound ?? 0} · ${value.expectedHash ? "expected hash 已生成" : "无可写 hash"}`;
   }
   if (toolName === "list_official_domain_proposals") {
     const proposals = Array.isArray(value.proposals) ? value.proposals as Array<{ trustStatus?: string }> : [];

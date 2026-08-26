@@ -1,7 +1,10 @@
 import type { SkuCategory } from "../sku/types";
 import type { NormalizedModelQuery } from "./types";
 
-const BRANDS = ["JONSBO", "ASUS", "Seagate", "Corsair", "Intel", "Kingston", "Samsung", "Seasonic", "SilverStone", "FSP", "Thermalright", "Noctua", "ID-COOLING", "LSI", "NVIDIA"];
+const BRANDS: Array<[string, string[]]> = [
+  ["Western Digital", ["western digital", "wd"]],
+  ...["JONSBO", "ASUS", "Seagate", "Corsair", "Intel", "Kingston", "Samsung", "Seasonic", "SilverStone", "FSP", "Thermalright", "Noctua", "ID-COOLING", "LSI", "NVIDIA", "MSI"].map((brand): [string, string[]] => [brand, [brand]]),
+];
 const CATEGORY_WORDS: [SkuCategory, string[]][] = [
   ["case", ["case", "机箱"]],
   ["motherboard", ["motherboard", "mainboard", "主板"]],
@@ -21,7 +24,10 @@ function clean(value: string): string {
 
 function findBrand(normalized: string): string | undefined {
   const lower = normalized.toLocaleLowerCase();
-  return BRANDS.find((brand) => lower.includes(brand.toLocaleLowerCase()));
+  for (const [brand, aliases] of BRANDS) {
+    if (aliases.some((alias) => new RegExp(`(?:^|[^a-z0-9])${alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^a-z0-9])`, "i").test(lower))) return brand;
+  }
+  return undefined;
 }
 
 function findCategory(normalized: string): SkuCategory | undefined {

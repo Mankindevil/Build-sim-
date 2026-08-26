@@ -38,6 +38,14 @@ interface CatalogCandidate {
   url?: string;
   match?: { score?: number; kind?: string };
   extraction?: { status?: string; fieldsFound?: number; error?: string };
+  official?: { trustStatus?: string; pageKind?: string; reasons?: string[] };
+  identity?: {
+    verdict?: "exact" | "same-family" | "conflict" | "insufficient-evidence";
+    score?: number;
+    reasons?: string[];
+    unknowns?: string[];
+    criticalConflicts?: Array<{ field?: string; input?: unknown; candidate?: unknown }>;
+  };
   fields?: Array<{ field?: string; value?: unknown; evidence?: string }>;
 }
 
@@ -48,6 +56,7 @@ interface CatalogJob {
   candidates?: CatalogCandidate[];
   warnings?: string[];
   errors?: string[];
+  summary?: { discovered?: number; inspected?: number; fetchSucceeded?: number; productPages?: number; exact?: number; sameFamily?: number; conflicts?: number; insufficientEvidence?: number; blocked?: number; searchLinks?: number };
 }
 
 interface CatalogLookupResult {
@@ -143,9 +152,15 @@ export function selectBestCatalogCandidate(candidates: CatalogCandidate[] = [], 
   const identityText = (candidate: CatalogCandidate): string => comparableIdentity([
     candidate.title, candidate.brand, candidate.model, candidate.mpn, candidate.canonicalUrl, candidate.url,
   ].filter(Boolean).join(" "));
-  const isStrongMatch = (candidate: CatalogCandidate): boolean =>
-    ["exact-mpn", "brand-model"].includes(candidate.match?.kind ?? "") && Number(candidate.match?.score ?? 0) >= 0.7;
-  const relevant = expectedKeys.length === 0 ? [...candidates] : candidates.filter((candidate) => {
+  const isStrongMatch = (candidate: CatalogCandidate): boolean => candidate.identity?.verdict === "exact"
+    || (!candidate.identity && ["exact-mpn", "brand-model"].includes(candidate.match?.kind ?? "") && Number(candidate.match?.score ?? 0) >= 0.7);
+  const eligible = candidates.filter((candidate) => {
+    if (candidate.identity && candidate.identity.verdict !== "exact") return false;
+    if (candidate.identity && !["product", "spec", "datasheet", "support"].includes(candidate.official?.pageKind ?? "unknown")) return false;
+    if (["search", "forum", "article", "blocked"].includes(candidate.official?.pageKind ?? "")) return false;
+    return true;
+  });
+  const relevant = expectedKeys.length === 0 ? eligible : eligible.filter((candidate) => {
     if (isStrongMatch(candidate)) return true;
     const haystack = identityText(candidate);
     const modelMatches = expectedKeys.some((key) => haystack.includes(key));
@@ -155,11 +170,12 @@ export function selectBestCatalogCandidate(candidates: CatalogCandidate[] = [], 
   return relevant.sort((a, b) => {
     const rank = (candidate: CatalogCandidate): number => {
       const exact = candidate.match?.kind === "exact-mpn" ? 100 : candidate.match?.kind === "brand-model" ? 60 : 0;
+      const identityVerdict = candidate.identity?.verdict === "exact" ? 300 : 0;
       const extracted = candidate.extraction?.status === "ok" ? 30 : candidate.extraction?.status === "partial" ? 10 : 0;
       const haystack = identityText(candidate);
-      const identity = expectedKeys.some((key) => haystack.includes(key)) ? 200 : 0;
+      const identityTextMatch = expectedKeys.some((key) => haystack.includes(key)) ? 200 : 0;
       const brand = expectedBrand && haystack.includes(expectedBrand) ? 40 : 0;
-      return identity + brand + exact + extracted + Number(candidate.match?.score ?? 0) * 10 + Number(candidate.extraction?.fieldsFound ?? 0);
+      return identityVerdict + identityTextMatch + brand + exact + extracted + Number(candidate.match?.score ?? 0) * 10 + Number(candidate.extraction?.fieldsFound ?? 0);
     };
     return rank(b) - rank(a);
   })[0] ?? null;
@@ -379,10 +395,16 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       const candidateTitle = document.createElement("strong");
       candidateTitle.textContent = "校验官网候选";
       const candidateMeta = document.createElement("p");
-      candidateMeta.textContent = `${catalogCandidate.title ?? "未命名候选"} · 匹配 ${Math.round(Number(catalogCandidate.match?.score ?? 0) * 100)}% · 参数 ${catalogCandidate.extraction?.status ?? "unknown"}`;
+      candidateMeta.textContent = `${catalogCandidate.title ?? "未命名候选"} · 页面 ${catalogCandidate.official?.pageKind ?? "unknown"} · 身份 ${catalogCandidate.identity?.verdict ?? catalogCandidate.match?.kind ?? "unknown"} · 匹配 ${Math.round(Number(catalogCandidate.identity?.score ?? catalogCandidate.match?.score ?? 0) * 100)}% · 参数 ${catalogCandidate.extraction?.status ?? "unknown"}`;
       const candidateWarning = document.createElement("p");
       candidateWarning.className = "transaction-candidate-warning";
-      candidateWarning.textContent = catalogCandidate.extraction?.error ? `仍缺参数：${catalogCandidate.extraction.error}` : "已展示当前来源明确提供的参数；未列出的字段保持 unknown。";
+      const identityNotes = [
+        ...(catalogCandidate.identity?.criticalConflicts ?? []).map((entry) => `${entry.field}: ${String(entry.input)} ≠ ${String(entry.candidate)}`),
+        ...((catalogCandidate.identity?.unknowns ?? []).length ? [`待确认：${catalogCandidate.identity?.unknowns?.join("、")}`] : []),
+      ];
+      candidateWarning.textContent = identityNotes.length
+        ? identityNotes.join("；")
+        : catalogCandidate.extraction?.error ? `仍缺参数：${catalogCandidate.extraction.error}` : "已展示当前来源明确提供的参数；未列出的字段保持 unknown。";
       const candidateLink = document.createElement("a");
       candidateLink.href = record.evidence.officialUrl;
       candidateLink.target = "_blank";
@@ -585,6 +607,9 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       return { record: timedOut, candidate: null };
     }
     onProgress?.(`候选发现完成 · ${job.candidates?.length ?? 0} 个页面`);
+    if (job.summary) {
+      onProgress?.(`候选漏斗 · 发现 ${job.summary.discovered ?? 0} · 成功读取 ${job.summary.fetchSucceeded ?? 0} · 产品/规格页 ${job.summary.productPages ?? 0} · 精确型号 ${job.summary.exact ?? 0} · 同系列 ${job.summary.sameFamily ?? 0} · 冲突 ${job.summary.conflicts ?? 0}`);
+    }
     for (const warning of job.warnings ?? []) onProgress?.(`服务警告 · ${warning}`);
     for (const error of job.errors ?? []) onProgress?.(`服务错误 · ${error}`);
     const candidate = selectBestCatalogCandidate(job.candidates, analysis.detected);
@@ -592,6 +617,9 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       const noResult = recordFromAnalysis(analysis, job.status === "failed" ? "search-failed" : "search-no-result");
       setStatus("没有找到品牌与型号一致的官网候选；不会附加无关来源。", "warn");
       onProgress?.("身份校验未通过 · 所有无关或无参数候选已拒绝");
+      const explained = (job.candidates ?? []).find((entry) => entry.identity?.reasons?.length || entry.extraction?.error);
+      if (explained?.identity?.reasons?.length) onProgress?.(`首个未通过原因 · ${explained.identity.reasons.join("；")}`);
+      else if (explained?.extraction?.error) onProgress?.(`首个读取失败 · ${explained.extraction.error}`);
       return { record: noResult, candidate: null };
     }
     onProgress?.(`候选入选 · ${candidate.title ?? candidate.canonicalUrl ?? candidate.url ?? "未命名页面"}`);

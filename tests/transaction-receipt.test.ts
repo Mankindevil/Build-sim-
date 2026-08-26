@@ -156,4 +156,11 @@ describe("transaction screenshot receipt agent", () => {
       { candidateId: "case", title: "JONSBO computer case", canonicalUrl: "https://www.jonsbo.com/en/product/ComputerCase.html", match: { kind: "weak", score: 0.2 }, extraction: { status: "partial", fieldsFound: 3 } },
     ], { name: "GX-850", model: "GX-850", brand: "Seasonic" })).toBeNull();
   });
+
+  it("never lets a related candidate override a deterministic variant conflict", () => {
+    expect(selectBestCatalogCandidate([
+      { candidateId: "wrong-tier", title: "WD Red Pro 8TB", canonicalUrl: "https://www.westerndigital.com/products/internal-drives/wd-red-pro", official: { trustStatus: "trusted", pageKind: "product", reasons: [] }, identity: { verdict: "conflict", score: 0, reasons: ["storageTier conflicts: plus != pro"], unknowns: [], criticalConflicts: [{ field: "storageTier", input: "plus", candidate: "pro" }] }, match: { kind: "weak", score: 0 }, extraction: { status: "ok", fieldsFound: 8 } },
+      { candidateId: "same-family", title: "WD Red 8TB", canonicalUrl: "https://www.westerndigital.com/products/internal-drives/wd-red", official: { trustStatus: "trusted", pageKind: "product", reasons: [] }, identity: { verdict: "same-family", score: 0.6, reasons: ["tier unknown"], unknowns: ["storageTier"], criticalConflicts: [] }, match: { kind: "spec-match", score: 0.6 }, extraction: { status: "ok", fieldsFound: 8 } },
+    ], { name: "WD Red Plus 8TB", model: "WD Red Plus", brand: "Western Digital" })).toBeNull();
+  });
 });

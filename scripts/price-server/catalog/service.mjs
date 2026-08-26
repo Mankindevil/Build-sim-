@@ -16,6 +16,7 @@ import { createSearXngDiscoveryProvider } from "./searxng-discovery.mjs";
 import { loadEnv } from "../env.mjs";
 import { createDomainProposal } from "./domain-proposals.mjs";
 import { catalogCandidateInputHash } from "./contracts.mjs";
+import { assessCatalogIdentity, classifyOfficialPage, summarizeCatalogCandidates } from "./identity.mjs";
 
 const catalogJson = createRequire(import.meta.url)("../../../data/skus/catalog.json");
 
@@ -89,13 +90,13 @@ function registryCandidate(query) {
   };
 }
 
-function scoreExtracted(candidate, extracted) {
-  const mpn = extracted.fields.find((field) => field.field === "mpn")?.value;
-  const brand = extracted.fields.find((field) => field.field === "brand")?.value;
-  const query = candidate.query;
-  const exactMpn = Boolean(query.mpn && mpn && String(query.mpn).toLocaleLowerCase() === String(mpn).toLocaleLowerCase());
-  const brandModel = Boolean(query.brand && brand && String(query.brand).toLocaleLowerCase() === String(brand).toLocaleLowerCase());
-  return { score: exactMpn ? 1 : brandModel ? 0.75 : 0.2, kind: exactMpn ? "exact-mpn" : brandModel ? "brand-model" : "weak", reasons: exactMpn ? ["official extracted MPN exact match"] : brandModel ? ["official extracted brand match; MPN not exact"] : ["official page did not prove exact identity"] };
+function scoreExtracted(identity) {
+  if (identity.verdict === "exact") {
+    const exactMpn = identity.reasons.includes("official MPN exactly matches");
+    return { score: identity.score, kind: exactMpn ? "exact-mpn" : "brand-model", reasons: identity.reasons };
+  }
+  if (identity.verdict === "same-family") return { score: identity.score, kind: "spec-match", reasons: identity.reasons };
+  return { score: identity.score, kind: "weak", reasons: identity.reasons };
 }
 
 const REQUIRED_FIELDS_BY_CATEGORY = {
@@ -156,11 +157,17 @@ async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFal
     }
     contentCache.set(cacheKey, extracted);
     const fields = extracted.fields;
+    const canonical = canonicalUrl ?? fetchResult.canonicalUrl ?? fetchResult.finalUrl;
+    const officialEntry = registryForUrl(new URL(canonical));
+    const page = classifyOfficialPage(fetchResult, extracted, canonical);
+    const identity = assessCatalogIdentity({ ...candidate, canonicalUrl: canonical }, extracted, officialEntry);
     const inspected = {
       ...candidate,
-      canonicalUrl: canonicalUrl ?? fetchResult.canonicalUrl ?? fetchResult.finalUrl,
+      canonicalUrl: canonical,
       source: { ...candidate.source, kind: "official", retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
-      match: scoreExtracted(candidate, extracted),
+      official: { trustStatus: officialEntry?.trustStatus ?? "untrusted", brand: officialEntry?.brand, pageKind: page.kind, reasons: page.reasons },
+      identity,
+      match: scoreExtracted(identity),
       extraction: { status: extractionStatus(candidate, extracted, fetchResult), fieldsFound: fields.length, fieldsMissing: Math.max(0, 6 - fields.length), adapter: extracted.adapter, ...(fetchResult.contentHash ? { contentHash: fetchResult.contentHash } : {}), ...(extracted.warnings.length ? { error: safeText(extracted.warnings.join("; ")) } : {}) },
       fields,
       ...(extracted.accessBarrier ? { accessBarrier: extracted.accessBarrier } : {}),
@@ -205,16 +212,23 @@ async function processJob(job, options) {
     url: entry.url,
     discovery: entry,
     source: { kind: entry.provider === "catalog-cache" ? "official" : "search", provider: entry.provider, domain: domainOf(entry.url), retrievedAt: entry.retrievedAt },
+    official: { trustStatus: "trusted", brand: registryForUrl(new URL(entry.url))?.brand, pageKind: entry.provider === "registry-search" ? "search" : "unknown", reasons: [entry.provider === "registry-search" ? "official site-search link" : "official page inspection pending"] },
     match: { score: entry.matchScore ?? 0.3, kind: entry.matchKind ?? "weak", reasons: [entry.provider === "catalog-cache" ? "catalog candidate" : "discovery candidate; inspection required"] },
     extraction: { status: "not-run", fieldsFound: 0, fieldsMissing: 0 },
   }));
   job.stage = "fetch";
   job.candidates = [];
+  let browserFallbackUses = 0;
+  const browserFallbackLimit = Math.min(3, Math.max(0, Number(options.browserFallbackLimit ?? 2)));
   for (const candidate of candidates.slice(0, job.limit)) {
     const inspectable = candidate.source.kind === "official" || candidate.source.provider !== "registry-search";
-    job.candidates.push(inspectable && options.inspect !== false ? await inspectCandidate(candidate, options) : candidate);
+    const candidateOptions = options.browserFallback && browserFallbackUses < browserFallbackLimit
+      ? { ...options, browserFallback: async (url) => { browserFallbackUses += 1; return options.browserFallback(url); } }
+      : { ...options, browserFallback: undefined };
+    job.candidates.push(inspectable && options.inspect !== false ? await inspectCandidate(candidate, candidateOptions) : candidate);
   }
   job.stage = "score";
+  job.summary = summarizeCatalogCandidates(job.candidates, discovery.candidates.length);
   job.status = job.candidates.some((candidate) => candidate.extraction.status === "partial" || candidate.extraction.status === "failed") ? "partial" : "completed";
   if (job.candidates.length === 0) job.warnings.push("未找到官方候选；第三方价格发现请使用 /api/price/collect，不混入官方参数");
   await persistJob(job, options.persistRoot);

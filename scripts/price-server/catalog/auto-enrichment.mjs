@@ -10,6 +10,15 @@ export async function runAutoEnrichment(candidateId, options = {}) {
   if (options.expectedHash && options.expectedHash !== inputHash) return { status: "blocked", candidateId, inputHash, reasons: ["candidate expected hash mismatch"] };
   const evidence = { inputHash, registryVersion: OFFICIAL_REGISTRY_VERSION, extractorVersion: candidate.extraction?.adapter, contentHash: candidate.extraction?.contentHash };
   if (!options.autoEnrichTrustedOfficial) return { status: "candidate", candidateId, ...evidence, changedFields: [], conflicts: candidate.conflicts ?? [] };
+  if (candidate.identity?.verdict === "conflict") {
+    return { status: "blocked", candidateId, ...evidence, changedFields: [], conflicts: candidate.identity.criticalConflicts ?? [], reasons: candidate.identity.reasons ?? ["critical product identity conflict"] };
+  }
+  if (candidate.identity && candidate.identity.verdict !== "exact") {
+    return { status: "candidate", candidateId, ...evidence, changedFields: [], conflicts: candidate.conflicts ?? [], reasons: [...(candidate.identity.reasons ?? []), "exact product identity is required before creating a catalog draft"] };
+  }
+  if (candidate.official && !["product", "spec", "datasheet", "support"].includes(candidate.official.pageKind)) {
+    return { status: "candidate", candidateId, ...evidence, changedFields: [], conflicts: candidate.conflicts ?? [], reasons: [`official page kind is ${candidate.official.pageKind}; a product/specification artifact is required before creating a catalog draft`] };
+  }
   const exactMpn = candidate.match?.kind === "exact-mpn";
   if (options.autoAcceptExactMpn && exactMpn && options.catalogWriteEnabled) {
     const accepted = await acceptOfficial(candidateId, { ...options, candidate });

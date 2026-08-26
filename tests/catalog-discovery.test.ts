@@ -38,12 +38,33 @@ describe("C3 provider-neutral catalog discovery", () => {
     expect(result.warnings.join(" ")).toContain("blocked");
   });
 
+  it("keeps official forum and editorial pages out of product candidate slots", async () => {
+    const provider = { id: "searxng", discover: async () => [
+      { url: "https://rog-forum.asus.com/t5/gpu/topic", title: "forum", retrievedAt: "2026-08-24T00:00:00.000Z", rank: 0 },
+      { url: "https://www.asus.com/news/product-story", title: "story", retrievedAt: "2026-08-24T00:00:00.000Z", rank: 1 },
+      { url: "https://www.asus.com/motherboards-components/motherboards/example", title: "product", retrievedAt: "2026-08-24T00:00:00.000Z", rank: 2 },
+    ] };
+    const result = await discoverOfficialUrls({ query, providers: [provider] });
+    expect(result.candidates.map((entry) => entry.title)).toEqual(["product"]);
+    expect(result.warnings.join(" ")).toContain("skipped forum page");
+    expect(result.warnings.join(" ")).toContain("skipped article page");
+  });
+
   it("isolates provider failure and preserves later provider candidates", async () => {
     const failed = { id: "failed", discover: async () => { throw new Error("fixture timeout"); } };
     const healthy = { id: "healthy", discover: async () => [{ url: "https://www.asus.com/product/one", title: "one", retrievedAt: "2026-08-24T00:00:00.000Z", rank: 0 }] };
     const result = await discoverOfficialUrls({ query, providers: [failed, healthy] });
     expect(result.candidates).toHaveLength(1);
     expect(result.warnings).toEqual(["failed: fixture timeout"]);
+  });
+
+  it("does not fan an unknown brand query out across every trusted vendor", async () => {
+    const unknown = normalizeModelQuery("GX-850", { category: "psu" });
+    let domains: string[] = ["unexpected"];
+    const provider = { id: "domain-observer", discover: async ({ allowedDomains }: { allowedDomains: string[] }) => { domains = allowedDomains; return []; } };
+    const result = await discoverOfficialUrls({ query: unknown, providers: [provider] });
+    expect(domains).toEqual([]);
+    expect(result.warnings.join(" ")).toContain("品牌未识别");
   });
 
   it("includes provider and registry versions in jobs and returns multiple product candidates", async () => {
@@ -57,6 +78,6 @@ describe("C3 provider-neutral catalog discovery", () => {
     expect(result?.candidates).toHaveLength(2);
     expect(result?.discovery.providerIds).toEqual([provider.id]);
     expect(result?.discovery.registryVersion).toMatch(/^[a-f0-9]{64}$/);
-    expect(result?.discovery.queryNormalizationVersion).toBe("1.0.0");
+    expect(result?.discovery.queryNormalizationVersion).toBe("1.1.0");
   });
 });

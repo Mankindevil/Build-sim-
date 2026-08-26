@@ -216,7 +216,7 @@ describe("transaction screenshot review UI", () => {
         catalogMatch: null, evidence: { receiptId: "receipt-msi", fileName: "gpu.png", contentHash: "8".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 90, excerpt: "RTX 3070" }, catalogSearch: null,
       }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url === "/api/price/transactions/catalog-search") return new Response(JSON.stringify({ jobId: "job-msi", status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
-      if (url === "/api/catalog/search/job-msi") return new Response(JSON.stringify({ jobId: "job-msi", status: "completed", stage: "score", candidates: [], warnings: ["未找到官方候选"] }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/search/job-msi") return new Response(JSON.stringify({ jobId: "job-msi", status: "completed", stage: "score", candidates: [], summary: { discovered: 3, fetchSucceeded: 1, productPages: 1, exact: 0, sameFamily: 1, conflicts: 1 }, warnings: ["未找到官方候选"] }), { status: 200, headers: { "Content-Type": "application/json" } });
       throw new Error(`unexpected request ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -229,6 +229,7 @@ describe("transaction screenshot review UI", () => {
     await vi.waitFor(() => expect(document.querySelector('[data-state="empty"]')?.textContent).toContain("0 个可用候选"));
     expect(document.querySelector(".transaction-search-log")?.textContent).toContain("官网查询词 · MSI RTX 3070 Ventus 2X OC 8GB");
     expect(document.querySelector(".transaction-search-log")?.textContent).toContain("服务警告 · 未找到官方候选");
+    expect(document.querySelector(".transaction-search-log")?.textContent).toContain("候选漏斗 · 发现 3 · 成功读取 1 · 产品/规格页 1 · 精确型号 0 · 同系列 1 · 冲突 1");
     expect(onImport).not.toHaveBeenCalled();
   });
 

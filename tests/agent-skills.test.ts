@@ -92,4 +92,38 @@ describe("A4 Skill-scoped Tool runtime", () => {
     await expect(runtime.startRun(session.id, { content: "test", skillId: "missing" })).rejects.toMatchObject({ code: "skill_not_found", status: 404 });
     expect((await runtime.getSession(session.id)).messages).toEqual([]);
   });
+
+  it("gives shopping research the completed deterministic identity verdict", async () => {
+    const requests: ProviderTurnRequest[] = [];
+    const provider: ProviderAdapter = {
+      id: "deepseek",
+      models: [{ provider: "deepseek", id: "deepseek-v4-flash", label: "fixture", capabilities: { streaming: true, tools: true, parallelTools: true, structuredOutput: true, thinking: true } }],
+      async createTurn(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          expect(request.system).toContain("`conflict` 不得被模型推翻");
+          expect(request.tools.map((tool) => tool.name)).toContain("get_catalog_search_job");
+          return { provider: "deepseek", providerRequestId: "identity-1", model: request.model, content: "", toolCalls: [{ id: "identity-search", name: "search_official_catalog", input: { query: "WD Red Plus 8TB", brand: "Western Digital", category: "storage" } }], stopReason: "tool_use", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, latencyMs: 1 };
+        }
+        const result = JSON.parse(request.messages.at(-1)?.content ?? "{}");
+        expect(result.content.candidates[0].identity).toMatchObject({ verdict: "conflict", criticalConflicts: [{ field: "storageTier", input: "plus", candidate: "pro" }] });
+        return { provider: "deepseek", providerRequestId: "identity-2", model: request.model, content: "候选是 Red Pro，与 Red Plus 冲突，不能视为同型号。", toolCalls: [], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, latencyMs: 1 };
+      },
+    };
+    const fetchMock = async (url: string) => new Response(JSON.stringify(url.endsWith("/api/catalog/search")
+      ? { jobId: "catalog-search-identity", status: "queued", candidates: [] }
+      : { jobId: "catalog-search-identity", status: "completed", candidates: [{ identity: { verdict: "conflict", criticalConflicts: [{ field: "storageTier", input: "plus", candidate: "pro" }] } }], summary: { conflicts: 1 } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    const tools = registry();
+    const runtime = new AgentRuntime([provider], new MemoryAgentSessionStore(), { toolRegistry: tools, skillLoader: new AgentSkillLoader(path.resolve("skills"), tools) });
+    const session = await runtime.createSession();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      const run = await runtime.startRun(session.id, { content: "查找 WD Red Plus 8TB", buildConfig: baseline as never, skillId: "shopping-research" });
+      await runtime.waitForRun(run.runId);
+      expect((await runtime.getSession(session.id)).messages.at(-1)?.content).toContain("不能视为同型号");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

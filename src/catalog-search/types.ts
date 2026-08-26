@@ -61,6 +61,21 @@ export interface ModelCandidate {
     etag?: string;
     lastModified?: string;
   };
+  official?: {
+    trustStatus: "trusted" | "proposed" | "untrusted";
+    brand?: string;
+    pageKind: "product" | "spec" | "datasheet" | "support" | "series" | "search" | "forum" | "article" | "blocked" | "unknown";
+    reasons: string[];
+  };
+  identity?: {
+    verdict: "exact" | "same-family" | "conflict" | "insufficient-evidence";
+    score: number;
+    criticalMatches: Array<{ field: string; input: unknown; candidate: unknown; evidenceId?: string }>;
+    criticalConflicts: Array<{ field: string; input: unknown; candidate: unknown; evidenceId?: string }>;
+    unknowns: string[];
+    reasons: string[];
+    agentReviewRequired: boolean;
+  };
   match: {
     score: number;
     kind: "exact-mpn" | "brand-model" | "spec-match" | "weak";

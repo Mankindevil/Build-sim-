@@ -14,9 +14,9 @@ describe("A3 Build Sim Tool registry", () => {
   it("registers governed read/external-read tools and one approval-bound write tool", () => {
     const registry = new AgentToolRegistry(createBuildSimTools());
     expect(registry.names()).toEqual([
-      "compare_builds", "enrich_official_catalog", "get_build_evaluation", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "list_official_domain_proposals", "propose_plan_change", "search_official_catalog", "search_price_candidates",
+      "compare_builds", "enrich_official_catalog", "get_build_evaluation", "get_catalog_search_job", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "list_official_domain_proposals", "propose_plan_change", "search_official_catalog", "search_price_candidates",
     ]);
-    expect(registry.catalog()).toHaveLength(10);
+    expect(registry.catalog()).toHaveLength(11);
     expect(registry.catalog().every((tool) => /^[a-f0-9]{64}$/.test(tool.definitionHash))).toBe(true);
     expect(registry.catalog().filter((tool) => tool.effect === "write")).toEqual([expect.objectContaining({ name: "enrich_official_catalog", approval: "required" })]);
   });
@@ -51,15 +51,23 @@ describe("A3 Build Sim Tool registry", () => {
     const calls: Array<{ url: string; body: unknown }> = [];
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
-      return new Response(JSON.stringify({ status: "queued", candidates: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+      const payload = url.endsWith("/api/catalog/search")
+        ? { jobId: "job-agent", status: "queued", candidates: [] }
+        : url.endsWith("/api/catalog/search/job-agent")
+          ? { jobId: "job-agent", status: "completed", candidates: [], summary: { exact: 0, conflicts: 0 } }
+          : { status: "completed", candidates: [] };
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     const registry = new AgentToolRegistry(createBuildSimTools({ priceServiceUrl: "http://127.0.0.1:6174" }));
     expect((await registry.dispatch("search_official_catalog", { query: "ASUS W680M", limit: 3 }, context())).result.ok).toBe(true);
+    expect((await registry.dispatch("get_catalog_search_job", { jobId: "job-agent" }, context())).result.ok).toBe(true);
     expect((await registry.dispatch("list_official_domain_proposals", {}, context())).result.ok).toBe(true);
     expect((await registry.dispatch("inspect_catalog_candidate", { url: "http://127.0.0.1/private" }, context())).result).toMatchObject({ ok: false, errorCode: "tool_input_invalid" });
     expect((await registry.dispatch("search_price_candidates", { skuIds: ["case.jonsbo-n6"], channels: ["official"], limit: 1 }, context())).result.ok).toBe(true);
     expect(calls).toEqual([
       { url: "http://127.0.0.1:6174/api/catalog/search", body: { query: "ASUS W680M", limit: 3, officialOnly: true } },
+      { url: "http://127.0.0.1:6174/api/catalog/search/job-agent", body: null },
+      { url: "http://127.0.0.1:6174/api/catalog/search/job-agent", body: null },
       { url: "http://127.0.0.1:6174/api/catalog/domain-proposals", body: null },
       { url: "http://127.0.0.1:6174/api/price/collect", body: { skuIds: ["case.jonsbo-n6"], channels: ["official"], limit: 1 } },
     ]);

@@ -63,4 +63,12 @@ describe("C5 trusted exact-MPN auto enrichment", () => {
       expect(result.conflicts).toHaveLength(1);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
+
+  it("does not create a draft when deterministic variant identity conflicts", async () => {
+    const value = candidate(String(Date.now()));
+    value.identity = { verdict: "conflict", criticalConflicts: [{ field: "generation", input: "v5", candidate: "v4" }], reasons: ["generation conflicts: v5 != v4"] };
+    value.official = { trustStatus: "trusted", brand: "ASUS", pageKind: "product", reasons: [] };
+    const result = await runAutoEnrichment(value.candidateId, { candidate: value, autoEnrichTrustedOfficial: true, autoAcceptExactMpn: false });
+    expect(result).toMatchObject({ status: "blocked", reasons: ["generation conflicts: v5 != v4"] });
+  });
 });

@@ -1,5 +1,6 @@
 import { registryForUrl } from "./registry.mjs";
 import { extractOfficialHtml, extractOfficialPdf } from "./extract.mjs";
+import { detectAccessBarrier } from "./access-barrier.mjs";
 
 function extract(fetchResult, id) {
   const parsed = fetchResult.contentType.includes("pdf")
@@ -29,6 +30,19 @@ function msiField(fetchResult, field, value, locator) {
 }
 
 function extractMsiGpu(fetchResult) {
+  const accessBarrier = detectAccessBarrier(fetchResult);
+  if (fetchResult.status < 200 || fetchResult.status >= 300 || accessBarrier) {
+    return {
+      fields: [],
+      conflicts: [],
+      warnings: [
+        ...(accessBarrier ? [`access barrier detected: ${accessBarrier.kind}; ${accessBarrier.manualAction}`] : []),
+        ...(fetchResult.status >= 400 ? [`official page returned HTTP ${fetchResult.status}`] : []),
+      ],
+      adapter: "msi-gpu-spec-v1",
+      ...(accessBarrier ? { accessBarrier } : {}),
+    };
+  }
   const html = fetchResult.body;
   const values = new Map();
   for (const row of html.matchAll(/<div class=["']tr["'][^>]*>[\s\S]*?<li class=["']specName["'][^>]*>\s*([^<]{1,100})<\/li>[\s\S]*?<\/ul>\s*([\s\S]*?)<\/div>\s*<\/div>/gi)) {

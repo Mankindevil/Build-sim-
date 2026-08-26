@@ -54,6 +54,29 @@ async function localService(baseUrl: string, pathname: string, body: unknown, si
   }
 }
 
+function waitFor(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("aborted", "AbortError")); }, { once: true });
+  });
+}
+
+async function searchOfficialCatalog(baseUrl: string, body: unknown, signal: AbortSignal): Promise<AgentToolResult> {
+  const queued = await localService(baseUrl, "/api/catalog/search", body, signal);
+  if (!queued.ok) return queued;
+  let job = queued.content as { jobId?: string; status?: string } | null;
+  if (!job?.jobId || ["completed", "partial", "failed"].includes(job.status ?? "")) return queued;
+  const jobId = job.jobId;
+  for (let attempt = 0; attempt < 40 && !signal.aborted; attempt += 1) {
+    await waitFor(attempt === 0 ? 200 : 500, signal);
+    const polled = await localService(baseUrl, `/api/catalog/search/${encodeURIComponent(jobId)}`, null, signal, "GET");
+    if (!polled.ok) return polled;
+    job = polled.content as typeof job;
+    if (["completed", "partial", "failed"].includes(job?.status ?? "")) return { ...polled, provenance: ["local-service:/api/catalog/search", `catalog-job:${job?.jobId}`] };
+  }
+  return { ok: true, content: job, message: "Catalog search is still running; use the returned jobId for follow-up inspection.", provenance: ["local-service:/api/catalog/search", `catalog-job:${job?.jobId ?? "unknown"}`] };
+}
+
 const getBuildEvaluation: AgentToolSpec = {
   contractVersion: AGENT_CONTRACT_VERSION,
   name: "get_build_evaluation",
@@ -219,13 +242,13 @@ function createSearchOfficialCatalog(priceServiceUrl: string): AgentToolSpec {
     contractVersion: AGENT_CONTRACT_VERSION,
     name: "search_official_catalog",
     title: "搜索官方型号候选",
-    description: "Queue an allowlisted official-domain model search through the existing local catalog service. Results are candidates only and cannot enter the formal SKU catalog without separate human confirmation.",
+    description: "Queue and poll an allowlisted official-domain model search. It returns page classification, deterministic identity verdicts, critical conflicts, unknown discriminators and field provenance. Treat same-family or insufficient-evidence as unresolved; no candidate can enter the formal SKU catalog without the separate governed confirmation path.",
     effect: "external-read",
     approval: "never",
     timeoutMs: 30_000,
     maxResultBytes: 80_000,
     inputSchema: schema({ query: { type: "string", minLength: 2, maxLength: 240 }, brand: { type: "string", minLength: 1, maxLength: 80 }, category: { type: "string", maxLength: 40 }, limit: { type: "integer", minimum: 1, maximum: 20 } }, ["query"]),
-    async execute(input, context) { return localService(priceServiceUrl, "/api/catalog/search", { ...input as object, officialOnly: true }, context.signal); },
+    async execute(input, context) { return searchOfficialCatalog(priceServiceUrl, { ...input as object, officialOnly: true }, context.signal); },
   };
 }
 
@@ -241,6 +264,24 @@ function createInspectCatalogCandidate(priceServiceUrl: string): AgentToolSpec {
     maxResultBytes: 100_000,
     inputSchema: schema({ url: { type: "string", minLength: 10, maxLength: 2_000, pattern: "^https://" }, query: { type: "string", maxLength: 240 }, brand: { type: "string", maxLength: 80 }, category: { type: "string", maxLength: 40 } }, ["url"]),
     async execute(input, context) { return localService(priceServiceUrl, "/api/catalog/inspect", input, context.signal); },
+  };
+}
+
+function createGetCatalogSearchJob(priceServiceUrl: string): AgentToolSpec {
+  return {
+    contractVersion: AGENT_CONTRACT_VERSION,
+    name: "get_catalog_search_job",
+    title: "读取官网搜索任务",
+    description: "Read one previously queued catalog-search job, including its candidate funnel, official page classifications, identity verdicts, critical conflicts and provenance. This is read-only and cannot change catalog state.",
+    effect: "external-read",
+    approval: "never",
+    timeoutMs: 10_000,
+    maxResultBytes: 100_000,
+    inputSchema: schema({ jobId: { type: "string", minLength: 3, maxLength: 160 } }, ["jobId"]),
+    async execute(input, context) {
+      const value = input as { jobId: string };
+      return localService(priceServiceUrl, `/api/catalog/search/${encodeURIComponent(value.jobId)}`, null, context.signal, "GET");
+    },
   };
 }
 
@@ -298,5 +339,5 @@ function createSearchPriceCandidates(priceServiceUrl: string): AgentToolSpec {
 
 export function createBuildSimTools(options: { priceServiceUrl?: string } = {}): AgentToolSpec[] {
   const priceServiceUrl = options.priceServiceUrl ?? DEFAULT_PRICE_SERVICE;
-  return [getBuildEvaluation, compareBuilds, proposePlanChange, getSkuFacts, getPriceSnapshot, createSearchOfficialCatalog(priceServiceUrl), createInspectCatalogCandidate(priceServiceUrl), createListOfficialDomainProposals(priceServiceUrl), createEnrichOfficialCatalog(priceServiceUrl), createSearchPriceCandidates(priceServiceUrl)];
+  return [getBuildEvaluation, compareBuilds, proposePlanChange, getSkuFacts, getPriceSnapshot, createSearchOfficialCatalog(priceServiceUrl), createGetCatalogSearchJob(priceServiceUrl), createInspectCatalogCandidate(priceServiceUrl), createListOfficialDomainProposals(priceServiceUrl), createEnrichOfficialCatalog(priceServiceUrl), createSearchPriceCandidates(priceServiceUrl)];
 }
