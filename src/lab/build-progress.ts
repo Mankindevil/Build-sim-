@@ -26,6 +26,12 @@ export interface BuildProgressItem {
   unitPriceCny: number | null;
   stage: BuildStage;
   source: "catalog" | "manual" | "transaction";
+  overrides?: {
+    name?: true;
+    category?: true;
+    qty?: true;
+    unitPriceCny?: true;
+  };
   planLink?: PlanTransactionLink;
   transaction?: TransactionEvidence;
 }
@@ -85,12 +91,22 @@ export interface BuildProgressSummary {
   unknownPurchasedPrice: number;
 }
 
+export interface PurchasePriceSummary {
+  spentKnownCny: number;
+  spentUnknownItems: number;
+  remainingNowKnownCny: number;
+  remainingNowUnknownItems: number;
+  remainingFutureKnownCny: number;
+  remainingFutureUnknownItems: number;
+}
+
 export interface BuildProgressController {
   syncEvaluation: (evaluation: BuildEvaluation) => void;
   activatePlan: (context: BuildProgressPlanContext) => void;
   stageTransaction: (record: TransactionImportRecord, screenshot?: File) => void;
   importTransaction: (record: TransactionImportRecord) => void;
   summary: () => BuildProgressSummary;
+  pricing: () => PurchasePriceSummary;
   purchaseFacts: () => Array<{ skuId: string; stage: BuildStage; receiptId?: string; planId?: string | null; planItemId?: string | null; linkStatus?: PlanTransactionLink["linkStatus"] }>;
   subscribe: (listener: () => void) => () => void;
   dispose: () => void;
@@ -137,6 +153,13 @@ export function normalizeProgressState(input: unknown): BuildProgressState {
     if (!raw || typeof raw !== "object") continue;
     const item = raw as Partial<BuildProgressItem>;
     if (!item.name || !isBuildStage(item.stage)) continue;
+    const rawOverrides = item.overrides && typeof item.overrides === "object" ? item.overrides : {};
+    const overrides: NonNullable<BuildProgressItem["overrides"]> = {
+      ...(rawOverrides.name === true ? { name: true } : {}),
+      ...(rawOverrides.category === true ? { category: true } : {}),
+      ...(rawOverrides.qty === true ? { qty: true } : {}),
+      ...(rawOverrides.unitPriceCny === true ? { unitPriceCny: true } : {}),
+    };
     items[id] = {
       id,
       skuId: typeof item.skuId === "string" ? item.skuId : null,
@@ -146,6 +169,7 @@ export function normalizeProgressState(input: unknown): BuildProgressState {
       unitPriceCny: Number.isFinite(item.unitPriceCny) ? Math.max(0, Number(item.unitPriceCny)) : null,
       stage: item.stage,
       source: item.source === "manual" || item.source === "transaction" ? item.source : "catalog",
+      ...(Object.keys(overrides).length ? { overrides } : {}),
       ...(item.planLink && typeof item.planLink === "object" ? { planLink: item.planLink as PlanTransactionLink } : {}),
       ...(item.transaction && typeof item.transaction === "object" ? { transaction: item.transaction as TransactionEvidence } : {}),
     };
@@ -172,6 +196,35 @@ export function summarizeProgress(items: BuildProgressItem[]): BuildProgressSumm
     }
   }
   return summary;
+}
+
+export function summarizePurchasePricing(evaluation: BuildEvaluation | null, items: BuildProgressItem[]): PurchasePriceSummary {
+  const progress = summarizeProgress(items);
+  const result: PurchasePriceSummary = {
+    spentKnownCny: progress.knownSpentCny,
+    spentUnknownItems: progress.unknownPurchasedPrice,
+    remainingNowKnownCny: 0,
+    remainingNowUnknownItems: 0,
+    remainingFutureKnownCny: 0,
+    remainingFutureUnknownItems: 0,
+  };
+  if (!evaluation) return result;
+
+  const progressBySku = new Map(items.filter((item) => item.skuId).map((item) => [item.skuId, item]));
+  const priceBySku = new Map(evaluation.price.items.map((item) => [item.skuId, item]));
+  for (const line of evaluation.bom) {
+    const item = progressBySku.get(line.skuId);
+    const purchased = item?.stage === "purchased" || item?.stage === "installed";
+    if (purchased) continue;
+    const price = priceBySku.get(line.skuId)?.priceCny ?? null;
+    const future = line.bucket === "upgrade_later";
+    if (price === null) {
+      if (future) result.remainingFutureUnknownItems += 1;
+      else result.remainingNowUnknownItems += 1;
+    } else if (future) result.remainingFutureKnownCny += price * line.qty;
+    else result.remainingNowKnownCny += price * line.qty;
+  }
+  return result;
 }
 
 function priceForSku(sku: SkuRecord): number | null {
@@ -254,6 +307,7 @@ export function initBuildProgress(args: {
   let activePlanVersionId = initialPlan?.planVersionId ?? null;
   let state = loadState(activePlanId);
   let currentBom: BuildLineItem[] = initialPlan?.evaluation.bom ?? [];
+  let currentEvaluation: BuildEvaluation | null = initialPlan?.evaluation ?? null;
   const pendingTransactions = new Map<string, BuildProgressItem>();
   const pendingScreenshotDeletes = new Set<string>();
   const pendingArchiveDeletes = new Set<string>();
@@ -295,15 +349,19 @@ export function initBuildProgress(args: {
     const sku = args.getCatalog().skus.find((entry) => entry.id === line.skuId);
     if (!sku) return;
     const existing = state.items[line.skuId];
+    const overrides = existing?.overrides;
+    const keepRecordedValue = Boolean(existing?.transaction);
     state.items[line.skuId] = {
       id: line.skuId,
       skuId: line.skuId,
-      name: sku.name,
-      category: sku.category,
-      qty: existing?.transaction ? existing.qty : line.qty,
-      unitPriceCny: existing?.unitPriceCny ?? priceForSku(sku),
+      name: overrides?.name ? existing?.name ?? sku.name : sku.name,
+      category: overrides?.category ? existing?.category ?? sku.category : sku.category,
+      qty: overrides?.qty || keepRecordedValue ? existing?.qty ?? line.qty : line.qty,
+      unitPriceCny: overrides?.unitPriceCny || keepRecordedValue ? existing?.unitPriceCny ?? null : existing?.unitPriceCny ?? priceForSku(sku),
       stage: existing?.stage ?? stageForBucket(line.bucket),
       source: "catalog",
+      ...(overrides && Object.keys(overrides).length ? { overrides } : {}),
+      ...(existing?.planLink ? { planLink: existing.planLink } : {}),
       ...(existing?.transaction ? { transaction: existing.transaction } : {}),
     };
   };
@@ -470,8 +528,8 @@ export function initBuildProgress(args: {
   const editorRow = (item: BuildProgressItem): string => {
     const officialUrl = safeOfficialUrl(item.transaction?.officialUrl);
     return `<div class="build-editor-row${pendingTransactions.has(item.id) ? " is-pending" : ""}" data-progress-row data-progress-id="${esc(item.id)}" data-source="${item.source}">
-    <div class="build-editor-identity"><small>${item.source === "manual" ? "用户记录" : item.transaction ? "交易截图" : "正式 SKU"}${pendingTransactions.has(item.id) ? " · 待保存" : ""}</small><input class="build-editor-name" value="${esc(item.name)}" ${item.source === "catalog" ? "readonly" : ""}>${item.transaction ? `<span class="build-transaction-proof">${esc(item.transaction.fileName)} · ${verificationLabel(item.transaction.verification)}${officialUrl ? ` · <a href="${esc(officialUrl)}" target="_blank" rel="noreferrer">查看官网来源</a>` : ""}</span>` : ""}</div>
-    <label>分类<select class="build-editor-category"${item.source === "catalog" ? " disabled" : ""}>${categoryOptions(item.category)}</select></label>
+    <div class="build-editor-identity"><small>${item.source === "manual" ? "用户记录" : item.transaction ? "交易截图" : "正式 SKU · 显示信息可编辑"}${pendingTransactions.has(item.id) ? " · 待保存" : ""}</small><input class="build-editor-name" value="${esc(item.name)}">${item.transaction ? `<span class="build-transaction-proof">${esc(item.transaction.fileName)} · ${verificationLabel(item.transaction.verification)}${officialUrl ? ` · <a href="${esc(officialUrl)}" target="_blank" rel="noreferrer">查看官网来源</a>` : ""}</span>` : ""}</div>
+    <label>分类<select class="build-editor-category">${categoryOptions(item.category)}</select></label>
     <label>数量<input class="build-editor-qty" type="number" min="1" max="99" step="1" value="${item.qty}"></label>
     <label>单价 ¥<input class="build-editor-price" type="number" min="0" step="1" value="${item.unitPriceCny ?? ""}" placeholder="待补"></label>
     <label>状态<select class="build-editor-stage">${stageOptions(item.stage)}</select></label>
@@ -495,10 +553,18 @@ export function initBuildProgress(args: {
     if (!editor) return;
     const rows = currentItems();
     const ids = new Set(rows.map((item) => item.id));
-    editor.innerHTML = [
-      ...rows.map((item) => editorRow(pendingTransactions.get(item.id) ?? item)),
-      ...[...pendingTransactions.values()].filter((item) => !ids.has(item.id)).map(editorRow),
-    ].join("");
+    const renderedItems = [
+      ...rows.map((item) => pendingTransactions.get(item.id) ?? item),
+      ...[...pendingTransactions.values()].filter((item) => !ids.has(item.id)),
+    ];
+    editor.innerHTML = renderedItems.map(editorRow).join("");
+    for (const item of renderedItems) {
+      const row = [...editor.querySelectorAll<HTMLElement>("[data-progress-row]")].find((candidate) => candidate.dataset.progressId === item.id);
+      const category = row?.querySelector<HTMLSelectElement>(".build-editor-category");
+      const stage = row?.querySelector<HTMLSelectElement>(".build-editor-stage");
+      if (category) category.value = item.category;
+      if (stage) stage.value = item.stage;
+    }
     updateSaveState();
     renderCurrentReviewSummary();
   };
@@ -606,7 +672,16 @@ export function initBuildProgress(args: {
       const pending = pendingTransactions.get(id);
       const transaction = pending?.transaction ?? existing?.transaction;
       const planLink = pending?.planLink ?? existing?.planLink;
-      nextState.items[id] = { id, skuId: pending?.skuId ?? existing?.skuId ?? (source === "catalog" ? id : null), name, category, qty, unitPriceCny, stage, source, ...(planLink ? { planLink } : {}), ...(transaction ? { transaction } : {}) };
+      const skuId = pending?.skuId ?? existing?.skuId ?? (source === "catalog" ? id : null);
+      const sku = source === "catalog" && skuId ? args.getCatalog().skus.find((entry) => entry.id === skuId) : null;
+      const line = source === "catalog" && skuId ? currentBom.find((entry) => entry.skuId === skuId) : null;
+      const overrides: NonNullable<BuildProgressItem["overrides"]> = source === "catalog" ? {
+        ...(sku && name !== sku.name ? { name: true } : {}),
+        ...(sku && category !== sku.category ? { category: true } : {}),
+        ...(line && qty !== line.qty ? { qty: true } : {}),
+        ...(sku && unitPriceCny !== priceForSku(sku) ? { unitPriceCny: true } : {}),
+      } : {};
+      nextState.items[id] = { id, skuId, name, category, qty, unitPriceCny, stage, source, ...(Object.keys(overrides).length ? { overrides } : {}), ...(planLink ? { planLink } : {}), ...(transaction ? { transaction } : {}) };
       if (source !== "catalog") retainedExternal.add(id);
     }
     for (const item of Object.values(nextState.items)) {
@@ -704,15 +779,26 @@ export function initBuildProgress(args: {
       const id = matchedCatalog?.id ?? `transaction-${record.receiptId}`;
       const existing = state.items[id];
       const planLink = record.planLink ?? (activePlanId ? { schemaVersion: "1.0.0", planId: activePlanId, planVersionIdAtCapture: activePlanVersionId, planItemId: matchedCatalog?.id ?? null, linkStatus: matchedCatalog ? "linked" : "unlinked" } satisfies PlanTransactionLink : undefined);
+      const qty = Math.max(1, Math.round(record.qty));
+      const unitPriceCny = record.unitPriceCny ?? existing?.unitPriceCny ?? null;
+      const sku = matchedCatalog && record.skuId ? args.getCatalog().skus.find((entry) => entry.id === record.skuId) : null;
+      const line = matchedCatalog && record.skuId ? currentBom.find((entry) => entry.skuId === record.skuId) : null;
+      const overrides: NonNullable<BuildProgressItem["overrides"]> = matchedCatalog ? {
+        ...(sku && record.name !== sku.name ? { name: true } : {}),
+        ...(sku && record.category !== sku.category ? { category: true } : {}),
+        ...(line && qty !== line.qty ? { qty: true } : {}),
+        ...(sku && unitPriceCny !== priceForSku(sku) ? { unitPriceCny: true } : {}),
+      } : {};
       pendingTransactions.set(id, {
         id,
         skuId: record.skuId,
-        name: matchedCatalog?.name ?? record.name,
-        category: matchedCatalog?.category ?? record.category,
-        qty: Math.max(1, Math.round(record.qty)),
-        unitPriceCny: record.unitPriceCny ?? existing?.unitPriceCny ?? null,
+        name: record.name,
+        category: record.category,
+        qty,
+        unitPriceCny,
         stage: record.stage ?? (existing?.stage === "installed" ? "installed" : "purchased"),
         source: matchedCatalog ? "catalog" : "transaction",
+        ...(Object.keys(overrides).length ? { overrides } : {}),
         ...(planLink ? { planLink } : {}),
         transaction: record.evidence,
       });
@@ -728,15 +814,26 @@ export function initBuildProgress(args: {
       const id = matchedCatalog?.id ?? `transaction-${record.receiptId}`;
       const existing = state.items[id];
       const planLink = record.planLink ?? (activePlanId ? { schemaVersion: "1.0.0", planId: activePlanId, planVersionIdAtCapture: activePlanVersionId, planItemId: matchedCatalog?.id ?? null, linkStatus: matchedCatalog ? "linked" : "unlinked" } satisfies PlanTransactionLink : undefined);
+      const qty = Math.max(1, Math.round(record.qty));
+      const unitPriceCny = record.unitPriceCny ?? existing?.unitPriceCny ?? null;
+      const sku = matchedCatalog && record.skuId ? args.getCatalog().skus.find((entry) => entry.id === record.skuId) : null;
+      const line = matchedCatalog && record.skuId ? currentBom.find((entry) => entry.skuId === record.skuId) : null;
+      const overrides: NonNullable<BuildProgressItem["overrides"]> = matchedCatalog ? {
+        ...(sku && record.name !== sku.name ? { name: true } : {}),
+        ...(sku && record.category !== sku.category ? { category: true } : {}),
+        ...(line && qty !== line.qty ? { qty: true } : {}),
+        ...(sku && unitPriceCny !== priceForSku(sku) ? { unitPriceCny: true } : {}),
+      } : {};
       state.items[id] = {
         id,
         skuId: record.skuId,
-        name: matchedCatalog?.name ?? record.name,
-        category: matchedCatalog?.category ?? record.category,
-        qty: Math.max(1, Math.round(record.qty)),
-        unitPriceCny: record.unitPriceCny ?? existing?.unitPriceCny ?? null,
+        name: record.name,
+        category: record.category,
+        qty,
+        unitPriceCny,
         stage: record.stage ?? (existing?.stage === "installed" ? "installed" : "purchased"),
         source: matchedCatalog ? "catalog" : "transaction",
+        ...(Object.keys(overrides).length ? { overrides } : {}),
         ...(planLink ? { planLink } : {}),
         transaction: record.evidence,
       };
@@ -744,6 +841,7 @@ export function initBuildProgress(args: {
       render();
     },
     syncEvaluation(evaluation) {
+      currentEvaluation = evaluation;
       currentBom = evaluation.bom;
       for (const line of currentBom) ensureLine(line);
       render();
@@ -758,11 +856,13 @@ export function initBuildProgress(args: {
         state = loadState(activePlanId);
       }
       activePlanVersionId = context.planVersionId;
+      currentEvaluation = context.evaluation;
       currentBom = context.evaluation.bom;
       for (const line of currentBom) ensureLine(line);
       render();
     },
     summary() { return summarizeProgress(currentItems()); },
+    pricing() { return summarizePurchasePricing(currentEvaluation, currentItems()); },
     purchaseFacts() {
       return currentCatalogItems().filter((item): item is BuildProgressItem & { skuId: string } => Boolean(item.skuId)).map((item) => ({
         skuId: item.skuId,

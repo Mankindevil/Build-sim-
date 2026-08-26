@@ -3,6 +3,7 @@ import {
   emptyProgressState,
   normalizeProgressState,
   stageForBucket,
+  summarizePurchasePricing,
   summarizeProgress,
   type BuildProgressItem,
 } from "../src/lab/build-progress";
@@ -48,6 +49,37 @@ describe("build progress", () => {
     expect(valid?.unitPriceCny).toBeNull();
     expect(valid?.skuId).toBeNull();
     expect(valid?.qty).toBe(2);
+  });
+
+  it("removes purchased BOM rows from the remaining-price summary and uses recorded spend", () => {
+    const evaluation = {
+      bom: [
+        { skuId: "case", qty: 1, bucket: "owned" },
+        { skuId: "psu", qty: 1, bucket: "buy_now" },
+        { skuId: "memory", qty: 1, bucket: "buy_now" },
+        { skuId: "gpu", qty: 1, bucket: "upgrade_later" },
+      ],
+      price: { items: [
+        { skuId: "case", qty: 1, priceCny: 629 },
+        { skuId: "psu", qty: 1, priceCny: 899 },
+        { skuId: "memory", qty: 1, priceCny: null },
+        { skuId: "gpu", qty: 1, priceCny: 2_000 },
+      ] },
+    } as unknown as import("../src/core/evaluate").BuildEvaluation;
+    const items: BuildProgressItem[] = [
+      { id: "case", skuId: "case", name: "Case", category: "case", qty: 1, unitPriceCny: 699, stage: "purchased", source: "catalog" },
+      { id: "psu", skuId: "psu", name: "PSU", category: "psu", qty: 1, unitPriceCny: 850, stage: "locked", source: "catalog" },
+      { id: "memory", skuId: "memory", name: "Memory", category: "memory", qty: 1, unitPriceCny: null, stage: "candidate", source: "catalog" },
+      { id: "gpu", skuId: "gpu", name: "GPU", category: "gpu", qty: 1, unitPriceCny: 2_000, stage: "candidate", source: "catalog" },
+    ];
+    expect(summarizePurchasePricing(evaluation, items)).toEqual({
+      spentKnownCny: 699,
+      spentUnknownItems: 0,
+      remainingNowKnownCny: 899,
+      remainingNowUnknownItems: 1,
+      remainingFutureKnownCny: 2_000,
+      remainingFutureUnknownItems: 0,
+    });
   });
 
   it("falls back to an empty versioned state", () => {

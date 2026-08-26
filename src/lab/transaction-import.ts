@@ -276,10 +276,8 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
     const name = document.createElement("input");
     name.className = "transaction-review-name";
     name.value = record.name;
-    name.readOnly = Boolean(record.skuId);
     const category = document.createElement("select");
     category.className = "transaction-review-category";
-    category.disabled = Boolean(record.skuId);
     const categories = TRANSACTION_CATEGORIES.includes(record.category) ? TRANSACTION_CATEGORIES : [record.category, ...TRANSACTION_CATEGORIES];
     for (const value of categories) {
       const option = document.createElement("option");
@@ -357,7 +355,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
     updateLinkHint();
     const linkLabel = makeLabel("对应方案位置（可选）", link);
     linkLabel.append(linkHint);
-    fields.append(makeLabel(record.skuId ? "部件名称（正式 SKU）" : "部件名称", name), makeLabel("分类", category), makeLabel("数量", qty), makeLabel("成交单价 ¥", price), makeLabel("当前状态", stage), linkLabel);
+    fields.append(makeLabel(record.skuId ? "部件名称（已匹配正式 SKU，可编辑显示信息）" : "部件名称", name), makeLabel("分类", category), makeLabel("数量", qty), makeLabel("成交单价 ¥", price), makeLabel("当前状态", stage), linkLabel);
     const evidence = document.createElement("p");
     evidence.className = "transaction-review-evidence";
     evidence.textContent = `证据：${record.evidence.fileName} · OCR ${record.evidence.ocrEngine} · 置信度 ${record.evidence.ocrConfidence === null ? "unknown" : `${record.evidence.ocrConfidence}%`} · ${record.evidence.excerpt || "无可展示摘录"}`;

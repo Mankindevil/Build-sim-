@@ -45,6 +45,39 @@ describe("build progress transaction import", () => {
     expect(JSON.parse(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY) ?? "{}").items["case.jonsbo-n6"]).toMatchObject({ stage: "purchased", unitPriceCny: 699, transaction: { receiptId: "receipt-known", verification: "matched-catalog" } });
   });
 
+  it("allows every field on an existing catalog row to be edited and keeps overrides after re-evaluation", async () => {
+    const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: ["case.jonsbo-n6"] });
+    controller.syncEvaluation(evaluation());
+    document.querySelector<HTMLButtonElement>("#build-base-edit")!.click();
+    let row = document.querySelector<HTMLElement>('[data-progress-row][data-progress-id="case.jonsbo-n6"]')!;
+    const name = row.querySelector<HTMLInputElement>(".build-editor-name")!;
+    const category = row.querySelector<HTMLSelectElement>(".build-editor-category")!;
+    const qty = row.querySelector<HTMLInputElement>(".build-editor-qty")!;
+    const price = row.querySelector<HTMLInputElement>(".build-editor-price")!;
+    const stage = row.querySelector<HTMLSelectElement>(".build-editor-stage")!;
+    expect(name.readOnly).toBe(false);
+    expect(category.disabled).toBe(false);
+    name.value = "我的旧 N6";
+    category.value = "accessory";
+    qty.value = "2";
+    price.value = "688";
+    stage.value = "installed";
+    document.querySelector<HTMLButtonElement>("#build-base-save")!.click();
+
+    await vi.waitFor(() => expect(JSON.parse(localStorage.getItem(BUILD_PROGRESS_STORAGE_KEY) ?? "{}").items["case.jonsbo-n6"]).toMatchObject({
+      name: "我的旧 N6", category: "accessory", qty: 2, unitPriceCny: 688, stage: "installed",
+      overrides: { name: true, category: true, qty: true, unitPriceCny: true },
+    }));
+    controller.syncEvaluation(evaluation());
+    document.querySelector<HTMLButtonElement>("#build-base-edit")!.click();
+    row = document.querySelector<HTMLElement>('[data-progress-row][data-progress-id="case.jonsbo-n6"]')!;
+    expect(row.querySelector<HTMLInputElement>(".build-editor-name")?.value).toBe("我的旧 N6");
+    expect(row.querySelector<HTMLSelectElement>(".build-editor-category")?.value).toBe("accessory");
+    expect(row.querySelector<HTMLInputElement>(".build-editor-qty")?.value).toBe("2");
+    expect(row.querySelector<HTMLInputElement>(".build-editor-price")?.value).toBe("688");
+    expect(row.querySelector<HTMLSelectElement>(".build-editor-stage")?.value).toBe("installed");
+  });
+
   it("adds an unknown model as a provisional purchased record without changing the deterministic BOM", () => {
     const controller = initBuildProgress({ getCatalog: loadBundledCatalog, baseSkuIds: ["case.jonsbo-n6"] });
     controller.syncEvaluation(evaluation());

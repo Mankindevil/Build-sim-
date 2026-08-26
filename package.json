@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:g1:browser": "node scripts/g1-browser-smoke.mjs",
+    "test:purchase-price:browser": "node scripts/purchase-price-browser-smoke.mjs",
     "test:g7:browser": "node scripts/g7-browser-smoke.mjs",
     "test:workspace:browser": "node scripts/workspace-browser-smoke.mjs",
     "test:spatial:browser": "node scripts/spatial-browser-smoke.mjs",

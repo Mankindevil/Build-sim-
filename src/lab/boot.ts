@@ -834,12 +834,41 @@ function updateGalleryFromSkus(config: BuildConfig): void {
 }
 
 function updatePriceStamp(): void {
+  const pricing = buildProgress?.pricing();
+  const formatKnown = (knownCny: number, unknownItems: number): string =>
+    `¥${Math.round(knownCny).toLocaleString("zh-CN")}${unknownItems ? ` + ${unknownItems} 项待补` : ""}`;
+  if (pricing) {
+    const remainingNow = formatKnown(pricing.remainingNowKnownCny, pricing.remainingNowUnknownItems);
+    const remainingAll = formatKnown(
+      pricing.remainingNowKnownCny + pricing.remainingFutureKnownCny,
+      pricing.remainingNowUnknownItems + pricing.remainingFutureUnknownItems,
+    );
+    const spent = formatKnown(pricing.spentKnownCny, pricing.spentUnknownItems);
+    const currentTotal = formatKnown(
+      pricing.spentKnownCny + pricing.remainingNowKnownCny,
+      pricing.spentUnknownItems + pricing.remainingNowUnknownItems,
+    );
+    const futureTotal = formatKnown(
+      pricing.spentKnownCny + pricing.remainingNowKnownCny + pricing.remainingFutureKnownCny,
+      pricing.spentUnknownItems + pricing.remainingNowUnknownItems + pricing.remainingFutureUnknownItems,
+    );
+    const setText = (id: string, value: string): void => { const el = $(id); if (el) el.textContent = value; };
+    setText("kpi-price", remainingNow);
+    setText("purchased-total", spent);
+    setText("stage-total", remainingNow);
+    setText("remaining-total", remainingAll);
+    setText("grand-total", currentTotal);
+    setText("future-total", futureTotal);
+  }
   const note = $("kpi-price-note");
   if (!note) return;
+  const spentPrefix = pricing
+    ? `已投入 ¥${Math.round(pricing.spentKnownCny).toLocaleString("zh-CN")}${pricing.spentUnknownItems ? ` + ${pricing.spentUnknownItems} 项成交价待补` : ""} · `
+    : "";
   if (priceStamp.asOf && priceStamp.auditedCount > 0) {
-    note.textContent = `不含未来 GPU · snapshot ${priceStamp.asOf} · ${priceStamp.auditedCount} 条审计报价`;
+    note.textContent = `${spentPrefix}剩余待购不含未来 GPU · snapshot ${priceStamp.asOf} · ${priceStamp.auditedCount} 条审计报价`;
   } else {
-    note.textContent = "不含未来 GPU · 价格快照尚未审计（unknown）";
+    note.textContent = `${spentPrefix}剩余待购不含未来 GPU · 价格快照尚未审计`;
   }
 }
 
@@ -1114,6 +1143,7 @@ async function boot(): Promise<void> {
     onTransactionsArchived: setArchivedPurchasesAsPlanDefaults,
   });
   const syncBuildTasks = () => {
+    updatePriceStamp();
     const state = planStore?.getState();
     if (!state?.activePlan || !state.evaluation || !buildTaskStore) return;
     buildTaskStore.reconcile({

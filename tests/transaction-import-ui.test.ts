@@ -105,6 +105,8 @@ describe("transaction screenshot review UI", () => {
     input.dispatchEvent(new Event("change"));
 
     await vi.waitFor(() => expect(document.querySelector(".transaction-review-link")).not.toBeNull());
+    expect(document.querySelector<HTMLInputElement>(".transaction-review-name")?.readOnly).toBe(false);
+    expect(document.querySelector<HTMLSelectElement>(".transaction-review-category")?.disabled).toBe(false);
     const link = document.querySelector<HTMLSelectElement>(".transaction-review-link")!;
     expect(link.closest("label")?.textContent).toContain("对应方案位置（可选）");
     expect(link.options[0]?.textContent).toBe("不对应方案（作为额外采购）");

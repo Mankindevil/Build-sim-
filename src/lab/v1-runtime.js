@@ -76,7 +76,7 @@
   // plausible-looking number in a KPI.
   function powerView(power){return {base:power.baseW,cpu:power.cpuW,hdd:power.hddW,gpu:power.gpuW,hba:power.hbaW,dc:power.dcW,wall:power.wallW,mainDc:power.mainDcW,driveDc:power.driveDcW,mainPeak:power.pathologicalDcW,drivePeak:null,pathological:power.pathologicalDcW,pathologicalWall:power.pathologicalWallW,headroom:power.headroomRatio,psuWaste:power.psuWasteW,dual:power.psus.length>1};}
   function fitView(ev){const level=ev.occupancy.verdict,issues=ev.findings.filter(f=>f.verdict==='bad').map(f=>f.message),warnings=ev.findings.filter(f=>f.verdict==='warn').map(f=>f.message),oks=ev.findings.filter(f=>f.verdict==='ok').map(f=>f.message);return {level,issues,warnings,oks};}
-  function noiseView(ev){return {noise:ev.noise.totalDba,parts:ev.noise.parts};}
+  function noiseView(ev){return {noise:ev.noise.totalDba,parts:ev.noise.parts,unknown:ev.noise.unknown||[]};}
   function priceText(price){const known=price.knownCny>0?`¥${Math.round(price.knownCny).toLocaleString('zh-CN')}`:'unknown';return price.unknownSkuIds.length?`已知 ${known} + ${price.unknownSkuIds.length} 项 unknown`:known;}
   function linePrice(ev,skuId){const item=ev.price.items.find(x=>x.skuId===skuId);return !item||item.priceCny===null?'unknown':fmt(item.priceCny*item.qty);}
   function frontSfxSelected(){
@@ -133,6 +133,7 @@
   }
   const WIDTH_MAX_K=45;
   const evidenceZh={official:'官方',standard:'标准',inferred:'推算',unknown:'未知'};
+  const noiseMissingZh={'fan SKU/noise profile':'风扇具体型号与噪音曲线','in-chassis acoustic measurement':'机箱内声学实测'};
 
   /** Which end of every range the thermal views colour by, and the slice plane. */
   const heatState={bound:'hi',plane:'xy'};
@@ -654,7 +655,7 @@
   function renderOverview(c,p,a,fit,ev){
     $('#kpi-wall').textContent=p.wall===null?'unknown':Math.round(p.wall)+' W';$('#kpi-wall-note').textContent=$('#workload-select').selectedOptions[0].text+' · 来自 BuildEvaluation.power';
     $('#kpi-heat').textContent=p.dc===null?'unknown':Math.round(p.dc)+' W';$('#kpi-btu').textContent=p.wall===null?'墙上热负载 unknown':`约 ${Math.round(p.wall*3.412)} BTU/h 室内热负载`;
-    $('#kpi-noise').textContent=a.noise===null?'unknown':a.noise+' dBA';$('#kpi-noise-note').textContent='噪音证据由 BuildEvaluation.noise 提供；未测则保持 unknown';
+    $('#kpi-noise').textContent=a.noise===null?'unknown':a.noise+' dBA';$('#kpi-noise-note').textContent=a.noise===null?`缺少：${a.unknown.map(x=>noiseMissingZh[x]||x).join('、')}`:'来自 BuildEvaluation.noise 的可追溯噪音结果';
     // Same ranges as the air-balance card, from the same evaluation — the KPI can no
     // longer show a confident single number the model never produced.
     const cpuT=nodeTemp(ev,'cpu'),hddT=nodeTemp(ev,'hdd'),gpuT=nodeTemp(ev,'gpu');
@@ -689,7 +690,7 @@
     });
     $('#temperature-bars').innerHTML=rows.length?rangeRows(rows,100):'<p class="lab-note">当前配置没有可定温的部件。</p>';
     const colors=['var(--viz-series-2)','var(--viz-series-5)','var(--viz-series-6)','var(--viz-series-4)','var(--viz-series-1)','var(--viz-series-3)'],parts=[['CPU',p.cpu],['HDD',p.hdd],['GPU',p.gpu],['主板/风扇',p.base],['HBA',p.hba],['PSU 废热',p.psuWaste]].filter(x=>x[1]>0);const heatDenom=Math.max(1,p.dc??1);$('#heat-split').innerHTML=parts.map((x,i)=>`<div class="heat-segment" style="width:${x[1]/heatDenom*100}%;background:${colors[i%colors.length]}">${x[0]} ${Math.round(x[1])}W</div>`).join('');
-    $('#noise-total').textContent=a.noise===null?'unknown':a.noise+' dBA';const noiseData={};Object.entries(a.parts).filter(x=>x[1]!==null&&x[1]>0).forEach(([k,v])=>noiseData[k+'噪音']={value:v,level:v>45?'warn':'ok'});$('#noise-bars').innerHTML=Object.keys(noiseData).length?metricRows(noiseData,55):'<p class="lab-note">噪音未测，保持 unknown。</p>';
+    $('#noise-total').textContent=a.noise===null?'unknown':a.noise+' dBA';const noiseData={};Object.entries(a.parts).filter(x=>x[1]!==null&&x[1]>0).forEach(([k,v])=>noiseData[k+'噪音']={value:v,level:v>45?'warn':'ok'});$('#noise-bars').innerHTML=Object.keys(noiseData).length?metricRows(noiseData,55):`<p class="lab-note">缺少 ${a.unknown.map(x=>noiseMissingZh[x]||x).join('、')}，因此不显示未经证实的 dBA 数值。</p>`;
     const deterministicAdvice=ev.findings.filter(f=>f.id.startsWith('thermal.')||f.id.startsWith('psu.')||f.id.startsWith('wiring.')).map(f=>`${f.verdict} · ${f.message}`);$('#fan-advice').innerHTML='<ul class="compact-list">'+(deterministicAdvice.length?deterministicAdvice:['当前没有额外热/电源建议；详情以 BuildEvaluation findings 为准。']).map(x=>`<li>${x}</li>`).join('')+'</ul>';
     const scenarios=ev.power.scenarios;$('#power-scenarios').innerHTML=scenarios.map(s=>`<div><span>${s.label}</span><strong>${s.wallW===null?'unknown':Math.round(s.wallW)+' W'}</strong><small>${s.wallW===null?'证据不足':'墙上估算 · '+Math.round(s.wallW*3.412)+' BTU/h'}</small></div>`).join('');renderThermalField(c,ev);
   }
