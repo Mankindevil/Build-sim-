@@ -1,15 +1,16 @@
 import crypto from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
 import {
   link,
-  mkdir,
   open,
   readFile,
   readdir,
-  rename,
   stat,
   unlink,
 } from "node:fs/promises";
+import { RuntimeCoordinator } from "../runtime/coordinator.mjs";
+import { atomicWriteFile, atomicWriteJson, confined, ensurePrivateDirectory, sha256Bytes, withDirectoryLock } from "../runtime/fs.mjs";
 
 const SCHEMA_VERSION = "1.0.0";
 const DOCUMENT_ID = /^doc-sha256-([a-f0-9]{64})$/;
@@ -252,9 +253,33 @@ export class EvidenceRepositoryError extends Error {
 
 export class FileEvidenceRepository {
   constructor(options = {}) {
-    this.root = path.resolve(options.root ?? process.env.EVIDENCE_REPOSITORY_ROOT ?? path.join(process.cwd(), "runtime/evidence"));
+    const runtimeRoot = path.resolve(options.runtimeRoot ?? options.coordinator?.root ?? process.env.RUNTIME_ROOT ?? path.join(process.cwd(), "runtime"));
+    this.root = path.resolve(options.root ?? path.join(runtimeRoot, "evidence"));
+    this.coordinator = options.root ? null : options.coordinator ?? new RuntimeCoordinator({ root: runtimeRoot, now: options.now });
     this.now = options.now ?? (() => new Date().toISOString());
     this.queues = new Map();
+    this.boundary = new AsyncLocalStorage();
+  }
+
+  async assertLegacyRootEmpty() {
+    if (!this.coordinator) return;
+    let entries;
+    try { entries = await readdir(this.root, { withFileTypes: true }); }
+    catch (error) { if (error?.code === "ENOENT") return; throw error; }
+    if (entries.some((entry) => !entry.name.startsWith("."))) throw new EvidenceRepositoryError("legacy_migration_required", "Legacy runtime/evidence contains data; run the explicit active-generation migration dry-run before startup");
+  }
+
+  atActiveRoot(activeRoot) { return new FileEvidenceRepository({ root: confined(activeRoot, "evidence"), now: this.now }); }
+
+  async publicBoundary(write, coordinated, local) {
+    if (this.coordinator) {
+      await this.coordinator.initialize();
+      await this.assertLegacyRootEmpty();
+      if (write) return (await this.coordinator.withWrite(({ activeRoot }) => coordinated(this.atActiveRoot(activeRoot)))).result;
+      return (await this.coordinator.withConsistentSnapshot(({ activeRoot }) => coordinated(this.atActiveRoot(activeRoot)))).result;
+    }
+    if (this.boundary.getStore()) return local();
+    return withDirectoryLock(confined(this.root, ".locks", "repository-global"), () => this.boundary.run(true, local));
   }
 
   confined(...parts) {
@@ -309,7 +334,7 @@ export class FileEvidenceRepository {
   }
 
   async writeTemporary(file, content) {
-    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await ensurePrivateDirectory(path.dirname(file));
     const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
     const handle = await open(temporary, "wx", 0o600);
     let complete = false;
@@ -339,13 +364,20 @@ export class FileEvidenceRepository {
   }
 
   async replaceAtomic(file, content) {
-    const temporary = await this.writeTemporary(file, content);
-    try {
-      await rename(temporary, file);
-      await this.syncDirectory(path.dirname(file));
-    } finally {
-      await unlink(temporary).catch(() => undefined);
+    const prior = await readFile(file).catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error));
+    let backup = null;
+    if (prior) {
+      backup = this.confined(".rollback", `${Date.now()}-${crypto.randomUUID()}-${path.basename(file)}.bak`);
+      await atomicWriteFile(backup, prior);
     }
+    const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content);
+    const manifestFile = this.confined(".rollback", "manifest.json");
+    const manifest = await readFile(manifestFile, "utf8").then((raw) => JSON.parse(raw)).catch((error) => error?.code === "ENOENT" ? { schemaVersion: "evidence-rollback-manifest-v1", entries: [] } : Promise.reject(error));
+    const eventId = crypto.randomUUID();
+    const prepared = { eventId, operation: "replace-index", target: path.relative(this.root, file), backup: backup ? path.relative(this.root, backup) : null, previousHash: prior ? sha256Bytes(prior) : null, nextHash: sha256Bytes(bytes), status: "prepared", createdAt: this.now() };
+    await atomicWriteJson(manifestFile, { ...manifest, entries: [...(manifest.entries ?? []), prepared] });
+    await atomicWriteFile(file, bytes);
+    await atomicWriteJson(manifestFile, { ...manifest, entries: [...(manifest.entries ?? []), { ...prepared, status: "committed", committedAt: this.now() }] });
   }
 
   async readEnvelope(file, kind, label, { optional = false } = {}) {
@@ -379,6 +411,7 @@ export class FileEvidenceRepository {
   }
 
   async verifyBlob(document) {
+    return this.publicBoundary(false, (repository) => repository.verifyBlob(document), async () => {
     const file = this.blobPath(document.sha256);
     let bytes;
     try {
@@ -391,9 +424,11 @@ export class FileEvidenceRepository {
       throw new EvidenceRepositoryError("integrity_error", "Evidence content integrity check failed");
     }
     return bytes;
+    });
   }
 
   async verifyExistingBlob(hash, expectedLength) {
+    return this.publicBoundary(false, (repository) => repository.verifyExistingBlob(hash, expectedLength), async () => {
     const file = this.blobPath(hash);
     let info;
     try {
@@ -405,6 +440,7 @@ export class FileEvidenceRepository {
     if (!info.isFile() || info.size !== expectedLength) throw new EvidenceRepositoryError("integrity_error", "Existing evidence blob size does not match its hash");
     const bytes = await readFile(file);
     if (sha256(bytes) !== hash) throw new EvidenceRepositoryError("integrity_error", "Existing evidence blob hash is invalid");
+    });
   }
 
   normalizeImport(input, hash, byteLength) {
@@ -482,6 +518,7 @@ export class FileEvidenceRepository {
   }
 
   async updateUrlIndex(url, capture) {
+    return this.publicBoundary(true, (repository) => repository.updateUrlIndex(url, capture), async () => {
     const { normalized, file } = this.urlIndexPath(url);
     return this.serialize(file, async () => {
       const currentPayload = await this.readEnvelope(file, "evidence-url-index", "Evidence URL index", { optional: true });
@@ -501,9 +538,11 @@ export class FileEvidenceRepository {
       await this.replaceAtomic(file, `${JSON.stringify(envelope("evidence-url-index", next), null, 2)}\n`);
       return next;
     });
+    });
   }
 
   async importBuffer(content, input) {
+    return this.publicBoundary(true, (repository) => repository.importBuffer(content, input), async () => {
     const bytes = normalizeBuffer(content);
     const hash = sha256(bytes);
     const normalized = this.normalizeImport(input, hash, bytes.byteLength);
@@ -541,7 +580,9 @@ export class FileEvidenceRepository {
     );
     const persistedCapture = validatedCapture(writtenCapture.value);
     const aliases = [...new Set([persistedCapture.requestedUrl, persistedCapture.finalUrl, persistedCapture.canonicalUrl])];
-    await Promise.all(aliases.map((url) => this.updateUrlIndex(url, persistedCapture)));
+    // The rollback manifest is one ordered journal; keep alias replacements in
+    // that same order instead of racing independent read-modify-write appends.
+    for (const url of aliases) await this.updateUrlIndex(url, persistedCapture);
 
     return deepFreeze({
       document: clone(persistedDocument),
@@ -549,9 +590,11 @@ export class FileEvidenceRepository {
       reusedDocument: !writtenDocument.created,
       reusedCapture: !writtenCapture.created,
     });
+    });
   }
 
   async importFile(file, input) {
+    return this.publicBoundary(true, (repository) => repository.importFile(file, input), async () => {
     if (typeof file !== "string" || !file) throw new EvidenceRepositoryError("invalid_input", "Evidence import file path is required");
     let bytes;
     try {
@@ -566,47 +609,61 @@ export class FileEvidenceRepository {
       ...input,
       capture: { ...capture, acquisitionMethod: capture.acquisitionMethod ?? "bundled-import" },
     });
+    });
   }
 
   async readDocumentRecord(id) {
-    const payload = await this.readEnvelope(this.documentPath(id), "evidence-document", "Evidence document", { optional: true });
-    return payload ? validatedDocument(payload) : null;
+    return this.publicBoundary(false, (repository) => repository.readDocumentRecord(id), async () => {
+      const payload = await this.readEnvelope(this.documentPath(id), "evidence-document", "Evidence document", { optional: true });
+      return payload ? validatedDocument(payload) : null;
+    });
   }
 
   async getDocument(id) {
-    const document = await this.readDocumentRecord(id);
-    if (!document) return null;
-    await this.verifyBlob(document);
-    return deepFreeze(clone(document));
+    return this.publicBoundary(false, (repository) => repository.getDocument(id), async () => {
+      const document = await this.readDocumentRecord(id);
+      if (!document) return null;
+      await this.verifyBlob(document);
+      return deepFreeze(clone(document));
+    });
   }
 
   /** Read and integrity-check immutable metadata and bytes in one pass. */
   async getDocumentContent(id) {
-    const document = await this.readDocumentRecord(id);
-    if (!document) return null;
-    const bytes = await this.verifyBlob(document);
-    return Object.freeze({ document: deepFreeze(clone(document)), bytes: Buffer.from(bytes) });
+    return this.publicBoundary(false, (repository) => repository.getDocumentContent(id), async () => {
+      const document = await this.readDocumentRecord(id);
+      if (!document) return null;
+      const bytes = await this.verifyBlob(document);
+      return Object.freeze({ document: deepFreeze(clone(document)), bytes: Buffer.from(bytes) });
+    });
   }
 
   async readCaptureRecord(id) {
-    const payload = await this.readEnvelope(this.capturePath(id), "evidence-capture", "Evidence capture", { optional: true });
-    return payload ? validatedCapture(payload) : null;
+    return this.publicBoundary(false, (repository) => repository.readCaptureRecord(id), async () => {
+      const payload = await this.readEnvelope(this.capturePath(id), "evidence-capture", "Evidence capture", { optional: true });
+      return payload ? validatedCapture(payload) : null;
+    });
   }
 
   async getCapture(id) {
-    const capture = await this.readCaptureRecord(id);
-    if (!capture) return null;
-    if (!await this.readDocumentRecord(capture.documentId)) throw new EvidenceRepositoryError("integrity_error", "Evidence capture refers to a missing document");
-    return deepFreeze(clone(capture));
+    return this.publicBoundary(false, (repository) => repository.getCapture(id), async () => {
+      const capture = await this.readCaptureRecord(id);
+      if (!capture) return null;
+      if (!await this.readDocumentRecord(capture.documentId)) throw new EvidenceRepositoryError("integrity_error", "Evidence capture refers to a missing document");
+      return deepFreeze(clone(capture));
+    });
   }
 
   async readContent(id) {
-    const document = await this.readDocumentRecord(id);
-    if (!document) throw new EvidenceRepositoryError("not_found", "Evidence document was not found");
-    return this.verifyBlob(document);
+    return this.publicBoundary(false, (repository) => repository.readContent(id), async () => {
+      const document = await this.readDocumentRecord(id);
+      if (!document) throw new EvidenceRepositoryError("not_found", "Evidence document was not found");
+      return this.verifyBlob(document);
+    });
   }
 
   async listCaptures(id) {
+    return this.publicBoundary(false, (repository) => repository.listCaptures(id), async () => {
     assertDocumentId(id);
     if (!await this.readDocumentRecord(id)) throw new EvidenceRepositoryError("not_found", "Evidence document was not found");
     const root = this.confined("captures");
@@ -631,9 +688,11 @@ export class FileEvidenceRepository {
     }
     captures.sort((left, right) => right.retrievedAt.localeCompare(left.retrievedAt) || left.id.localeCompare(right.id));
     return deepFreeze(clone(captures));
+    });
   }
 
   async getLatestCaptureForUrl(url) {
+    return this.publicBoundary(false, (repository) => repository.getLatestCaptureForUrl(url), async () => {
     const { normalized, file } = this.urlIndexPath(url);
     const payload = await this.readEnvelope(file, "evidence-url-index", "Evidence URL index", { optional: true });
     if (!payload) return null;
@@ -647,12 +706,19 @@ export class FileEvidenceRepository {
     if (!aliases.has(normalized)) throw new EvidenceRepositoryError("integrity_error", "Evidence URL index alias does not match its capture");
     if (!await this.readDocumentRecord(capture.documentId)) throw new EvidenceRepositoryError("integrity_error", "Evidence URL index refers to a missing document");
     return deepFreeze(clone(capture));
+    });
   }
 
   async getLatestDocumentForUrl(url) {
-    const capture = await this.getLatestCaptureForUrl(url);
-    return capture ? this.getDocument(capture.documentId) : null;
+    return this.publicBoundary(false, (repository) => repository.getLatestDocumentForUrl(url), async () => {
+      const capture = await this.getLatestCaptureForUrl(url);
+      return capture ? this.getDocument(capture.documentId) : null;
+    });
   }
+
+  /** Root-aware reads for a caller already holding the shared coordinator barrier. */
+  async getDocumentAtRoot(activeRoot, id) { return this.atActiveRoot(activeRoot).getDocument(id); }
+  async getCaptureAtRoot(activeRoot, id) { return this.atActiveRoot(activeRoot).getCapture(id); }
 }
 
 export function normalizeEvidenceUrl(url) {

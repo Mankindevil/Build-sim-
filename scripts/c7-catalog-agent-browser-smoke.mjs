@@ -54,7 +54,9 @@ await page.route("**/api/agent/**", async (route) => {
   return json({ error: "fixture_route_not_found", pathname }, 404);
 });
 
-await page.goto(`http://127.0.0.1:${webPort}/index.html`, { waitUntil: "networkidle" });
+await page.goto(`http://127.0.0.1:${webPort}/index.html#/agent`, { waitUntil: "networkidle" });
+await page.locator('[data-panel="agent"]').waitFor({ state: "visible" });
+await page.click(".agent-controls-details > summary");
 await page.selectOption("#agent-skill", "shopping-research");
 await page.fill("#agent-input", "执行本地 exact MPN fixture 的治理型目录补齐流程");
 await page.click("#agent-send");

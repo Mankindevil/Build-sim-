@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AgentRunAuditRecord } from "./contracts";
+import type { AgentRuntimeWriteFence } from "./session-store";
 import { stableAgentJson } from "./evaluation-contract";
 
 const SENSITIVE_KEY = /^(?:api[_-]?key|authorization|cookie|set-cookie|password|secret|access[_-]?token|refresh[_-]?token|approval[_-]?token)$/i;
@@ -33,5 +34,5 @@ export function sealAgentRunAudit(record: Omit<AgentRunAuditRecord, "recordHash"
 
 export interface AgentRunAuditStore {
   get(runId: string): Promise<AgentRunAuditRecord | null>;
-  put(record: AgentRunAuditRecord): Promise<void>;
+  put(record: AgentRunAuditRecord, fence?: AgentRuntimeWriteFence): Promise<void>;
 }

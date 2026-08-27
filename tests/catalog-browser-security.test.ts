@@ -74,7 +74,7 @@ describe("C1 browser and DNS security", () => {
     const html = `<script type="application/ld+json">{"@type":"Product","brand":"ASUS","model":"C1 Board","mpn":"${mpn}"}</script>`;
     const fetcher = vi.fn(async () => ({ requestedUrl: url, finalUrl: url, status: 200, contentType: "text/html", retrievedAt: "2026-08-24T00:00:00.000Z", body: html, contentHash: String(stamp), redirects: [] }));
     const browserFallback = vi.fn(async () => { throw new Error("fixture renderer unavailable"); });
-    const job = queueSearch({ query: mpn, brand: "ASUS", category: "motherboard" }, { catalog, fetcher, browserFallback });
+    const job = await queueSearch({ query: mpn, brand: "ASUS", category: "motherboard" }, { catalog, fetcher, browserFallback });
     const result = await waitForJob(job.jobId);
     expect(fetcher).toHaveBeenCalledOnce();
     expect(browserFallback).toHaveBeenCalledOnce();

@@ -7,19 +7,20 @@
  */
 
 import http from "node:http";
-import { decideDomainProposal, listDomainProposals } from "./catalog/domain-proposals.mjs";
+import path from "node:path";
+import { decideDomainProposal, listDomainProposals, migrateLegacyDomainRepository } from "./catalog/domain-proposals.mjs";
 import { runAutoEnrichment } from "./catalog/auto-enrichment.mjs";
 import {
   buildAndWriteLatest,
+  readActivePriceState,
   loadCandidates,
-  loadLocalQuotes,
-  loadManualQuotes,
-  readJson,
   removeLocalQuote,
   saveCandidates,
   today,
   upsertLocalQuote,
-  latestPath,
+  initializePriceRepository,
+  loadListingCapture,
+  resolvePriceRepositoryPaths,
   loadFx,
 } from "./store.mjs";
 import {
@@ -31,12 +32,12 @@ import {
 } from "./adapters/index.mjs";
 import { listingKey } from "./adapters/variant.mjs";
 import { buildSearchQueries, isPriceTrackable } from "../../src/price/queries.mjs";
-import { getJob, inspectUrl, queueSearch } from "./catalog/service.mjs";
+import { getJob, initializeCatalogJobs, inspectUrl, queueSearch } from "./catalog/service.mjs";
 import { renderOfficialFallback } from "./catalog/browser-fallback.mjs";
 import { acceptOfficial, confirmDraft, createDraft, previewDraft, recoverPendingDrafts, rejectDraft } from "./catalog/write.mjs";
 import { loadRuntimeFlags } from "../runtime/flags.mjs";
-import { buildAuditedQuote } from "./price-audit.mjs";
-import { createAdviceJob, getAdviceBillingSummary, getAdviceJob } from "../deepseek/advice.mjs";
+import { buildAuditedQuoteFromCapture } from "./price-audit.mjs";
+import { createAdviceJob, getAdviceBillingSummary, getAdviceJob, resumeAdviceJobs } from "../deepseek/advice.mjs";
 import { intEnv, loadEnv } from "./env.mjs";
 import { analyzeTransactionScreenshot } from "./transactions/receipt.mjs";
 import { transactionCatalogSearchRequest } from "./transactions/catalog-search-request.mjs";
@@ -48,12 +49,16 @@ import {
   initializeRuntimeCatalog,
   loadMergedCatalog,
   markRuntimeCatalogSkuAccepted,
+  migrateLegacyCatalogRepository,
   resultRequiresRuntimeCatalogRetention,
   resolveCatalogRepositoryPaths,
   sanitizeMergedCatalog,
+  withCatalogWrite,
 } from "./catalog/repository.mjs";
+import { activateOfficialRegistryRepository, activeOfficialRegistry, registryForUrl } from "./catalog/registry.mjs";
 import { FileEvidenceRepository } from "../../src/evidence/repository.mjs";
 import { checkEvidencePostRequest, handleEvidenceRoute, matchesEvidenceEtag } from "../../src/evidence/http-routes.mjs";
+import { RuntimeCoordinator } from "../../src/runtime/coordinator.mjs";
 
 const HOST = "127.0.0.1";
 const env = await loadEnv();
@@ -63,16 +68,38 @@ const TRANSACTION_BODY_MAX_BYTES = intEnv(env, "TRANSACTION_SCREENSHOT_BODY_MAX_
 const TRANSACTION_OCR_TIMEOUT_MS = intEnv(env, "TRANSACTION_SCREENSHOT_OCR_TIMEOUT_MS", 60_000, { min: 5_000, max: 120_000 });
 const TRANSACTION_OCR_PROVIDER = env.TRANSACTION_OCR_PROVIDER || "deepseek-ocr";
 const DEEPSEEK_OCR_MAX_TOKENS = intEnv(env, "DEEPSEEK_OCR_MAX_TOKENS", 2_048, { min: 128, max: 8_192 });
-const TRANSACTION_ARCHIVE_ROOT = env.TRANSACTION_ARCHIVE_ROOT || `${process.cwd()}/runtime/transactions`;
-const CATALOG_REPOSITORY = resolveCatalogRepositoryPaths({ persistRoot: env.CATALOG_PERSIST_ROOT || `${process.cwd()}/runtime` });
-const EVIDENCE_REPOSITORY = new FileEvidenceRepository({ root: env.EVIDENCE_REPOSITORY_ROOT || `${process.cwd()}/runtime/evidence` });
+const RUNTIME_ROOT = env.RUNTIME_ROOT || env.PRICE_RUNTIME_ROOT || `${process.cwd()}/runtime`;
+if (env.CATALOG_PERSIST_ROOT && path.resolve(env.CATALOG_PERSIST_ROOT) !== path.resolve(RUNTIME_ROOT)) {
+  throw new Error("CATALOG_PERSIST_ROOT must match RUNTIME_ROOT; migrate the legacy catalog before startup");
+}
+const RUNTIME_COORDINATOR = new RuntimeCoordinator({ root: RUNTIME_ROOT });
+await RUNTIME_COORDINATOR.initialize();
+const configuredTransactionRoot = env.TRANSACTION_ARCHIVE_ROOT ? path.resolve(env.TRANSACTION_ARCHIVE_ROOT) : null;
+const TRANSACTION_ARCHIVE_ROOT = configuredTransactionRoot && configuredTransactionRoot !== path.join(path.resolve(RUNTIME_ROOT), "transactions")
+  ? configuredTransactionRoot
+  : null;
+const CATALOG_REPOSITORY = resolveCatalogRepositoryPaths({ runtimeRoot: RUNTIME_ROOT, coordinator: RUNTIME_COORDINATOR, generationAware: true });
+const configuredEvidenceRoot = env.EVIDENCE_REPOSITORY_ROOT ? path.resolve(env.EVIDENCE_REPOSITORY_ROOT) : null;
+if (configuredEvidenceRoot && configuredEvidenceRoot !== path.join(path.resolve(RUNTIME_ROOT), "evidence")) {
+  throw new Error("EVIDENCE_REPOSITORY_ROOT conflicts with RUNTIME_ROOT; run the explicit evidence migration dry-run before startup");
+}
+const EVIDENCE_REPOSITORY = new FileEvidenceRepository({ coordinator: RUNTIME_COORDINATOR, runtimeRoot: RUNTIME_ROOT });
 const EVIDENCE_FETCH_TIMEOUT_MS = intEnv(env, "EVIDENCE_FETCH_TIMEOUT_MS", 30_000, { min: 1_000, max: 120_000 });
 const EVIDENCE_FETCH_MAX_BYTES = intEnv(env, "EVIDENCE_FETCH_MAX_BYTES", 25_000_000, { min: 1_000_000, max: 50_000_000 });
 const EVIDENCE_FETCH_MAX_REDIRECTS = intEnv(env, "EVIDENCE_FETCH_MAX_REDIRECTS", 4, { min: 0, max: 8 });
 const EVIDENCE_CACHE_TTL_MS = intEnv(env, "EVIDENCE_CACHE_TTL_MS", 86_400_000, { min: 0, max: 2_592_000_000 });
+const PRICE_REPOSITORY = resolvePriceRepositoryPaths({ runtimeRoot: env.PRICE_RUNTIME_ROOT || env.RUNTIME_ROOT || `${process.cwd()}/runtime` });
 if (!["deepseek-ocr", "tesseract"].includes(TRANSACTION_OCR_PROVIDER)) throw new Error("TRANSACTION_OCR_PROVIDER must be deepseek-ocr or tesseract");
+const LEGACY_CATALOG_MIGRATION = await migrateLegacyCatalogRepository(CATALOG_REPOSITORY);
+if (LEGACY_CATALOG_MIGRATION.status === "dry_run") throw new Error("Legacy runtime catalog requires explicit catalog-user-data-v1 isolation and active-generation migration apply");
+const LEGACY_DOMAIN_MIGRATION = await migrateLegacyDomainRepository({ coordinator: RUNTIME_COORDINATOR, generationAware: true });
+if (LEGACY_DOMAIN_MIGRATION.status === "dry_run") throw new Error("Legacy runtime domain registry requires explicit active-generation migration apply with the dry-run source hash");
 await initializeRuntimeCatalog(CATALOG_REPOSITORY);
-const CATALOG_RECOVERY_RESULTS = await recoverPendingDrafts({ ...catalogWriteOptions(CATALOG_REPOSITORY), catalogWriteEnabled: true });
+await initializePriceRepository(PRICE_REPOSITORY);
+await activateOfficialRegistryRepository({ coordinator: RUNTIME_COORDINATOR, generationAware: true });
+const CATALOG_JOB_REPOSITORY = await initializeCatalogJobs({ coordinator: RUNTIME_COORDINATOR });
+await resumeAdviceJobs({ coordinator: RUNTIME_COORDINATOR, flags: await loadRuntimeFlags() });
+const CATALOG_RECOVERY_RESULTS = await withCatalogWrite(CATALOG_REPOSITORY, async (paths) => recoverPendingDrafts({ ...catalogWriteOptions(paths), catalogWriteEnabled: true }));
 const blockedCatalogRecovery = CATALOG_RECOVERY_RESULTS.find((result) => result.status !== "confirmed");
 if (blockedCatalogRecovery) throw new Error(`Unable to recover pending catalog confirmation: ${(blockedCatalogRecovery.reasons ?? [blockedCatalogRecovery.status]).join("; ")}`);
 
@@ -80,16 +107,21 @@ async function loadCatalog() {
   return loadMergedCatalog(CATALOG_REPOSITORY);
 }
 
-async function governedCatalogOptions(extra = {}) {
-  const catalog = await loadCatalog();
-  return { ...catalogWriteOptions(CATALOG_REPOSITORY, catalog), ...extra };
-}
-
-async function retainAcceptedCatalogResult(result) {
+async function retainAcceptedCatalogResult(result, paths) {
   if (resultRequiresRuntimeCatalogRetention(result) && !result.runtimeCatalogRetained) {
-    await markRuntimeCatalogSkuAccepted(result.skuId, CATALOG_REPOSITORY);
+    await markRuntimeCatalogSkuAccepted(result.skuId, { ...paths, direct: true, generationAware: false });
   }
   return result;
+}
+
+async function withGovernedCatalogMutation(extra, operation, candidateId = null) {
+  return withCatalogWrite(CATALOG_REPOSITORY, async (paths) => {
+    const catalog = await loadMergedCatalog({ ...paths, direct: true, generationAware: false });
+    const candidate = candidateId === null ? undefined
+      : /^catalog-candidate-[a-f0-9]{16}$/.test(candidateId) ? await CATALOG_JOB_REPOSITORY.findCandidateAt(paths.activeRoot, candidateId) : null;
+    const result = await operation({ ...catalogWriteOptions(paths, catalog), ...extra, ...(candidateId === null ? {} : { candidate }) });
+    return retainAcceptedCatalogResult(result, paths);
+  });
 }
 
 function send(res, status, payload) {
@@ -136,15 +168,12 @@ async function readBody(req, maxBytes = MAX_BODY_BYTES) {
 }
 
 async function handleState() {
-  const [catalog, latest, manual, local, availability, candidates, fx] = await Promise.all([
+  const [catalog, priceState, availability] = await Promise.all([
     loadCatalog(),
-    readJson(latestPath, null),
-    loadManualQuotes(),
-    loadLocalQuotes(),
+    readActivePriceState(today(), PRICE_REPOSITORY),
     channelAvailability(),
-    loadCandidates(today()),
-    loadFx(),
   ]);
+  const { latest, manual, local, candidates, fx } = priceState;
 
   return {
     asOf: latest?.asOf ?? null,
@@ -157,6 +186,8 @@ async function handleState() {
       priceVersion: latest.priceVersion ?? null,
       generatedAt: latest.generatedAt ?? null,
     } : null,
+    runtimeGeneration: priceState.runtimeGeneration,
+    runtimeRevision: priceState.runtimeRevision,
     channels: CHANNELS,
     availability,
     fx,
@@ -191,7 +222,7 @@ async function handleCollect(body) {
     };
   }
 
-  const fx = await loadFx();
+  const fx = await loadFx(PRICE_REPOSITORY);
   const results = [];
   const candidates = [];
   for (const sku of targets) {
@@ -217,8 +248,7 @@ async function handleCollect(body) {
     results,
     candidates,
   };
-  await saveCandidates(payload);
-  return payload;
+  return saveCandidates(payload, today(), PRICE_REPOSITORY);
 }
 
 /**
@@ -226,30 +256,29 @@ async function handleCollect(body) {
  * the answer survives a reload and the human can see which option was priced.
  */
 async function handleVariants(body) {
-  const url = String(body.url ?? "");
-  const channel = String(body.channel ?? "");
-  if (!url || !channel) throw new Error("url 与 channel 必填");
-
-  const result = await resolveVariants({ channel, url, limit: 24 });
-  const file = await loadCandidates(today());
-  const key = listingKey(url);
-  if (file?.candidates) {
-    for (const row of file.candidates) {
-      if (listingKey(row.url) !== key) continue;
-      row.variants = result.variants ?? [];
-      row.variantSource = result.source ?? null;
-      row.variantNotes = result.notes ?? [];
-      row.variantStatus = result.status;
-    }
-    await saveCandidates(file);
-  }
+  const file = await loadCandidates(today(), PRICE_REPOSITORY);
+  const requestedUrl = String(body.url ?? "");
+  const requestedChannel = String(body.channel ?? "");
+  if (!requestedUrl || !requestedChannel) throw new Error("url 与 channel 必填");
+  const key = listingKey(requestedUrl);
+  const row = file?.candidates?.find((candidate) => listingKey(candidate.url) === key && candidate.channel === requestedChannel);
+  if (!row) throw new Error("variant resolution requires a server-captured listing candidate");
+  const result = await resolveVariants({ channel: row.channel, url: row.url, limit: 24 });
+  row.variants = result.variants ?? [];
+  row.variantSource = result.source ?? null;
+  row.variantNotes = result.notes ?? [];
+  row.variantStatus = result.status;
+  await saveCandidates(file, today(), PRICE_REPOSITORY);
   return result;
 }
 
 async function handleAudit(body) {
   const catalog = await loadCatalog();
-  const row = await upsertLocalQuote(buildAuditedQuote(body, catalog));
-  const snapshot = await buildAndWriteLatest(today(), undefined, { catalog });
+  const capture = await loadListingCapture(body?.listingCaptureId, PRICE_REPOSITORY);
+  const row = await upsertLocalQuote(buildAuditedQuoteFromCapture(body, catalog, capture, {
+    isOfficialUrl: (value) => Boolean(registryForUrl(value, activeOfficialRegistry())),
+  }), PRICE_REPOSITORY);
+  const snapshot = await buildAndWriteLatest(today(), undefined, { ...PRICE_REPOSITORY, catalog });
   return { saved: row, asOf: snapshot.asOf, quoteCount: snapshot.quotes.length };
 }
 
@@ -257,28 +286,26 @@ async function handleUnaudit(url) {
   const skuId = url.searchParams.get("skuId");
   if (!skuId) throw new Error("skuId is required");
   const variantLabel = url.searchParams.has("variantLabel") ? url.searchParams.get("variantLabel") ?? "" : undefined;
-  const removed = await removeLocalQuote(skuId, url.searchParams.get("platform") ?? undefined, variantLabel);
-  const snapshot = await buildAndWriteLatest(today(), undefined, { catalog: await loadCatalog() });
+  const removed = await removeLocalQuote(skuId, url.searchParams.get("platform") ?? undefined, variantLabel, PRICE_REPOSITORY);
+  const snapshot = await buildAndWriteLatest(today(), undefined, { ...PRICE_REPOSITORY, catalog: await loadCatalog() });
   return { removed, asOf: snapshot.asOf, quoteCount: snapshot.quotes.length };
 }
 
 async function handleDraftConfirmation(draftId, body = {}) {
   const flags = await loadRuntimeFlags();
-  const result = await confirmDraft(draftId, await governedCatalogOptions({
+  const result = await withGovernedCatalogMutation({
     expectedHash: body.expectedHash,
     approved: body.approved,
     catalogWriteEnabled: flags.catalogWriteEnabled,
-  }));
-  await retainAcceptedCatalogResult(result);
+  }, (options) => confirmDraft(draftId, options));
   return { status: result.status === "blocked" ? 409 : 200, result };
 }
 
 async function handleDraftRejection(draftId, body = {}) {
-  const result = await rejectDraft(draftId, {
-    ...catalogWriteOptions(CATALOG_REPOSITORY),
+  const result = await withGovernedCatalogMutation({
     expectedHash: body.expectedHash,
     approved: body.approved,
-  });
+  }, (options) => rejectDraft(draftId, options));
   return { status: result.status === "blocked" ? 409 : 200, result };
 }
 
@@ -310,20 +337,21 @@ const server = http.createServer(async (req, res) => {
       const [catalog, flags] = await Promise.all([loadCatalog(), loadRuntimeFlags()]);
       return send(res, 200, { ...sanitizeMergedCatalog(catalog), writeEnabled: flags.catalogWriteEnabled });
     }
-    if (route === "GET /api/price/transactions/archive") return send(res, 200, { records: await listTransactionArchives({ root: TRANSACTION_ARCHIVE_ROOT }) });
+    const transactionArchiveOptions = TRANSACTION_ARCHIVE_ROOT ? { root: TRANSACTION_ARCHIVE_ROOT } : { coordinator: RUNTIME_COORDINATOR };
+    if (route === "GET /api/price/transactions/archive") return send(res, 200, { records: await listTransactionArchives(transactionArchiveOptions) });
     if (route === "POST /api/price/transactions/archive") {
       const body = await readBody(req, TRANSACTION_BODY_MAX_BYTES);
-      return send(res, 201, await archiveTransaction(body, { root: TRANSACTION_ARCHIVE_ROOT }));
+      return send(res, 201, await archiveTransaction(body, transactionArchiveOptions));
     }
     const transactionImageMatch = url.pathname.match(/^\/api\/price\/transactions\/archive\/([^/]+)\/image$/);
     if (transactionImageMatch && req.method === "GET") {
-      const image = await readTransactionImage(decodeURIComponent(transactionImageMatch[1]), { root: TRANSACTION_ARCHIVE_ROOT });
+      const image = await readTransactionImage(decodeURIComponent(transactionImageMatch[1]), transactionArchiveOptions);
       return image ? sendImage(res, image) : send(res, 404, { error: "transaction screenshot not found" });
     }
-    if (transactionImageMatch && req.method === "DELETE") return send(res, 200, await deleteTransactionImage(decodeURIComponent(transactionImageMatch[1]), { root: TRANSACTION_ARCHIVE_ROOT }));
+    if (transactionImageMatch && req.method === "DELETE") return send(res, 200, await deleteTransactionImage(decodeURIComponent(transactionImageMatch[1]), transactionArchiveOptions));
     const transactionArchiveMatch = url.pathname.match(/^\/api\/price\/transactions\/archive\/([^/]+)$/);
-    if (transactionArchiveMatch && req.method === "PATCH") return send(res, 200, await updateTransactionArchive(decodeURIComponent(transactionArchiveMatch[1]), await readBody(req), { root: TRANSACTION_ARCHIVE_ROOT }));
-    if (transactionArchiveMatch && req.method === "DELETE") return send(res, 200, await deleteTransactionArchive(decodeURIComponent(transactionArchiveMatch[1]), { root: TRANSACTION_ARCHIVE_ROOT }));
+    if (transactionArchiveMatch && req.method === "PATCH") return send(res, 200, await updateTransactionArchive(decodeURIComponent(transactionArchiveMatch[1]), await readBody(req), transactionArchiveOptions));
+    if (transactionArchiveMatch && req.method === "DELETE") return send(res, 200, await deleteTransactionArchive(decodeURIComponent(transactionArchiveMatch[1]), transactionArchiveOptions));
     if (route === "POST /api/price/transactions/analyze") {
       const body = await readBody(req, TRANSACTION_BODY_MAX_BYTES);
       const catalog = await loadCatalog();
@@ -351,7 +379,7 @@ const server = http.createServer(async (req, res) => {
         ...(transactionDiscoveryMode === "searxng" ? [createSearXngDiscoveryProvider(env)] : []),
         new RegistrySearchDiscoveryProvider(),
       ];
-      return send(res, 202, queueSearch(transactionCatalogSearchRequest(body), { discoveryProviders, catalog, persistRoot: CATALOG_REPOSITORY.persistRoot, browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
+      return send(res, 202, await queueSearch(transactionCatalogSearchRequest(body), { discoveryProviders, catalog, coordinator: RUNTIME_COORDINATOR, browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
     }
     if (route === "POST /api/catalog/search") {
       const body = await readBody(req);
@@ -364,76 +392,73 @@ const server = http.createServer(async (req, res) => {
         ...(discoveryMode === "searxng" ? [createSearXngDiscoveryProvider(env)] : []),
         new RegistrySearchDiscoveryProvider(),
       ];
-      return send(res, 202, queueSearch(body, { discoveryProviders, catalog, persistRoot: CATALOG_REPOSITORY.persistRoot, browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
+      return send(res, 202, await queueSearch(body, { discoveryProviders, catalog, coordinator: RUNTIME_COORDINATOR, browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
     }
     if (route === "POST /api/advice/build") {
       const flags = await loadRuntimeFlags();
-      const job = await createAdviceJob(await readBody(req), { flags });
+      const job = await createAdviceJob(await readBody(req), { flags, coordinator: RUNTIME_COORDINATOR });
       return send(res, job.status === "advice-unavailable" ? 503 : job.status === "disabled" ? 200 : 202, job);
     }
     if (route === "GET /api/advice/billing") {
-      return send(res, 200, await getAdviceBillingSummary({ limit: url.searchParams.get("limit") ?? 100 }));
+      return send(res, 200, await getAdviceBillingSummary({ limit: url.searchParams.get("limit") ?? 100, coordinator: RUNTIME_COORDINATOR }));
     }
     if (req.method === "GET" && url.pathname.startsWith("/api/advice/build/")) {
       const requestId = decodeURIComponent(url.pathname.slice("/api/advice/build/".length));
-      const job = await getAdviceJob(requestId);
+      const job = await getAdviceJob(requestId, { coordinator: RUNTIME_COORDINATOR });
       return job ? send(res, 200, job) : send(res, 404, { error: "advice job not found" });
     }
     if (req.method === "GET" && url.pathname.startsWith("/api/catalog/search/")) {
       const id = decodeURIComponent(url.pathname.slice("/api/catalog/search/".length));
-      const job = getJob(id);
+      const job = await getJob(id, { coordinator: RUNTIME_COORDINATOR });
       return job ? send(res, 200, job) : send(res, 404, { error: "catalog search job not found" });
     }
     if (route === "POST /api/catalog/inspect") {
       const result = await inspectUrl(await readBody(req), { browserFallback: renderOfficialFallback });
       return send(res, 200, result);
     }
-    if (route === "GET /api/catalog/domain-proposals") return send(res, 200, await listDomainProposals({ persistRoot: CATALOG_REPOSITORY.persistRoot }));
+    if (route === "GET /api/catalog/domain-proposals") return send(res, 200, await listDomainProposals({ coordinator: RUNTIME_COORDINATOR, generationAware: true }));
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/domain-proposals/") && (url.pathname.endsWith("/approve") || url.pathname.endsWith("/reject"))) {
       const approve = url.pathname.endsWith("/approve");
       const suffix = approve ? "/approve" : "/reject";
       const proposalId = decodeURIComponent(url.pathname.slice("/api/catalog/domain-proposals/".length, -suffix.length));
       const body = await readBody(req);
-      return send(res, 200, await decideDomainProposal(proposalId, approve ? "approved" : "rejected", body.expectedHash, { persistRoot: CATALOG_REPOSITORY.persistRoot }));
+      return send(res, 200, await decideDomainProposal(proposalId, approve ? "approved" : "rejected", body.expectedHash, { coordinator: RUNTIME_COORDINATOR, generationAware: true }));
     }
     const priceCatalogCandidateMatch = url.pathname.match(/^\/api\/price\/catalog\/candidates\/([^/]+)\/(review|draft)$/);
     if (req.method === "POST" && priceCatalogCandidateMatch?.[1] && priceCatalogCandidateMatch[2]) {
       const candidateId = decodeURIComponent(priceCatalogCandidateMatch[1]);
       const body = await readBody(req);
       const flags = await loadRuntimeFlags();
-      const options = await governedCatalogOptions({ expectedHash: body.expectedHash, expectedDraftHash: body.expectedDraftHash });
-      const result = priceCatalogCandidateMatch[2] === "review"
-        ? await previewDraft(candidateId, body.selections ?? {}, options)
-        : await createDraft(candidateId, body.selections ?? {}, options);
+      const result = await withGovernedCatalogMutation({ expectedHash: body.expectedHash, expectedDraftHash: body.expectedDraftHash }, (options) => priceCatalogCandidateMatch[2] === "review"
+        ? previewDraft(candidateId, body.selections ?? {}, options)
+        : createDraft(candidateId, body.selections ?? {}, options), candidateId);
       return send(res, result.status === "blocked" ? 409 : 200, { ...result, writeEnabled: flags.catalogWriteEnabled });
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/review")) {
       const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/review".length));
       const body = await readBody(req);
       const flags = await loadRuntimeFlags();
-      const result = await previewDraft(candidateId, body.selections ?? {}, await governedCatalogOptions({ expectedHash: body.expectedHash }));
+      const result = await withGovernedCatalogMutation({ expectedHash: body.expectedHash }, (options) => previewDraft(candidateId, body.selections ?? {}, options), candidateId);
       return send(res, result.status === "blocked" ? 409 : 200, { ...result, writeEnabled: flags.catalogWriteEnabled });
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/enrich")) {
       const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/enrich".length));
       const flags = await loadRuntimeFlags();
       const body = await readBody(req);
-      const result = await runAutoEnrichment(candidateId, await governedCatalogOptions({ expectedHash: body.expectedHash, autoEnrichTrustedOfficial: flags.catalogAutoEnrichTrustedOfficial, autoAcceptExactMpn: flags.catalogAutoAcceptExactMpn, catalogWriteEnabled: flags.catalogWriteEnabled }));
-      await retainAcceptedCatalogResult(result);
+      const result = await withGovernedCatalogMutation({ expectedHash: body.expectedHash, autoEnrichTrustedOfficial: flags.catalogAutoEnrichTrustedOfficial, autoAcceptExactMpn: flags.catalogAutoAcceptExactMpn, catalogWriteEnabled: flags.catalogWriteEnabled }, (options) => runAutoEnrichment(candidateId, options), candidateId);
       return send(res, result.status === "accepted" || result.status === "draft" ? 200 : 409, result);
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/accept-official")) {
       const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/accept-official".length));
       const flags = await loadRuntimeFlags();
       const body = await readBody(req);
-      const result = await acceptOfficial(candidateId, await governedCatalogOptions({ expectedHash: body.expectedHash, approved: body.approved, catalogWriteEnabled: flags.catalogWriteEnabled }));
-      await retainAcceptedCatalogResult(result);
+      const result = await withGovernedCatalogMutation({ expectedHash: body.expectedHash, approved: body.approved, catalogWriteEnabled: flags.catalogWriteEnabled }, (options) => acceptOfficial(candidateId, options), candidateId);
       return send(res, result.status === "accepted" ? 200 : 409, result);
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/draft")) {
       const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/draft".length));
       const body = await readBody(req);
-      const result = await createDraft(candidateId, body.selections ?? {}, await governedCatalogOptions({ expectedHash: body.expectedHash, expectedDraftHash: body.expectedDraftHash }));
+      const result = await withGovernedCatalogMutation({ expectedHash: body.expectedHash, expectedDraftHash: body.expectedDraftHash }, (options) => createDraft(candidateId, body.selections ?? {}, options), candidateId);
       return send(res, result.status === "blocked" ? 409 : 200, result);
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/drafts/") && url.pathname.endsWith("/confirm")) {
@@ -470,7 +495,7 @@ const server = http.createServer(async (req, res) => {
     if (route === "POST /api/price/audit") return send(res, 200, await handleAudit(await readBody(req)));
     if (route === "DELETE /api/price/audit") return send(res, 200, await handleUnaudit(url));
     if (route === "POST /api/price/rebuild") {
-      const snapshot = await buildAndWriteLatest(today(), undefined, { catalog: await loadCatalog() });
+      const snapshot = await buildAndWriteLatest(today(), undefined, { ...PRICE_REPOSITORY, catalog: await loadCatalog() });
       return send(res, 200, { asOf: snapshot.asOf, quoteCount: snapshot.quotes.length });
     }
     return send(res, 404, { error: `No route for ${route}` });

@@ -2,6 +2,15 @@ import path from "node:path";
 import { readFile, stat } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { atomicWriteJson } from "../store.mjs";
+import { RuntimeCoordinator } from "../../../src/runtime/coordinator.mjs";
+import {
+  atomicWriteJson as durableAtomicWriteJson,
+  confined as runtimeConfined,
+  ensurePrivateDirectory,
+  pathExists,
+  sha256Bytes,
+} from "../../../src/runtime/fs.mjs";
+import { buildMigrationPlan, sanitizeCatalogUserData } from "../../migrations/isolate-user-data-v1.mjs";
 
 const RUNTIME_METADATA_KEY = "runtimeCatalog";
 const RUNTIME_METADATA_SCHEMA_VERSION = "1.0.0";
@@ -22,28 +31,124 @@ function confined(root, target, label) {
   return resolved;
 }
 
+function normalizeProductCatalogOverlay(document) {
+  if (document?.overlayKind !== "product_catalog_overlay") return document;
+  return {
+    schemaVersion: document.schemaVersion,
+    catalogVersion: document.overlayVersion,
+    updatedAt: document.updatedAt,
+    skus: document.skus,
+    [RUNTIME_METADATA_KEY]: {
+      schemaVersion: RUNTIME_METADATA_SCHEMA_VERSION,
+      overlayKind: document.overlayKind,
+      overlayVersion: document.overlayVersion,
+      acceptedSkuIds: document.acceptedSkuIds,
+      baseCatalogVersion: document.baseCatalogVersion,
+      baseUpdatedAt: document.baseUpdatedAt,
+    },
+  };
+}
+
 function validateCatalog(document, label) {
   if (!document || typeof document !== "object" || Array.isArray(document)) throw new Error(`${label} must be a JSON object`);
-  if (typeof document.schemaVersion !== "string" || !document.schemaVersion) throw new Error(`${label}.schemaVersion is required`);
-  if (typeof document.updatedAt !== "string" || !document.updatedAt) throw new Error(`${label}.updatedAt is required`);
+  if (!/^\d+\.\d+\.\d+$/.test(String(document.schemaVersion ?? ""))) throw new Error(`${label}.schemaVersion is invalid`);
+  if (document.catalogVersion !== undefined && !/^\d+\.\d+\.\d+$/.test(String(document.catalogVersion))) throw new Error(`${label}.catalogVersion is invalid`);
+  if (typeof document.updatedAt !== "string" || !Number.isFinite(Date.parse(document.updatedAt))) throw new Error(`${label}.updatedAt is invalid`);
   if (!Array.isArray(document.skus)) throw new Error(`${label}.skus must be an array`);
   const ids = new Set();
   for (const sku of document.skus) {
     if (!sku || typeof sku !== "object" || Array.isArray(sku) || typeof sku.id !== "string" || !sku.id) throw new Error(`${label} contains a SKU without a valid id`);
     if (ids.has(sku.id)) throw new Error(`${label} contains duplicate SKU id: ${sku.id}`);
     ids.add(sku.id);
+    if (sku.price && typeof sku.price === "object" && sku.price.paid !== undefined) throw new Error(`${label} contains user price.paid for ${sku.id}`);
+    if (Array.isArray(sku.tags) && sku.tags.some((tag) => /^(?:owned|paid|user|purchase|transaction)(?:$|[-_])/iu.test(String(tag)))) throw new Error(`${label} contains user ownership tag for ${sku.id}`);
   }
   const metadata = document[RUNTIME_METADATA_KEY];
   if (metadata !== undefined) {
     if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) throw new Error(`${label}.${RUNTIME_METADATA_KEY} must be an object`);
+    if (metadata.schemaVersion !== RUNTIME_METADATA_SCHEMA_VERSION) throw new Error(`${label}.${RUNTIME_METADATA_KEY}.schemaVersion is invalid`);
     if (!Array.isArray(metadata.acceptedSkuIds) || metadata.acceptedSkuIds.some((id) => typeof id !== "string" || !id)) {
       throw new Error(`${label}.${RUNTIME_METADATA_KEY}.acceptedSkuIds must be a string array`);
     }
     if (new Set(metadata.acceptedSkuIds).size !== metadata.acceptedSkuIds.length) {
       throw new Error(`${label}.${RUNTIME_METADATA_KEY}.acceptedSkuIds contains duplicates`);
     }
+    if (metadata.acceptedSkuIds.some((id) => !ids.has(id))) throw new Error(`${label}.${RUNTIME_METADATA_KEY}.acceptedSkuIds references a missing SKU`);
+    if (metadata.overlayKind !== undefined && metadata.overlayKind !== "product_catalog_overlay") throw new Error(`${label}.${RUNTIME_METADATA_KEY}.overlayKind is invalid`);
+    if (metadata.overlayVersion !== undefined && (typeof metadata.overlayVersion !== "string" || !metadata.overlayVersion)) throw new Error(`${label}.${RUNTIME_METADATA_KEY}.overlayVersion is invalid`);
+    if (metadata.baseCatalogVersion !== undefined && !/^\d+\.\d+\.\d+$/.test(String(metadata.baseCatalogVersion))) throw new Error(`${label}.${RUNTIME_METADATA_KEY}.baseCatalogVersion is invalid`);
+    if (metadata.baseUpdatedAt !== undefined && !Number.isFinite(Date.parse(metadata.baseUpdatedAt))) throw new Error(`${label}.${RUNTIME_METADATA_KEY}.baseUpdatedAt is invalid`);
+  }
+  const isolation = buildMigrationPlan(document, { dryRun: true });
+  if (isolation.removedFieldCount > 0) throw new Error(`${label} contains user or transaction fields that require catalog-user-data-v1 isolation`);
+  return document;
+}
+
+export function assertProductCatalogDocument(document, label = "product catalog") {
+  return validateCatalog(clone(document), label);
+}
+
+function catalogDraftHashValue(draft) {
+  return {
+    schemaVersion: draft.schemaVersion,
+    draftId: draft.draftId,
+    operation: draft.operation,
+    baseSkuId: draft.baseSkuId,
+    baseSkuHash: draft.baseSkuHash,
+    baseCatalogVersion: draft.baseCatalogVersion,
+    candidateId: draft.candidateId,
+    candidateInputHash: draft.candidateInputHash,
+    candidateSnapshot: draft.candidateSnapshot,
+    proposed: draft.proposed,
+    fields: draft.fields,
+    conflicts: draft.conflicts,
+    missing: draft.missing,
+    changedFields: draft.changedFields,
+  };
+}
+
+function assertCatalogDraftDocument(document, label) {
+  if (!document || typeof document !== "object" || Array.isArray(document)
+    || document.schemaVersion !== "1.0.0" || !Array.isArray(document.drafts)) {
+    throw new Error(`${label} is invalid`);
+  }
+  const ids = new Set();
+  for (const draft of document.drafts) {
+    if (!draft || typeof draft !== "object" || Array.isArray(draft)
+      || draft.schemaVersion !== "1.0.0" || !/^sku-draft-[a-f0-9]{20}$/.test(String(draft.draftId ?? ""))
+      || ids.has(draft.draftId) || !["create", "update"].includes(draft.operation)
+      || !["preview", "draft", "confirming", "confirmed", "rejected"].includes(draft.status)
+      || !/^[a-f0-9]{64}$/.test(String(draft.candidateInputHash ?? ""))
+      || !/^[a-f0-9]{64}$/.test(String(draft.inputHash ?? "")) || draft.expectedHash !== draft.inputHash
+      || !draft.candidateSnapshot || !draft.proposed
+      || !Array.isArray(draft.fields) || !Array.isArray(draft.conflicts) || !Array.isArray(draft.missing)
+      || !Array.isArray(draft.changedFields) || !Number.isFinite(Date.parse(draft.createdAt))
+      || !Number.isFinite(Date.parse(draft.updatedAt))) {
+      throw new Error(`${label} contains an invalid or hash-mismatched draft`);
+    }
+    const actualHash = sha256Bytes(Buffer.from(JSON.stringify(catalogDraftHashValue(draft)), "utf8"));
+    if (actualHash !== draft.inputHash) throw new Error(`${label} contains an invalid or hash-mismatched draft`);
+    ids.add(draft.draftId);
   }
   return document;
+}
+
+/**
+ * Validates every current authority path owned by ProductCatalogOverlay.
+ * Production backup/restore and Doctor call this same repository validator;
+ * an unrecognised file can therefore never become authority merely because it
+ * happens to contain parseable JSON.
+ */
+export function assertProductCatalogRuntimeAuthority(logicalPath, document) {
+  if (logicalPath === "product-catalog.json") {
+    assertProductCatalogDocument(document, "runtime product catalog");
+    return { kind: "product-catalog", id: document.catalogVersion ?? document.schemaVersion };
+  }
+  if (/^drafts\/\d{4}-\d{2}-\d{2}\.json$/.test(logicalPath)) {
+    assertCatalogDraftDocument(document, "runtime product catalog draft file");
+    return { kind: "catalog-drafts", ids: document.drafts.map((draft) => draft.draftId) };
+  }
+  throw new Error("catalog-overlays repository contains an unrecognized authority path");
 }
 
 async function readRequiredJson(file, label) {
@@ -54,7 +159,7 @@ async function readRequiredJson(file, label) {
     throw new Error(`Unable to read ${label} at ${file}: ${error instanceof Error ? error.message : String(error)}`);
   }
   try {
-    return validateCatalog(JSON.parse(raw), label);
+    return validateCatalog(normalizeProductCatalogOverlay(JSON.parse(raw)), label);
   } catch (error) {
     if (error instanceof SyntaxError) throw new Error(`${label} contains invalid JSON at ${file}`);
     throw error;
@@ -69,7 +174,7 @@ function readRequiredJsonSync(file, label) {
     throw new Error(`Unable to read ${label} at ${file}: ${error instanceof Error ? error.message : String(error)}`);
   }
   try {
-    return validateCatalog(JSON.parse(raw), label);
+    return validateCatalog(normalizeProductCatalogOverlay(JSON.parse(raw)), label);
   } catch (error) {
     if (error instanceof SyntaxError) throw new Error(`${label} contains invalid JSON at ${file}`);
     throw error;
@@ -134,6 +239,8 @@ function runtimeAcceptedIds(base, runtime) {
 function metadataFor(base, acceptedSkuIds) {
   return {
     schemaVersion: RUNTIME_METADATA_SCHEMA_VERSION,
+    overlayKind: "product_catalog_overlay",
+    overlayVersion: base.catalogVersion ?? base.schemaVersion,
     acceptedSkuIds: [...acceptedSkuIds].sort(),
     baseCatalogVersion: base.catalogVersion ?? base.schemaVersion,
     baseUpdatedAt: base.updatedAt,
@@ -175,7 +282,7 @@ export function sanitizeMergedCatalog(catalog) {
   });
 }
 
-export function resolveCatalogRepositoryPaths(options = {}) {
+function directRepositoryPaths(options = {}) {
   const persistRoot = path.resolve(options.persistRoot ?? process.env.CATALOG_PERSIST_ROOT ?? path.join(process.cwd(), "runtime"));
   const baseCatalogPath = path.resolve(options.baseCatalogPath ?? defaultBaseCatalogPath);
   const runtimeCatalogPath = confined(persistRoot, options.runtimeCatalogPath ?? path.join(persistRoot, "data/skus/catalog.json"), "runtime catalog path");
@@ -187,15 +294,154 @@ export function resolveCatalogRepositoryPaths(options = {}) {
   return { persistRoot, baseCatalogPath, runtimeCatalogPath, draftRoot, auditRoot, rollbackRoot, rollbackManifestPath };
 }
 
+function explicitDirectPaths(options) {
+  return ["runtimeCatalogPath", "draftRoot", "auditRoot", "rollbackRoot", "rollbackManifestPath"]
+    .some((key) => options[key] !== undefined);
+}
+
+function usesCoordinator(options = {}) {
+  if (options.coordinator || options.generationAware === true) return true;
+  if (options.direct === true || options.generationAware === false || explicitDirectPaths(options)) return false;
+  // A persistRoot has historically denoted the direct test/recovery layout.
+  // Production composition opts in explicitly with its shared coordinator.
+  return options.persistRoot === undefined && process.env.CATALOG_PERSIST_ROOT === undefined;
+}
+
+function coordinatorFor(options = {}) {
+  return options.coordinator ?? new RuntimeCoordinator({
+    root: options.runtimeRoot ?? process.env.RUNTIME_ROOT ?? process.env.CATALOG_PERSIST_ROOT ?? path.join(process.cwd(), "runtime"),
+    now: options.now,
+  });
+}
+
+function activeRepositoryPaths(activeRoot, options = {}) {
+  const catalogRoot = runtimeConfined(activeRoot, "catalog-overlays");
+  const auditRoot = runtimeConfined(activeRoot, "audit", "catalog-events");
+  const rollbackRoot = runtimeConfined(activeRoot, "audit", "rollback", "catalog");
+  return Object.freeze({
+    persistRoot: path.resolve(options.runtimeRoot ?? options.persistRoot ?? process.env.RUNTIME_ROOT ?? process.env.CATALOG_PERSIST_ROOT ?? path.join(process.cwd(), "runtime")),
+    activeRoot,
+    baseCatalogPath: path.resolve(options.baseCatalogPath ?? defaultBaseCatalogPath),
+    runtimeCatalogPath: runtimeConfined(catalogRoot, "product-catalog.json"),
+    draftRoot: runtimeConfined(catalogRoot, "drafts"),
+    auditRoot,
+    rollbackRoot,
+    rollbackManifestPath: runtimeConfined(rollbackRoot, "catalog-accept-manifest.json"),
+    generationAware: true,
+  });
+}
+
+async function ensureCatalogLayout(paths) {
+  await Promise.all([paths.draftRoot, paths.auditRoot, paths.rollbackRoot].map(ensurePrivateDirectory));
+}
+
+/** Resolve configuration only. Generation-aware callers must never cache a
+ * returned active path; use withCatalogRead/withCatalogWrite for each operation. */
+/** @returns {any} */
+export function resolveCatalogRepositoryPaths(options = {}) {
+  if (!usesCoordinator(options)) return Object.freeze({ ...directRepositoryPaths(options), generationAware: false });
+  return Object.freeze({
+    persistRoot: path.resolve(options.runtimeRoot ?? options.persistRoot ?? process.env.RUNTIME_ROOT ?? process.env.CATALOG_PERSIST_ROOT ?? path.join(process.cwd(), "runtime")),
+    baseCatalogPath: path.resolve(options.baseCatalogPath ?? defaultBaseCatalogPath),
+    coordinator: coordinatorFor(options),
+    generationAware: true,
+  });
+}
+
+export async function withCatalogRead(options = {}, operation) {
+  if (typeof operation !== "function") throw new TypeError("catalog read operation is required");
+  if (!usesCoordinator(options) && !options.generationAware) return operation(directRepositoryPaths(options));
+  const coordinator = coordinatorFor(options);
+  await coordinator.initialize(options.appVersion);
+  return (await coordinator.withConsistentSnapshot(({ activeRoot }) => operation(activeRepositoryPaths(activeRoot, options)))).result;
+}
+
+export async function withCatalogWrite(options = {}, operation) {
+  if (typeof operation !== "function") throw new TypeError("catalog write operation is required");
+  if (!usesCoordinator(options) && !options.generationAware) {
+    const paths = directRepositoryPaths(options);
+    await ensureCatalogLayout(paths);
+    return operation(paths);
+  }
+  const coordinator = coordinatorFor(options);
+  await coordinator.initialize(options.appVersion);
+  return (await coordinator.withWrite(async ({ activeRoot }) => {
+    const paths = activeRepositoryPaths(activeRoot, options);
+    await ensureCatalogLayout(paths);
+    return operation(paths);
+  }, {
+    ...(options.expectedRuntimeRevision !== undefined ? { expectedRevision: options.expectedRuntimeRevision } : {}),
+    ...(options.maintenanceLeaseToken ? { maintenanceLeaseToken: options.maintenanceLeaseToken } : {}),
+  })).result;
+}
+
+function legacyCatalogPath(options = {}) {
+  const root = path.resolve(options.runtimeRoot ?? options.persistRoot ?? options.coordinator?.root ?? process.env.RUNTIME_ROOT ?? process.env.CATALOG_PERSIST_ROOT ?? path.join(process.cwd(), "runtime"));
+  return path.join(root, "data/skus/catalog.json");
+}
+
+/** Safe, idempotent import for the pre-generation catalog. The source is left
+ * untouched as recovery evidence; a control marker prevents restore from ever
+ * resurrecting it into a later empty generation. */
+export async function migrateLegacyCatalogRepository(options = {}) {
+  const coordinator = coordinatorFor({ ...options, generationAware: true });
+  await coordinator.initialize(options.appVersion);
+  const source = legacyCatalogPath(options);
+  const marker = path.join(coordinator.controlRoot, "catalog-legacy-migration.json");
+  const sourceBytes = await readFile(source).catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error));
+  const existingMarker = await readFile(marker, "utf8").then(JSON.parse).catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error));
+  if (!sourceBytes) return { status: "not_found", source };
+  const sourceHash = sha256Bytes(sourceBytes);
+  if (existingMarker) {
+    if (existingMarker.sourceHash !== sourceHash) throw new Error("legacy runtime catalog changed after migration; refusing ambiguous import");
+    return { status: "already_migrated", sourceHash };
+  }
+  const rawLegacy = normalizeProductCatalogOverlay(JSON.parse(sourceBytes.toString("utf8")));
+  const isolation = buildMigrationPlan(rawLegacy, { sourceBytes, dryRun: options.dryRun !== false });
+  const legacy = validateCatalog(sanitizeCatalogUserData(rawLegacy), "sanitized legacy runtime catalog");
+  if (options.dryRun !== false) return { status: "dry_run", sourceHash, skuCount: legacy.skus.length, removedFieldCount: isolation.removedFieldCount, requiresExplicitApply: true };
+  if (options.expectedSourceHash !== sourceHash) throw new Error("legacy catalog migration apply requires the dry-run expected source hash");
+  const result = await coordinator.withWrite(async ({ activeRoot, state }) => {
+    const paths = activeRepositoryPaths(activeRoot, options);
+    await ensureCatalogLayout(paths);
+    if (await pathExists(paths.runtimeCatalogPath)) throw new Error("active runtime catalog already exists; refusing legacy overwrite");
+    await atomicWriteJson(paths.runtimeCatalogPath, legacy, writeOptions(paths, "catalog-legacy-migration"));
+    if (isolation.quarantine.length) await durableAtomicWriteJson(runtimeConfined(activeRoot, "migrations", "catalog-user-data-v1", "quarantine.json"), {
+      schemaVersion: "catalog-user-data-quarantine-v1", sourceHash, entries: isolation.quarantine,
+    });
+    await durableAtomicWriteJson(marker, {
+      schemaVersion: "catalog-legacy-migration-v1",
+      status: "applied",
+      source: path.relative(coordinator.root, source).split(path.sep).join("/"),
+      target: path.relative(coordinator.root, paths.runtimeCatalogPath).split(path.sep).join("/"),
+      sourceHash,
+      removedFieldCount: isolation.removedFieldCount,
+      targetHash: sha256Bytes(await readFile(paths.runtimeCatalogPath)),
+      runtimeGeneration: state.runtimeGeneration,
+      migratedAt: new Date().toISOString(),
+    });
+    return { status: "applied", sourceHash, removedFieldCount: isolation.removedFieldCount, runtimeGeneration: state.runtimeGeneration };
+  });
+  return result.result;
+}
+
 export async function loadMergedCatalog(options = {}) {
-  const paths = resolveCatalogRepositoryPaths(options);
-  const base = await readRequiredJson(paths.baseCatalogPath, "base catalog");
-  const runtime = await exists(paths.runtimeCatalogPath) ? await readRequiredJson(paths.runtimeCatalogPath, "runtime catalog") : null;
-  return mergeCatalogDocuments(base, runtime);
+  return withCatalogRead(options, async (paths) => {
+    const base = await readRequiredJson(paths.baseCatalogPath, "base catalog");
+    const runtime = await exists(paths.runtimeCatalogPath) ? await readRequiredJson(paths.runtimeCatalogPath, "runtime catalog") : null;
+    return mergeCatalogDocuments(base, runtime);
+  });
 }
 
 export function loadMergedCatalogSync(options = {}) {
-  const paths = resolveCatalogRepositoryPaths(options);
+  let paths;
+  if (!usesCoordinator(options) && !options.generationAware) paths = directRepositoryPaths(options);
+  else if (options.activeRoot) paths = activeRepositoryPaths(path.resolve(options.activeRoot), options);
+  else {
+    const coordinator = coordinatorFor(options);
+    const state = JSON.parse(readFileSync(coordinator.stateFile, "utf8"));
+    paths = activeRepositoryPaths(coordinator.activeRoot(state), options);
+  }
   const base = readRequiredJsonSync(paths.baseCatalogPath, "base catalog");
   const runtime = existsSync(paths.runtimeCatalogPath) ? readRequiredJsonSync(paths.runtimeCatalogPath, "runtime catalog") : null;
   return mergeCatalogDocuments(base, runtime);
@@ -206,30 +452,35 @@ function writeOptions(paths, operation) {
 }
 
 export async function initializeRuntimeCatalog(options = {}) {
-  const paths = resolveCatalogRepositoryPaths(options);
-  const merged = await loadMergedCatalog(paths);
-  const current = await exists(paths.runtimeCatalogPath) ? await readRequiredJson(paths.runtimeCatalogPath, "runtime catalog") : null;
-  if (current && JSON.stringify(current) === JSON.stringify(merged)) return merged;
-  await atomicWriteJson(paths.runtimeCatalogPath, merged, writeOptions(paths, "catalog-runtime-initialize"));
-  return merged;
+  return withCatalogWrite(options, async (paths) => {
+    const base = await readRequiredJson(paths.baseCatalogPath, "base catalog");
+    const current = await exists(paths.runtimeCatalogPath) ? await readRequiredJson(paths.runtimeCatalogPath, "runtime catalog") : null;
+    const merged = mergeCatalogDocuments(base, current);
+    if (current && JSON.stringify(current) === JSON.stringify(merged)) return merged;
+    await atomicWriteJson(paths.runtimeCatalogPath, merged, writeOptions(paths, "catalog-runtime-initialize"));
+    return merged;
+  });
 }
 
 export async function markRuntimeCatalogSkuAccepted(skuId, options = {}) {
   if (typeof skuId !== "string" || !skuId) throw new Error("accepted SKU id is required");
-  const paths = resolveCatalogRepositoryPaths(options);
-  if (!await exists(paths.runtimeCatalogPath)) throw new Error("runtime catalog is not initialized");
-  const runtime = await readRequiredJson(paths.runtimeCatalogPath, "runtime catalog");
-  if (!runtime.skus.some((sku) => sku.id === skuId)) throw new Error(`accepted SKU is missing from runtime catalog: ${skuId}`);
-  const priorIds = runtime[RUNTIME_METADATA_KEY]?.acceptedSkuIds ?? [];
-  runtime[RUNTIME_METADATA_KEY] = {
-    ...(runtime[RUNTIME_METADATA_KEY] ?? {}),
-    schemaVersion: RUNTIME_METADATA_SCHEMA_VERSION,
-    acceptedSkuIds: [...new Set([...priorIds, skuId])].sort(),
-  };
-  const base = await readRequiredJson(paths.baseCatalogPath, "base catalog");
-  const merged = mergeCatalogDocuments(base, runtime);
-  await atomicWriteJson(paths.runtimeCatalogPath, merged, writeOptions(paths, "catalog-runtime-accept"));
-  return merged;
+  return withCatalogWrite(options, async (paths) => {
+    if (!await exists(paths.runtimeCatalogPath)) throw new Error("runtime catalog is not initialized");
+    const currentBytes = await readFile(paths.runtimeCatalogPath);
+    if (options.expectedHash !== undefined && options.expectedHash !== sha256Bytes(currentBytes)) throw new Error("runtime catalog expected hash conflict");
+    const runtime = validateCatalog(normalizeProductCatalogOverlay(JSON.parse(currentBytes.toString("utf8"))), "runtime catalog");
+    if (!runtime.skus.some((sku) => sku.id === skuId)) throw new Error(`accepted SKU is missing from runtime catalog: ${skuId}`);
+    const priorIds = runtime[RUNTIME_METADATA_KEY]?.acceptedSkuIds ?? [];
+    runtime[RUNTIME_METADATA_KEY] = {
+      ...(runtime[RUNTIME_METADATA_KEY] ?? {}),
+      schemaVersion: RUNTIME_METADATA_SCHEMA_VERSION,
+      acceptedSkuIds: [...new Set([...priorIds, skuId])].sort(),
+    };
+    const base = await readRequiredJson(paths.baseCatalogPath, "base catalog");
+    const merged = mergeCatalogDocuments(base, runtime);
+    await atomicWriteJson(paths.runtimeCatalogPath, merged, { ...writeOptions(paths, "catalog-runtime-accept"), expectedHash: sha256Bytes(currentBytes) });
+    return merged;
+  });
 }
 
 export function resultRequiresRuntimeCatalogRetention(result) {
@@ -242,7 +493,7 @@ export function resultRequiresRuntimeCatalogRetention(result) {
 }
 
 export function catalogWriteOptions(options = {}, catalog) {
-  const paths = resolveCatalogRepositoryPaths(options);
+  const paths = options.runtimeCatalogPath ? options : directRepositoryPaths(options);
   return {
     ...(catalog ? { catalog } : {}),
     catalogPath: paths.runtimeCatalogPath,
@@ -250,6 +501,7 @@ export function catalogWriteOptions(options = {}, catalog) {
     auditRoot: paths.auditRoot,
     rollbackRoot: paths.rollbackRoot,
     rollbackManifestPath: paths.rollbackManifestPath,
+    validateCatalog: (value) => assertProductCatalogDocument(value, "catalog write"),
     retainRuntimeSkuMetadata: true,
   };
 }

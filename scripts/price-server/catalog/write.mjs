@@ -657,7 +657,7 @@ function selectedFields(candidate, selections = {}) {
 
 export async function acceptOfficial(candidateId, options = {}) {
   const resolved = config(options);
-  const candidate = options.candidate ?? findCandidate(candidateId);
+  const candidate = Object.hasOwn(options, "candidate") ? options.candidate : findCandidate(candidateId);
   // The idempotency key must include every acceptance-relevant fact. A later
   // candidate with the same content hash but a new canonical URL or conflict
   // finding must never replay an earlier accepted result.
@@ -701,6 +701,7 @@ export async function acceptOfficial(candidateId, options = {}) {
     const result = { status: "accepted", candidateId, skuId: proposed.id, catalogVersion: nextCatalog.catalogVersion, catalogHash, inputHash, idempotencyKey, registryVersion: resolved.registryVersion, extractorVersion: candidate.extraction.adapter, contentHash: candidate.extraction.contentHash, changedFields: changed, eventId, runtimeCatalogRetained: Boolean(resolved.retainRuntimeSkuMetadata), rollbackManifest: resolved.rollbackManifestPath };
     const event = { eventId, operation: "accept-official", idempotencyKey, candidateId, skuId: proposed.id, status: "accepted", inputHash, contentHash: candidate.extraction.contentHash, catalogHash, catalogVersion: nextCatalog.catalogVersion, changedFields: changed, createdAt: now(), result };
     try {
+      resolved.validateCatalog?.(nextCatalog);
       await atomicWriteJson(resolved.catalogPath, nextCatalog, { operation: "catalog-accept-official", rollbackRoot: resolved.rollbackRoot, manifestPath: resolved.rollbackManifestPath });
       await writeEvent(event, resolved);
     } catch (error) {
@@ -714,7 +715,7 @@ export async function acceptOfficial(candidateId, options = {}) {
 
 export async function previewDraft(candidateId, selections = {}, options = {}) {
   const resolved = config(options);
-  const candidate = options.candidate ?? findCandidate(candidateId);
+  const candidate = Object.hasOwn(options, "candidate") ? options.candidate : findCandidate(candidateId);
   if (!candidate) return { status: "blocked", candidateId, reasons: ["candidate not found"] };
   const governed = validateGovernedCandidate(candidate, options.expectedHash, { requireExpectedHash: true });
   const candidateInputHash = governed.inputHash;
@@ -890,6 +891,7 @@ async function recoverConfirmingDraft(draft, catalog, existingEvent, resolved) {
   let committedCatalog = catalog;
   if (currentHash === intent.catalogBeforeHash) {
     if (intent.catalogAfterHash !== intent.catalogBeforeHash) {
+      resolved.validateCatalog?.(intent.nextCatalog);
       await atomicWriteJson(resolved.catalogPath, intent.nextCatalog, { operation: "catalog-confirm-draft-recovery", rollbackRoot: resolved.rollbackRoot, manifestPath: resolved.rollbackManifestPath });
     }
     committedCatalog = intent.nextCatalog;
@@ -1014,7 +1016,10 @@ async function confirmDraftTransition(draftId, options, resolved) {
     const pendingDraft = { ...draft, status: "confirming", confirmationIntent, updatedAt: now() };
     drafts.set(draftId, pendingDraft);
     await persistDraft(pendingDraft, resolved);
-    if (catalogChanged) await atomicWriteJson(resolved.catalogPath, nextCatalog, { operation: "catalog-confirm-draft", rollbackRoot: resolved.rollbackRoot, manifestPath: resolved.rollbackManifestPath });
+    if (catalogChanged) {
+      resolved.validateCatalog?.(nextCatalog);
+      await atomicWriteJson(resolved.catalogPath, nextCatalog, { operation: "catalog-confirm-draft", rollbackRoot: resolved.rollbackRoot, manifestPath: resolved.rollbackManifestPath });
+    }
     if (options.testFailpoint === "after-catalog-write") throw new Error("test failpoint after catalog write");
     await writeEvent(event, resolved);
     await persistConfirmedDraft(pendingDraft, result, resolved);

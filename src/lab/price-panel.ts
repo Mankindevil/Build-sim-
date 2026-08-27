@@ -36,6 +36,8 @@ interface VariantRow {
 }
 
 interface Candidate extends PriceCandidate {
+  candidateId?: string;
+  listingCaptureId?: string;
   variants?: VariantRow[];
   variantStatus?: string;
   variantSource?: string | null;
@@ -543,34 +545,16 @@ function bindCandidateActions(): void {
         window.alert(`不能入账：${block}`);
         return;
       }
-      const match = matchFor(candidate);
       btn.disabled = true;
       btn.textContent = "写入中…";
       try {
         await api("/audit", {
           method: "POST",
           body: JSON.stringify({
+            listingCaptureId: candidate.listingCaptureId,
+            candidateId: candidate.candidateId,
             skuId: candidate.skuId,
-            platform: candidate.platform,
-            priceCny: candidate.priceCny,
-            priceAmount: candidate.priceAmount,
-            priceCurrency: candidate.priceCurrency,
-            priceKind: candidate.priceKind,
-            listingUrl: candidate.url,
-            title: candidate.title,
             variantLabel: candidate.variantLabel ?? "",
-            fetchedAt: candidate.fetchedAt,
-            sourceHash: candidate.sourceHash ?? null,
-            sourceKind: "marketplace-listing",
-            match: match.kind === "mpn" ? "mpn" : "manual",
-            note: [
-              `${CHANNEL_LABELS[candidate.channel] ?? candidate.channel} 抓取后人工确认`,
-              candidate.variantLabel ? `规格「${candidate.variantLabel}」` : "",
-              candidate.variantSkuId ? `skuId ${candidate.variantSkuId}` : "",
-              ...match.reasons,
-            ]
-              .filter(Boolean)
-              .join("；"),
           }),
         });
         btn.textContent = "已入账";

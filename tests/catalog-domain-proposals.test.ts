@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createDomainProposal, decideDomainProposal, listDomainProposals, rollbackDomainApproval } from "../scripts/price-server/catalog/domain-proposals.mjs";
-import { loadOfficialRegistry } from "../scripts/price-server/catalog/registry.mjs";
+import { activateOfficialRegistry, activateOfficialRegistryRepository, loadOfficialRegistry, loadOfficialRegistryRepository, registryForUrl } from "../scripts/price-server/catalog/registry.mjs";
 import { queueSearch, waitForJob } from "../scripts/price-server/catalog/service.mjs";
 import { loadRuntimeFlags } from "../scripts/runtime/flags.mjs";
 
@@ -15,13 +15,17 @@ async function tempRegistryRoot() {
   return { root, registryPath };
 }
 
+afterEach(async () => {
+  activateOfficialRegistry(loadOfficialRegistry(JSON.parse(await readFile(new URL("../data/catalog/official-domains.json", import.meta.url), "utf8"))));
+});
+
 describe("C5 governed domain proposals", () => {
   it("persists untrusted discovery as an idempotent proposal without inspecting it", async () => {
     const { root } = await tempRegistryRoot();
     const stamp = Date.now();
     const provider = { id: `proposal-fixture-${stamp}`, discover: async () => [{ url: `https://products.example.org/${stamp}`, title: "Example exact product", snippet: "candidate only", retrievedAt: "2026-08-24T00:00:00.000Z", rank: 0 }] };
     try {
-      const job = queueSearch({ query: `EXAMPLE-${stamp}`, brand: "ExampleBrand", category: "storage" }, { discoveryProviders: [provider], persistRoot: root, inspect: false });
+      const job = await queueSearch({ query: `EXAMPLE-${stamp}`, brand: "ExampleBrand", category: "storage" }, { discoveryProviders: [provider], persistRoot: root, inspect: false });
       const result = await waitForJob(job.jobId);
       expect(result?.candidates).toHaveLength(0);
       expect(result?.domainProposals).toHaveLength(1);
@@ -41,9 +45,67 @@ describe("C5 governed domain proposals", () => {
       expect(approved.status).toBe("trusted");
       const registry = JSON.parse(await readFile(registryPath, "utf8"));
       expect(loadOfficialRegistry(registry).brands.find((entry: { brand: string }) => entry.brand === "ASUS")?.domains).toContain("specs.asus-example.com");
+      expect((await stat(registryPath)).mode & 0o777).toBe(0o600);
+      expect((await stat(path.join(root, "data/catalog/official-domains.overlay.json"))).mode & 0o777).toBe(0o600);
+      expect((await stat(path.join(root, "data/catalog"))).mode & 0o777).toBe(0o700);
       await rollbackDomainApproval({ persistRoot: root });
       const restored = JSON.parse(await readFile(registryPath, "utf8"));
       expect(restored.brands.find((entry: { brand: string }) => entry.brand === "ASUS").domains).not.toContain("specs.asus-example.com");
+      const overlay = JSON.parse(await readFile(path.join(root, "data/catalog/official-domains.overlay.json"), "utf8"));
+      expect(overlay.brands.find((entry: { brand: string }) => entry.brand === "ASUS")).toBeUndefined();
+      expect(registryForUrl(new URL("https://specs.asus-example.com/board"))).toBeNull();
+      expect((await decideDomainProposal(proposal.proposalId, "approved", proposal.inputHash, { persistRoot: root })).status).toBe("trusted");
+      expect(registryForUrl(new URL("https://specs.asus-example.com/board"))?.brand).toBe("ASUS");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("persists every approval in the seed + overlay repository and reloads them after restart", async () => {
+    const { root, registryPath } = await tempRegistryRoot();
+    const overlayPath = path.join(root, "data/catalog/official-domains.overlay.json");
+    try {
+      const suffix = Date.now();
+      const firstDomain = `first-${suffix}.fixture.example.org`;
+      const secondDomain = `second-${suffix}.fixture.example.net`;
+      const first = await createDomainProposal({ brand: "First Runtime Brand", url: `https://${firstDomain}/item`, provider: "fixture" }, { persistRoot: root });
+      const second = await createDomainProposal({ brand: "Second Runtime Brand", url: `https://${secondDomain}/item`, provider: "fixture" }, { persistRoot: root });
+      await decideDomainProposal(first.proposalId, "approved", first.inputHash, { persistRoot: root });
+      await decideDomainProposal(second.proposalId, "approved", second.inputHash, { persistRoot: root });
+
+      const overlay = JSON.parse(await readFile(overlayPath, "utf8"));
+      expect(overlay.brands.map((entry: { brand: string }) => entry.brand)).toEqual(expect.arrayContaining(["First Runtime Brand", "Second Runtime Brand"]));
+      const repository = await loadOfficialRegistryRepository({ overlayPath });
+      expect(registryForUrl(new URL(`https://${firstDomain}/item`), repository)?.brand).toBe("First Runtime Brand");
+      expect(registryForUrl(new URL(`https://${secondDomain}/item`), repository)?.brand).toBe("Second Runtime Brand");
+      expect(loadOfficialRegistry(JSON.parse(await readFile(registryPath, "utf8"))).version).toBe(repository.version);
+
+      activateOfficialRegistry(loadOfficialRegistry(JSON.parse(await readFile(new URL("../data/catalog/official-domains.json", import.meta.url), "utf8"))));
+      expect(registryForUrl(new URL(`https://${firstDomain}/item`))).toBeNull();
+      await activateOfficialRegistryRepository({ overlayPath });
+      expect(registryForUrl(new URL(`https://${firstDomain}/item`))?.brand).toBe("First Runtime Brand");
+      expect(registryForUrl(new URL(`https://${secondDomain}/item`))?.brand).toBe("Second Runtime Brand");
+
+      await rollbackDomainApproval({ persistRoot: root });
+      expect(registryForUrl(new URL(`https://${firstDomain}/item`))?.brand).toBe("First Runtime Brand");
+      expect(registryForUrl(new URL(`https://${secondDomain}/item`))).toBeNull();
+      const rolledBackOverlay = JSON.parse(await readFile(overlayPath, "utf8"));
+      expect(rolledBackOverlay.brands.map((entry: { brand: string }) => entry.brand)).toContain("First Runtime Brand");
+      expect(rolledBackOverlay.brands.map((entry: { brand: string }) => entry.brand)).not.toContain("Second Runtime Brand");
+      const rolledBackRegistry = loadOfficialRegistry(JSON.parse(await readFile(registryPath, "utf8")));
+      expect(registryForUrl(new URL(`https://${firstDomain}/item`), rolledBackRegistry)?.brand).toBe("First Runtime Brand");
+      expect(registryForUrl(new URL(`https://${secondDomain}/item`), rolledBackRegistry)).toBeNull();
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("refuses rollback when either materialized registry file has a newer write", async () => {
+    const { root, registryPath } = await tempRegistryRoot();
+    try {
+      const domain = `newer-${Date.now()}.fixture.example.org`;
+      const proposal = await createDomainProposal({ brand: "Newer Write Fixture", url: `https://${domain}/item`, provider: "fixture" }, { persistRoot: root });
+      await decideDomainProposal(proposal.proposalId, "approved", proposal.inputHash, { persistRoot: root });
+      const registry = JSON.parse(await readFile(registryPath, "utf8"));
+      await writeFile(registryPath, `${JSON.stringify({ ...registry, updatedAt: "2026-08-27T23:59:59.000Z" }, null, 2)}\n`);
+      await expect(rollbackDomainApproval({ persistRoot: root })).rejects.toThrow(/newer write/);
+      expect(JSON.parse(await readFile(registryPath, "utf8")).updatedAt).toBe("2026-08-27T23:59:59.000Z");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

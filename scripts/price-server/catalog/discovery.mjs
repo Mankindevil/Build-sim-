@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { assertDiscoveryResult } from "./contracts.mjs";
-import { OFFICIAL_DOMAIN_REGISTRY, OFFICIAL_REGISTRY_VERSION, registryForBrand } from "./registry.mjs";
+import { activeOfficialRegistry, registryForBrand } from "./registry.mjs";
 import { validateOfficialUrl } from "./security.mjs";
 
 const bundledCatalog = createRequire(import.meta.url)("../../../data/skus/catalog.json");
@@ -19,8 +19,8 @@ export function discoveredPageHint(rawUrl) {
   return "candidate";
 }
 
-export function canonicalizeDiscoveredUrl(raw) {
-  const url = validateOfficialUrl(raw);
+export function canonicalizeDiscoveredUrl(raw, registry) {
+  const url = validateOfficialUrl(raw, registry === undefined ? {} : { registry });
   url.hash = "";
   if ((url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80")) url.port = "";
   return url.toString();
@@ -47,8 +47,8 @@ export class CatalogCacheDiscoveryProvider {
 
 export class RegistrySearchDiscoveryProvider {
   id = "registry-search";
-  async discover({ query }) {
-    const entry = registryForBrand(query.brand);
+  async discover({ query, registry = undefined }) {
+    const entry = registry === undefined ? registryForBrand(query.brand) : registryForBrand(query.brand, registry);
     if (!entry?.search || entry.trustStatus !== "trusted") return [];
     return [{
       url: entry.search.urlTemplate.replace("{query}", encodeURIComponent(query.raw)),
@@ -62,8 +62,9 @@ export class RegistrySearchDiscoveryProvider {
 
 export class MsiProductDiscoveryProvider {
   id = "msi-product-pattern";
-  async discover({ query, limit }) {
-    if (registryForBrand(query.brand)?.brand !== "MSI" || query.category !== "gpu") return [];
+  async discover({ query, limit, registry = undefined }) {
+    const entry = registry === undefined ? registryForBrand(query.brand) : registryForBrand(query.brand, registry);
+    if (entry?.brand !== "MSI" || query.category !== "gpu") return [];
     const text = String(query.raw ?? "").normalize("NFKC");
     const chip = text.match(/\b(RTX|GTX)\s*([0-9]{3,4})(?:\s*(Ti|SUPER))?/i);
     const ventus = text.match(/\bVENTUS\s*([23]X)\b/i);
@@ -97,24 +98,26 @@ export class CatalogDiscoveryRegistry {
   ids() { return this.providers.map((provider) => provider.id); }
 }
 
-export function allowedDomainsForQuery(query, registry = OFFICIAL_DOMAIN_REGISTRY) {
-  const brand = registryForBrand(query.brand, registry);
+export function allowedDomainsForQuery(query, registry) {
+  const resolvedRegistry = registry ?? activeOfficialRegistry();
+  const brand = registryForBrand(query.brand, resolvedRegistry);
   if (brand?.trustStatus === "trusted") return [...brand.domains];
   return [];
 }
 
 /** @param {{query:any, catalog?:any, providers?:Array<any>, limit?:number, signal?:AbortSignal, registry?:any}} options */
-export async function discoverOfficialUrls({ query, catalog = bundledCatalog, providers, limit = 10, signal = new AbortController().signal, registry = OFFICIAL_DOMAIN_REGISTRY }) {
+export async function discoverOfficialUrls({ query, catalog = bundledCatalog, providers, limit = 10, signal = new AbortController().signal, registry }) {
+  const resolvedRegistry = registry ?? activeOfficialRegistry();
   const selected = providers ?? [new CatalogCacheDiscoveryProvider(catalog), new RegistrySearchDiscoveryProvider()];
   const providerRegistry = new CatalogDiscoveryRegistry(selected);
-  const allowedDomains = allowedDomainsForQuery(query, registry);
+  const allowedDomains = allowedDomainsForQuery(query, resolvedRegistry);
   const warnings = allowedDomains.length ? [] : ["品牌未识别或未进入可信域名表；已跳过跨品牌官网搜索"];
   const proposals = [];
   const byCanonical = new Map();
   for (const provider of providerRegistry.providers) {
     let results;
     try {
-      results = await provider.discover({ query, allowedDomains, limit, signal });
+      results = await provider.discover({ query, allowedDomains, limit, signal, registry: resolvedRegistry });
       if (!Array.isArray(results)) throw new Error("provider result must be an array");
     } catch (error) {
       warnings.push(`${provider.id}: ${safeText(error?.message ?? error)}`);
@@ -123,7 +126,7 @@ export async function discoverOfficialUrls({ query, catalog = bundledCatalog, pr
     for (const raw of results) {
       try {
         const result = assertDiscoveryResult({ ...raw, provider: provider.id });
-        const url = canonicalizeDiscoveredUrl(result.url);
+        const url = canonicalizeDiscoveredUrl(result.url, resolvedRegistry);
         const pageHint = discoveredPageHint(url);
         if (provider.id !== "catalog-cache" && provider.id !== "registry-search" && pageHint !== "candidate") {
           warnings.push(`${provider.id}: skipped ${pageHint} page: ${url}`);
@@ -133,7 +136,7 @@ export async function discoverOfficialUrls({ query, catalog = bundledCatalog, pr
       } catch (error) {
         try {
           const proposedUrl = new URL(raw?.url);
-          if (proposedUrl.protocol === "https:" && !registry.brands.some((entry) => entry.domains.some((domain) => proposedUrl.hostname === domain || proposedUrl.hostname.endsWith(`.${domain}`)))) {
+          if (proposedUrl.protocol === "https:" && !resolvedRegistry.brands.some((entry) => entry.domains.some((domain) => proposedUrl.hostname === domain || proposedUrl.hostname.endsWith(`.${domain}`)))) {
             proposals.push({ brand: query.brand, domain: proposedUrl.hostname.toLocaleLowerCase(), url: proposedUrl.toString(), title: safeText(raw?.title), snippet: safeText(raw?.snippet), provider: provider.id, retrievedAt: raw?.retrievedAt });
           }
         } catch { /* malformed discovery values are warnings only */ }
@@ -143,5 +146,5 @@ export async function discoverOfficialUrls({ query, catalog = bundledCatalog, pr
     }
     if (byCanonical.size >= limit) break;
   }
-  return { providerIds: providerRegistry.ids(), registryVersion: registry.version ?? OFFICIAL_REGISTRY_VERSION, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, candidates: [...byCanonical.values()], proposals, warnings };
+  return { providerIds: providerRegistry.ids(), registryVersion: resolvedRegistry.version, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, candidates: [...byCanonical.values()], proposals, warnings };
 }

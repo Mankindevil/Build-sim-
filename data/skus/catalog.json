@@ -21,15 +21,13 @@
       },
       "price": {
         "currency": "CNY",
-        "paid": 629,
         "asOf": "2026-08-19",
         "listingUrl": "https://www.jonsbo.com/en/products/N6Black.html",
-        "note": "User transaction. MSRP / current JD-PDD / historical low: unknown",
+        "note": "MSRP / current JD-PDD / historical low: unknown",
         "historicalLowEvidence": "unknown",
         "currentEvidence": "unknown"
       },
       "tags": [
-        "owned",
         "baseline"
       ],
       "appearance": {
@@ -61,15 +59,13 @@
       ],
       "price": {
         "currency": "CNY",
-        "paid": 2799,
         "asOf": "2026-08-19",
         "listingUrl": "https://www.asus.com/us/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/",
-        "note": "User transaction. MSRP / current / historical low: unknown",
+        "note": "MSRP / current / historical low: unknown",
         "historicalLowEvidence": "unknown",
         "currentEvidence": "unknown"
       },
       "tags": [
-        "owned",
         "baseline"
       ],
       "attrs": {
@@ -111,16 +107,14 @@
       },
       "price": {
         "currency": "CNY",
-        "paid": 1380,
         "asOf": "2026-08-19",
         "msrp": null,
         "listingUrl": "https://www.intel.co.jp/content/www/jp/ja/products/sku/236784/intel-core-i5-processor-14500-24m-cache-up-to-5-00-ghz/specifications.html",
-        "note": "User paid CNY. Intel tray/box USD list is not China retail MSRP. JD/PDD current & historical: unknown",
+        "note": "Intel tray/box USD list is not China retail MSRP. JD/PDD current & historical: unknown",
         "historicalLowEvidence": "unknown",
         "currentEvidence": "unknown"
       },
       "tags": [
-        "owned",
         "baseline"
       ],
       "attrs": {
@@ -171,7 +165,7 @@
         "historicalLow": null,
         "asOf": "2026-08-26",
         "listingUrl": "https://seasonic.com/product/focus-plus-gold/",
-        "note": "已停产旧款；当前价格与历史低价 unknown，成交价应来自用户交易档案。",
+        "note": "已停产旧款；当前价格与历史低价 unknown。",
         "historicalLowEvidence": "unknown",
         "currentEvidence": "unknown"
       },
@@ -193,7 +187,7 @@
         "atx12vVersion": "2.4",
         "peripheralSockets": 4,
         "peripheralSocketsEvidence": "inferred",
-        "peripheralSocketsNote": "用户实物确认 4 个 Peripheral/SATA 模组座；官方旧款线材表同时列出 3 根 SATA 与 1 根 Molex 外围线。",
+        "peripheralSocketsNote": "Peripheral/SATA 模组座数量需按具体实例观察；官方旧款线材表列出 3 根 SATA 与 1 根 Molex 外围线。",
         "peripheralSocketsSourceUrl": "https://seasonic.com/product/focus-plus-gold/"
       },
       "appearance": {
@@ -211,7 +205,7 @@
         ],
         "total": null,
         "evidence": "inferred",
-        "source": "用户实物确认 4 座，并由 Seasonic 官方旧款 850W 线材清单交叉核对。",
+        "source": "Seasonic 官方旧款 850W 线材清单；面板数量需按具体实例观察。",
         "sourceUrl": "https://seasonic.com/product/focus-plus-gold/"
       }
     },
@@ -254,7 +248,7 @@
         "historicalLow": null,
         "asOf": "2026-08-20",
         "listingUrl": "https://seasonic.com/focus-gx-atx-3-1/",
-        "note": "V1 planning band ¥899–999 from PDD multi-SKU screenshots — not locked as auditable current. historicalLow unknown",
+        "note": "CNY current and historical low are not locked as auditable observations.",
         "historicalLowEvidence": "unknown",
         "currentEvidence": "unknown"
       },
@@ -456,8 +450,7 @@
         "evidence": "official",
         "leadEvidence": "official",
         "sourceUrl": "https://www.corsair.com/ww/en/p/psu/cp-9020284-na/sf-series-sf750-fully-modular-80-plus-platinum-sfx-power-supply-cp-9020284-na",
-        "note": "官方线材表：1×SATA(4 直头) + 1×SATA(4 弯头) + 1×PATA(3 头)。SATA 两根独立线，Molex 只有一根。 用户 PDD 商品页规格图（SF 系列同一张）同样只画出 x1 Peripheral 4-pin。",
-        "crossCheck": "public/assets/reference/corsair-sf-cable-spec-pdd.png"
+        "note": "官方线材表：1×SATA(4 直头) + 1×SATA(4 弯头) + 1×PATA(3 头)。SATA 两根独立线，Molex 只有一根。"
       },
       "price": {
         "currency": "CNY",
@@ -566,15 +559,14 @@
         "evidence": "official",
         "leadEvidence": "official",
         "sourceUrl": "https://www.corsair.com/us/en/explorer/diy-builder/power-supply-units/sf750sf850sf1000-platinum-atx-31-everything-you-need-to-know/",
-        "note": "官方线材表与 SF750 同源：1×SATA(4 直头) + 1×SATA(4 弯头) + 1×PATA(3 头)，PCIe 增至 4 根。Molex 仍只有一根线。用户 PDD 商品页规格图佐证。",
-        "crossCheck": "public/assets/reference/corsair-sf-cable-spec-pdd.png"
+        "note": "官方线材表与 SF750 同源：1×SATA(4 直头) + 1×SATA(4 弯头) + 1×PATA(3 头)，PCIe 增至 4 根。Molex 仍只有一根线。"
       },
       "price": {
         "currency": "CNY",
         "current": null,
         "historicalLow": null,
         "asOf": "2026-08-21",
-        "note": "用户 PDD 截图 2026-08-21 见「限量价 ¥1329 / 最后5件」，属拼团限时价且非常规成交价，未锁为 audited current。",
+        "note": "当前价格与历史低价未知；需要新的合规报价观察。",
         "historicalLowEvidence": "unknown",
         "currentEvidence": "unknown"
       },
@@ -1126,7 +1118,6 @@
       },
       "price": {
         "currency": "CNY",
-        "paid": 0,
         "historicalLowEvidence": "unknown",
         "currentEvidence": "unknown"
       },
@@ -1568,7 +1559,7 @@
       "category": "storage",
       "brand": "Samsung",
       "model": "980 PRO",
-      "name": "Samsung 980 PRO (owned ×2)",
+      "name": "Samsung 980 PRO",
       "dims": {
         "evidence": "official",
         "note": "M.2 2280"
@@ -1578,15 +1569,13 @@
       },
       "price": {
         "currency": "CNY",
-        "paid": 0,
         "asOf": "2026-08-19",
         "listingUrl": "https://www.samsung.com/us/memory-storage/nvme-ssd/980-pro-pcie-4-0-nvme-ssd-1tb-sku-mz-v8p1t0b-am/",
-        "note": "User already owns two sticks; capacity per stick per label. paid shown as 0 (sunk)",
+        "note": "Capacity per stick is variant-sensitive; verify from the physical label.",
         "historicalLowEvidence": "unknown",
         "currentEvidence": "unknown"
       },
       "tags": [
-        "owned",
         "nvme",
         "m2"
       ],

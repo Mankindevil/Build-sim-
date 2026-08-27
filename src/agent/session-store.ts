@@ -1,8 +1,15 @@
 import type { AgentSession } from "./contracts";
 
+export interface AgentRuntimeWriteFence {
+  runtimeGeneration: number;
+  jobId?: string;
+  expectedRevision?: number;
+  leaseToken?: string;
+}
+
 export interface AgentSessionStore {
   get(sessionId: string): Promise<AgentSession | null>;
-  put(session: AgentSession): Promise<void>;
+  put(session: AgentSession, fence?: AgentRuntimeWriteFence): Promise<void>;
 }
 export class MemoryAgentSessionStore implements AgentSessionStore {
   private readonly sessions = new Map<string, AgentSession>();
@@ -12,7 +19,7 @@ export class MemoryAgentSessionStore implements AgentSessionStore {
     return session ? structuredClone(session) : null;
   }
 
-  async put(session: AgentSession): Promise<void> {
+  async put(session: AgentSession, _fence?: AgentRuntimeWriteFence): Promise<void> {
     this.sessions.set(session.id, structuredClone(session));
   }
 }

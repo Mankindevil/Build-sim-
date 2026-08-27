@@ -1,31 +1,33 @@
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
-import { mkdir, readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { normalizeModelQuery } from "./normalize.mjs";
-import { registryForBrand, registryForUrl } from "./registry.mjs";
+import { activeOfficialRegistry, registryForBrand, registryForUrl } from "./registry.mjs";
 import { fetchOfficial } from "./fetch.mjs";
 import { validateOfficialUrl } from "./security.mjs";
 import { extractOfficialHtml, extractOfficialPdf } from "./extract.mjs";
 import { adapterForUrl } from "./adapters.mjs";
-import { atomicWriteJson } from "../store.mjs";
 import { discoverOfficialUrls, QUERY_NORMALIZATION_VERSION } from "./discovery.mjs";
-import { OFFICIAL_REGISTRY_VERSION } from "./registry.mjs";
 import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./discovery.mjs";
 import { createSearXngDiscoveryProvider } from "./searxng-discovery.mjs";
 import { loadEnv } from "../env.mjs";
 import { createDomainProposal } from "./domain-proposals.mjs";
 import { catalogCandidateInputHash } from "./contracts.mjs";
 import { assessCatalogIdentity, classifyOfficialPage, summarizeCatalogCandidates } from "./identity.mjs";
+import { CatalogSearchJobRepository } from "./catalog-job-repository.mjs";
 
 const catalogJson = createRequire(import.meta.url)("../../../data/skus/catalog.json");
 
-const jobs = new Map();
 const contentCache = new Map();
 const fetchCache = new Map();
-const standaloneCandidates = new Map();
-const STANDALONE_CANDIDATE_TTL_MS = 30 * 60_000;
-const STANDALONE_CANDIDATE_LIMIT = 128;
+// These two maps only route a request to the durable store / retain a
+// read-through copy for legacy synchronous catalog-write callers. Neither map
+// carries lifecycle state or makes an unpersisted candidate authoritative.
+const repositoriesByRoot = new Map();
+const jobRootHints = new Map();
+const candidateReadThroughCache = new Map();
+const activeRuns = new Set();
 
 function sha256(value) { return crypto.createHash("sha256").update(value).digest("hex"); }
 function now() { return new Date().toISOString(); }
@@ -49,31 +51,55 @@ function fetchAudit(fetchResult) {
   };
 }
 
-function retainStandaloneCandidate(candidate) {
-  const timestamp = Date.now();
-  for (const [id, entry] of standaloneCandidates) {
-    if (entry.expiresAt <= timestamp) standaloneCandidates.delete(id);
-  }
-  standaloneCandidates.delete(candidate.candidateId);
-  standaloneCandidates.set(candidate.candidateId, { candidate: structuredClone(candidate), expiresAt: timestamp + STANDALONE_CANDIDATE_TTL_MS });
-  while (standaloneCandidates.size > STANDALONE_CANDIDATE_LIMIT) {
-    standaloneCandidates.delete(standaloneCandidates.keys().next().value);
-  }
+function persistRootFor(options = {}) {
+  if (options.coordinator?.root) return path.resolve(options.coordinator.root);
+  // The production server always passes its explicit runtime root. The private
+  // temporary fallback keeps standalone tooling/tests durable without trying to
+  // mutate the read-only release artifact.
+  return path.resolve(options.persistRoot ?? process.env.CATALOG_JOB_PERSIST_ROOT ?? path.join(os.tmpdir(), `build-sim-catalog-service-${process.pid}`));
 }
 
-async function persistJob(job, root) {
-  if (!root) return;
-  const dir = path.join(root, "data/catalog-candidates");
-  await mkdir(dir, { recursive: true });
-  const file = path.join(dir, `${new Date().toISOString().slice(0, 10)}.json`);
-  const existing = await readFile(file, "utf8").then((text) => JSON.parse(text)).catch(() => ({ schemaVersion: "1.0.0", jobs: [] }));
-  const jobsById = new Map((existing.jobs ?? []).map((entry) => [entry.jobId, entry]));
-  jobsById.set(job.jobId, job);
-  await atomicWriteJson(file, { ...existing, jobs: [...jobsById.values()] }, {
-    operation: "catalog-search-candidates",
-    rollbackRoot: path.join(root, "data/audit/rollback"),
-    manifestPath: path.join(root, "data/audit/rollback/catalog-search-manifest.json"),
-  });
+async function repositoryFor(options = {}) {
+  const persistRoot = persistRootFor(options);
+  let repository = repositoriesByRoot.get(persistRoot);
+  if (!repository) {
+    // A normal process restart must recover durable work, not quarantine it.
+    // Restore quarantine is enabled only by the explicit backup-restore path.
+    repository = new CatalogSearchJobRepository({ persistRoot, ...(options.coordinator ? { coordinator: options.coordinator } : {}) });
+    await repository.initialize("price-server");
+    repositoriesByRoot.set(persistRoot, repository);
+  }
+  return { repository, persistRoot };
+}
+
+async function hydrateJob(record, repository) {
+  const candidateIds = record.catalog.candidateIds ?? [];
+  const candidates = await Promise.all(candidateIds.map((id) => repository.findCandidate(id)));
+  for (const candidate of candidates.filter(Boolean)) candidateReadThroughCache.set(candidate.candidateId, structuredClone(candidate));
+  const lifecycle = record.job.status;
+  const status = lifecycle === "succeeded" ? record.catalog.status : lifecycle;
+  return {
+    jobId: record.job.jobId,
+    idempotencyKey: record.job.idempotencyKey,
+    status,
+    backgroundStatus: lifecycle,
+    stage: record.catalog.stage,
+    query: record.catalog.query,
+    ...(record.catalog.requestContext ? { requestContext: record.catalog.requestContext } : {}),
+    limit: record.catalog.limit,
+    candidates,
+    warnings: record.catalog.warnings ?? [],
+    errors: record.catalog.errors ?? [],
+    ...(record.catalog.discovery ? { discovery: record.catalog.discovery } : {}),
+    ...(record.catalog.domainProposals ? { domainProposals: record.catalog.domainProposals } : {}),
+    ...(record.catalog.summary ? { summary: record.catalog.summary } : {}),
+    revision: record.job.revision,
+    runtimeGeneration: record.job.runtimeGeneration,
+    ...(record.job.progress ? { progress: record.job.progress } : {}),
+    createdAt: record.job.createdAt,
+    updatedAt: record.job.updatedAt,
+    persisted: ["succeeded", "failed", "cancelled", "dead_letter"].includes(lifecycle),
+  };
 }
 
 function catalogCandidates(query, catalog) {
@@ -276,25 +302,27 @@ async function inspectCandidate(candidate, {
   }
 }
 
-async function processJob(job, options) {
-  job.status = "running";
-  job.stage = "discover";
-  await persistJob(job, options.persistRoot);
+async function processClaim(claim, repository, options) {
+  let record = claim.record;
+  let fence = claim.fence;
+  let job = record.catalog;
+  const registry = options.registry ?? activeOfficialRegistry();
+  if (job.registryVersion !== registry.version) throw new Error("official registry changed after catalog job creation; enqueue a new search");
   let discoveryProviders = options.discoveryProviders;
   if (!discoveryProviders) {
     const env = await loadEnv();
     const mode = env.CATALOG_DISCOVERY_PROVIDER || "registry";
     if (!["registry", "searxng"].includes(mode)) throw new Error("CATALOG_DISCOVERY_PROVIDER must be registry or searxng");
-    discoveryProviders = [new CatalogCacheDiscoveryProvider(options.catalog ?? catalogJson), ...(mode === "searxng" ? [createSearXngDiscoveryProvider(env, { cacheRoot: options.discoveryCacheRoot })] : []), new RegistrySearchDiscoveryProvider()];
+    discoveryProviders = [new CatalogCacheDiscoveryProvider(options.catalog ?? catalogJson), ...(mode === "searxng" ? [createSearXngDiscoveryProvider(env, { cacheRoot: options.discoveryCacheRoot, registryVersion: registry.version })] : []), new RegistrySearchDiscoveryProvider()];
   }
-  const discovery = await discoverOfficialUrls({ query: job.query, catalog: options.catalog ?? catalogJson, providers: discoveryProviders, limit: job.limit, signal: options.signal });
-  job.discovery = { providerIds: discovery.providerIds, registryVersion: discovery.registryVersion, queryNormalizationVersion: discovery.queryNormalizationVersion };
-  job.warnings.push(...discovery.warnings);
-  job.domainProposals = [];
+  const discovery = await discoverOfficialUrls({ query: job.query, catalog: options.catalog ?? catalogJson, providers: discoveryProviders, limit: job.limit, signal: options.signal, registry });
+  const discoveryMetadata = { providerIds: discovery.providerIds, registryVersion: discovery.registryVersion, queryNormalizationVersion: discovery.queryNormalizationVersion };
+  const warnings = [...(job.warnings ?? []), ...discovery.warnings];
+  const domainProposals = [];
   if (options.persistRoot) {
     for (const proposal of discovery.proposals ?? []) {
-      const saved = await createDomainProposal({ ...proposal, brand: proposal.brand ?? job.query.brand, mpn: job.query.mpn, reason: "discovery candidate domain is not governed" }, { persistRoot: options.persistRoot });
-      if (saved?.proposalId) job.domainProposals.push(saved);
+      const saved = await createDomainProposal({ ...proposal, brand: proposal.brand ?? job.query.brand, mpn: job.query.mpn, reason: "discovery candidate domain is not governed" }, options.coordinator ? { coordinator: options.coordinator, generationAware: true } : { persistRoot: options.persistRoot });
+      if (saved?.proposalId) domainProposals.push(saved);
     }
   }
   const candidates = discovery.candidates.map((entry) => ({
@@ -313,8 +341,13 @@ async function processJob(job, options) {
     match: { score: entry.matchScore ?? 0.3, kind: entry.matchKind ?? "weak", reasons: [entry.provider === "catalog-cache" ? "catalog candidate" : "discovery candidate; inspection required"] },
     extraction: { status: "not-run", fieldsFound: 0, fieldsMissing: 0 },
   }));
-  job.stage = "fetch";
-  job.candidates = [];
+  ({ record, fence } = await repository.checkpoint(record.job.jobId, fence, {
+    stage: "fetch", discovery: discoveryMetadata, warnings, domainProposals,
+    progress: { stage: "fetch", completed: 0, total: Math.min(job.limit, candidates.length) },
+  }));
+  claim.fence = fence;
+  job = record.catalog;
+  const inspectedCandidates = [];
   let browserFallbackUses = 0;
   const browserFallbackLimit = Math.min(3, Math.max(0, Number(options.browserFallbackLimit ?? 2)));
   for (const candidate of candidates.slice(0, job.limit)) {
@@ -322,58 +355,103 @@ async function processJob(job, options) {
     const candidateOptions = options.browserFallback && browserFallbackUses < browserFallbackLimit
       ? { ...options, browserFallback: async (url) => { browserFallbackUses += 1; return options.browserFallback(url); } }
       : { ...options, browserFallback: undefined };
-    job.candidates.push(inspectable && options.inspect !== false ? await inspectCandidate(candidate, candidateOptions) : candidate);
+    inspectedCandidates.push(inspectable && options.inspect !== false ? await inspectCandidate(candidate, candidateOptions) : candidate);
+    ({ record, fence } = await repository.checkpoint(record.job.jobId, fence, {
+      stage: "fetch", progress: { stage: "fetch", completed: inspectedCandidates.length, total: Math.min(job.limit, candidates.length) },
+    }));
+    claim.fence = fence;
   }
-  job.stage = "score";
-  job.summary = summarizeCatalogCandidates(job.candidates, discovery.candidates.length);
-  job.status = job.candidates.some((candidate) => candidate.extraction.status === "partial" || candidate.extraction.status === "failed") ? "partial" : "completed";
-  if (job.candidates.length === 0) job.warnings.push("未找到官方候选；第三方价格发现请使用 /api/price/collect，不混入官方参数");
-  await persistJob(job, options.persistRoot);
-  job.persisted = true;
-  return job;
+  const status = inspectedCandidates.some((candidate) => candidate.extraction.status === "partial" || candidate.extraction.status === "failed") ? "partial" : "completed";
+  const finalWarnings = inspectedCandidates.length === 0 ? [...warnings, "未找到官方候选；第三方价格发现请使用 /api/price/collect，不混入官方参数"] : warnings;
+  const completed = await repository.complete(record.job.jobId, fence, {
+    status, stage: "score", candidates: inspectedCandidates, warnings: finalWarnings,
+    discovery: discoveryMetadata, domainProposals, summary: summarizeCatalogCandidates(inspectedCandidates, discovery.candidates.length),
+    progress: { stage: "score", completed: inspectedCandidates.length, total: Math.min(job.limit, candidates.length) },
+  });
+  return hydrateJob(completed, repository);
 }
 
-export function queueSearch(body, options = {}) {
+async function runOne(repository, options) {
+  const runKey = `${options.persistRoot ?? "default"}:${options.jobId ?? "next"}`;
+  if (activeRuns.has(runKey)) return null;
+  activeRuns.add(runKey);
+  try {
+    const claim = await repository.claimNext(`catalog-price-worker-${process.pid}`, { jobId: options.jobId });
+    if (!claim) return null;
+    try {
+      return await processClaim(claim, repository, options);
+    } catch (error) {
+      await repository.fail(claim.record.job.jobId, claim.fence, error).catch(() => undefined);
+      throw error;
+    }
+  } finally {
+    activeRuns.delete(runKey);
+  }
+}
+
+export async function queueSearch(body, options = {}) {
   const query = normalizeModelQuery(String(body.query ?? ""), { brand: body.brand, category: body.category, locale: body.locale ?? "zh-CN" });
   const limit = Math.min(20, Math.max(1, Number(body.limit ?? 10)));
   const providerIds = (options.discoveryProviders ?? []).map((provider) => provider.id);
   const requestId = typeof body.requestId === "string" && /^[A-Za-z0-9._:-]{8,160}$/.test(body.requestId) ? body.requestId : null;
   const trigger = body.trigger === "user-confirmed-review" ? body.trigger : null;
   const requestContext = trigger ? { source: "transaction-import", trigger, ...(requestId ? { requestId } : {}) } : null;
-  const key = JSON.stringify({ query, officialOnly: body.officialOnly !== false, limit, providerIds: providerIds.length ? providerIds : ["catalog-cache", "registry-search"], registryVersion: OFFICIAL_REGISTRY_VERSION, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, ...(requestId ? { requestId } : {}) });
+  const registry = options.registry ?? activeOfficialRegistry();
+  const key = JSON.stringify({ query, officialOnly: body.officialOnly !== false, limit, providerIds: providerIds.length ? providerIds : ["catalog-cache", "registry-search"], registryVersion: registry.version, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, ...(requestId ? { requestId } : {}) });
   const id = jobId(key);
-  const existing = jobs.get(id);
-  if (existing) return existing;
-  const job = { jobId: id, idempotencyKey: sha256(key), status: "queued", stage: "normalize", query, ...(requestContext ? { requestContext } : {}), limit, candidates: [], warnings: [], errors: [], createdAt: now(), updatedAt: now() };
-  jobs.set(id, job);
-  void processJob(job, options).catch(async (error) => { job.status = "failed"; job.stage = "score"; job.errors.push(error?.message ?? String(error)); job.updatedAt = now(); await persistJob(job, options.persistRoot); job.persisted = true; });
-  return job;
+  const { repository, persistRoot } = await repositoryFor(options);
+  const created = await repository.create({
+    jobId: id, idempotencyKey: sha256(key), inputHash: sha256(key), payloadRef: `catalog-search-payload:${sha256(key)}`,
+    catalog: { query, ...(requestContext ? { requestContext } : {}), limit, registryVersion: registry.version },
+  });
+  jobRootHints.set(id, persistRoot);
+  if (created.created || ["queued"].includes(created.record.job.status)) {
+    void runOne(repository, { ...options, registry, persistRoot, jobId: id }).catch(() => undefined);
+  }
+  return hydrateJob(created.record, repository);
 }
 
-export async function waitForJob(jobId, timeoutMs = 5_000) {
+export async function waitForJob(jobId, timeoutMs = 5_000, options = {}) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const job = jobs.get(jobId);
-    if (!job || (["completed", "partial", "failed"].includes(job.status) && job.persisted === true)) return job;
+    const job = await getJob(jobId, options);
+    if (!job || job.status === "paused_restore_review" || (["completed", "partial", "failed"].includes(job.status) && job.persisted === true)) return job;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  return jobs.get(jobId);
+  return getJob(jobId, options);
 }
 
-export function getJob(jobId) { return jobs.get(jobId) ?? null; }
+export async function getJob(jobId, options = {}) {
+  const root = options.persistRoot ? persistRootFor(options) : (jobRootHints.get(jobId) ?? persistRootFor(options));
+  const repository = repositoriesByRoot.get(root) ?? new CatalogSearchJobRepository({ persistRoot: root, ...(options.coordinator ? { coordinator: options.coordinator } : {}) });
+  if (!repositoriesByRoot.has(root)) {
+    await repository.initialize("price-server");
+    repositoriesByRoot.set(root, repository);
+  }
+  try { return await hydrateJob(await repository.get(jobId), repository); } catch (error) {
+    if (error?.code === "not_found") return null;
+    throw error;
+  }
+}
 
+/** Compatibility cache only. Durable callers must use findCandidateDurable. */
 export function findCandidate(candidateId) {
-  for (const job of jobs.values()) {
-    const candidate = (job.candidates ?? []).find((entry) => entry.candidateId === candidateId);
-    if (candidate) return candidate;
-  }
-  const standalone = standaloneCandidates.get(candidateId);
-  if (!standalone) return null;
-  if (standalone.expiresAt <= Date.now()) {
-    standaloneCandidates.delete(candidateId);
-    return null;
-  }
-  return structuredClone(standalone.candidate);
+  const candidate = candidateReadThroughCache.get(candidateId);
+  return candidate ? structuredClone(candidate) : null;
+}
+
+export async function findCandidateDurable(candidateId, options = {}) {
+  const { repository } = await repositoryFor(options);
+  const candidate = await repository.findCandidate(candidateId);
+  if (candidate) candidateReadThroughCache.set(candidateId, structuredClone(candidate));
+  return candidate;
+}
+
+/** Preload the non-authoritative compatibility cache from durable records on server boot. */
+export async function initializeCatalogJobs(options = {}) {
+  const { repository } = await repositoryFor(options);
+  for (const candidate of await repository.listCandidates()) candidateReadThroughCache.set(candidate.candidateId, structuredClone(candidate));
+  return repository;
 }
 
 export async function inspectUrl(body, options = {}) {
@@ -381,6 +459,8 @@ export async function inspectUrl(body, options = {}) {
   const query = normalizeModelQuery(String(body.query ?? new URL(url).pathname), { brand: body.brand, category: body.category, locale: body.locale ?? "zh-CN" });
   const candidate = { candidateId: candidateId(`${query.raw}|${url}`), query, ...(query.brand ? { brand: query.brand } : {}), ...(query.model ? { model: query.model } : {}), ...(query.mpn ? { mpn: query.mpn } : {}), ...(query.category ? { category: query.category } : {}), title: query.raw, url, source: { kind: "official", domain: domainOf(url), retrievedAt: now() }, match: { score: 0, kind: "weak", reasons: ["inspection pending"] }, extraction: { status: "not-run", fieldsFound: 0, fieldsMissing: 0 } };
   const inspected = await inspectCandidate(candidate, options);
-  retainStandaloneCandidate(inspected);
+  const { repository } = await repositoryFor(options);
+  await repository.storeCandidate(inspected);
+  candidateReadThroughCache.set(inspected.candidateId, structuredClone(inspected));
   return inspected;
 }

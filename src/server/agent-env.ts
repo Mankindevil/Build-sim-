@@ -67,9 +67,13 @@ export interface AgentRuntimeConfig {
   maxMessageChars: number;
   limits: AgentRunLimits;
   sessionRoot: string;
+  sessionRootConfigured: boolean;
   auditRoot: string;
+  auditRootConfigured: boolean;
+  runtimeRoot: string;
   skillsRoot: string;
   catalogPersistRoot: string;
+  priceRuntimeRoot: string;
   deepseek: DeepSeekAgentConfig;
   claude: ClaudeAgentConfig;
 }
@@ -90,6 +94,9 @@ export function parseAgentRuntimeConfig(env: Record<string, string | undefined>)
   const claude = parseClaudeAgentConfig(env, enabled);
   const port = intEnv(env.AGENT_SERVER_PORT, 5175, "AGENT_SERVER_PORT", 1, 65_535);
   const pricePort = intEnv(env.PRICE_SERVER_PORT, 5174, "PRICE_SERVER_PORT", 1, 65_535);
+  const runtimeRoot = path.resolve(env.RUNTIME_ROOT || env.PRICE_RUNTIME_ROOT || "runtime");
+  const configuredSessionRoot = path.resolve(env.AGENT_SESSION_ROOT || "data/agent/sessions");
+  const configuredAuditRoot = path.resolve(env.AGENT_AUDIT_ROOT || "data/agent/audit");
   return {
     enabled,
     port,
@@ -102,10 +109,20 @@ export function parseAgentRuntimeConfig(env: Record<string, string | undefined>)
       maxRepeatedToolCalls: intEnv(env.AGENT_MAX_REPEATED_TOOL_CALLS, 2, "AGENT_MAX_REPEATED_TOOL_CALLS", 1, 8),
       maxToolResultBytes: intEnv(env.AGENT_MAX_TOOL_RESULT_BYTES, 160_000, "AGENT_MAX_TOOL_RESULT_BYTES", 1_024, 1_000_000),
     },
-    sessionRoot: path.resolve(env.AGENT_SESSION_ROOT || "data/agent/sessions"),
-    auditRoot: path.resolve(env.AGENT_AUDIT_ROOT || "data/agent/audit"),
+    sessionRoot: configuredSessionRoot,
+    // The old child-root values in deployed env files are aliases for the
+    // coordinator layout. Only a genuinely isolated root opts out.
+    sessionRootConfigured: Boolean(env.AGENT_SESSION_ROOT)
+      && configuredSessionRoot !== path.join(runtimeRoot, "agent", "sessions")
+      && configuredSessionRoot !== path.resolve("data/agent/sessions"),
+    auditRoot: configuredAuditRoot,
+    auditRootConfigured: Boolean(env.AGENT_AUDIT_ROOT)
+      && configuredAuditRoot !== path.join(runtimeRoot, "agent", "audit")
+      && configuredAuditRoot !== path.resolve("data/agent/audit"),
+    runtimeRoot,
     skillsRoot: path.resolve(env.BUILD_SIM_SKILLS_ROOT || "skills"),
     catalogPersistRoot: path.resolve(env.CATALOG_PERSIST_ROOT || "runtime"),
+    priceRuntimeRoot: path.resolve(env.PRICE_RUNTIME_ROOT || env.RUNTIME_ROOT || "runtime"),
     deepseek: { ...deepseek, enabled: enabled && deepseek.enabled },
     claude,
   };

@@ -104,7 +104,8 @@ export function validateOfficialUrl(raw, options = {}) {
   if (!allowHttp && url.protocol !== "https:") throw new Error("official URL must use https");
   if (allowHttp && !["https:", "http:"].includes(url.protocol)) throw new Error("official URL protocol is not allowed");
   if (isPrivateHostname(url.hostname)) throw new Error("private or local URL is blocked");
-  if (registryForUrl(url, registry)?.trustStatus !== "trusted") throw new Error("official domain is not trusted or allowlisted");
+  const registryEntry = registry === undefined ? registryForUrl(url) : registryForUrl(url, registry);
+  if (registryEntry?.trustStatus !== "trusted") throw new Error("official domain is not trusted or allowlisted");
   url.username = "";
   url.password = "";
   url.hash = "";

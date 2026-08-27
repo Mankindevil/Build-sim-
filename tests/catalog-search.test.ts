@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +15,7 @@ import { transactionCatalogSearchRequest } from "../scripts/price-server/transac
 import { acceptOfficial, confirmDraft, createDraft, rejectDraft, rollbackCatalogAcceptance } from "../scripts/price-server/catalog/write.mjs";
 import { catalogCandidateInputHash } from "../scripts/price-server/catalog/contracts.mjs";
 import { runAutoEnrichment } from "../scripts/price-server/catalog/auto-enrichment.mjs";
+import { CatalogSearchJobRepository } from "../scripts/price-server/catalog/catalog-job-repository.mjs";
 import type { SkuCatalog } from "../src/sku/types";
 
 const fixturePath = new URL("./fixtures/catalog/official-product.html", import.meta.url);
@@ -173,8 +174,8 @@ describe("G3 catalog search job", () => {
       }],
     };
     const options = { catalog, inspect: true, fetcher: async () => fetchResult };
-    const first = queueSearch({ query: "EX-BOARD-X1", category: "motherboard", officialOnly: true }, options);
-    const second = queueSearch({ query: "EX-BOARD-X1", category: "motherboard", officialOnly: true }, options);
+    const first = await queueSearch({ query: "EX-BOARD-X1", category: "motherboard", officialOnly: true }, options);
+    const second = await queueSearch({ query: "EX-BOARD-X1", category: "motherboard", officialOnly: true }, options);
     expect(second.jobId).toBe(first.jobId);
     const completed = await waitForJob(first.jobId);
     expect(completed?.status).toBe("partial");
@@ -185,8 +186,8 @@ describe("G3 catalog search job", () => {
     expect(completed?.candidates[0]?.canonicalUrl).toBe("https://www.asus.com/example");
     expect(completed?.candidates[0]?.fields?.some((field: { field: string }) => field.field === "dims.lengthMm")).toBe(true);
     expect(completed?.candidates[0]?.priceCandidates).toBeUndefined();
-    expect(getJob(first.jobId)?.idempotencyKey).toBe(first.idempotencyKey);
-    const retried = queueSearch({ query: "EX-BOARD-X1", category: "motherboard", officialOnly: true, requestId: "transaction-review-retry-0001", trigger: "user-confirmed-review" }, options);
+    expect((await getJob(first.jobId))?.idempotencyKey).toBe(first.idempotencyKey);
+    const retried = await queueSearch({ query: "EX-BOARD-X1", category: "motherboard", officialOnly: true, requestId: "transaction-review-retry-0001", trigger: "user-confirmed-review" }, options);
     expect(retried.jobId).not.toBe(first.jobId);
     expect(retried.requestContext).toEqual({ source: "transaction-import", trigger: "user-confirmed-review", requestId: "transaction-review-retry-0001" });
     await waitForJob(retried.jobId);
@@ -210,8 +211,8 @@ describe("G3 catalog search job", () => {
       limit: 8,
     });
     const provider = { id: `transaction-route-${Date.now()}`, discover: async () => [] };
-    const first = queueSearch(firstBody, { discoveryProviders: [provider], inspect: false });
-    const second = queueSearch(transactionCatalogSearchRequest({ ...firstBody, requestId: "transaction-route-review-0002" }), { discoveryProviders: [provider], inspect: false });
+    const first = await queueSearch(firstBody, { discoveryProviders: [provider], inspect: false });
+    const second = await queueSearch(transactionCatalogSearchRequest({ ...firstBody, requestId: "transaction-route-review-0002" }), { discoveryProviders: [provider], inspect: false });
     expect(first.jobId).not.toBe(second.jobId);
     expect(first.requestContext).toEqual({ source: "transaction-import", trigger: "user-confirmed-review", requestId: "transaction-route-review-0001" });
     expect(second.requestContext).toEqual({ source: "transaction-import", trigger: "user-confirmed-review", requestId: "transaction-route-review-0002" });
@@ -232,7 +233,7 @@ describe("G3 catalog search job", () => {
       body,
       contentHash: crypto.createHash("sha256").update(body).digest("hex"),
     };
-    const queued = queueSearch({
+    const queued = await queueSearch({
       query: "MSI RTX 3070 Ventus 2X OC 8GB GDDR6",
       category: "gpu",
       requestId: "transaction-msi-capacity-regression",
@@ -276,17 +277,19 @@ describe("G3 catalog search job", () => {
     }
   });
 
-  it("persists candidates atomically with an audit manifest", async () => {
+  it("persists candidates as checksummed private runtime records", async () => {
     const persistRoot = await mkdtemp(path.join(os.tmpdir(), "build-sim-g3-"));
     try {
       const query = `EX-PERSIST-${Date.now()}`;
-      const job = queueSearch({ query, officialOnly: true }, { persistRoot, inspect: false });
+      const job = await queueSearch({ query, officialOnly: true }, { persistRoot, inspect: false });
       await waitForJob(job.jobId);
-      const date = new Date().toISOString().slice(0, 10);
-      const saved = JSON.parse(await readFile(path.join(persistRoot, "data/catalog-candidates", `${date}.json`), "utf8"));
-      const manifest = JSON.parse(await readFile(path.join(persistRoot, "data/audit/rollback/catalog-search-manifest.json"), "utf8"));
-      expect(saved.jobs.some((entry: { jobId: string }) => entry.jobId === job.jobId)).toBe(true);
-      expect(manifest.entries.some((entry: { operation: string }) => entry.operation === "catalog-search-candidates")).toBe(true);
+      const repository = new CatalogSearchJobRepository({ persistRoot });
+      await repository.initialize("test");
+      const state = await repository.coordinator.readState();
+      const recordPath = path.join(repository.coordinator.activeRoot(state), "jobs", "catalog-search", "records", `${job.jobId}.json`);
+      const saved = JSON.parse(await readFile(recordPath, "utf8"));
+      expect(saved).toMatchObject({ schemaVersion: "catalog-search-store-envelope-v1", kind: "catalog-search-job" });
+      expect((await stat(recordPath)).mode & 0o777).toBe(0o600);
     } finally {
       await rm(persistRoot, { recursive: true, force: true });
     }
@@ -336,7 +339,7 @@ describe("G4 official adapters and audited writes", () => {
     const body = await readFile(new URL("./fixtures/catalog/asus-product.html", import.meta.url), "utf8");
     const result = { ...fetchResult, finalUrl: "https://www.asus.com/example/g4", body, contentHash: crypto.createHash("sha256").update(body).digest("hex") };
     const catalog: SkuCatalog = { schemaVersion: "2.0.0", updatedAt: "2026-08-23", skus: [{ id: "existing.other", category: "motherboard", brand: "Other", model: "Other", name: "Other", mpn: "OTHER-1", dims: { evidence: "unknown" }, power: { evidence: "unknown" }, price: { currency: "CNY", historicalLowEvidence: "unknown", currentEvidence: "unknown" } }] };
-    const job = queueSearch({ query: "ASUS-G4-001", category: "motherboard", brand: "ASUS", officialOnly: true }, {
+    const job = await queueSearch({ query: "ASUS-G4-001", category: "motherboard", brand: "ASUS", officialOnly: true }, {
       catalog: { ...catalog, skus: [{ ...catalog.skus[0], id: "asus.g4", brand: "ASUS", model: "Pro WS G4", name: "ASUS Pro WS G4", mpn: "ASUS-G4-001", appearance: { page: result.finalUrl } }] },
       fetcher: async () => result,
       inspect: true,
@@ -387,7 +390,7 @@ describe("G4 official adapters and audited writes", () => {
   it("does not let partial/conflicting search candidates enter the governed draft path", async () => {
     const conflictHtml = await readFile(new URL("./fixtures/catalog/conflict-product.html", import.meta.url), "utf8");
     const conflictResult = { ...fetchResult, finalUrl: "https://www.asus.com/conflict", body: conflictHtml, contentHash: "g4-conflict" };
-    const job = queueSearch({ query: "EX-CONFLICT-1", category: "motherboard", brand: "ASUS", officialOnly: true }, {
+    const job = await queueSearch({ query: "EX-CONFLICT-1", category: "motherboard", brand: "ASUS", officialOnly: true }, {
       catalog: { schemaVersion: "2.0.0", updatedAt: "2026-08-23", skus: [{ id: "conflict.example", category: "motherboard", brand: "ASUS", model: "Conflict", name: "Conflict", mpn: "EX-CONFLICT-1", dims: { evidence: "manual" }, power: { evidence: "manual" }, price: { currency: "CNY", historicalLowEvidence: "unknown", currentEvidence: "unknown" }, appearance: { page: conflictResult.finalUrl } }] },
       fetcher: async () => conflictResult,
       inspect: true,

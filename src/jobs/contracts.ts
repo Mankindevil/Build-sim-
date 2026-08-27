@@ -117,8 +117,8 @@ export function restoreBackgroundJob(job: BackgroundJob, runtimeGeneration: numb
 }
 
 const JOB_TRANSITIONS: Readonly<Record<BackgroundJobStatus, readonly BackgroundJobStatus[]>> = Object.freeze({
-  queued: ["running", "cancelled"],
-  running: ["waiting_user", "waiting_retry", "paused_offline", "succeeded", "failed", "cancelled", "dead_letter"],
+  queued: ["running", "paused_offline", "cancelled"],
+  running: ["running", "waiting_user", "waiting_retry", "paused_offline", "succeeded", "failed", "cancelled", "dead_letter"],
   waiting_user: ["queued", "cancelled"],
   waiting_retry: ["queued", "cancelled", "dead_letter"],
   paused_offline: ["queued", "cancelled"],

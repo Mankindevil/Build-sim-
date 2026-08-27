@@ -1,8 +1,7 @@
 import { AGENT_CONTRACT_VERSION, type AgentToolContext, type AgentToolResult, type AgentToolSpec, type JsonSchema } from "../agent/contracts";
-import { loadBundledPriceSnapshot } from "../sku/catalog";
 import type { BuildConfig, BuildSelection } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
-import { evaluateBuildAuthoritatively, loadAuthoritativeCatalog } from "./evaluation-service";
+import { evaluateBuildAuthoritatively, loadAuthoritativeCatalog, loadAuthoritativePriceSnapshot } from "./evaluation-service";
 import { PLAN_PATCH_PATHS, type BuildIntent, type PlanPatchOperation } from "../plans/contracts";
 import { previewPlanProposal } from "../plans/proposals";
 
@@ -416,10 +415,10 @@ const getPriceSnapshot: AgentToolSpec = {
   maxResultBytes: 60_000,
   inputSchema: schema({ skuIds: { type: "array", items: { type: "string", minLength: 1, maxLength: 120 }, maxItems: 32, uniqueItems: true } }),
   async execute(input) {
-    const snapshot = loadBundledPriceSnapshot();
+    const snapshot = loadAuthoritativePriceSnapshot();
     const requested = new Set((input as { skuIds?: string[] }).skuIds ?? []);
     const quotes = requested.size ? snapshot.quotes.filter((quote) => requested.has(quote.skuId)) : snapshot.quotes;
-    return { ok: true, content: { schemaVersion: snapshot.schemaVersion, asOf: snapshot.asOf, note: snapshot.note, quotes }, provenance: ["data/prices/latest.json", `snapshot:${snapshot.asOf}`] };
+    return { ok: true, content: { schemaVersion: snapshot.schemaVersion, asOf: snapshot.asOf, note: snapshot.note, quotes }, provenance: ["runtime/prices/latest.json", `snapshot:${snapshot.snapshotId ?? snapshot.asOf}`] };
   },
 };
 

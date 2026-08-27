@@ -1,4 +1,11 @@
-import type { SkuCatalog, SkuRecord } from "./types";
+import {
+  assertProductCatalogOverlay,
+  assertProductCatalogSeed,
+  type ProductCatalogOverlay,
+  type ProductCatalogSeed,
+  type SkuCatalog,
+  type SkuRecord,
+} from "./types";
 import catalogJson from "../../data/skus/catalog.json";
 import latestPrices from "../../data/prices/latest.json";
 import { applyPriceSnapshot, snapshotSummary } from "../price/merge";
@@ -33,6 +40,28 @@ export function loadBundledCatalog(): SkuCatalog {
 /** Raw catalog JSON without price overlay (tests / refresh tooling). */
 export function loadRawCatalog(): SkuCatalog {
   return catalogJson as SkuCatalog;
+}
+
+/** Convert the bundled catalog into the explicit immutable product seed view. */
+export function loadProductCatalogSeed(): ProductCatalogSeed {
+  const catalog = structuredClone(loadRawCatalog()) as ProductCatalogSeed;
+  const seed = { ...catalog, seedKind: "product_catalog_seed" as const, seedVersion: catalog.catalogVersion ?? catalog.schemaVersion };
+  assertProductCatalogSeed(seed);
+  return seed;
+}
+
+/** Validate and merge the product-only runtime overlay with its seed. */
+export function mergeProductCatalogOverlay(seed: ProductCatalogSeed, overlay: ProductCatalogOverlay): ProductCatalogSeed {
+  assertProductCatalogSeed(seed);
+  assertProductCatalogOverlay(overlay);
+  if (overlay.baseCatalogVersion !== (seed.catalogVersion ?? seed.schemaVersion)) throw new Error("product catalog overlay base version mismatch");
+  const accepted = new Set(overlay.acceptedSkuIds);
+  const overlayById = new Map(overlay.skus.map((sku) => [sku.id, sku]));
+  const skus = seed.skus.map((sku) => accepted.has(sku.id) ? structuredClone(overlayById.get(sku.id)!) : structuredClone(sku));
+  for (const sku of overlay.skus) if (accepted.has(sku.id) && !seed.skus.some((base) => base.id === sku.id)) skus.push(structuredClone(sku));
+  const merged = { ...seed, catalogVersion: overlay.overlayVersion, updatedAt: overlay.updatedAt, skus };
+  assertProductCatalogSeed(merged);
+  return merged;
 }
 
 export function bundledPriceSummary(): { asOf: string | null; auditedCount: number } {

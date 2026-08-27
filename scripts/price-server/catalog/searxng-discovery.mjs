@@ -3,7 +3,7 @@ import path from "node:path";
 import { mkdir } from "node:fs/promises";
 import { intEnv } from "../env.mjs";
 import { atomicWriteJson, readJson } from "../store.mjs";
-import { OFFICIAL_REGISTRY_VERSION } from "./registry.mjs";
+import { activeOfficialRegistry } from "./registry.mjs";
 
 const memoryCache = new Map();
 const MAX_QUERY_CHARS = 240;
@@ -55,7 +55,7 @@ export class SearXngDiscoveryProvider {
     this.cacheTtlMs = options.cacheTtlMs ?? 86_400_000;
     this.cacheRoot = options.cacheRoot;
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.registryVersion = options.registryVersion ?? OFFICIAL_REGISTRY_VERSION;
+    this.registryVersion = options.registryVersion ?? activeOfficialRegistry().version;
     this.maxResponseBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES;
     this.concurrency = Math.min(4, Math.max(1, options.concurrency ?? 3));
   }

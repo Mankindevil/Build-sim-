@@ -12,9 +12,10 @@
  * Never writes audited prices into latest.json — promote via manual-quotes.json.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { initializePriceRepository, resolvePriceRepositoryPaths, writePriceSearchArtifacts } from "../price-server/store.mjs";
 import {
   buildSearchQueries,
   buildSkuSearchLinks,
@@ -24,9 +25,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "../..");
-const pricesDir = path.join(root, "data/prices");
 const catalogPath = path.join(root, "data/skus/catalog.json");
-const candidatesDir = path.join(pricesDir, "candidates");
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -86,6 +85,8 @@ async function tryFetchPriceHint(url, channel) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const priceRepository = resolvePriceRepositoryPaths({ runtimeRoot: process.env.PRICE_RUNTIME_ROOT ?? process.env.RUNTIME_ROOT ?? path.join(root, "runtime") });
+  await initializePriceRepository(priceRepository);
   const catalog = await loadJson(catalogPath);
   const targets = catalog.skus.filter((s) => {
     if (!s.mpn) return false;
@@ -167,15 +168,11 @@ async function main() {
     candidates,
   };
 
-  await mkdir(candidatesDir, { recursive: true });
-  const outPath = path.join(candidatesDir, `${args.asOf}.json`);
-  await writeFile(outPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-
   const mdLines = [
     `# Price search ${args.asOf}`,
     "",
     "料号搜索词用于京东 / 亚马逊 / 官网；淘宝拼多多按料号搜不到内存，用规格搜索词。",
-    "打开链接 → 核对标题的品牌 / 容量 / 频率 / ECC 与料号 → 价格填入 `data/prices/manual-quotes.json`（`evidence: \"audited\"`）→ `npm run price:refresh`。",
+    "打开链接 → 核对标题的品牌 / 容量 / 频率 / ECC 与料号 → 价格写入 active runtime 的 manual quote 流程 → `npm run price:refresh`。",
     "",
   ];
   for (const row of report) {
@@ -190,8 +187,7 @@ async function main() {
     }
     mdLines.push("");
   }
-  const mdPath = path.join(candidatesDir, `${args.asOf}.md`);
-  await writeFile(mdPath, `${mdLines.join("\n")}\n`, "utf8");
+  const { jsonFile: outPath, markdownFile: mdPath } = await writePriceSearchArtifacts(payload, `${mdLines.join("\n")}\n`, args.asOf, priceRepository);
 
   console.log(`Wrote ${candidates.length} candidate row(s) → ${path.relative(root, outPath)}`);
   console.log(`Cheat sheet → ${path.relative(root, mdPath)}`);

@@ -38,7 +38,7 @@ describe("C7 official enrichment delivery closure", () => {
 
     try {
       await writeFile(catalogPath, `${JSON.stringify(bundledCatalog)}\n`, "utf8");
-      const job = queueSearch({ query: "ASUS-G4-001", brand: "ASUS", category: "motherboard", officialOnly: true }, { discoveryProviders: [provider], fetcher, inspect: true });
+      const job = await queueSearch({ query: "ASUS-G4-001", brand: "ASUS", category: "motherboard", officialOnly: true }, { discoveryProviders: [provider], fetcher, inspect: true });
       const completed = await waitForJob(job.jobId);
       const candidate = completed?.candidates[0];
       expect(completed).toMatchObject({ status: "completed", discovery: { providerIds: [provider.id] } });

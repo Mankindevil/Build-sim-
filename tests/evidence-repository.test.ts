@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileEvidenceRepository } from "../src/evidence/repository.mjs";
+import { RuntimeCoordinator } from "../src/runtime/coordinator.mjs";
 
 const roots: string[] = [];
 
@@ -68,6 +69,13 @@ describe("content-addressed evidence repository", () => {
     expect((await stat(blob)).mode & 0o777).toBe(0o600);
     expect((await stat(documentFile)).mode & 0o777).toBe(0o600);
     expect((await stat(captureFile)).mode & 0o777).toBe(0o600);
+    const rollbackFile = path.join(root, ".rollback", "manifest.json");
+    expect((await stat(path.dirname(documentFile))).mode & 0o777).toBe(0o700);
+    expect((await stat(rollbackFile)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(await readFile(rollbackFile, "utf8")).entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ operation: "replace-index", status: "committed" }),
+    ]));
+    await writeFile(`${documentFile}.interrupted.tmp`, "partial", { mode: 0o600 });
 
     const restarted = new FileEvidenceRepository({ root });
     await expect(restarted.getDocument(imported.document.id)).resolves.toEqual(imported.document);
@@ -203,5 +211,31 @@ describe("content-addressed evidence repository", () => {
     envelope.payload.title = "tampered title";
     await writeFile(documentFile, JSON.stringify(envelope));
     await expect(repository.getDocument(imported.document.id)).rejects.toMatchObject({ code: "corrupt_data" });
+  });
+
+  it("follows active-generation pointer switches and maintenance fencing across restart", async () => {
+    const runtimeRoot = await temporaryRoot();
+    const now = () => "2026-08-27T00:00:00.000Z";
+    const coordinator = new RuntimeCoordinator({ root: runtimeRoot, now });
+    const repository = new FileEvidenceRepository({ coordinator, now });
+    const first = await repository.importBuffer(Buffer.from("generation-one"), metadata("https://support.example.com/generation-one"));
+    const lease = await coordinator.acquireMaintenanceLease("restore", { ttlMs: 60_000 });
+    await expect(repository.importBuffer(Buffer.from("fenced"), metadata("https://support.example.com/fenced"))).rejects.toThrow(/maintenance lease/);
+    const staging = await coordinator.createStagingGeneration(lease.token);
+    const staged = new FileEvidenceRepository({ root: path.join(staging, "evidence"), now });
+    const second = await staged.importBuffer(Buffer.from("generation-two"), metadata("https://support.example.com/generation-two"));
+    await coordinator.activateStagingGeneration(staging, 1, lease.token);
+    await coordinator.releaseMaintenanceLease(lease.token);
+    await expect(repository.getDocument(first.document.id)).resolves.toBeNull();
+    await expect(repository.getDocument(second.document.id)).resolves.toEqual(second.document);
+    await expect(new FileEvidenceRepository({ coordinator, now }).getCapture(second.capture.id)).resolves.toEqual(second.capture);
+  });
+
+  it("fails closed instead of silently ignoring legacy top-level evidence", async () => {
+    const runtimeRoot = await temporaryRoot();
+    const now = () => "2026-08-27T00:00:00.000Z";
+    await new FileEvidenceRepository({ root: path.join(runtimeRoot, "evidence"), now }).importBuffer(Buffer.from("legacy"), metadata("https://support.example.com/legacy"));
+    const repository = new FileEvidenceRepository({ coordinator: new RuntimeCoordinator({ root: runtimeRoot, now }), runtimeRoot, now });
+    await expect(repository.getLatestCaptureForUrl("https://support.example.com/legacy")).rejects.toThrow(/migration dry-run/);
   });
 });

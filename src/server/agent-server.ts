@@ -11,6 +11,9 @@ import { FileAgentRunAuditStore } from "./file-audit-store";
 import { loadAgentRuntimeConfig } from "./agent-env";
 import { createBuildSimTools } from "./domain-tools";
 import type { AgentSession, AgentWriteApprovalEnvelope } from "../agent/contracts";
+import { RuntimeCoordinator } from "../runtime/coordinator.mjs";
+import { FileJobRepository } from "../jobs/repository";
+import { FileArtifactRepository } from "../artifacts/repository.mjs";
 
 const HOST = "127.0.0.1";
 const MAX_BODY_BYTES = 1_000_000;
@@ -119,7 +122,7 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
   }
   const runMatch = url.pathname.match(/^\/api\/agent\/runs\/([^/]+)$/);
   if (req.method === "GET" && runMatch?.[1]) {
-    send(res, 200, runtime.getRun(decodeURIComponent(runMatch[1])));
+    send(res, 200, await runtime.getRunState(decodeURIComponent(runMatch[1])));
     return true;
   }
   const auditMatch = url.pathname.match(/^\/api\/agent\/runs\/([^/]+)\/audit$/);
@@ -155,7 +158,7 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
       unsubscribe();
       res.end();
     };
-    const snapshot = runtime.getRun(runId);
+    const snapshot = await runtime.getRunState(runId);
     snapshot.events.forEach((event, index) => {
       if (index <= afterIndex || ended) return;
       res.write(`id: ${index}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
@@ -164,11 +167,18 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
       end();
       return true;
     }
-    unsubscribe = runtime.subscribe(runId, (event, index) => {
-      if (ended) return;
-      res.write(`id: ${index}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-      if (event.type === "run_status" && terminal(event.status)) end();
-    }, snapshot.events.length - 1);
+    try {
+      unsubscribe = runtime.subscribe(runId, (event, index) => {
+        if (ended) return;
+        res.write(`id: ${index}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        if (event.type === "run_status" && terminal(event.status)) end();
+      }, snapshot.events.length - 1);
+    } catch (error) {
+      if (!(error instanceof AgentRuntimeError && error.code === "run_not_found")) throw error;
+      // A previous process still owns an unexpired lease. The durable status
+      // endpoint remains authoritative; the browser reconnects after retry.
+      end();
+    }
     req.on("close", end);
     return true;
   }
@@ -194,7 +204,9 @@ const isMain = process.argv[1] !== undefined && fileURLToPath(import.meta.url) =
 if (isMain) {
   void (async () => {
     const config = await loadAgentRuntimeConfig();
-    configureAuthoritativeCatalogRepository({ persistRoot: config.catalogPersistRoot });
+    const coordinator = new RuntimeCoordinator({ root: config.runtimeRoot });
+    await coordinator.initialize();
+    configureAuthoritativeCatalogRepository({ runtimeRoot: config.runtimeRoot, generationAware: true, priceRuntimeRoot: config.priceRuntimeRoot });
     const toolRegistry = new AgentToolRegistry(createBuildSimTools({ priceServiceUrl: config.priceServiceUrl }));
     const adapters = [
       new DeepSeekProviderAdapter(config.deepseek),
@@ -202,7 +214,7 @@ if (isMain) {
     ];
     const runtime = new AgentRuntime(
       adapters,
-      new FileAgentSessionStore(config.sessionRoot),
+      new FileAgentSessionStore(config.sessionRootConfigured ? config.sessionRoot : { coordinator }),
       {
         maxTokens: config.deepseek.maxTokens,
         temperature: config.deepseek.temperature,
@@ -212,11 +224,16 @@ if (isMain) {
         },
         toolRegistry,
         skillLoader: new AgentSkillLoader(config.skillsRoot, toolRegistry),
-        auditStore: new FileAgentRunAuditStore(config.auditRoot),
+        auditStore: new FileAgentRunAuditStore(config.auditRootConfigured ? config.auditRoot : { coordinator }),
         limits: config.limits,
         maxMessageChars: config.maxMessageChars,
+        durableJobs: {
+          repository: new FileJobRepository({ coordinator, leaseDurationMs: 180_000 }),
+          artifacts: new FileArtifactRepository({ coordinator }),
+        },
       },
     );
+    await runtime.initializeDurableRuns();
     createAgentServer({ runtime, maxBodyBytes: config.requestBodyMaxBytes }).listen(config.port, HOST, () => {
       console.log(`Build Sim Agent server listening on http://${HOST}:${config.port} (${config.enabled ? "enabled" : "disabled"})`);
     });

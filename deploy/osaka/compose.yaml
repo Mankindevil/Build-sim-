@@ -12,6 +12,20 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+
+  runtime-preflight:
+    build:
+      context: ../..
+      dockerfile: deploy/osaka/Dockerfile
+      target: runtime
+    image: build-sim-runtime:osaka
+    command: ["node", "scripts/migrations/migrate-runtime-v1.mjs", "--preflight", "--runtime-root", "/app/runtime"]
+    volumes:
+      - ../../runtime:/app/runtime
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
   price:
     build:
       context: ../..
@@ -24,6 +38,9 @@ services:
       - ../../.env.remote
     volumes:
       - ../../runtime:/app/runtime
+    depends_on:
+      runtime-preflight:
+        condition: service_completed_successfully
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -37,7 +54,8 @@ services:
     volumes:
       - ../../runtime:/app/runtime
     depends_on:
-      - price
+      price:
+        condition: service_started
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -50,6 +68,9 @@ services:
       - ../../.env.remote
     volumes:
       - ../../runtime:/app/runtime
+    depends_on:
+      runtime-preflight:
+        condition: service_completed_successfully
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

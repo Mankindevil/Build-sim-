@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readdir, readFile, rename } from "node:fs/promises";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { open, readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
 import type { BuildConfig } from "../config/types";
 import {
@@ -32,6 +33,8 @@ import { createImmutablePlanVersion } from "./version";
 import { assertValidConfig } from "../config/validate";
 import { loadBundledCatalog } from "../sku/catalog";
 import type { SkuCatalog } from "../sku/types";
+import { RuntimeCoordinator } from "../runtime/coordinator.mjs";
+import { atomicWriteFile, atomicWriteJson, confined, ensurePrivateDirectory, sha256Bytes, withDirectoryLock } from "../runtime/fs.mjs";
 
 const STORED_SCHEMA_VERSION = "1.0.0" as const;
 const SAFE_ID = /^[a-z0-9][a-z0-9-]{7,79}$/;
@@ -55,14 +58,20 @@ type EvidenceBindingIdentity = Pick<PlanEvidenceBinding,
 
 export interface FilePlanRepositoryOptions {
   root?: string;
+  runtimeRoot?: string;
+  coordinator?: RuntimeCoordinator;
   now?: () => string;
   id?: (prefix: "plan" | "version") => string;
   /** Production supplies the merged runtime catalog; tests/defaults use the bundled facts. */
   getCatalog?: () => SkuCatalog;
+  getCatalogAtRoot?: (activeRoot: string) => SkuCatalog;
   /** Authoritative immutable evidence metadata lookup; required only for binding operations. */
   getEvidenceDocument?: EvidenceDocumentLookup;
   /** Authoritative capture lookup; required when a binding includes captureId. */
   getEvidenceCapture?: EvidenceCaptureLookup;
+  /** Root-aware lookups used while the shared coordinator barrier is held. */
+  getEvidenceDocumentAtRoot?: (activeRoot: string, documentId: string) => ReturnType<EvidenceDocumentLookup>;
+  getEvidenceCaptureAtRoot?: (activeRoot: string, captureId: string) => ReturnType<EvidenceCaptureLookup>;
 }
 
 function checksum(value: unknown): string {
@@ -75,20 +84,61 @@ function clone<T>(value: T): T {
 
 export class FilePlanRepository implements PlanRepository {
   private readonly root: string;
+  private readonly coordinator: RuntimeCoordinator | undefined;
   private readonly now: () => string;
   private readonly id: (prefix: "plan" | "version") => string;
   private readonly getCatalog: () => SkuCatalog;
+  private readonly getCatalogAtRoot: FilePlanRepositoryOptions["getCatalogAtRoot"];
   private readonly getEvidenceDocument: EvidenceDocumentLookup;
   private readonly getEvidenceCapture: EvidenceCaptureLookup;
+  private readonly getEvidenceDocumentAtRoot: FilePlanRepositoryOptions["getEvidenceDocumentAtRoot"];
+  private readonly getEvidenceCaptureAtRoot: FilePlanRepositoryOptions["getEvidenceCaptureAtRoot"];
   private readonly queues = new Map<string, Promise<unknown>>();
+  private readonly boundary = new AsyncLocalStorage<boolean>();
 
   constructor(options: FilePlanRepositoryOptions = {}) {
-    this.root = path.resolve(options.root ?? "runtime/plans");
+    const coordinatorRoot = (options.coordinator as unknown as { root?: string } | undefined)?.root;
+    const runtimeRoot = path.resolve(options.runtimeRoot ?? coordinatorRoot ?? path.join(process.cwd(), "runtime"));
+    this.root = path.resolve(options.root ?? path.join(runtimeRoot, "plans"));
+    this.coordinator = options.root ? undefined : options.coordinator ?? new RuntimeCoordinator({ root: runtimeRoot, now: options.now });
     this.now = options.now ?? (() => new Date().toISOString());
     this.id = options.id ?? ((prefix) => `${prefix}-${randomUUID()}`);
     this.getCatalog = options.getCatalog ?? loadBundledCatalog;
+    this.getCatalogAtRoot = options.getCatalogAtRoot;
     this.getEvidenceDocument = options.getEvidenceDocument ?? (() => null);
     this.getEvidenceCapture = options.getEvidenceCapture ?? (() => null);
+    this.getEvidenceDocumentAtRoot = options.getEvidenceDocumentAtRoot;
+    this.getEvidenceCaptureAtRoot = options.getEvidenceCaptureAtRoot;
+  }
+
+  private async assertLegacyRootEmpty(): Promise<void> {
+    if (!this.coordinator) return;
+    let entries: import("node:fs").Dirent[];
+    try { entries = await readdir(this.root, { withFileTypes: true }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+    if (entries.some((entry) => !entry.name.startsWith("."))) throw new PlanRepositoryError("invalid_input", "Legacy runtime/plans contains data; run the explicit active-generation migration dry-run before startup", 409);
+  }
+
+  private atActiveRoot(activeRoot: string): FilePlanRepository {
+    return new FilePlanRepository({
+      root: confined(activeRoot, "plans"), now: this.now, id: this.id,
+      getCatalog: this.getCatalogAtRoot ? () => this.getCatalogAtRoot!(activeRoot) : this.getCatalog,
+      ...(this.getCatalogAtRoot ? { getCatalogAtRoot: this.getCatalogAtRoot } : {}),
+      getEvidenceDocument: this.getEvidenceDocumentAtRoot ? (id) => this.getEvidenceDocumentAtRoot!(activeRoot, id) : this.getEvidenceDocument,
+      getEvidenceCapture: this.getEvidenceCaptureAtRoot ? (id) => this.getEvidenceCaptureAtRoot!(activeRoot, id) : this.getEvidenceCapture,
+    });
+  }
+
+  private async publicBoundary<T>(write: boolean, coordinated: (repository: FilePlanRepository) => Promise<T>, local: () => Promise<T>): Promise<T> {
+    if (this.coordinator) {
+      await this.coordinator.initialize();
+      await this.assertLegacyRootEmpty();
+      if (write) return (await this.coordinator.withWrite(({ activeRoot }: { activeRoot: string }) => coordinated(this.atActiveRoot(activeRoot)))).result as T;
+      return (await this.coordinator.withConsistentSnapshot(({ activeRoot }: { activeRoot: string }) => coordinated(this.atActiveRoot(activeRoot)))).result as T;
+    }
+    if (this.boundary.getStore()) return local();
+    const lock = confined(this.root, ".locks", "repository-global");
+    return withDirectoryLock(lock, () => this.boundary.run(true, local));
   }
 
   /**
@@ -173,17 +223,26 @@ export class FilePlanRepository implements PlanRepository {
   }
 
   private async atomicWrite<T>(file: string, kind: StoredEnvelope<T>["kind"], payload: T): Promise<void> {
-    await mkdir(path.dirname(file), { recursive: true });
     const envelope: StoredEnvelope<T> = { schemaVersion: STORED_SCHEMA_VERSION, kind, checksum: checksum(payload), payload };
-    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-    const handle = await open(temporary, "wx", 0o600);
-    try {
-      await handle.writeFile(`${JSON.stringify(envelope, null, 2)}\n`, "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
+    const prior = await readFile(file).catch((error) => (error as NodeJS.ErrnoException).code === "ENOENT" ? null : Promise.reject(error));
+    let backupPath: string | null = null;
+    if (prior) {
+      backupPath = confined(this.root, ".rollback", `${Date.now()}-${randomUUID()}-${path.basename(file)}.bak`);
+      await atomicWriteFile(backupPath, prior);
     }
-    await rename(temporary, file);
+    const bytes = Buffer.from(`${JSON.stringify(envelope, null, 2)}\n`, "utf8");
+    const manifestFile = confined(this.root, ".rollback", "manifest.json");
+    const manifest = await readFile(manifestFile, "utf8").then((raw) => JSON.parse(raw)).catch((error) => (error as NodeJS.ErrnoException).code === "ENOENT" ? { schemaVersion: "plan-rollback-manifest-v1", entries: [] } : Promise.reject(error));
+    const eventId = randomUUID();
+    const prepared = { eventId, operation: kind, target: path.relative(this.root, file), backup: backupPath ? path.relative(this.root, backupPath) : null, previousHash: prior ? sha256Bytes(prior) : null, nextHash: sha256Bytes(bytes), status: "prepared", createdAt: this.now() };
+    await atomicWriteJson(manifestFile, { ...manifest, entries: [...(manifest.entries ?? []), prepared] });
+    await atomicWriteFile(file, bytes);
+    await atomicWriteJson(manifestFile, { ...manifest, entries: [...(manifest.entries ?? []), { ...prepared, status: "committed", committedAt: this.now() }] });
+  }
+
+  private async syncDirectory(directory: string): Promise<void> {
+    const handle = await open(directory, "r");
+    try { await handle.sync(); } finally { await handle.close(); }
   }
 
   private async readEnvelope<T>(file: string, kind: StoredEnvelope<T>["kind"]): Promise<T> {
@@ -265,6 +324,7 @@ export class FilePlanRepository implements PlanRepository {
   }
 
   async list(): Promise<BuildPlanSummary[]> {
+    return this.publicBoundary(false, (repository) => repository.list(), async () => {
     let entries;
     try {
       entries = await readdir(this.root, { withFileTypes: true });
@@ -289,13 +349,15 @@ export class FilePlanRepository implements PlanRepository {
       });
     }
     return plans.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+    });
   }
 
   async get(planId: string): Promise<BuildPlan> {
-    return clone(await this.readPlan(planId));
+    return this.publicBoundary(false, (repository) => repository.get(planId), async () => clone(await this.readPlan(planId)));
   }
 
   async create(input: CreatePlanInput): Promise<BuildPlan> {
+    return this.publicBoundary(true, (repository) => repository.create(input), async () => {
     if (!input.name.trim()) throw new PlanRepositoryError("invalid_input", "Plan name is required", 400);
     return this.serialize("create", () => this.idempotent(
       "create",
@@ -329,10 +391,11 @@ export class FilePlanRepository implements PlanRepository {
         return { value: clone(plan), result: { planId, value: clone(plan) } };
       },
     ));
+    });
   }
 
   async updateDraft(planId: string, input: UpdateDraftInput): Promise<BuildPlan> {
-    return this.serialize(planId, () => this.idempotent(
+    return this.publicBoundary(true, (repository) => repository.updateDraft(planId, input), async () => this.serialize(planId, () => this.idempotent(
       `updateDraft:${planId}`,
       input.idempotencyKey,
       input,
@@ -361,11 +424,11 @@ export class FilePlanRepository implements PlanRepository {
         await this.atomicWrite(this.planFile(planId), "plan", updated);
         return { value: clone(updated), result: { planId, value: clone(updated) } };
       },
-    ));
+    )));
   }
 
   async updateInfo(planId: string, input: UpdatePlanInfoInput): Promise<BuildPlan> {
-    return this.serialize(planId, async () => {
+    return this.publicBoundary(true, (repository) => repository.updateInfo(planId, input), async () => this.serialize(planId, async () => {
       const plan = await this.readPlan(planId);
       if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
       assertExpectedRevision(input.expectedRevision, plan.draftRevision);
@@ -390,11 +453,11 @@ export class FilePlanRepository implements PlanRepository {
       assertValidBuildPlan(updated);
       await this.atomicWrite(this.planFile(planId), "plan", updated);
       return clone(updated);
-    });
+    }));
   }
 
   async saveVersion(planId: string, input: SaveVersionInput): Promise<PlanVersion> {
-    return this.serialize(planId, () => this.idempotent(
+    return this.publicBoundary(true, (repository) => repository.saveVersion(planId, input), async () => this.serialize(planId, () => this.idempotent(
       `saveVersion:${planId}`,
       input.idempotencyKey,
       input,
@@ -432,10 +495,11 @@ export class FilePlanRepository implements PlanRepository {
         await this.atomicWrite(this.planFile(planId), "plan", updated);
         return { value: version, result: { planId, versionId, value: clone(version) } };
       },
-    ));
+    )));
   }
 
   async duplicate(planId: string, input: DuplicatePlanInput): Promise<BuildPlan> {
+    return this.publicBoundary(true, (repository) => repository.duplicate(planId, input), async () => {
     if (!input.name.trim()) throw new PlanRepositoryError("invalid_input", "Plan name is required", 400);
     return this.serialize(`duplicate:${planId}`, () => this.idempotent(
       `duplicate:${planId}`,
@@ -473,15 +537,18 @@ export class FilePlanRepository implements PlanRepository {
         return { value: saved, result: { planId: saved.id, value: clone(saved) } };
       },
     ));
+    });
   }
 
   async listEvidenceBindings(planId: string): Promise<PlanEvidenceBinding[]> {
-    const plan = await this.readPlan(planId);
-    return clone(plan.draft.evidenceBindings ?? []);
+    return this.publicBoundary(false, (repository) => repository.listEvidenceBindings(planId), async () => {
+      const plan = await this.readPlan(planId);
+      return clone(plan.draft.evidenceBindings ?? []);
+    });
   }
 
   async bindEvidence(planId: string, input: BindPlanEvidenceInput): Promise<PlanEvidenceBinding> {
-    return this.serialize(planId, () => this.idempotent(
+    return this.publicBoundary(true, (repository) => repository.bindEvidence(planId, input), async () => this.serialize(planId, () => this.idempotent(
       `bindEvidence:${planId}`,
       input.idempotencyKey,
       input,
@@ -531,10 +598,11 @@ export class FilePlanRepository implements PlanRepository {
         await this.atomicWrite(this.planFile(planId), "plan", updated);
         return { value: clone(binding), result: { planId, value: clone(binding) } };
       },
-    ));
+    )));
   }
 
   async unbindEvidence(planId: string, input: UnbindPlanEvidenceInput): Promise<void> {
+    return this.publicBoundary(true, (repository) => repository.unbindEvidence(planId, input), async () => {
     await this.serialize(planId, () => this.idempotent(
       `unbindEvidence:${planId}`,
       input.idempotencyKey,
@@ -565,34 +633,50 @@ export class FilePlanRepository implements PlanRepository {
         return { value: undefined, result: { planId } };
       },
     ));
+    });
   }
 
   async archive(planId: string): Promise<void> {
+    return this.publicBoundary(true, (repository) => repository.archive(planId), async () => {
     await this.serialize(planId, async () => {
       const plan = await this.readPlan(planId);
       if (plan.status === "archived") return;
       await this.atomicWrite(this.planFile(planId), "plan", { ...plan, status: "archived", updatedAt: this.now() });
     });
+    });
   }
 
   async restore(planId: string): Promise<void> {
+    return this.publicBoundary(true, (repository) => repository.restore(planId), async () => {
     await this.serialize(planId, async () => {
       const plan = await this.readPlan(planId);
       if (plan.status === "active") return;
       await this.atomicWrite(this.planFile(planId), "plan", { ...plan, status: "active", updatedAt: this.now() });
     });
+    });
   }
 
   async delete(planId: string): Promise<void> {
+    return this.publicBoundary(true, (repository) => repository.delete(planId), async () => {
     await this.serialize(planId, async () => {
       await this.readPlan(planId);
       const target = path.join(this.root, ".trash", `${planId}-${this.now().replace(/[^0-9]/g, "")}`);
-      await mkdir(path.dirname(target), { recursive: true });
+      await ensurePrivateDirectory(path.dirname(target));
+      const manifestFile = confined(this.root, ".rollback", "manifest.json");
+      const manifest = await readFile(manifestFile, "utf8").then((raw) => JSON.parse(raw)).catch((error) => (error as NodeJS.ErrnoException).code === "ENOENT" ? { schemaVersion: "plan-rollback-manifest-v1", entries: [] } : Promise.reject(error));
+      const eventId = randomUUID();
+      const entry = { eventId, operation: "trash-plan", target: path.relative(this.root, this.planDirectory(planId)), backup: path.relative(this.root, target), previousHash: checksum(await this.readPlan(planId)), nextHash: null, status: "moving", createdAt: this.now() };
+      await atomicWriteJson(manifestFile, { ...manifest, entries: [...(manifest.entries ?? []), entry] });
       await rename(this.planDirectory(planId), target);
+      await this.syncDirectory(this.root);
+      await this.syncDirectory(path.dirname(target));
+      await atomicWriteJson(manifestFile, { ...manifest, entries: [...(manifest.entries ?? []), { ...entry, status: "moved", movedAt: this.now() }] });
+    });
     });
   }
 
   async listVersions(planId: string): Promise<PlanVersion[]> {
+    return this.publicBoundary(false, (repository) => repository.listVersions(planId), async () => {
     await this.readPlan(planId);
     const directory = path.join(this.planDirectory(planId), "versions");
     let files: string[];
@@ -604,6 +688,7 @@ export class FilePlanRepository implements PlanRepository {
     }
     const versions = await Promise.all(files.filter((file) => file.endsWith(".json")).map((file) => this.readVersion(planId, file.slice(0, -5))));
     return versions.sort((left, right) => left.versionNumber - right.versionNumber);
+    });
   }
 }
 

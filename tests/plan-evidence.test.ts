@@ -278,4 +278,28 @@ describe("plan evidence bindings", () => {
     });
     await expect(new FileEvidenceRepository({ root: evidenceRoot }).getDocument(stored.document.id)).resolves.toEqual(stored.document);
   });
+
+  it("composes production plans and evidence under one active-generation coordinator", async () => {
+    const runtimeRoot = await mkdtemp(path.join(tmpdir(), "build-sim-workspace-runtime-")); roots.push(runtimeRoot);
+    const { repository, evidenceRepository, coordinator } = createWorkspaceRepositories({ RUNTIME_ROOT: runtimeRoot });
+    expect(coordinator).toBeDefined();
+    const stored = await evidenceRepository.importBuffer(Buffer.from("shared generation evidence"), {
+      mediaType: "application/pdf",
+      kind: "manufacturer-manual",
+      title: "Shared runtime manual",
+      productIdentities: [{ brand: "JONSBO", model: "N6", category: "case", skuId: "case.jonsbo-n6" }],
+      capture: { requestedUrl: "https://www.jonsbo.com/shared-runtime.pdf", finalUrl: "https://www.jonsbo.com/shared-runtime.pdf", retrievedAt: "2026-08-27T03:00:00.000Z", status: 200, redirects: [], officialBrand: "JONSBO", acquisitionMethod: "official-fetch" },
+    });
+    const plan = await repository.create({ name: "Shared generation plan", config: createDefaultN6Config("draft", "2026-08-27T03:00:00.000Z") });
+    await expect(repository.bindEvidence(plan.id, bindInput(stored, { idempotencyKey: "shared-generation-bind" }))).resolves.toMatchObject({ documentId: stored.document.id });
+    await expect(readFile(path.join(runtimeRoot, "generations", "1", "plans", plan.id, "plan.json"), "utf8")).resolves.toContain(stored.document.id);
+    await expect(readFile(path.join(runtimeRoot, "generations", "1", "evidence", "documents", stored.document.sha256.slice(0, 2), `${stored.document.id}.json`), "utf8")).resolves.toContain(stored.document.id);
+  });
+
+  it("fails closed on conflicting active-generation and legacy repository roots", async () => {
+    const runtimeRoot = await mkdtemp(path.join(tmpdir(), "build-sim-workspace-runtime-"));
+    const legacyPlanRoot = await mkdtemp(path.join(tmpdir(), "build-sim-workspace-legacy-plans-"));
+    roots.push(runtimeRoot, legacyPlanRoot);
+    expect(() => createWorkspaceRepositories({ RUNTIME_ROOT: runtimeRoot, PLAN_REPOSITORY_ROOT: legacyPlanRoot })).toThrow(/conflicts with legacy/);
+  });
 });

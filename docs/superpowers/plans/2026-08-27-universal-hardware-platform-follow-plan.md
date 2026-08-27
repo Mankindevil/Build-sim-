@@ -1277,7 +1277,7 @@ U0 → U1 → U2 → U3 → ┬→ U4 ─┐
 | 阶段 | 状态 | 依赖 | 核心交付 |
 |---|---|---|---|
 | U0 | 已完成 | 无 | 冻结全部首发契约、基线、通用/故障黄金夹具和 feature flags |
-| U1 | 未开始 | U0 | runtime repositories、附件/观察、durable jobs、备份 SPI 和 Doctor 骨架 |
+| U1 | 已完成 | U0 | runtime repositories、附件/观察、durable jobs、备份 SPI 和 Doctor 骨架 |
 | U2 | 未开始 | U1 | BuildConfig V3、需求、情景、逻辑布局、渐进档案和 V2 迁移 |
 | U3 | 未开始 | U2 | Fact/Claim 与用户观察图、身份 scope、冲突、更新决定和快照 |
 | U4 | 未开始 | U3 | 官网 → 第三方 → Agent 推断、附件提取和持久任务闭环 |
@@ -1445,28 +1445,28 @@ U0。
 
 ### 任务
 
-- [ ] 定义只包含产品身份和稳定 seed 的 `ProductCatalogSeed`。
-- [ ] 定义 runtime `ProductCatalogOverlay`，不再直接修改镜像内 seed 文件。
-- [ ] 从全局 SKU 删除 `paid`、owned 数量、用户成交备注和用户标签。
-- [ ] 把用户成交/订单信息迁入 plan transaction 或 plan-scoped purchase record；首发不持久化姓名、电话和收货地址。
-- [ ] 无法确定所属方案的用户数据进入 quarantine，绝不默认绑定新方案。
-- [ ] 把 facts、domain registry overlay、price observations/history/targets、snapshots、audit、evidence、attachments、observations、jobs、execution sessions、exports、backups 和 diagnostics 全部放入 `/app/runtime` 下的明确子目录。
-- [ ] 将官方域名改为“镜像 seed + runtime overlay”；所有读取走同一 repository，批准后当前进程立即可见。
-- [ ] 移除 Agent/evaluation 对静态 `latest.json` 的运行时权威依赖。
-- [ ] 修复 price service 重启或容器重建后价格数据丢失。
-- [ ] 为 repository 写入增加原子 rename、expected hash、并发锁、备份和 rollback manifest。
-- [ ] 建立 `AttachmentRepository`、plan-scoped `ObservationRepository`、`JobRepository`、`ExecutionRepository` 和 `ArtifactRepository`；blob 内容寻址，元数据/隐私类别/引用与 blob 分离。
-- [ ] 建立跨 repository 引用图和只读 consistent-snapshot/export SPI，供便携导出、完整备份、Doctor 以及未来安全 GC 共用。
-- [ ] 落地 durable job scheduler/worker 骨架：revision CAS、lease/fencing token、heartbeat、checkpoint、runtime generation、idempotency key、attempt、dependency、offline pause、restore quarantine、cancel 和 dead-letter；不允许 U4/U10 各自再建内存队列。
-- [ ] 落地 `scripts/backup/create.mjs`、`verify.mjs`、`restore.mjs` 骨架；实现 maintenance lease、staging/root pointer/runtime generation，`plan_portable` 与 `full_local_backup` 使用不同 mode，迁移 rollback manifest 不冒充用户备份。
-- [ ] 落地只读 Doctor CLI 与稳定 JSON schema，先覆盖 runtime 权限/空间、repository manifest/hash、snapshot pointer、服务版本和 job lease；repair flag 默认关闭。
-- [ ] 完整备份排除 API key、`.env`、cookie、浏览器 profile/cache并记录 excluded reason；`private_user` 与内层 manifest 使用 authenticated encryption，私密包权限 `0600`，密钥不进包。
-- [ ] 建立 `BackupVerificationReport`、portable `ArtifactLockfile/ImportPlan` 和引用 necessity；complete portable 必须离线精确 replay，slim portable 明确按当前 runtime 重评。
-- [ ] Doctor 增加 mandatory checks/strict exit、结构化脱敏 evidence 和版本绑定 `RepairPlan`；默认命令无写入，repair 先重验 preconditions 与备份。
-- [ ] 定义 runtime quota/retention 与基于引用图的 mark-and-sweep：活动 snapshot、审计、备份/导出引用对象不可删，GC 默认 dry-run、幂等并有 quarantine/恢复窗口。
-- [ ] 重写 price audit 入口：客户端只能提交服务端已捕获的 observation/candidate ID，不能提交任意价格、source hash 或 provenance hash。
-- [ ] URL 必须验证 platform 域名、协议、重定向、variant 和 canonical form。
-- [ ] 为所有 repository 增加 corruption、partial write、concurrent write 和 restart tests。
+- [x] 定义只包含产品身份和稳定 seed 的 `ProductCatalogSeed`。
+- [x] 定义 runtime `ProductCatalogOverlay`，不再直接修改镜像内 seed 文件。
+- [x] 从全局 SKU 删除 `paid`、owned 数量、用户成交备注和用户标签。
+- [x] 把用户成交/订单信息迁入 plan transaction 或 plan-scoped purchase record；首发不持久化姓名、电话和收货地址。
+- [x] 无法确定所属方案的用户数据进入 quarantine，绝不默认绑定新方案。
+- [x] 把 facts、domain registry overlay、price observations/history/targets、snapshots、audit、evidence、attachments、observations、jobs、execution sessions、exports、backups 和 diagnostics 全部放入 `/app/runtime` 下的明确子目录。
+- [x] 将官方域名改为“镜像 seed + runtime overlay”；所有读取走同一 repository，批准后当前进程立即可见。
+- [x] 移除 Agent/evaluation 对静态 `latest.json` 的运行时权威依赖。
+- [x] 修复 price service 重启或容器重建后价格数据丢失。
+- [x] 为 repository 写入增加原子 rename、expected hash、并发锁、备份和 rollback manifest。
+- [x] 建立 `AttachmentRepository`、plan-scoped `ObservationRepository`、`JobRepository`、`ExecutionRepository` 和 `ArtifactRepository`；blob 内容寻址，元数据/隐私类别/引用与 blob 分离。
+- [x] 建立跨 repository 引用图和只读 consistent-snapshot/export SPI，供便携导出、完整备份、Doctor 以及未来安全 GC 共用。
+- [x] 落地 durable job scheduler/worker 骨架：revision CAS、lease/fencing token、heartbeat、checkpoint、runtime generation、idempotency key、attempt、dependency、offline pause、restore quarantine、cancel 和 dead-letter；不允许 U4/U10 各自再建内存队列。
+- [x] 落地 `scripts/backup/create.mjs`、`verify.mjs`、`restore.mjs` 骨架；实现 maintenance lease、staging/root pointer/runtime generation，`plan_portable` 与 `full_local_backup` 使用不同 mode，迁移 rollback manifest 不冒充用户备份。
+- [x] 落地只读 Doctor CLI 与稳定 JSON schema，先覆盖 runtime 权限/空间、repository manifest/hash、snapshot pointer、服务版本和 job lease；repair flag 默认关闭。
+- [x] 完整备份排除 API key、`.env`、cookie、浏览器 profile/cache并记录 excluded reason；`private_user` 与内层 manifest 使用 authenticated encryption，私密包权限 `0600`，密钥不进包。
+- [x] 建立 `BackupVerificationReport`、portable `ArtifactLockfile/ImportPlan` 和引用 necessity；complete portable 必须离线精确 replay，slim portable 明确按当前 runtime 重评。
+- [x] Doctor 增加 mandatory checks/strict exit、结构化脱敏 evidence 和版本绑定 `RepairPlan`；默认命令无写入，repair 先重验 preconditions 与备份。
+- [x] 定义 runtime quota/retention 与基于引用图的 mark-and-sweep：活动 snapshot、审计、备份/导出引用对象不可删，GC 默认 dry-run、幂等并有 quarantine/恢复窗口。
+- [x] 重写 price audit 入口：客户端只能提交服务端已捕获的 observation/candidate ID，不能提交任意价格、source hash 或 provenance hash。
+- [x] URL 必须验证 platform 域名、协议、重定向、variant 和 canonical form。
+- [x] 为所有 repository 增加 corruption、partial write、concurrent write 和 restart tests。
 
 ### 主要文件
 
@@ -1490,19 +1490,19 @@ npx vitest run tests/catalog-runtime-repository.test.ts tests/catalog-domain-pro
 
 ### 退出门禁
 
-- [ ] 全局 SKU 不包含任何用户 paid/owned 数据。
-- [ ] 38 个现有 SKU 的 legacy 字段已进入迁移清单，不因缺 provenance 被继续当作活动 official fact。
-- [ ] 新品牌域名批准后无需重启即可使用。
-- [ ] 价格服务重启、容器重建和 Agent 读取都看到同一 runtime snapshot。
-- [ ] 任意客户端构造的 URL/价格不能直接成为 audited observation。
-- [ ] 所有数据迁移可 dry-run、可审计、可回滚。
-- [ ] 重启后附件、用户观察、价格历史/目标、job 状态/进度和产物引用不丢失。
-- [ ] 两个 worker 不能同时提交同一 job；相同 idempotency key 不产生重复 fact/price/proposal。
-- [ ] consistent backup manifest 能列出全部 repository root/snapshot pointer；并发写入时要么取得一致屏障，要么明确失败。
-- [ ] 默认 Doctor 对 runtime 零写入且输出无 secret/PII；构造的坏 hash、悬空引用和过期 lease 能被检出。
-- [ ] 过期 worker/旧 runtime generation 的提交为 0；恢复后的非终态 job 不会自动运行。
-- [ ] execution sessions 重启不丢；完整备份 manifest 包含其引用闭包。
-- [ ] 默认备份中的 plaintext private-user/secret 命中为 0；失败恢复不切换 active pointer。
+- [x] 全局 SKU 不包含任何用户 paid/owned 数据。
+- [x] 38 个现有 SKU 的 legacy 字段已进入迁移清单，不因缺 provenance 被继续当作活动 official fact。
+- [x] 新品牌域名批准后无需重启即可使用。
+- [x] 价格服务重启、容器重建和 Agent 读取都看到同一 runtime snapshot。
+- [x] 任意客户端构造的 URL/价格不能直接成为 audited observation。
+- [x] 所有数据迁移可 dry-run、可审计、可回滚。
+- [x] 重启后附件、用户观察、价格历史/目标、job 状态/进度和产物引用不丢失。
+- [x] 两个 worker 不能同时提交同一 job；相同 idempotency key 不产生重复 fact/price/proposal。
+- [x] consistent backup manifest 能列出全部 repository root/snapshot pointer；并发写入时要么取得一致屏障，要么明确失败。
+- [x] 默认 Doctor 对 runtime 零写入且输出无 secret/PII；构造的坏 hash、悬空引用和过期 lease 能被检出。
+- [x] 过期 worker/旧 runtime generation 的提交为 0；恢复后的非终态 job 不会自动运行。
+- [x] execution sessions 重启不丢；完整备份 manifest 包含其引用闭包。
+- [x] 默认备份中的 plaintext private-user/secret 命中为 0；失败恢复不切换 active pointer。
 
 ### 回滚
 
@@ -1512,6 +1512,19 @@ npx vitest run tests/catalog-runtime-repository.test.ts tests/catalog-domain-pro
 
 - `refactor(data): isolate product facts plan data and runtime stores`
 - `feat(runtime): add durable jobs backup spi and doctor foundation`
+
+### U1 执行记录（2026-08-27）
+
+- 状态：门禁通过。
+- 提交：本记录所在 U1 原子集成提交；push 目标为 `origin/codex/complete-universal-hardware-platform`。
+- 主要变更：统一 active-generation runtime、产品 seed/overlay、plan/evidence/attachment/observation/price/job/execution/artifact repositories、持久 Agent/Advice/catalog jobs、生产引用闭包、加密备份/恢复、零写 Doctor、GC、交易隐私边界和 Osaka 单一迁移 preflight。
+- 数据迁移：默认 dry-run；38 SKU 清单固定；隔离副本已完成 dry-run → apply → verify → rollback、崩溃恢复和 backup inclusion；真实 runtime 尚未迁移或切换 pointer，将在 U12 发布前备份后执行。
+- 聚焦测试：24 files / 118 tests passed；独立 false-green 复审确认 `domain-overlays`、catalog、price、transaction、job fencing、Doctor zero-write 和 restore pointer 负例均关闭，无未处理 P0/P1。
+- 全量测试：147 files / 877 tests passed；`npm run typecheck`、`npm run build`、全仓 MJS syntax、Compose config、`git diff --check` 均通过；secret scan 514 files / 0 findings。
+- 浏览器测试：`test:platform:browser`、`test:transactions:browser`、`test:purchase-price:browser`、`test:c7:browser` 全部通过；平台门禁同时覆盖真空白档案、版本持久化、Node/browser hash golden、性能、内存、响应大小、响应式布局和可访问性。
+- 运行验证：隔离回环 Price/Workspace/Agent 与 Vite 组合通过；打包后的 Workspace/Agent 独立启动且迁移 CLI 保持 inert；所有临时进程和目录已清理，未触碰现有 5174–5176 服务或真实 runtime。
+- 已知非阻塞限制：客户端主 bundle 仍有现存的大 chunk warning；公网 provider、真实 legacy runtime 迁移和生产恢复演练属于 U12 发布门禁，不在 U1 提前执行。
+- 下一阶段前置条件：已满足，可进入 U2；v2/N6 reader 与 fallback 必须继续保留。
 
 ---
 

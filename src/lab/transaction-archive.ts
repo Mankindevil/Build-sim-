@@ -45,6 +45,13 @@ export interface TransactionArchiveRecord {
     contentHash: string;
     imageUrl: string;
   } | null;
+  imageEvidence?: {
+    fileName: string;
+    mimeType: string;
+    bytes: number;
+    contentHash: string;
+    persistence: "discarded_after_verification";
+  };
   pendingFile?: File;
   /** A recoverable local projection shown when the archive service has no matching record. */
   localOnly?: boolean;

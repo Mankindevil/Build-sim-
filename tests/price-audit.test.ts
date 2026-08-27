@@ -2,8 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildAuditedQuote } from "../scripts/price-server/price-audit.mjs";
-import { buildAndWriteLatest, isAuditedRow, loadLocalQuotes, upsertLocalQuote } from "../scripts/price-server/store.mjs";
+import { buildAuditedQuote, buildAuditedQuoteFromCapture } from "../scripts/price-server/price-audit.mjs";
+import { buildAndWriteLatest, isAuditedRow, loadListingCapture, loadLocalQuotes, saveCandidates, upsertLocalQuote } from "../scripts/price-server/store.mjs";
 import { restoreLatestRollback } from "../scripts/price-server/store.mjs";
 import { applyPriceSnapshot } from "../src/price/merge";
 import { isAuditedQuote } from "../src/price/types";
@@ -55,14 +55,29 @@ function body(variantLabel = "32GB") {
 }
 
 describe("G5 price audit and snapshot provenance", () => {
-  it("rejects from/foreign/unknown prices and retains variant provenance", () => {
-    const valid = buildAuditedQuote(body(), catalog);
+  it("accepts only a server-issued capture and derives price, source and provenance hashes", () => {
+    const capture = {
+      schemaVersion: "1.0.0",
+      candidateId: "price-candidate-1234567890abcdef1234",
+      skuId: "memory.fixture",
+      platform: "jd",
+      title: "Fixture Memory G5 MEM-G5-001 32GB",
+      canonicalUrl: "https://item.jd.com/g5-fixture.html",
+      redirectChain: ["https://item.jd.com/g5-fixture.html"],
+      fetchedAt: "2026-08-23T00:00:00.000Z",
+      variants: [{ skuId: "g5", label: "32GB", amount: 529, currency: "CNY", stock: 1 }],
+      source: { priceSource: "api", query: "MEM-G5-001" },
+    };
+    const request = { listingCaptureId: "listing-capture-1234567890abcdef1234", candidateId: capture.candidateId, skuId: "memory.fixture", variantLabel: "32GB" };
+    const valid = buildAuditedQuoteFromCapture(request, catalog, capture);
     expect(valid.priceKind).toBe("variant");
     expect(valid.variantLabel).toBe("32GB");
     expect(valid.provenanceHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(() => buildAuditedQuote({ ...body(), priceKind: "from", variantLabel: "" }, catalog)).toThrow(/variantLabel/);
-    expect(() => buildAuditedQuote({ ...body(), priceCurrency: "USD" }, catalog)).toThrow(/外币/);
-    expect(() => buildAuditedQuote({ ...body(), fxAssumed: { rate: 7.2 } }, catalog)).toThrow(/汇率/);
+    expect(() => buildAuditedQuote()).toThrow(/direct price audit is disabled/);
+    expect(() => buildAuditedQuoteFromCapture({ ...request, priceCny: 1 }, catalog, capture)).toThrow(/cannot self-report priceCny/);
+    expect(() => buildAuditedQuoteFromCapture({ ...request, variantLabel: "64GB" }, catalog, capture)).toThrow(/selected captured variant/);
+    expect(() => buildAuditedQuoteFromCapture(request, catalog, { ...capture, canonicalUrl: "http://item.jd.com/g5" })).toThrow(/HTTPS/);
+    expect(() => buildAuditedQuoteFromCapture(request, catalog, { ...capture, canonicalUrl: "https://evil.example/g5", redirectChain: ["https://evil.example/g5"] })).toThrow(/domain/);
     expect(isAuditedRow({ ...valid, evidence: "audited" })).toBe(true);
     expect(isAuditedRow({ ...valid, priceKind: "from" })).toBe(false);
     expect(isAuditedRow({ ...valid, currency: "USD" })).toBe(false);
@@ -81,9 +96,12 @@ describe("G5 price audit and snapshot provenance", () => {
     const snapshotManifest = path.join(rollbackRoot, "snapshot-manifest.json");
     try {
       await writeFile(localPath, JSON.stringify({ schemaVersion: "1.0.0", quotes: [] }), "utf8");
-      const first = await upsertLocalQuote(buildAuditedQuote(body(), catalog), { localPath, rollbackRoot });
-      await upsertLocalQuote(buildAuditedQuote(body("64GB"), catalog), { localPath, rollbackRoot });
-      await upsertLocalQuote(buildAuditedQuote(body(), catalog), { localPath, rollbackRoot });
+      const quote = (variantLabel = "32GB") => buildAuditedQuoteFromCapture({ listingCaptureId: "listing-capture-1234567890abcdef1234", candidateId: "price-candidate-1234567890abcdef1234", skuId: "memory.fixture", variantLabel }, catalog, {
+        schemaVersion: "1.0.0", candidateId: "price-candidate-1234567890abcdef1234", skuId: "memory.fixture", platform: "jd", title: "Fixture", canonicalUrl: "https://item.jd.com/g5-fixture.html", redirectChain: ["https://item.jd.com/g5-fixture.html"], fetchedAt: "2026-08-23T00:00:00.000Z", variants: [{ skuId: "g5-32", label: "32GB", amount: 529, currency: "CNY" }, { skuId: "g5-64", label: "64GB", amount: 529, currency: "CNY" }], source: {},
+      });
+      const first = await upsertLocalQuote(quote(), { localPath, rollbackRoot });
+      await upsertLocalQuote(quote("64GB"), { localPath, rollbackRoot });
+      await upsertLocalQuote(quote(), { localPath, rollbackRoot });
       const local = await loadLocalQuotes({ localPath });
       expect(local).toHaveLength(2);
       expect(local.map((quote: { variantLabel?: string }) => quote.variantLabel)).toEqual(["32GB", "64GB"]);
@@ -131,7 +149,7 @@ describe("G5 price audit and snapshot provenance", () => {
 
       const changed = await buildAndWriteLatest("2026-08-23", "G5 changed", {
         catalog,
-        quotes: [buildAuditedQuote({ ...body(), priceCny: 599, priceAmount: 599 }, catalog)],
+        quotes: [{ ...quote(), priceCny: 599, priceAmount: 599 }],
         latestPath,
         snapshotsDir,
         auditRoot,
@@ -142,6 +160,19 @@ describe("G5 price audit and snapshot provenance", () => {
       expect(changed.contentHash).not.toBe(snapshot.contentHash);
       await restoreLatestRollback(latestPath, { manifestPath: snapshotManifest });
       expect(JSON.parse(await readFile(latestPath, "utf8")).contentHash).toBe(snapshot.contentHash);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("persists immutable listing captures outside transient candidates", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-price-capture-"));
+    try {
+      const saved = await saveCandidates({ candidates: [{ skuId: "memory.fixture", platform: "jd", channel: "jd", title: "Fixture", url: "https://item.jd.com/g5-fixture.html?utm_source=x", fetchedAt: "2026-08-23T00:00:00.000Z", variants: [{ skuId: "g5", label: "32GB", amount: 529, currency: "CNY" }] }] }, "2026-08-23", { runtimeRoot: root });
+      const candidate = saved.candidates[0]!;
+      const capture = await loadListingCapture(candidate.listingCaptureId, { runtimeRoot: root });
+      expect(capture.candidateId).toBe(candidate.candidateId);
+      expect(capture.canonicalUrl).not.toContain("utm_");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -118,7 +118,7 @@ function pinnedHttpsFetch(url, init, addresses) {
 async function resolveOfficialTarget(rawUrl, options) {
   const url = validateOfficialUrl(rawUrl, options);
   if (options.expectedBrand) {
-    const actualBrand = registryForUrl(url, options.registry)?.brand;
+    const actualBrand = (options.registry === undefined ? registryForUrl(url) : registryForUrl(url, options.registry))?.brand;
     if (!actualBrand || actualBrand.toLocaleLowerCase() !== String(options.expectedBrand).toLocaleLowerCase()) {
       throw new Error("official redirect crossed the expected manufacturer brand");
     }

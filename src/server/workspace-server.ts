@@ -8,13 +8,16 @@ import { ensureDefaultPlan } from "../plans/seed";
 import { handleWorkspaceRoute } from "./workspace-routes";
 import { PlanProposalService } from "../plans/proposals";
 import { FilePlanAgentContextAuditStore, MemoryPlanAgentContextAuditStore, type PlanAgentContextAuditStore } from "../plans/agent-context-audit";
-import { loadAuthoritativeCatalog } from "./evaluation-service";
+import { loadAuthoritativeCatalogAtRoot } from "./evaluation-service";
+import { loadMergedCatalogSync } from "../../scripts/price-server/catalog/repository.mjs";
+import { RuntimeCoordinator } from "../runtime/coordinator.mjs";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 5176;
 const MAX_BODY_BYTES = 1_000_000;
 
 export interface WorkspaceRepositoryEnvironment {
+  RUNTIME_ROOT?: string;
   PLAN_REPOSITORY_ROOT?: string;
   EVIDENCE_REPOSITORY_ROOT?: string;
 }
@@ -24,17 +27,32 @@ export function createWorkspaceRepositories(environment: WorkspaceRepositoryEnvi
   evidenceRepository: FileEvidenceRepository;
   planRoot: string;
   evidenceRoot: string;
+  coordinator?: RuntimeCoordinator;
 } {
-  const planRoot = path.resolve(environment.PLAN_REPOSITORY_ROOT ?? "runtime/plans");
-  const evidenceRoot = path.resolve(environment.EVIDENCE_REPOSITORY_ROOT ?? "runtime/evidence");
-  const evidenceRepository = new FileEvidenceRepository({ root: evidenceRoot });
+  const configuredRuntimeRoot = environment.RUNTIME_ROOT ? path.resolve(environment.RUNTIME_ROOT) : undefined;
+  const defaultRuntimeRoot = configuredRuntimeRoot ?? path.resolve("runtime");
+  const planRoot = path.resolve(environment.PLAN_REPOSITORY_ROOT ?? path.join(defaultRuntimeRoot, "plans"));
+  const evidenceRoot = path.resolve(environment.EVIDENCE_REPOSITORY_ROOT ?? path.join(defaultRuntimeRoot, "evidence"));
+  if (configuredRuntimeRoot && (planRoot !== path.join(configuredRuntimeRoot, "plans") || evidenceRoot !== path.join(configuredRuntimeRoot, "evidence"))) {
+    throw new Error("RUNTIME_ROOT conflicts with legacy plan/evidence repository roots; migrate or remove the conflicting configuration");
+  }
+  const configuredAsRuntimePair = path.basename(planRoot) === "plans" && path.basename(evidenceRoot) === "evidence" && path.dirname(planRoot) === path.dirname(evidenceRoot);
+  const useCoordinator = Boolean(environment.RUNTIME_ROOT) || (!environment.PLAN_REPOSITORY_ROOT && !environment.EVIDENCE_REPOSITORY_ROOT) || configuredAsRuntimePair;
+  const runtimeRoot = configuredRuntimeRoot ?? path.resolve(configuredAsRuntimePair ? path.dirname(planRoot) : "runtime");
+  const coordinator = useCoordinator ? new RuntimeCoordinator({ root: runtimeRoot }) : undefined;
+  const evidenceRepository = useCoordinator ? new FileEvidenceRepository({ coordinator, runtimeRoot }) : new FileEvidenceRepository({ root: evidenceRoot });
   const repository = new FilePlanRepository({
-    root: planRoot,
-    getCatalog: loadAuthoritativeCatalog,
+    ...(useCoordinator ? { coordinator: coordinator!, runtimeRoot } : { root: planRoot }),
+    getCatalog: () => loadMergedCatalogSync({ persistRoot: runtimeRoot, direct: true, generationAware: false }),
+    ...(useCoordinator ? { getCatalogAtRoot: (activeRoot: string) => loadAuthoritativeCatalogAtRoot(activeRoot, { runtimeRoot }) } : {}),
     getEvidenceDocument: (documentId) => evidenceRepository.getDocument(documentId),
     getEvidenceCapture: (captureId) => evidenceRepository.getCapture(captureId),
+    ...(useCoordinator ? {
+      getEvidenceDocumentAtRoot: (activeRoot: string, documentId: string) => evidenceRepository.getDocumentAtRoot(activeRoot, documentId),
+      getEvidenceCaptureAtRoot: (activeRoot: string, captureId: string) => evidenceRepository.getCaptureAtRoot(activeRoot, captureId),
+    } : {}),
   });
-  return { repository, evidenceRepository, planRoot, evidenceRoot };
+  return { repository, evidenceRepository, planRoot, evidenceRoot, ...(coordinator ? { coordinator } : {}) };
 }
 
 function send(response: ServerResponse, status: number, payload: unknown): void {
@@ -80,9 +98,11 @@ const isMain = process.argv[1] !== undefined && fileURLToPath(import.meta.url) =
 if (isMain) {
   void (async () => {
     const port = Number(process.env.WORKSPACE_SERVER_PORT ?? DEFAULT_PORT);
-    const { repository, planRoot } = createWorkspaceRepositories();
+    const { repository, planRoot, coordinator } = createWorkspaceRepositories();
     await ensureDefaultPlan(repository);
-    const agentContextAuditStore = new FilePlanAgentContextAuditStore(path.join(planRoot, ".agent-context-audit"));
+    const agentContextAuditStore = coordinator
+      ? new FilePlanAgentContextAuditStore({ coordinator })
+      : new FilePlanAgentContextAuditStore(path.join(planRoot, ".agent-context-audit"));
     createWorkspaceServer(repository, { agentContextAuditStore }).listen(port, HOST, () => {
       console.log(`Build Sim workspace server listening on http://${HOST}:${port}`);
     });

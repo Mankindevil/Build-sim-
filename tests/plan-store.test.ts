@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { createDefaultN6Config } from "../src/plans/default-plan";
 import { FilePlanRepository } from "../src/plans/file-repository";
 import { PlanConflictError } from "../src/plans/conflict";
 import { ensureDefaultPlan } from "../src/plans/seed";
+import { RuntimeCoordinator } from "../src/runtime/coordinator.mjs";
 
 const roots: string[] = [];
 let counter = 0;
@@ -30,6 +31,14 @@ describe("R1 file plan repository", () => {
     const first = await store.create({ name: "First", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
     const second = await store.create({ name: "Second", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
     expect((await store.list()).map((plan) => plan.id)).toEqual(expect.arrayContaining([first.id, second.id]));
+    const planFile = path.join(root, first.id, "plan.json");
+    const rollbackFile = path.join(root, ".rollback", "manifest.json");
+    expect((await stat(planFile)).mode & 0o777).toBe(0o600);
+    expect((await stat(path.dirname(planFile))).mode & 0o777).toBe(0o700);
+    expect((await stat(rollbackFile)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(await readFile(rollbackFile, "utf8")).entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ target: path.join(first.id, "plan.json"), status: "committed", backup: null }),
+    ]));
     const restarted = new FilePlanRepository({ root });
     await expect(restarted.get(first.id)).resolves.toMatchObject({ id: first.id, name: "First" });
   });
@@ -125,6 +134,8 @@ describe("R1 file plan repository", () => {
     const { root, store } = await repository();
     const plan = await store.create({ name: "Plan", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
     const file = path.join(root, plan.id, "plan.json");
+    await writeFile(`${file}.interrupted.tmp`, "partial", { mode: 0o600 });
+    await expect(store.get(plan.id)).resolves.toMatchObject({ id: plan.id, name: "Plan" });
     const envelope = JSON.parse(await readFile(file, "utf8"));
     envelope.payload.name = "tampered";
     await writeFile(file, JSON.stringify(envelope));
@@ -137,5 +148,41 @@ describe("R1 file plan repository", () => {
     const deletedDirectory = trashEntries.find((entry) => entry.startsWith(`${clean.id}-`));
     expect(deletedDirectory).toBeTruthy();
     expect((await readFile(path.join(root, ".trash", deletedDirectory!, "plan.json"), "utf8"))).toContain(clean.id);
+  });
+
+  it("resolves the active generation per call and fences maintenance across restart", async () => {
+    const runtimeRoot = await mkdtemp(path.join(tmpdir(), "build-sim-plans-runtime-")); roots.push(runtimeRoot);
+    const now = () => "2026-08-27T00:00:00.000Z";
+    const coordinator = new RuntimeCoordinator({ root: runtimeRoot, now });
+    const store = new FilePlanRepository({ coordinator, now, id: () => "plan-00000001" });
+    const oldPlan = await store.create({ name: "Generation one", config: createDefaultN6Config("draft", now()) });
+    await expect(readFile(path.join(runtimeRoot, "generations", "1", "plans", oldPlan.id, "plan.json"), "utf8")).resolves.toContain("Generation one");
+    const lease = await coordinator.acquireMaintenanceLease("restore", { ttlMs: 60_000 });
+    await expect(store.create({ name: "Fenced", config: createDefaultN6Config("draft", now()) })).rejects.toThrow(/maintenance lease/);
+    const staging = await coordinator.createStagingGeneration(lease.token);
+    const staged = new FilePlanRepository({ root: path.join(staging, "plans"), now, id: () => "plan-00000002" });
+    const newPlan = await staged.create({ name: "Generation two", config: createDefaultN6Config("draft", now()) });
+    await coordinator.activateStagingGeneration(staging, 1, lease.token);
+    await coordinator.releaseMaintenanceLease(lease.token);
+    await expect(store.get(oldPlan.id)).rejects.toMatchObject({ code: "not_found" });
+    await expect(store.get(newPlan.id)).resolves.toMatchObject({ name: "Generation two" });
+    await expect(new FilePlanRepository({ coordinator, now }).list()).resolves.toMatchObject([{ id: newPlan.id }]);
+  });
+
+  it("serializes coordinator-backed writers and fails closed on legacy top-level data", async () => {
+    const runtimeRoot = await mkdtemp(path.join(tmpdir(), "build-sim-plans-runtime-")); roots.push(runtimeRoot);
+    const now = () => "2026-08-27T00:00:00.000Z";
+    const coordinator = new RuntimeCoordinator({ root: runtimeRoot, now });
+    const first = new FilePlanRepository({ coordinator, now, id: () => "plan-00000003" });
+    const second = new FilePlanRepository({ coordinator, now });
+    const plan = await first.create({ name: "Concurrent", config: createDefaultN6Config("draft", now()) });
+    const left = structuredClone(plan.draft.config); left.selection.diskCount = 2;
+    const right = structuredClone(plan.draft.config); right.selection.diskCount = 3;
+    const outcomes = await Promise.allSettled([first.updateDraft(plan.id, { expectedRevision: 0, config: left }), second.updateDraft(plan.id, { expectedRevision: 0, config: right })]);
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
+    const legacyRoot = await mkdtemp(path.join(tmpdir(), "build-sim-plans-legacy-")); roots.push(legacyRoot);
+    await new FilePlanRepository({ root: path.join(legacyRoot, "plans"), now, id: () => "plan-00000004" }).create({ name: "Legacy", config: createDefaultN6Config("draft", now()) });
+    await expect(new FilePlanRepository({ coordinator: new RuntimeCoordinator({ root: legacyRoot, now }), runtimeRoot: legacyRoot, now }).list()).rejects.toThrow(/migration dry-run/);
   });
 });

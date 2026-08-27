@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Rebuild data/prices/latest.json (and a dated snapshot) from the two curated
+ * Rebuild runtime/prices/latest.json (and a dated snapshot) from the two curated
  * inputs: manual-quotes.json and local-quotes.json. Audited rows only.
  *
  *   npm run price:refresh
@@ -9,7 +9,7 @@
  * Fetching lives in the local price server (npm run price:serve).
  */
 
-import { buildAndWriteLatest, loadLocalQuotes, loadManualQuotes, today } from "../price-server/store.mjs";
+import { buildAndWriteLatest, initializePriceRepository, loadLocalQuotes, loadManualQuotes, today } from "../price-server/store.mjs";
 
 function parseArgs(argv) {
   const out = { asOf: today() };
@@ -20,11 +20,12 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+await initializePriceRepository();
 const [manual, local] = await Promise.all([loadManualQuotes(), loadLocalQuotes()]);
 const snapshot = await buildAndWriteLatest(args.asOf);
 
 console.log(
-  `Wrote ${snapshot.quotes.length} audited quote(s) → data/prices/latest.json and snapshots/${args.asOf}.json`,
+  `Wrote ${snapshot.quotes.length} audited quote(s) → runtime/prices/latest.json and snapshots/${args.asOf}.json`,
 );
 console.log(`  manual-quotes.json: ${manual.length} · local-quotes.json: ${local.length}`);
 if (snapshot.quotes.length === 0) {

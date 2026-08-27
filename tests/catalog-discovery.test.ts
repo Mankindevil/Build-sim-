@@ -93,7 +93,7 @@ describe("C3 provider-neutral catalog discovery", () => {
       { url: `https://www.asus.com/product/${stamp}-a`, title: "A", retrievedAt: "2026-08-24T00:00:00.000Z", rank: 0 },
       { url: `https://www.asus.com/product/${stamp}-b`, title: "B", retrievedAt: "2026-08-24T00:00:00.000Z", rank: 1 },
     ] };
-    const job = queueSearch({ query: `ASUS-G4-${stamp}`, brand: "ASUS", category: "motherboard" }, { discoveryProviders: [provider], inspect: false });
+    const job = await queueSearch({ query: `ASUS-G4-${stamp}`, brand: "ASUS", category: "motherboard" }, { discoveryProviders: [provider], inspect: false });
     const result = await waitForJob(job.jobId);
     expect(result?.candidates).toHaveLength(2);
     expect(result?.discovery.providerIds).toEqual([provider.id]);

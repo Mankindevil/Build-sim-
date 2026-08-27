@@ -4,6 +4,8 @@ import type { PlanAgentContext, PlanRepository } from "./contracts";
 import { assertValidPlanAgentContext } from "./validation";
 import { assertExpectedConfigHash, assertExpectedRevision } from "./conflict";
 import { sha256Hex } from "./canonical";
+import { RuntimeCoordinator } from "../runtime/coordinator.mjs";
+import { atomicWriteJson, confined, ensurePrivateDirectory, withDirectoryLock } from "../runtime/fs.mjs";
 
 export interface PlanAgentRunContextAudit {
   schemaVersion: "1.0.0";
@@ -36,17 +38,65 @@ function safeId(value: string): string {
 }
 
 export class FilePlanAgentContextAuditStore implements PlanAgentContextAuditStore {
-  constructor(private readonly root: string) {}
-  async put(record: PlanAgentRunContextAudit): Promise<void> {
-    await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
-    const target = path.join(this.root, `${safeId(record.runId)}.json`);
-    const temporary = `${target}.${crypto.randomUUID()}.tmp`;
-    await fs.writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
-    await fs.rename(temporary, target);
+  private readonly root: string | undefined;
+  private readonly coordinator: RuntimeCoordinator | undefined;
+
+  constructor(rootOrOptions: string | { root?: string; runtimeRoot?: string; coordinator?: RuntimeCoordinator }) {
+    if (typeof rootOrOptions === "string") this.root = path.resolve(rootOrOptions);
+    else {
+      this.root = rootOrOptions.root ? path.resolve(rootOrOptions.root) : undefined;
+      this.coordinator = rootOrOptions.coordinator ?? (!this.root ? new RuntimeCoordinator({ root: rootOrOptions.runtimeRoot }) : undefined);
+    }
   }
+
+  private file(root: string, runId: string): string {
+    return confined(root, `${safeId(runId)}.json`);
+  }
+
+  private async readAt(root: string, runId: string): Promise<PlanAgentRunContextAudit | null> {
+    try {
+      const stored = JSON.parse(await fs.readFile(this.file(root, runId), "utf8")) as unknown;
+      if (!stored || typeof stored !== "object" || Array.isArray(stored)) throw new Error("Plan Agent context audit envelope is corrupt");
+      const envelope = stored as { schemaVersion?: unknown; kind?: unknown; checksum?: unknown; payload?: unknown };
+      if (envelope.schemaVersion !== "plan-agent-context-audit-envelope-v1" || envelope.kind !== "plan-agent-context-audit" || !envelope.payload
+        || envelope.checksum !== await sha256Hex(envelope.payload)) throw new Error("Plan Agent context audit integrity check failed");
+      return structuredClone(envelope.payload) as PlanAgentRunContextAudit;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  private async putAt(root: string, record: PlanAgentRunContextAudit): Promise<void> {
+    await ensurePrivateDirectory(root);
+    const file = this.file(root, record.runId);
+    const existing = await this.readAt(root, record.runId);
+    if (existing) {
+      if (await sha256Hex(existing) !== await sha256Hex(record)) throw new Error("Plan Agent context audit run id conflict");
+      return;
+    }
+    await atomicWriteJson(file, {
+      schemaVersion: "plan-agent-context-audit-envelope-v1",
+      kind: "plan-agent-context-audit",
+      checksum: await sha256Hex(record),
+      payload: record,
+    });
+  }
+
+  async put(record: PlanAgentRunContextAudit): Promise<void> {
+    safeId(record.runId);
+    if (this.root) return withDirectoryLock(confined(this.root, ".locks", safeId(record.runId)), () => this.putAt(this.root!, record));
+    const coordinator = this.coordinator!;
+    await coordinator.initialize();
+    await coordinator.withWrite(({ activeRoot }: { activeRoot: string }) => this.putAt(confined(activeRoot, "audit", "plan-agent-context"), record));
+  }
+
   async get(runId: string): Promise<PlanAgentRunContextAudit | null> {
-    try { return JSON.parse(await fs.readFile(path.join(this.root, `${safeId(runId)}.json`), "utf8")) as PlanAgentRunContextAudit; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+    safeId(runId);
+    if (this.root) return this.readAt(this.root, runId);
+    const coordinator = this.coordinator!;
+    await coordinator.initialize();
+    return (await coordinator.withConsistentSnapshot(({ activeRoot }: { activeRoot: string }) => this.readAt(confined(activeRoot, "audit", "plan-agent-context"), runId))).result;
   }
 }
 

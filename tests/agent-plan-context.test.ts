@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { createPlanAgentContext, isPlanAgentContextStale, planAgentContextEnvelope } from "../src/agent/plan-context";
 import { makePlan } from "./helpers/workspace-ui";
 import { buildN6Evaluation } from "./helpers/spatial";
 import { sha256Hex } from "../src/plans/canonical";
-import { MemoryPlanAgentContextAuditStore, recordPlanAgentRunContext } from "../src/plans/agent-context-audit";
+import { FilePlanAgentContextAuditStore, MemoryPlanAgentContextAuditStore, recordPlanAgentRunContext, type PlanAgentRunContextAudit } from "../src/plans/agent-context-audit";
 import type { PlanRepository } from "../src/plans/contracts";
 import { handleWorkspaceRoute } from "../src/server/workspace-routes";
+import { RuntimeCoordinator } from "../src/runtime/coordinator.mjs";
 
 describe("R7 plan-bound Agent context", () => {
   it("binds plan/revision/evaluation, 3D, purchase and task facts in one validated envelope", async () => {
@@ -80,5 +84,34 @@ describe("R7 plan-bound Agent context", () => {
     await expect(handleWorkspaceRoute("POST", "/api/workspace/agent-context", { sessionId: "session-route", runId: "run-route", context }, repository, { agentContextAuditStore: store })).resolves.toMatchObject({ status: 201, payload: { runId: "run-route", evaluationHash: context.evaluationHash } });
     await expect(handleWorkspaceRoute("GET", "/api/workspace/agent-context/run-route", {}, repository, { agentContextAuditStore: store })).resolves.toMatchObject({ status: 200, payload: { runId: "run-route", planId: plan.id } });
     await expect(recordPlanAgentRunContext(repository, store, { sessionId: "session-stale", runId: "run-stale", context: { ...context, draftRevision: context.draftRevision + 1 } })).rejects.toThrow(/stale_revision/);
+  });
+
+  it("stores plan Agent context audit in the active runtime generation", async () => {
+    const runtimeRoot = await mkdtemp(path.join(tmpdir(), "build-sim-plan-agent-audit-"));
+    const coordinator = new RuntimeCoordinator({ root: runtimeRoot });
+    await coordinator.initialize();
+    const store = new FilePlanAgentContextAuditStore({ coordinator });
+    const record: PlanAgentRunContextAudit = {
+      schemaVersion: "1.0.0",
+      sessionId: "session-runtime",
+      runId: "run-runtime",
+      planId: "plan-runtime",
+      planVersionId: null,
+      draftRevision: 0,
+      configHash: "a".repeat(64),
+      evaluationHash: "b".repeat(64),
+      spatialSelection: null,
+      contextHash: "c".repeat(64),
+      recordedAt: "2026-08-27T00:00:00.000Z",
+    };
+    await store.put(record);
+    await expect(store.get(record.runId)).resolves.toEqual(record);
+    await expect(store.put({ ...record, contextHash: "d".repeat(64) })).rejects.toThrow(/run id conflict/);
+
+    const lease = await coordinator.acquireMaintenanceLease("test-pointer-switch");
+    const staging = await coordinator.createStagingGeneration(lease.token);
+    await coordinator.activateStagingGeneration(staging, 1, lease.token);
+    await coordinator.releaseMaintenanceLease(lease.token);
+    await expect(store.get(record.runId)).resolves.toBeNull();
   });
 });
