@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-progressive-partial",
+  "purpose": "Partially described plan that preserves known evidence while leaving unresolved identity and safe domains blocked",
+  "input": {
+    "buildConfig": {
+      "schemaVersion": "3.0.0", "id": "build-u0-progressive", "name": "渐进式部分方案", "updatedAt": "2026-08-27T00:00:00.000Z",
+      "intent": {"state": "answered", "value": "pc", "source": "user", "confirmedByUser": true}, "requirementSpec": null,
+      "system": null,
+      "components": [
+        {"instanceId": "case-1", "kind": "case", "role": "case", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.case.user-described-v1", "identityClaimIds": ["claim.case.user-text"]}, "source": "user"},
+        {"instanceId": "cpu-1", "kind": "cpu", "role": "cpu", "state": "planned", "identity": {"status": "unresolved", "userText": "一颗低功耗处理器"}, "source": "user"},
+        {"instanceId": "disk-1", "kind": "storage_drive", "role": "data", "state": "planned", "identity": {"status": "unresolved", "userText": "两块同型号 SSD", "candidateIds": ["storage.candidate-a", "storage.candidate-b"]}, "source": "user"}
+      ],
+      "roleDecisions": [], "placements": [], "connections": [], "logicalLayouts": [], "firmwareTargets": [], "notes": ["Keep unresolved user text; do not substitute a default SKU"]
+    },
+    "knownEvidence": {"caseMountCount": 2, "caseEvidenceRef": "fact.fixture.case.mounts.v1"},
+    "unknownSafetyFields": ["cpu.socket", "cpu.power", "disk.interface", "board.identity", "firmware-path"]
+  },
+  "expected": {
+    "decisions": [{"domain": "case-local", "verdict": "pass", "reason": "Known case mount evidence can be retained"}, {"domain": "identity", "verdict": "blocked", "reason": "Unresolved CPU and SSD identities cannot support safety decisions"}, {"domain": "overall", "verdict": "blocked", "reason": "Partial evaluation must preserve local evidence and block unknown dependent domains"}],
+    "requirements": [{"id": "identity.cpu", "strength": "hard", "status": "residual"}, {"id": "identity.storage", "strength": "hard", "status": "residual"}],
+    "invariants": ["Unresolved identity preserves userText", "No default SKU replaces unresolved text", "Known local evidence survives later additions", "Derived requirements are not written into config"]
+  }
+}

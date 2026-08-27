@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-multi-pcie-workstation",
+  "purpose": "Workstation with independent GPU, capture, and NIC cards sharing a documented lane budget",
+  "input": {
+    "buildConfig": {
+      "schemaVersion": "3.0.0", "id": "build-u0-workstation", "name": "Reference Multi-PCIe Workstation", "updatedAt": "2026-08-27T00:00:00.000Z",
+      "intent": {"state": "answered", "value": "workstation", "source": "user", "confirmedByUser": true}, "requirementSpec": null,
+      "system": {"profileId": "system.windows-11", "versionFactId": "fact.system.windows.version-1", "source": "user", "lockedByUser": true},
+      "components": [
+        {"instanceId": "case-1", "kind": "case", "role": "case", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.case.fulltower-workstation-v1", "identityClaimIds": ["claim.case.fulltower"]}, "source": "user"},
+        {"instanceId": "board-1", "kind": "motherboard", "role": "motherboard", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.board.workstation-w680-v1", "identityClaimIds": ["claim.board.workstation"]}, "source": "user"},
+        {"instanceId": "cpu-1", "kind": "cpu", "role": "cpu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.cpu.workstation-xeon-v1", "identityClaimIds": ["claim.cpu.workstation"]}, "source": "user"},
+        {"instanceId": "gpu-1", "kind": "gpu", "role": "gpu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.gpu.workstation-3slot-v1", "identityClaimIds": ["claim.gpu.workstation"]}, "source": "user"},
+        {"instanceId": "capture-1", "kind": "capture_card", "role": "capture", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.capture.pcie-x4-v1", "identityClaimIds": ["claim.capture.x4"]}, "source": "user"},
+        {"instanceId": "nic-1", "kind": "nic", "role": "network", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.nic.pcie-x8-v1", "identityClaimIds": ["claim.nic.x8"]}, "source": "user"},
+        {"instanceId": "ram-1", "kind": "memory_module", "role": "memory", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.memory.ecc-ddr5-v1", "identityClaimIds": ["claim.ram.ecc"]}, "source": "user"},
+        {"instanceId": "psu-1", "kind": "psu", "role": "psu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.psu.workstation-1200w-v1", "identityClaimIds": ["claim.psu.workstation"]}, "source": "user"}
+      ],
+      "roleDecisions": [],
+      "placements": [{"placementId": "p-gpu", "componentInstanceId": "gpu-1", "mountOwnerInstanceId": "board-1", "mountId": "slot-x16"}, {"placementId": "p-cap", "componentInstanceId": "capture-1", "mountOwnerInstanceId": "board-1", "mountId": "slot-x4"}, {"placementId": "p-nic", "componentInstanceId": "nic-1", "mountOwnerInstanceId": "board-1", "mountId": "slot-x8"}],
+      "connections": [], "logicalLayouts": [], "firmwareTargets": [], "notes": ["Lane bifurcation and slot sharing are explicit facts"]
+    },
+    "facts": {"slotLaneBudget": [{"slotId": "slot-x16", "lanes": 16}, {"slotId": "slot-x4", "lanes": 4}, {"slotId": "slot-x8", "lanes": 8}], "laneSharing": [], "nicDriverRefs": ["windows-nic-reference"]}
+  },
+  "expected": {
+    "decisions": [{"domain": "pcie-lanes", "verdict": "pass", "reason": "Three independent slots fit the documented lane budget"}, {"domain": "nic-driver", "verdict": "pass", "reason": "Target Windows profile has a driver reference"}, {"domain": "overall", "verdict": "pass", "reason": "Workstation topology is complete for known hard gates"}],
+    "requirements": [{"id": "workstation.capture", "strength": "hard", "status": "satisfied"}, {"id": "workstation.network", "strength": "important", "status": "satisfied"}],
+    "invariants": ["Each expansion card is an independent instance", "Lane sharing is not inferred from card count", "External network equipment is not a topology node"]
+  }
+}

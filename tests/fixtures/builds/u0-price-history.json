@@ -1,0 +1,282 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-price-history",
+  "purpose": "Exact-variant China new-price history, sparse two-year buckets, target crossing, and restart deduplication",
+  "input": {
+    "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+    "observations": [
+      {
+        "observationId": "price-now-1",
+        "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+        "variantIdentityFactIds": [
+          "fact.fixture.gpu.radeon-pro-variant-a.identity"
+        ],
+        "platform": "jd",
+        "sellerId": "seller-1",
+        "sellerName": "Fixture JD seller",
+        "sellerTier": "S1",
+        "condition": "new",
+        "stockStatus": "in_stock",
+        "priceCny": 3999,
+        "shippingCny": 0,
+        "comparableTotalCny": 3999,
+        "invoiceStatus": "yes",
+        "warrantyStatus": "mainland",
+        "canonicalUrl": "https://item.jd.com/fixture-gpu-a-1.html",
+        "listingCaptureId": "capture-price-now-1",
+        "capturedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "observationId": "price-now-2",
+        "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+        "variantIdentityFactIds": [
+          "fact.fixture.gpu.radeon-pro-variant-a.identity"
+        ],
+        "platform": "tmall",
+        "sellerId": "seller-2",
+        "sellerName": "Fixture Tmall seller",
+        "sellerTier": "S2",
+        "condition": "new",
+        "stockStatus": "seller_claimed",
+        "priceCny": 4099,
+        "shippingCny": 0,
+        "comparableTotalCny": 4099,
+        "invoiceStatus": "unknown",
+        "warrantyStatus": "mainland",
+        "canonicalUrl": "https://detail.tmall.com/item.htm?id=fixture-gpu-a-2",
+        "listingCaptureId": "capture-price-now-2",
+        "capturedAt": "2026-08-27T01:00:00.000Z"
+      },
+      {
+        "observationId": "price-old",
+        "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+        "variantIdentityFactIds": [
+          "fact.fixture.gpu.radeon-pro-variant-a.identity"
+        ],
+        "platform": "jd",
+        "sellerId": "seller-old",
+        "sellerName": "Fixture historical seller",
+        "sellerTier": "S2",
+        "condition": "new",
+        "stockStatus": "unknown",
+        "priceCny": 4599,
+        "shippingCny": 0,
+        "comparableTotalCny": 4599,
+        "invoiceStatus": "unknown",
+        "warrantyStatus": "mainland",
+        "canonicalUrl": "https://item.jd.com/fixture-gpu-a-old.html",
+        "listingCaptureId": "capture-price-old",
+        "capturedAt": "2024-08-27T00:00:00.000Z"
+      }
+    ],
+    "history": [
+      {
+        "historyPointId": "history-2026-08",
+        "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+        "variantIdentityFactIds": [
+          "fact.fixture.gpu.radeon-pro-variant-a.identity"
+        ],
+        "bucketStart": "2026-08-01T00:00:00.000Z",
+        "bucketEnd": "2026-09-01T00:00:00.000Z",
+        "timeZone": "Asia/Shanghai",
+        "policyHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "priceBasis": "comparable_total_cny",
+        "condition": "new",
+        "region": "CN",
+        "currency": "CNY",
+        "minCny": 3999,
+        "maxCny": 4099,
+        "medianCny": 4049,
+        "sampleCount": 2,
+        "sellerCount": 2,
+        "platformCounts": {
+          "jd": 1,
+          "tmall": 1
+        },
+        "observationIds": [
+          "price-now-1",
+          "price-now-2"
+        ],
+        "confidence": "medium",
+        "snapshotId": "price-snapshot-now"
+      },
+      {
+        "historyPointId": "history-2024-08",
+        "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+        "variantIdentityFactIds": [
+          "fact.fixture.gpu.radeon-pro-variant-a.identity"
+        ],
+        "bucketStart": "2024-08-01T00:00:00.000Z",
+        "bucketEnd": "2024-09-01T00:00:00.000Z",
+        "timeZone": "Asia/Shanghai",
+        "policyHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "priceBasis": "comparable_total_cny",
+        "condition": "new",
+        "region": "CN",
+        "currency": "CNY",
+        "minCny": 4599,
+        "maxCny": 4599,
+        "medianCny": 4599,
+        "sampleCount": 1,
+        "sellerCount": 1,
+        "platformCounts": {
+          "jd": 1
+        },
+        "observationIds": [
+          "price-old"
+        ],
+        "confidence": "low",
+        "snapshotId": "price-snapshot-old"
+      }
+    ],
+    "target": {
+      "targetId": "target-gpu-a",
+      "planId": "plan-price",
+      "instanceId": "gpu-1",
+      "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+      "variantIdentityFactIds": [
+        "fact.fixture.gpu.radeon-pro-variant-a.identity"
+      ],
+      "targetTotalCny": 4000,
+      "sellerTierMinimum": "S2",
+      "requireMainlandWarranty": true,
+      "enabled": true,
+      "status": "watching",
+      "revisionHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "updatedAt": "2026-08-27T00:00:00.000Z",
+      "nextCheckAt": "2026-08-27T04:00:00.000Z",
+      "lastEvaluatedSnapshotId": "price-snapshot-now"
+    },
+    "events": [
+      {
+        "eventId": "event-cross-1",
+        "targetId": "target-gpu-a",
+        "targetRevisionHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "priceSnapshotId": "price-snapshot-now",
+        "transition": "watching_to_met",
+        "occurredAt": "2026-08-27T02:00:00.000Z",
+        "idempotencyKey": "12:target-gpu-a|64:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb|18:price-snapshot-now|15:watching_to_met"
+      },
+      {
+        "eventId": "event-cross-1-duplicate",
+        "targetId": "target-gpu-a",
+        "targetRevisionHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "priceSnapshotId": "price-snapshot-now",
+        "transition": "watching_to_met",
+        "occurredAt": "2026-08-27T02:01:00.000Z",
+        "idempotencyKey": "12:target-gpu-a|64:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb|18:price-snapshot-now|15:watching_to_met"
+      }
+    ],
+    "listingCaptures": [
+      {
+        "schemaVersion": "listing-capture-v1",
+        "listingCaptureId": "capture-price-now-1",
+        "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+        "variantIdentityFactIds": [
+          "fact.fixture.gpu.radeon-pro-variant-a.identity"
+        ],
+        "platform": "jd",
+        "sellerId": "seller-1",
+        "sellerName": "Fixture JD seller",
+        "sellerTier": "S1",
+        "condition": "new",
+        "stockStatus": "in_stock",
+        "priceCny": 3999,
+        "shippingCny": 0,
+        "comparableTotalCny": 3999,
+        "invoiceStatus": "yes",
+        "warrantyStatus": "mainland",
+        "canonicalUrl": "https://item.jd.com/fixture-gpu-a-1.html",
+        "capturedAt": "2026-08-27T00:00:00.000Z",
+        "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "schemaVersion": "listing-capture-v1",
+        "listingCaptureId": "capture-price-now-2",
+        "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+        "variantIdentityFactIds": [
+          "fact.fixture.gpu.radeon-pro-variant-a.identity"
+        ],
+        "platform": "tmall",
+        "sellerId": "seller-2",
+        "sellerName": "Fixture Tmall seller",
+        "sellerTier": "S2",
+        "condition": "new",
+        "stockStatus": "seller_claimed",
+        "priceCny": 4099,
+        "shippingCny": 0,
+        "comparableTotalCny": 4099,
+        "invoiceStatus": "unknown",
+        "warrantyStatus": "mainland",
+        "canonicalUrl": "https://detail.tmall.com/item.htm?id=fixture-gpu-a-2",
+        "capturedAt": "2026-08-27T01:00:00.000Z",
+        "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+        "schemaVersion": "listing-capture-v1",
+        "listingCaptureId": "capture-price-old",
+        "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+        "variantIdentityFactIds": [
+          "fact.fixture.gpu.radeon-pro-variant-a.identity"
+        ],
+        "platform": "jd",
+        "sellerId": "seller-old",
+        "sellerName": "Fixture historical seller",
+        "sellerTier": "S2",
+        "condition": "new",
+        "stockStatus": "unknown",
+        "priceCny": 4599,
+        "shippingCny": 0,
+        "comparableTotalCny": 4599,
+        "invoiceStatus": "unknown",
+        "warrantyStatus": "mainland",
+        "canonicalUrl": "https://item.jd.com/fixture-gpu-a-old.html",
+        "capturedAt": "2024-08-27T00:00:00.000Z",
+        "contentHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    ]
+  },
+  "expected": {
+    "decisions": [
+      {
+        "domain": "current-price",
+        "verdict": "pass",
+        "reason": "Two independent exact-variant new CN observations form a current market range"
+      },
+      {
+        "domain": "history",
+        "verdict": "pass",
+        "reason": "Old observation remains history and is excluded from current budget"
+      },
+      {
+        "domain": "target-crossing",
+        "verdict": "pass",
+        "reason": "Comparable total crosses target and emits one idempotent event"
+      },
+      {
+        "domain": "overall",
+        "verdict": "pass",
+        "reason": "Price recommendation includes sample coverage and expiry semantics"
+      }
+    ],
+    "requirements": [
+      {
+        "id": "price.exact-variant",
+        "strength": "hard",
+        "status": "satisfied"
+      },
+      {
+        "id": "price.current-window",
+        "strength": "hard",
+        "status": "satisfied"
+      }
+    ],
+    "invariants": [
+      "Expired prices never enter current budget",
+      "History uses the same variant and comparable total basis",
+      "A single valid quote is low confidence; two independent sellers form a range",
+      "Target events dedupe by target revision snapshot transition",
+      "Buy/wait advice is time-bound, not a guarantee"
+    ]
+  }
+}

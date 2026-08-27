@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "2.0.0",
+  "id": "fixture-v2-empty",
+  "name": "空白装机方案",
+  "updatedAt": "2026-08-27T00:00:00.000Z",
+  "caseId": "",
+  "boardId": "",
+  "cpuId": "",
+  "selection": {
+    "psuId": "",
+    "psuTopology": "auto",
+    "coolerId": "",
+    "gpuId": "",
+    "memoryId": "",
+    "diskCount": 0,
+    "nvmeCount": 0,
+    "boot": "m2",
+    "hbaMode": "auto",
+    "hbaSkuId": null,
+    "fanMode": "balanced",
+    "fanGroups": []
+  },
+  "bom": []
+}

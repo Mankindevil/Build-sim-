@@ -1,0 +1,687 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-durable-jobs-portability-doctor",
+  "purpose": "Interrupted durable job restart, portable .buildsim round-trip, full backup/restore, and read-only Doctor corruption detection",
+  "input": {
+    "jobs": [
+      {
+        "schemaVersion": "1.0.0",
+        "jobId": "job-fetch-facts",
+        "type": "official_update_scan",
+        "handlerVersion": "handler-1",
+        "idempotencyKey": "plan-a|facts|snapshot-1",
+        "inputHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "payloadRef": "artifact://payload-1",
+        "planId": "plan-a",
+        "status": "paused_offline",
+        "revision": 3,
+        "attempt": 1,
+        "maxAttempts": 5,
+        "runAfter": "2026-08-27T03:00:00.000Z",
+        "checkpointRef": "artifact://checkpoint-1",
+        "runtimeGeneration": 7,
+        "networkRequired": true,
+        "dependencyJobIds": [],
+        "progress": {
+          "stage": "parse",
+          "completed": 2,
+          "total": 5
+        },
+        "resultRefs": [],
+        "createdAt": "2026-08-27T02:00:00.000Z",
+        "updatedAt": "2026-08-27T02:30:00.000Z"
+      },
+      {
+        "schemaVersion": "1.0.0",
+        "jobId": "job-resume",
+        "type": "price_target_recheck",
+        "handlerVersion": "handler-1",
+        "idempotencyKey": "target-a|snapshot-2",
+        "inputHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "payloadRef": "artifact://payload-2",
+        "planId": "plan-a",
+        "status": "paused_restore_review",
+        "revision": 2,
+        "attempt": 2,
+        "maxAttempts": 5,
+        "runAfter": "2026-08-27T03:10:00.000Z",
+        "runtimeGeneration": 8,
+        "networkRequired": true,
+        "dependencyJobIds": [
+          "job-fetch-facts"
+        ],
+        "resultRefs": [],
+        "createdAt": "2026-08-27T02:01:00.000Z",
+        "updatedAt": "2026-08-27T02:31:00.000Z"
+      }
+    ],
+    "portableManifest": {
+      "schemaVersion": "backup-v1",
+      "backupId": "portable-plan-a",
+      "createdAt": "2026-08-27T02:00:00.000Z",
+      "appVersion": "fixture-1",
+      "runtimeGeneration": 7,
+      "mode": "plan_portable",
+      "portableProfile": "complete",
+      "entries": [
+        {
+          "logicalPath": "plans/plan-a.json",
+          "kind": "plan",
+          "byteLength": 100,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "privacyClass": "private_user"
+        },
+        {
+          "logicalPath": "facts/snapshot-a.json",
+          "kind": "facts",
+          "byteLength": 80,
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "privacyClass": "public_source"
+        },
+        {
+          "logicalPath": "artifacts/lockfile.json",
+          "kind": "artifact_lockfile",
+          "byteLength": 40,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "privacyClass": "runtime_internal"
+        },
+        {
+          "logicalPath": "artifacts/rule-set.json",
+          "kind": "artifact",
+          "byteLength": 64,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "privacyClass": "runtime_internal"
+        },
+        {
+          "logicalPath": "artifacts/standard-set.json",
+          "kind": "artifact",
+          "byteLength": 64,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "privacyClass": "runtime_internal"
+        },
+        {
+          "logicalPath": "artifacts/system-profile.json",
+          "kind": "artifact",
+          "byteLength": 64,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "privacyClass": "runtime_internal"
+        },
+        {
+          "logicalPath": "artifacts/adapter-snapshot.json",
+          "kind": "artifact",
+          "byteLength": 64,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "privacyClass": "runtime_internal"
+        },
+        {
+          "logicalPath": "artifacts/engine.json",
+          "kind": "artifact",
+          "byteLength": 64,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "privacyClass": "runtime_internal"
+        },
+        {
+          "logicalPath": "artifacts/simulation-model.json",
+          "kind": "artifact",
+          "byteLength": 64,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "privacyClass": "runtime_internal"
+        }
+      ],
+      "includedRoots": [
+        "plans",
+        "facts",
+        "artifacts"
+      ],
+      "excludedEntries": [],
+      "planIds": [
+        "plan-a"
+      ],
+      "requirementSpecHashes": [],
+      "factSnapshotIds": [
+        "facts-a"
+      ],
+      "userObservationSnapshotIds": [],
+      "priceSnapshotIds": [],
+      "evaluationHashes": [
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ],
+      "artifactLockfileRef": "sha256:bbe0b0be8861ca03cfe043d8e83edc1f22e546e8520b33b094bf03feca36a5a6",
+      "executionSessionIds": [],
+      "manifestHash": "6c3885df51a0a2dd9c206b158db783ab26dd958cc1f4dd01db437da65127a523"
+    },
+    "portableEdges": [
+      {
+        "fromRef": "plans/plan-a.json",
+        "toRef": "facts/snapshot-a.json",
+        "necessity": "required_for_replay"
+      },
+      {
+        "fromRef": "plans/plan-a.json",
+        "toRef": "artifacts/lockfile.json",
+        "necessity": "required_for_replay"
+      }
+    ],
+    "portableIncludedRefs": [
+      "plans/plan-a.json",
+      "facts/snapshot-a.json",
+      "artifacts/lockfile.json"
+    ],
+    "backup": {
+      "manifest": {
+        "schemaVersion": "backup-v1",
+        "backupId": "backup-full-a",
+        "createdAt": "2026-08-27T02:00:00.000Z",
+        "appVersion": "fixture-1",
+        "runtimeGeneration": 8,
+        "mode": "full_local_backup",
+        "entries": [
+          {
+            "logicalPath": "plans/plan-a.json",
+            "kind": "plan",
+            "byteLength": 100,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "privacyClass": "private_user"
+          },
+          {
+            "logicalPath": "jobs/job-fetch-facts.json",
+            "kind": "job",
+            "byteLength": 80,
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "privacyClass": "runtime_internal"
+          }
+        ],
+        "includedRoots": [
+          "plans",
+          "facts",
+          "prices",
+          "jobs",
+          "artifacts",
+          "config",
+          "audit",
+          "execution-sessions"
+        ],
+        "excludedEntries": [
+          {
+            "kind": "provider_key",
+            "reason": "secret never enters backup"
+          },
+          {
+            "kind": "cookie",
+            "reason": "credential material excluded"
+          },
+          {
+            "kind": "browser_profile",
+            "reason": "credential material excluded"
+          },
+          {
+            "kind": "env_file",
+            "reason": "runtime secrets excluded"
+          }
+        ],
+        "planIds": [
+          "plan-a"
+        ],
+        "requirementSpecHashes": [
+          "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "factSnapshotIds": [
+          "facts-a"
+        ],
+        "userObservationSnapshotIds": [],
+        "priceSnapshotIds": [
+          "prices-a"
+        ],
+        "evaluationHashes": [
+          "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        ],
+        "artifactLockfileRef": "sha256:bbe0b0be8861ca03cfe043d8e83edc1f22e546e8520b33b094bf03feca36a5a6",
+        "executionSessionIds": [],
+        "manifestHash": "d88b84782431c321206f8a2c8c8a57183a79cb66f1ea8268d9c9f54914570e21"
+      },
+      "envelope": {
+        "formatVersion": "1.0.0",
+        "manifestHash": "d88b84782431c321206f8a2c8c8a57183a79cb66f1ea8268d9c9f54914570e21",
+        "payloadSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "payloadSha256Basis": "ciphertext",
+        "encryption": {
+          "mode": "authenticated",
+          "formatVersion": "1.0.0",
+          "kdf": "scrypt",
+          "kdfParams": {
+            "n": 32768,
+            "r": 8,
+            "p": 1,
+            "saltBase64": "AAAAAAAAAAAAAAAAAAAAAA=="
+          },
+          "cipher": "aes-256-gcm",
+          "nonceBase64": "AAAAAAAAAAAAAAAA",
+          "aadSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "keyLengthBits": 256,
+          "authTagBase64": "AAAAAAAAAAAAAAAAAAAAAA=="
+        }
+      },
+      "verification": {
+        "backupId": "backup-full-a",
+        "manifestHash": "d88b84782431c321206f8a2c8c8a57183a79cb66f1ea8268d9c9f54914570e21",
+        "verifiedAt": "2026-08-27T02:30:00.000Z",
+        "appVersion": "fixture-1",
+        "schemaVersion": "backup-verification-v1",
+        "hashClosureValid": true,
+        "temporaryRestoreTested": true,
+        "result": "pass",
+        "stagedPayloadSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "entryChecks": [
+          {
+            "logicalPath": "plans/plan-a.json",
+            "expectedByteLength": 100,
+            "actualByteLength": 100,
+            "expectedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "actualSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "logicalPath": "jobs/job-fetch-facts.json",
+            "expectedByteLength": 80,
+            "actualByteLength": 80,
+            "expectedSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "actualSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "temporaryRestore": {
+          "artifactRef": {
+            "ref": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "hashSpecVersion": "hash-spec-v1",
+            "algorithm": "sha256",
+            "contentHash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "domain": "artifact",
+            "schemaVersion": "1.0.0",
+            "canonicalizationPolicyId": "artifact-payload-v1"
+          },
+          "reportRef": {
+            "ref": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "hashSpecVersion": "hash-spec-v1",
+            "algorithm": "sha256",
+            "contentHash": "2222222222222222222222222222222222222222222222222222222222222222",
+            "domain": "artifact",
+            "schemaVersion": "1.0.0",
+            "canonicalizationPolicyId": "artifact-payload-v1"
+          },
+          "restoredManifestHash": "d88b84782431c321206f8a2c8c8a57183a79cb66f1ea8268d9c9f54914570e21",
+          "runtimeGeneration": 8
+        }
+      }
+    },
+    "doctor": {
+      "schemaVersion": "1.0.0",
+      "overall": "unhealthy",
+      "generatedAt": "2026-08-27T02:35:00.000Z",
+      "appVersion": "fixture-1",
+      "checks": [
+        {
+          "checkId": "runtime.permissions",
+          "checkVersion": "1",
+          "category": "runtime",
+          "status": "pass",
+          "severity": "info",
+          "summary": "runtime directories are private",
+          "evidence": [
+            {
+              "code": "permissions.ok",
+              "valueHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ],
+          "repairable": false
+        },
+        {
+          "checkId": "storage.free_space",
+          "checkVersion": "1",
+          "category": "storage",
+          "status": "pass",
+          "severity": "info",
+          "summary": "enough space",
+          "evidence": [
+            {
+              "code": "space.ok",
+              "valueHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "repairable": false
+        },
+        {
+          "checkId": "integrity.repository_hashes",
+          "checkVersion": "1",
+          "category": "integrity",
+          "status": "pass",
+          "severity": "info",
+          "summary": "repository hashes match",
+          "evidence": [
+            {
+              "code": "hashes.ok",
+              "valueHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
+          ],
+          "repairable": false
+        },
+        {
+          "checkId": "integrity.reference_closure",
+          "checkVersion": "1",
+          "category": "integrity",
+          "status": "fail",
+          "severity": "blocking",
+          "summary": "reference hash missing",
+          "evidence": [
+            {
+              "code": "ref.missing",
+              "valueHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            }
+          ],
+          "remediation": "restore the referenced artifact after an approved backup",
+          "repairable": true
+        },
+        {
+          "checkId": "migration.pending",
+          "checkVersion": "1",
+          "category": "migration",
+          "status": "pass",
+          "severity": "info",
+          "summary": "no pending migration",
+          "evidence": [],
+          "repairable": false
+        },
+        {
+          "checkId": "services.versions",
+          "checkVersion": "1",
+          "category": "services",
+          "status": "pass",
+          "severity": "info",
+          "summary": "service versions are pinned",
+          "evidence": [],
+          "repairable": false
+        },
+        {
+          "checkId": "jobs.stuck_lease",
+          "checkVersion": "1",
+          "category": "jobs",
+          "status": "warn",
+          "severity": "degraded",
+          "summary": "expired worker lease",
+          "evidence": [
+            {
+              "code": "lease.expired",
+              "valueHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          ],
+          "remediation": "review and requeue the expired job",
+          "repairable": true
+        },
+        {
+          "checkId": "jobs.dead_letter",
+          "checkVersion": "1",
+          "category": "jobs",
+          "status": "pass",
+          "severity": "info",
+          "summary": "dead-letter queue empty",
+          "evidence": [],
+          "repairable": false
+        },
+        {
+          "checkId": "backup.recent_verified",
+          "checkVersion": "1",
+          "category": "backup",
+          "status": "pass",
+          "severity": "info",
+          "summary": "recent backup verified",
+          "evidence": [
+            {
+              "code": "backup.verified",
+              "valueHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            }
+          ],
+          "repairable": false
+        },
+        {
+          "checkId": "runtime.browser_webgl",
+          "checkVersion": "1",
+          "category": "runtime",
+          "status": "pass",
+          "severity": "info",
+          "summary": "WebGL available",
+          "evidence": [],
+          "repairable": false
+        },
+        {
+          "checkId": "services.searxng",
+          "checkVersion": "1",
+          "category": "services",
+          "status": "pass",
+          "severity": "info",
+          "summary": "search service reachable",
+          "evidence": [],
+          "repairable": false
+        },
+        {
+          "checkId": "services.pdf_parser",
+          "checkVersion": "1",
+          "category": "services",
+          "status": "pass",
+          "severity": "info",
+          "summary": "PDF parser reachable",
+          "evidence": [],
+          "repairable": false
+        },
+        {
+          "checkId": "network.offline",
+          "checkVersion": "1",
+          "category": "network",
+          "status": "pass",
+          "severity": "info",
+          "summary": "offline mode is explicit",
+          "evidence": [],
+          "repairable": false
+        },
+        {
+          "checkId": "runtime.clock_skew",
+          "checkVersion": "1",
+          "category": "runtime",
+          "status": "pass",
+          "severity": "info",
+          "summary": "clock is synchronized",
+          "evidence": [],
+          "repairable": false
+        },
+        {
+          "checkId": "security.log_redaction",
+          "checkVersion": "1",
+          "category": "security",
+          "status": "pass",
+          "severity": "info",
+          "summary": "logs are redacted",
+          "evidence": [],
+          "repairable": false
+        }
+      ],
+      "reportHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "portableTrust": {
+      "artifactLockfileRef": "sha256:bbe0b0be8861ca03cfe043d8e83edc1f22e546e8520b33b094bf03feca36a5a6",
+      "artifactLockfile": {
+        "schemaVersion": "artifact-lockfile-v1",
+        "hashSpecVersion": "hash-spec-v1",
+        "lockfileHash": "bbe0b0be8861ca03cfe043d8e83edc1f22e546e8520b33b094bf03feca36a5a6",
+        "artifacts": {
+          "ruleSet": {
+            "ref": "sha256:d479e1bf84718cac9873072375991c12692eede349fc165ef900dc894861b324",
+            "hashSpecVersion": "hash-spec-v1",
+            "algorithm": "sha256",
+            "contentHash": "d479e1bf84718cac9873072375991c12692eede349fc165ef900dc894861b324",
+            "domain": "artifact.rule-set",
+            "schemaVersion": "1.0.0",
+            "canonicalizationPolicyId": "artifact-payload-v1",
+            "role": "ruleSet",
+            "artifactId": "fixture-ruleSet",
+            "mediaType": "application/json",
+            "requiredForReplay": true
+          },
+          "standardSet": {
+            "ref": "sha256:d91bd3a5f27c3122465bb8c1a96e35e6c641815b9bb3b8c66dee3c0ef2449e00",
+            "hashSpecVersion": "hash-spec-v1",
+            "algorithm": "sha256",
+            "contentHash": "d91bd3a5f27c3122465bb8c1a96e35e6c641815b9bb3b8c66dee3c0ef2449e00",
+            "domain": "artifact.standard-set",
+            "schemaVersion": "1.0.0",
+            "canonicalizationPolicyId": "artifact-payload-v1",
+            "role": "standardSet",
+            "artifactId": "fixture-standardSet",
+            "mediaType": "application/json",
+            "requiredForReplay": true
+          },
+          "systemProfile": {
+            "ref": "sha256:e388fcda0fcdc5e7b242e23dbddc7eee22f8a28e6565bc20478b4bc9278e2f35",
+            "hashSpecVersion": "hash-spec-v1",
+            "algorithm": "sha256",
+            "contentHash": "e388fcda0fcdc5e7b242e23dbddc7eee22f8a28e6565bc20478b4bc9278e2f35",
+            "domain": "artifact.system-profile",
+            "schemaVersion": "1.0.0",
+            "canonicalizationPolicyId": "artifact-payload-v1",
+            "role": "systemProfile",
+            "artifactId": "fixture-systemProfile",
+            "mediaType": "application/json",
+            "requiredForReplay": true
+          },
+          "adapterSnapshot": {
+            "ref": "sha256:1af5ef02f951a23301dfecc6b4f4e73b019887b550f43efd1e02b501162b8b33",
+            "hashSpecVersion": "hash-spec-v1",
+            "algorithm": "sha256",
+            "contentHash": "1af5ef02f951a23301dfecc6b4f4e73b019887b550f43efd1e02b501162b8b33",
+            "domain": "artifact.adapter-snapshot",
+            "schemaVersion": "1.0.0",
+            "canonicalizationPolicyId": "artifact-payload-v1",
+            "role": "adapterSnapshot",
+            "artifactId": "fixture-adapterSnapshot",
+            "mediaType": "application/json",
+            "requiredForReplay": true
+          },
+          "engine": {
+            "ref": "sha256:e24dee657b1f29ee66f93312d7228ab77a844e5fc363d0f1adadfd515fc5fedd",
+            "hashSpecVersion": "hash-spec-v1",
+            "algorithm": "sha256",
+            "contentHash": "e24dee657b1f29ee66f93312d7228ab77a844e5fc363d0f1adadfd515fc5fedd",
+            "domain": "artifact.engine",
+            "schemaVersion": "1.0.0",
+            "canonicalizationPolicyId": "artifact-payload-v1",
+            "role": "engine",
+            "artifactId": "fixture-engine",
+            "mediaType": "application/json",
+            "requiredForReplay": true
+          },
+          "simulationModel": {
+            "ref": "sha256:5dfd6ba02094fa74800b48ac117171996c5ac09310094f97cadd2d65d6cf5b00",
+            "hashSpecVersion": "hash-spec-v1",
+            "algorithm": "sha256",
+            "contentHash": "5dfd6ba02094fa74800b48ac117171996c5ac09310094f97cadd2d65d6cf5b00",
+            "domain": "artifact.simulation-model",
+            "schemaVersion": "1.0.0",
+            "canonicalizationPolicyId": "artifact-payload-v1",
+            "role": "simulationModel",
+            "artifactId": "fixture-simulationModel",
+            "mediaType": "application/json",
+            "requiredForReplay": true
+          }
+        }
+      },
+      "trustedGraph": {
+        "graphVersion": "fixture-graph-v1",
+        "graphHash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "nodes": [
+          "plans/plan-a.json",
+          "facts/snapshot-a.json",
+          "artifacts/lockfile.json",
+          "sha256:bbe0b0be8861ca03cfe043d8e83edc1f22e546e8520b33b094bf03feca36a5a6",
+          "sha256:d479e1bf84718cac9873072375991c12692eede349fc165ef900dc894861b324",
+          "sha256:d91bd3a5f27c3122465bb8c1a96e35e6c641815b9bb3b8c66dee3c0ef2449e00",
+          "sha256:e388fcda0fcdc5e7b242e23dbddc7eee22f8a28e6565bc20478b4bc9278e2f35",
+          "sha256:1af5ef02f951a23301dfecc6b4f4e73b019887b550f43efd1e02b501162b8b33",
+          "sha256:e24dee657b1f29ee66f93312d7228ab77a844e5fc363d0f1adadfd515fc5fedd",
+          "sha256:5dfd6ba02094fa74800b48ac117171996c5ac09310094f97cadd2d65d6cf5b00"
+        ],
+        "edges": [
+          {
+            "fromRef": "plans/plan-a.json",
+            "toRef": "facts/snapshot-a.json",
+            "necessity": "required_for_replay"
+          },
+          {
+            "fromRef": "plans/plan-a.json",
+            "toRef": "artifacts/lockfile.json",
+            "necessity": "required_for_replay"
+          }
+        ]
+      },
+      "requiredRoots": [
+        "plans/plan-a.json"
+      ],
+      "stagedIncludedRefs": [
+        "plans/plan-a.json",
+        "facts/snapshot-a.json",
+        "artifacts/lockfile.json",
+        "artifacts/rule-set.json",
+        "artifacts/standard-set.json",
+        "artifacts/system-profile.json",
+        "artifacts/adapter-snapshot.json",
+        "artifacts/engine.json",
+        "artifacts/simulation-model.json",
+        "sha256:bbe0b0be8861ca03cfe043d8e83edc1f22e546e8520b33b094bf03feca36a5a6",
+        "sha256:d479e1bf84718cac9873072375991c12692eede349fc165ef900dc894861b324",
+        "sha256:d91bd3a5f27c3122465bb8c1a96e35e6c641815b9bb3b8c66dee3c0ef2449e00",
+        "sha256:e388fcda0fcdc5e7b242e23dbddc7eee22f8a28e6565bc20478b4bc9278e2f35",
+        "sha256:1af5ef02f951a23301dfecc6b4f4e73b019887b550f43efd1e02b501162b8b33",
+        "sha256:e24dee657b1f29ee66f93312d7228ab77a844e5fc363d0f1adadfd515fc5fedd",
+        "sha256:5dfd6ba02094fa74800b48ac117171996c5ac09310094f97cadd2d65d6cf5b00"
+      ]
+    }
+  },
+  "expected": {
+    "decisions": [
+      {
+        "domain": "job-restart",
+        "verdict": "pass",
+        "reason": "Offline and restore states retain checkpoint, revision, runtime generation, and idempotency"
+      },
+      {
+        "domain": "portable-roundtrip",
+        "verdict": "pass",
+        "reason": "Complete package restores exact evaluation with hash closure"
+      },
+      {
+        "domain": "backup-secrets",
+        "verdict": "pass",
+        "reason": "Provider keys/cookies/profile are excluded"
+      },
+      {
+        "domain": "doctor",
+        "verdict": "fail",
+        "reason": "Read-only Doctor detects a blocking missing reference"
+      }
+    ],
+    "requirements": [
+      {
+        "id": "backup.hash-closure",
+        "strength": "hard",
+        "status": "satisfied"
+      },
+      {
+        "id": "doctor.repository-closure",
+        "strength": "hard",
+        "status": "conflict"
+      }
+    ],
+    "invariants": [
+      "Paused offline jobs do not burn retries",
+      "After restore, non-terminal jobs require user review and old leases are fenced",
+      "CAS requires expectedRevision, lease token, and runtime generation",
+      "Portable import never silently overwrites different hashes",
+      "Doctor default is read-only and evidence is redacted",
+      "Repair requires approved version-bound plan and prior backup"
+    ]
+  }
+}

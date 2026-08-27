@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-truenas-hba-backplane",
+  "purpose": "TrueNAS multi-disk build with a backplane and HBA in IT mode",
+  "input": {
+    "buildConfig": {
+      "schemaVersion": "3.0.0", "id": "build-u0-truenas", "name": "Reference TrueNAS HBA Backplane", "updatedAt": "2026-08-27T00:00:00.000Z",
+      "intent": {"state": "answered", "value": "nas", "source": "user", "confirmedByUser": true}, "requirementSpec": null,
+      "system": {"profileId": "system.truenas-scale", "versionFactId": "fact.truenas.version-1", "source": "user", "lockedByUser": true},
+      "components": [
+        {"instanceId": "case-1", "kind": "case", "role": "case", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.case.nas-8bay-v1", "identityClaimIds": ["claim.case.nas"]}, "source": "user"},
+        {"instanceId": "board-1", "kind": "motherboard", "role": "motherboard", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.board.server-8x-sata-v1", "identityClaimIds": ["claim.board.server"]}, "source": "user"},
+        {"instanceId": "cpu-1", "kind": "cpu", "role": "cpu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.cpu.server-low-power-v1", "identityClaimIds": ["claim.cpu.server"]}, "source": "user"},
+        {"instanceId": "hba-1", "kind": "hba", "role": "hba", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.hba.sas-9300-it-v1", "identityClaimIds": ["claim.hba.it"]}, "source": "user"},
+        {"instanceId": "backplane-1", "kind": "backplane", "role": "backplane", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.backplane.sas-8bay-v1", "identityClaimIds": ["claim.backplane.sas"]}, "source": "user"},
+        {"instanceId": "disk-1", "kind": "storage_drive", "role": "data-disk", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.disk.cmr-12tb-v1", "identityClaimIds": ["claim.disk.cmr"]}, "source": "user"},
+        {"instanceId": "disk-2", "kind": "storage_drive", "role": "data-disk", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.disk.cmr-12tb-v1", "identityClaimIds": ["claim.disk.cmr"]}, "source": "user"},
+        {"instanceId": "boot-1", "kind": "storage_drive", "role": "boot", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.storage.sata-boot-480gb-v1", "identityClaimIds": ["claim.boot.sata"]}, "source": "user"},
+        {"instanceId": "psu-1", "kind": "psu", "role": "psu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.psu.nas-650w-v1", "identityClaimIds": ["claim.psu.nas"]}, "source": "user"}
+      ],
+      "roleDecisions": [], "placements": [{"placementId": "place-hba", "componentInstanceId": "hba-1", "mountOwnerInstanceId": "board-1", "mountId": "pcie-x8-slot-1"}],
+      "connections": [{"connectionId": "conn-hba-backplane", "from": {"instanceId": "hba-1", "portId": "mini-sas-out"}, "to": {"instanceId": "backplane-1", "portId": "mini-sas-in"}, "status": "satisfied"}],
+      "logicalLayouts": [{"layoutId": "layout-mirror", "bootPoolDiskIds": ["boot-1"], "vdevs": [{"vdevId": "vdev-data", "topology": "mirror", "diskInstanceIds": ["disk-1", "disk-2"]}], "spareDiskIds": []}],
+      "firmwareTargets": [], "notes": ["RAID is not a backup"]
+    },
+    "facts": {"hbaMode": "IT", "backplaneProtocol": "SAS", "diskMedia": "CMR", "path": "hba->backplane->disks", "bootPoolIsolated": true},
+    "storageActivity": [{"logicalLayoutId": "layout-mirror", "dutyCycle": 0.4, "concurrentDiskCount": 2}]
+  },
+  "expected": {
+    "decisions": [
+      {"domain": "system", "verdict": "pass", "reason": "TrueNAS version is explicitly locked"},
+      {"domain": "hba-path", "verdict": "pass", "reason": "IT mode HBA and SAS backplane path are evidenced"},
+      {"domain": "storage-layout", "verdict": "pass", "reason": "Mirror has one-disk fault tolerance and isolated boot pool"},
+      {"domain": "destructive-actions", "verdict": "blocked", "reason": "No unique locator observation authorizes clearing disks"},
+      {"domain": "overall", "verdict": "blocked", "reason": "Safe NAS initialization requires per-disk locator confirmation"}
+    ],
+    "requirements": [{"id": "nas.boot-isolated", "strength": "hard", "status": "satisfied"}, {"id": "nas.locator-confirmation", "strength": "hard", "status": "residual"}],
+    "invariants": ["Physical disks remain component instances", "Logical layout is derived separately", "Mirror is not represented as a fake RAID component", "RAID/RAIDZ is never labeled backup"]
+  }
+}

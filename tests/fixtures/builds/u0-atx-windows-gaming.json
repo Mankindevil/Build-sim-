@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-atx-windows-gaming",
+  "purpose": "Reference ATX gaming PC that can boot the locked Windows profile",
+  "input": {
+    "buildConfig": {
+      "schemaVersion": "3.0.0", "id": "build-u0-atx-gaming", "name": "Reference ATX Windows Gaming", "updatedAt": "2026-08-27T00:00:00.000Z",
+      "intent": {"state": "answered", "value": "pc", "source": "user", "confirmedByUser": true},
+      "requirementSpec": null,
+      "system": {"profileId": "system.windows-11", "versionFactId": "fact.system.windows.version-1", "source": "user", "lockedByUser": true},
+      "components": [
+        {"instanceId": "case-1", "kind": "case", "role": "case", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.case.atx-builder-v1", "identityClaimIds": ["claim.case.atx" ]}, "source": "user"},
+        {"instanceId": "board-1", "kind": "motherboard", "role": "motherboard", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.board.am5-atx-v1", "identityClaimIds": ["claim.board.atx" ]}, "source": "user"},
+        {"instanceId": "cpu-1", "kind": "cpu", "role": "cpu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.cpu.amd-7800x3d-v1", "identityClaimIds": ["claim.cpu.am5" ]}, "source": "user"},
+        {"instanceId": "ram-1", "kind": "memory_module", "role": "memory", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.memory.ddr5-6000-v1", "identityClaimIds": ["claim.ram.ddr5" ]}, "source": "user"},
+        {"instanceId": "gpu-1", "kind": "gpu", "role": "gpu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.gpu.pcie-x16-320-v1", "identityClaimIds": ["claim.gpu.x16" ]}, "source": "user"},
+        {"instanceId": "boot-1", "kind": "storage_drive", "role": "boot", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.storage.nvme-1tb-v1", "identityClaimIds": ["claim.boot.nvme" ]}, "source": "user"},
+        {"instanceId": "psu-1", "kind": "psu", "role": "psu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.psu.atx-850w-v1", "identityClaimIds": ["claim.psu.atx" ]}, "source": "user"}
+      ],
+      "roleDecisions": [], "placements": [],
+      "connections": [
+        {"connectionId": "conn-atx-main", "from": {"instanceId": "psu-1", "portId": "atx-24"}, "to": {"instanceId": "board-1", "portId": "atx-24"}, "status": "satisfied"},
+        {"connectionId": "conn-atx-eps", "from": {"instanceId": "psu-1", "portId": "eps-8"}, "to": {"instanceId": "board-1", "portId": "eps-8"}, "status": "satisfied"},
+        {"connectionId": "conn-atx-gpu", "from": {"instanceId": "psu-1", "portId": "pcie-8"}, "to": {"instanceId": "gpu-1", "portId": "pcie-power"}, "status": "satisfied"}
+      ],
+      "logicalLayouts": [], "firmwareTargets": [], "notes": ["Reference facts are exact-variant and safety-critical"]
+    },
+    "facts": {"socket": "AM5", "memoryType": "DDR5", "biosMinimum": "fact.fixture.bios.am5-v1", "gpuLengthMm": 320, "caseGpuClearanceMm": 360, "psuWattage": 850, "systemDriverRefs": ["fixture.windows-gpu-driver-v1"]},
+    "evidence": {"safetyFields": "official_exact_variant", "geometryUncertaintyMm": 1}
+  },
+  "expected": {
+    "decisions": [
+      {"domain": "socket", "verdict": "pass", "reason": "CPU and board socket facts agree"},
+      {"domain": "memory", "verdict": "pass", "reason": "DIMM type and board support agree"},
+      {"domain": "power", "verdict": "pass", "reason": "ATX/EPS/PCIe connections and PSU capacity are evidenced"},
+      {"domain": "boot", "verdict": "pass", "reason": "NVMe boot device and locked Windows profile are supported"},
+      {"domain": "overall", "verdict": "pass", "reason": "All known hard gates pass with bounded clearance"}
+    ],
+    "requirements": [{"id": "req.windows-gaming", "strength": "hard", "status": "satisfied"}],
+    "invariants": ["No external display or USB device is a topology component", "Safety facts are not inferred across SKU families"]
+  }
+}

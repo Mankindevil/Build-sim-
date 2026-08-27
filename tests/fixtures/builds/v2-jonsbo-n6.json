@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "2.0.0",
+  "id": "fixture-v2-jonsbo-n6",
+  "name": "N6 Build Lab",
+  "updatedAt": "2026-08-27T00:00:00.000Z",
+  "caseId": "case.jonsbo-n6",
+  "boardId": "board.asus-w680m-ace-se",
+  "cpuId": "cpu.i5-14500",
+  "selection": {
+    "psuId": "psu.seasonic-focus-gx-850-v5",
+    "psuTopology": "auto",
+    "coolerId": "cooler.thermalright-axp90-x53-full",
+    "gpuId": "gpu.none",
+    "memoryId": "memory.kingston-ksm48e40bd8km-32hm-x2",
+    "diskCount": 1,
+    "diskSkuId": "storage.seagate-exos-x24-16tb",
+    "nvmeCount": 2,
+    "boot": "bay",
+    "hbaMode": "auto",
+    "hbaSkuId": null,
+    "fanMode": "balanced",
+    "fanGroups": [
+      {
+        "mountId": "front",
+        "sizeMm": 140,
+        "count": 2
+      }
+    ]
+  },
+  "bom": []
+}

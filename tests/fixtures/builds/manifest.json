@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "u0.fixture-manifest/1.0.0",
+  "id": "u0-build-fixtures",
+  "purpose": "Offline coverage index for universal and failure golden fixtures",
+  "fixtureDirectory": "tests/fixtures/builds",
+  "preservedLegacyFixtures": ["v2-empty.json", "v2-jonsbo-n6.json"],
+  "fixtures": [
+    {"file": "u0-atx-windows-gaming.json", "kind": "golden", "coverage": ["atx", "windows", "gaming"]},
+    {"file": "u0-igpu-office.json", "kind": "golden", "coverage": ["igpu", "office", "display"]},
+    {"file": "u0-truenas-hba-backplane.json", "kind": "golden", "coverage": ["truenas", "nas", "hba", "backplane"]},
+    {"file": "u0-multi-pcie-workstation.json", "kind": "golden", "coverage": ["workstation", "multi-pcie"]},
+    {"file": "u0-mini-itx.json", "kind": "golden", "coverage": ["mini-itx", "clearance"]},
+    {"file": "u0-blank.json", "kind": "golden", "coverage": ["blank", "zero-topology"]},
+    {"file": "u0-progressive-partial.json", "kind": "golden", "coverage": ["progressive", "partial"]},
+    {"file": "u0-requirements-only.json", "kind": "capability", "coverage": ["requirements-only"]},
+    {"file": "u0-solver-feasible.json", "kind": "capability", "coverage": ["solver", "feasible"]},
+    {"file": "u0-solver-unsat.json", "kind": "capability", "coverage": ["solver", "unsat_proven", "conflict-set"]},
+    {"file": "u0-solver-partial.json", "kind": "capability", "coverage": ["solver", "partial", "limits"]},
+    {"file": "u0-what-if-snapshot.json", "kind": "capability", "coverage": ["what-if", "fixed-snapshot"]},
+    {"file": "u0-assembly-gaps.json", "kind": "capability", "coverage": ["bundle", "fastener", "bracket", "tool"]},
+    {"file": "u0-procedures-windows-truenas.json", "kind": "capability", "coverage": ["procedure", "first-power", "failure-branch"]},
+    {"file": "u0-firmware-paths.json", "kind": "capability", "coverage": ["firmware", "flashback", "bridge"]},
+    {"file": "u0-nas-layouts.json", "kind": "capability", "coverage": ["mirror", "raidz", "smr", "destructive"]},
+    {"file": "u0-user-observations.json", "kind": "capability", "coverage": ["observation", "scope", "invalidation"]},
+    {"file": "u0-price-history.json", "kind": "capability", "coverage": ["price-history", "target-crossing", "dedupe"]},
+    {"file": "u0-durable-jobs-portability-doctor.json", "kind": "capability", "coverage": ["jobs", "restart", "buildsim", "backup", "doctor"]},
+    {"file": "u0-generic-catalog-fact-snapshot.json", "kind": "capability", "coverage": ["catalog", "facts", "identity-closure", "price-variant"]},
+    {"file": "u0-negative-compatibility.json", "kind": "negative", "coverage": ["socket", "bios", "ddr", "psu", "pcie-lane", "clearance", "boot", "display", "nic-driver", "modular-cable", "12v-2x6"]}
+  ],
+  "coverageRules": {
+    "verdicts": ["pass", "fail", "blocked"],
+    "safeUnknownVerdict": "blocked",
+    "inputsAreImmutable": true,
+    "evaluatorImplementationAsserted": false
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "schemaVersion": "u0-content-hash-golden-v1",
+  "vectors": [
+    {
+      "id": "config",
+      "contract": { "domain": "build-config", "schemaVersion": "3.0.0", "canonicalizationPolicyId": "config-v3-v1" },
+      "value": {
+        "schemaVersion": "3.0.0",
+        "id": "build-atx-001",
+        "name": "Café 工作站",
+        "updatedAt": "2026-08-27T00:00:00.000Z",
+        "intent": { "state": "answered", "value": "workstation", "source": "user", "confirmedByUser": true },
+        "requirementSpec": null,
+        "system": { "profileId": "system.windows-11", "versionFactId": "fact-win-24h2", "source": "user", "lockedByUser": true },
+        "components": [
+          { "instanceId": "gpu-1", "kind": "gpu", "role": "display", "state": "planned", "identity": { "status": "resolved", "skuId": "gpu.example-rtx", "identityClaimIds": ["claim-gpu"] }, "source": "user" },
+          { "instanceId": "motherboard-1", "kind": "motherboard", "role": "mainboard", "state": "ordered", "identity": { "status": "resolved", "skuId": "motherboard.example-am5", "identityClaimIds": ["claim-motherboard"] }, "source": "user" },
+          { "instanceId": "psu-1", "kind": "psu", "role": "power", "state": "planned", "identity": { "status": "unresolved", "userText": "ATX 3.1 750W 电源" }, "source": "user" }
+        ],
+        "roleDecisions": [],
+        "placements": [{ "placementId": "place-gpu", "componentInstanceId": "gpu-1", "mountOwnerInstanceId": "motherboard-1", "mountId": "pcie-x16-1" }],
+        "connections": [{ "connectionId": "power-gpu", "from": { "instanceId": "gpu-1", "portId": "12v-2x6" }, "to": { "instanceId": "psu-1", "portId": "12v-2x6" }, "status": "planned" }],
+        "logicalLayouts": [],
+        "firmwareTargets": [{ "instanceId": "motherboard-1", "targetReleaseFactId": "fact-bios-1.2", "requestedSettings": [{ "settingId": "virtualization", "desiredValue": "enabled" }], "source": "user" }],
+        "notes": ["保留 PCIe 插槽", "30°C 环境"]
+      },
+      "expectedSha256": "e5e1cd26c4915b783b207a52a9f88eeb6e850a09f48063516b356d983010f1fa"
+    },
+    {
+      "id": "requirement",
+      "contract": { "domain": "requirement-spec", "schemaVersion": "1.0.0", "canonicalizationPolicyId": "requirement-spec-v1" },
+      "value": {
+        "requirementSpecId": "req-workstation-001",
+        "schemaVersion": "1.0.0",
+        "budget": { "state": "answered", "value": { "targetCny": 12000, "hardCapCny": 13500, "reserveCny": 800 }, "source": "user", "confirmedByUser": true },
+        "workloads": [{
+          "workloadId": "blender-4k",
+          "name": "Blender 4K",
+          "metrics": [
+            { "metricId": "memory.capacity", "operator": "gte", "value": 64, "unitId": "gib", "priority": "must", "source": "user", "confirmedByUser": true },
+            { "metricId": "acoustics.noise", "operator": "lte", "value": 38, "unitId": "dba", "priority": "important", "source": "agent_proposed", "confirmedByUser": false }
+          ],
+          "evidenceOrBenchmarkRefs": ["benchmark.blender-4.2", "evidence.workflow-interview"]
+        }],
+        "constraints": [{ "constraintId": "os-windows", "predicate": { "facetId": "motherboard.supported_operating_systems", "operator": "includes", "value": "windows-11" }, "strength": "hard", "source": "user", "confirmedByUser": true }],
+        "horizonYears": { "state": "answered", "value": 5, "source": "user", "confirmedByUser": true }
+      },
+      "expectedSha256": "b965252fb4ea41dfe287f697decf3375a013f777a151f60f280eb7b937c26b0b"
+    },
+    {
+      "id": "fact",
+      "contract": { "domain": "fact-snapshot", "schemaVersion": "fact-snapshot-v1", "canonicalizationPolicyId": "fact-snapshot-content-v1" },
+      "value": {
+        "schemaVersion": "fact-snapshot-v1",
+        "snapshotId": "fact-snapshot-001",
+        "factIds": ["fact-case-clearance", "fact-psu-pinout"],
+        "conflictSetIds": [],
+        "createdAt": "2026-08-27T00:00:00.000Z",
+        "contentHash": "177368a227b8a7ac5d094899850ac257a28e54c3a44f6a985cf72b412b45011e"
+      },
+      "expectedSha256": "177368a227b8a7ac5d094899850ac257a28e54c3a44f6a985cf72b412b45011e"
+    },
+    {
+      "id": "observation",
+      "contract": { "domain": "user-observation-snapshot", "schemaVersion": "user-observation-snapshot-v1", "canonicalizationPolicyId": "observation-snapshot-content-v1" },
+      "value": {
+        "schemaVersion": "user-observation-snapshot-v1",
+        "snapshotId": "observation-snapshot-001",
+        "planId": "plan-001",
+        "observationIds": ["obs-clearance-1"],
+        "createdAt": "2026-08-27T00:00:00.000Z",
+        "contentHash": "fa5f8b205ca362a8f21274f64f42623c4e2e9c473ea70fd392fa755de0fdbfe9"
+      },
+      "expectedSha256": "fa5f8b205ca362a8f21274f64f42623c4e2e9c473ea70fd392fa755de0fdbfe9"
+    },
+    {
+      "id": "adapter",
+      "contract": { "domain": "adapter-snapshot", "schemaVersion": "adapter-snapshot-v1", "canonicalizationPolicyId": "adapter-snapshot-content-v1" },
+      "value": {
+        "schemaVersion": "adapter-snapshot-v1",
+        "snapshotId": "adapter-snapshot-001",
+        "adapters": [{
+          "adapterId": "adapter.catalog.generic",
+          "adapterVersion": "1.0.0",
+          "contractVersion": "hardware-adapter-v1",
+          "componentKindIds": ["case", "motherboard", "cpu", "memory_module", "gpu", "psu", "cpu_cooler", "aio", "radiator", "pump", "case_fan", "fan_rgb_hub", "storage_drive", "hba", "raid_controller", "storage_expander", "backplane", "nic", "capture_card", "expansion_board", "pcie_card", "cable", "adapter", "bracket"],
+          "emittedFacetIds": ["identity.category", "identity.manufacturer", "identity.model", "identity.revision", "physical.width", "physical.height", "physical.depth", "mount.standard", "mount.point_ids", "cpu.socket", "motherboard.cpu_socket", "motherboard.chipset", "motherboard.memory_type", "motherboard.memory_slot_count", "motherboard.memory_population_rules", "motherboard.form_factor", "motherboard.bios_version", "motherboard.bios_upgrade_methods", "motherboard.display_outputs", "motherboard.supported_operating_systems", "memory.type", "memory.capacity", "io.port_types", "io.header_types", "io.endpoint_ids", "case.motherboard_form_factors", "case.side_panel", "case.gpu_max_length", "case.cpu_cooler_max_height", "gpu.length", "gpu.slot_width", "gpu.power_connectors", "psu.capacity", "psu.connectors", "power.source_type", "power.load", "power.cable_families", "pcie.lane_count", "pcie.slot_types", "pcie.lane_sharing", "storage.interface", "storage.boot_support", "storage.recording_technology", "hba.mode", "cooling.fan_mounts", "cooling.radiator_support", "cooling.pump_header", "firmware.version", "firmware.upgrade_path_refs", "driver.supported_operating_systems", "driver.package_versions", "thermal.curve_refs", "acoustic.curve_refs", "package.contents", "acoustic.noise_class"],
+          "safetyClass": "electrical_safety",
+          "sourcePolicy": "official_required"
+        }],
+        "createdAt": "2026-08-27T00:00:00.000Z",
+        "contentHash": "d174ae53d29411b851d95f05fc51c623bf3df0b945e36ec9f0efc3c0b18c631e"
+      },
+      "expectedSha256": "d174ae53d29411b851d95f05fc51c623bf3df0b945e36ec9f0efc3c0b18c631e"
+    },
+    {
+      "id": "model",
+      "contract": { "domain": "simulation-model", "schemaVersion": "simulation-model-artifact-v1", "canonicalizationPolicyId": "simulation-model-artifact-v1" },
+      "value": {
+        "schemaVersion": "simulation-model-artifact-v1",
+        "modelId": "thermal-acoustic-interval",
+        "modelVersion": "2026.08",
+        "assumptions": ["ambient operating range is supplied by SimulationInput", "coil whine is reported as risk only", "room effects are excluded"],
+        "coefficients": { "airflowResistance": 0.42, "fanCurveExponent": 2.2 },
+        "contentHash": "e35e838d7660626d2c74da6d3c9f0db5e93920e59a97740e721679e77cd859bd"
+      },
+      "expectedSha256": "e35e838d7660626d2c74da6d3c9f0db5e93920e59a97740e721679e77cd859bd"
+    },
+    {
+      "id": "artifact",
+      "contract": { "domain": "artifact", "schemaVersion": "artifact-payload-v1", "canonicalizationPolicyId": "artifact-payload-v1" },
+      "value": {
+        "schemaVersion": "artifact-payload-v1",
+        "artifactId": "standards-atx-2026",
+        "mediaType": "application/vnd.buildsim.standard-set+json",
+        "payload": { "standardIds": ["ATX-3.1", "PCIe-CEM-5.1"], "publisher": "Build Sim fixture" },
+        "contentHash": "1d0ed2a7db11c8834e6764cce5b69269a4eee3fcd6a36977b79c6fcef1164d98"
+      },
+      "expectedSha256": "1d0ed2a7db11c8834e6764cce5b69269a4eee3fcd6a36977b79c6fcef1164d98"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "1.0.0",
+  "capturedAt": "2026-08-27T06:46:59Z",
+  "baseCommit": "3115748ff979b3cdd1bb4e0ca49e4c67ee9a4bb0",
+  "branch": "codex/complete-universal-hardware-platform",
+  "worktreeState": "pre-U0-dirty-user-work-preserved",
+  "algorithm": "sha256",
+  "entries": [
+    {
+      "domain": "catalog",
+      "path": "data/skus/catalog.json",
+      "sha256": "faccd64f63a9483862777ec032d175955e63598152da6457aba547ec98d5cc99"
+    },
+    {
+      "domain": "case-profile",
+      "path": "data/cases/jonsbo-n6/profile.json",
+      "sha256": "b339909d3ea64b12e63b15bd7a036f34e46cdd21f112fa28951400a19d5fdac8"
+    },
+    {
+      "domain": "case-geometry",
+      "path": "data/cases/jonsbo-n6/geometry.json",
+      "sha256": "39a02ae9a03016bda3270ca64f3f51cc41167a8491eaf27b81e4d3ef00b36621"
+    },
+    {
+      "domain": "case-routing",
+      "path": "data/cases/jonsbo-n6/routing.json",
+      "sha256": "6a1e2b7f8f30563a98088e3055415870a622a84e8e247edce8ad4e2c3841e57f"
+    },
+    {
+      "domain": "case-assembly",
+      "path": "data/cases/jonsbo-n6/assembly.json",
+      "sha256": "1aa3cd866ec55952f796b3339aec064c2601ea0d9cab4f72f40d530ac3db5ab8"
+    },
+    {
+      "domain": "constraints",
+      "path": "data/constraints/constraint-registry.json",
+      "sha256": "2ff29c3394948768ec781d61b47dad57234b3176f6931c7c97a429cdfad9611c"
+    },
+    {
+      "domain": "price-snapshot",
+      "path": "data/prices/latest.json",
+      "sha256": "0055670219ea36b453318b8490c86634f677035a2892aa0d1d1a8a148438889e"
+    },
+    {
+      "domain": "build-config-v2-schema",
+      "path": "src/config/types.ts",
+      "sha256": "6af0e62ef14711aaf11d262773bb30f2efda3dc2974ad88c6ab4b9501d71a18e"
+    },
+    {
+      "domain": "plan-v1-schema",
+      "path": "src/plans/contracts.ts",
+      "sha256": "3495af08e3323a424d92bcbe3c1eed3d4bd2c25698bc5907bee618a15b2509a2"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-assembly-gaps",
+  "purpose": "Bundle and assembly completeness cases for missing or mismatched physical supplies",
+  "input": {
+    "cases": [
+      {"caseId": "missing-screws", "bundleItems": [{"bundleItemId": "board-screws", "ownerSkuId": "fixture.board.am5-atx-v1", "kind": "fastener", "specification": [{"facetId": "package.contents", "operator": "includes", "value": "m3"}], "quantity": 4, "variantScopeFactIds": ["fact.board-revision-a"], "evidenceFactIds": ["fact.board-m3-fastener-requirement"]}], "available": [], "expectedGap": "need-to-buy"},
+      {"caseId": "wrong-standoffs", "bundleItems": [{"bundleItemId": "itx-standoff", "ownerSkuId": "fixture.case.itx-compact-v1", "kind": "standoff", "specification": [{"facetId": "case.cpu_cooler_max_height", "operator": "gte", "unitId": "mm", "value": 6.5}], "quantity": 4, "variantScopeFactIds": ["fact.case-revision-a"], "evidenceFactIds": ["fact.case-standoff"]}], "available": [{"item": "standoff", "height": 9}], "expectedGap": "blocked"},
+      {"caseId": "missing-bracket-tool", "bundleItems": [{"bundleItemId": "drive-bracket", "ownerSkuId": "fixture.case.itx-compact-v1", "kind": "bracket", "specification": [], "quantity": 1, "variantScopeFactIds": ["fact.case-revision-a"], "evidenceFactIds": ["fact.case-drive-bracket-requirement"]}, {"bundleItemId": "driver", "ownerSkuId": "fixture.case.itx-compact-v1", "kind": "tool", "specification": [], "quantity": 1, "variantScopeFactIds": ["fact.case-revision-a"], "evidenceFactIds": ["fact.case-driver-tool-requirement"]}], "available": [], "expectedGap": "blocked"},
+      {"caseId": "revision-mismatch", "bundleItems": [{"bundleItemId": "cable-a", "ownerSkuId": "fixture.psu.atx-850w-v1", "kind": "cable", "specification": [{"facetId": "psu.connectors", "operator": "includes", "value": "native-12v2x6"}], "quantity": 1, "revision": "B", "variantScopeFactIds": ["fact.psu-revision-b"], "evidenceFactIds": ["fact.psu-cable-b"]}], "available": [{"item": "cable-a", "revision": "A"}], "expectedGap": "blocked"}
+    ],
+    "assemblyRequirements": [{"requirementId": "req-fasteners", "neededByStepId": "step-mount-board"}, {"requirementId": "req-tool", "neededByStepId": "step-mount-drive"}]
+  },
+  "expected": {
+    "decisions": [{"domain": "missing-screws", "verdict": "fail", "reason": "Required fastener is absent and must be purchased"}, {"domain": "wrong-standoffs", "verdict": "fail", "reason": "Installed height does not match the board/case contract"}, {"domain": "missing-bracket-tool", "verdict": "blocked", "reason": "Bracket and tool availability is not established"}, {"domain": "wrong-modular-cable", "verdict": "fail", "reason": "Cable revision/PSU scope mismatch is safety critical"}, {"domain": "overall", "verdict": "blocked", "reason": "Assembly cannot be marked ready while requirements are missing or unsafe"}],
+    "requirements": [{"id": "req-fasteners", "strength": "hard", "status": "residual"}, {"id": "req-tool", "strength": "hard", "status": "residual"}],
+    "invariants": ["Bundle quantity and revision are variant-scoped", "Need-to-buy differs from not-confirmed", "Wrong modular cables never pass on generic connector shape", "Readiness is derived, not a writable boolean"]
+  }
+}

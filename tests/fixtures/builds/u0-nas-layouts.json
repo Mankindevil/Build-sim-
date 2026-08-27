@@ -1,0 +1,287 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-nas-layouts",
+  "purpose": "TrueNAS layout matrix for mirror, RAIDZ1/2, mixed media, SMR, HBA mode, and destructive locator safety",
+  "input": {
+    "layouts": [
+      {
+        "layoutId": "layout-mirror",
+        "bootPoolDiskIds": [
+          "boot-a",
+          "boot-b"
+        ],
+        "vdevs": [
+          {
+            "vdevId": "mirror-vdev",
+            "topology": "mirror",
+            "diskInstanceIds": [
+              "disk-a",
+              "disk-b"
+            ]
+          }
+        ],
+        "spareDiskIds": []
+      },
+      {
+        "layoutId": "layout-raidz1",
+        "bootPoolDiskIds": [
+          "boot-a"
+        ],
+        "vdevs": [
+          {
+            "vdevId": "raidz1-vdev",
+            "topology": "raidz1",
+            "diskInstanceIds": [
+              "disk-a",
+              "disk-b",
+              "disk-c"
+            ]
+          }
+        ],
+        "spareDiskIds": []
+      },
+      {
+        "layoutId": "layout-raidz2-mixed",
+        "bootPoolDiskIds": [
+          "boot-a"
+        ],
+        "vdevs": [
+          {
+            "vdevId": "raidz2-vdev",
+            "topology": "raidz2",
+            "diskInstanceIds": [
+              "disk-a",
+              "disk-b",
+              "disk-c",
+              "disk-d"
+            ]
+          }
+        ],
+        "spareDiskIds": []
+      },
+      {
+        "layoutId": "layout-unlocatable",
+        "bootPoolDiskIds": [
+          "boot-a"
+        ],
+        "vdevs": [
+          {
+            "vdevId": "vdev",
+            "topology": "mirror",
+            "diskInstanceIds": [
+              "disk-a",
+              "disk-b"
+            ]
+          }
+        ],
+        "spareDiskIds": []
+      }
+    ],
+    "layoutFacts": [
+      {
+        "layoutId": "layout-mirror",
+        "systemProfileId": "system.truenas-scale",
+        "diskFacts": {
+          "disk-a": {
+            "capacityBytes": 1000000000000,
+            "media": "CMR",
+            "faultDomain": "chassis-a"
+          },
+          "disk-b": {
+            "capacityBytes": 1000000000000,
+            "media": "CMR",
+            "faultDomain": "chassis-a"
+          }
+        },
+        "pathFacts": {
+          "hbaMode": "IT",
+          "uniqueLocators": true
+        }
+      },
+      {
+        "layoutId": "layout-raidz1",
+        "systemProfileId": "system.truenas-scale",
+        "diskFacts": {
+          "disk-a": {
+            "capacityBytes": 1000000000000,
+            "media": "CMR",
+            "faultDomain": "chassis-a"
+          },
+          "disk-b": {
+            "capacityBytes": 1000000000000,
+            "media": "CMR",
+            "faultDomain": "chassis-a"
+          },
+          "disk-c": {
+            "capacityBytes": 1000000000000,
+            "media": "CMR",
+            "faultDomain": "chassis-a"
+          }
+        },
+        "pathFacts": {
+          "hbaMode": "IT",
+          "uniqueLocators": true
+        }
+      },
+      {
+        "layoutId": "layout-raidz2-mixed",
+        "systemProfileId": "system.truenas-scale",
+        "diskFacts": {
+          "disk-a": {
+            "capacityBytes": 1000000000000,
+            "media": "CMR",
+            "faultDomain": "chassis-a"
+          },
+          "disk-b": {
+            "capacityBytes": 900000000000,
+            "media": "SMR",
+            "faultDomain": "chassis-a"
+          },
+          "disk-c": {
+            "capacityBytes": 1000000000000,
+            "media": "CMR",
+            "faultDomain": "chassis-a"
+          },
+          "disk-d": {
+            "capacityBytes": 1000000000000,
+            "media": "CMR",
+            "faultDomain": "chassis-a"
+          }
+        },
+        "pathFacts": {
+          "hbaMode": "RAID",
+          "uniqueLocators": true
+        }
+      },
+      {
+        "layoutId": "layout-unlocatable",
+        "systemProfileId": "system.truenas-scale",
+        "diskFacts": {
+          "disk-a": {
+            "capacityBytes": 1000000000000,
+            "media": "CMR",
+            "faultDomain": "chassis-a"
+          },
+          "disk-b": {
+            "capacityBytes": 1000000000000,
+            "media": "CMR",
+            "faultDomain": "chassis-a"
+          }
+        },
+        "pathFacts": {
+          "hbaMode": "IT",
+          "uniqueLocators": false
+        }
+      }
+    ],
+    "storageEvaluation": {
+      "layoutSelectionHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "systemProfileId": "system.truenas-scale",
+      "usableBytes": {
+        "min": 1000000000000,
+        "max": 1000000000000
+      },
+      "vdevResults": [
+        {
+          "vdevId": "mirror-vdev",
+          "estimatedUsableBytes": {
+            "min": 1000000000000,
+            "max": 1000000000000
+          },
+          "faultTolerance": {
+            "diskFailures": 1,
+            "conditions": [
+              "same-capacity CMR",
+              "IT-mode path"
+            ]
+          }
+        }
+      ],
+      "hbaAndPathDecisionIds": [
+        "storage-path-pass"
+      ],
+      "expansionOptions": [
+        {
+          "optionId": "add-mirror-vdev",
+          "operation": "add_vdev",
+          "requiredInstanceCount": 2,
+          "constraints": [],
+          "riskDecisionIds": [
+            "storage-path-pass"
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "decisionId": "storage-path-pass",
+          "verdict": "pass",
+          "domain": "storage",
+          "message": "Mirror path is evidenced",
+          "instanceIds": [
+            "disk-a",
+            "disk-b"
+          ],
+          "factIds": [
+            "fact.hba.it",
+            "fact.disk.cmr"
+          ],
+          "ruleId": "storage-mirror",
+          "ruleVersion": "1",
+          "assumptions": [],
+          "remediation": []
+        }
+      ],
+      "assumptions": [
+        "Usable capacity excludes filesystem overhead"
+      ]
+    }
+  },
+  "expected": {
+    "decisions": [
+      {
+        "domain": "mirror",
+        "verdict": "pass",
+        "reason": "Equal-capacity CMR disks and IT path permit one-disk tolerance"
+      },
+      {
+        "domain": "raidz1",
+        "verdict": "pass",
+        "reason": "Three same-capacity CMR disks have one-disk tolerance"
+      },
+      {
+        "domain": "mixed-raidz2",
+        "verdict": "fail",
+        "reason": "SMR/CMR mix and non-IT path violate declared NAS constraints"
+      },
+      {
+        "domain": "unlocatable-destructive",
+        "verdict": "blocked",
+        "reason": "Cannot authorize pool initialization without unique disk locators"
+      }
+    ],
+    "requirements": [
+      {
+        "id": "nas.same-capacity",
+        "strength": "hard",
+        "status": "satisfied"
+      },
+      {
+        "id": "nas.media-consistency",
+        "strength": "hard",
+        "status": "conflict"
+      },
+      {
+        "id": "nas.unique-locators",
+        "strength": "hard",
+        "status": "residual"
+      }
+    ],
+    "invariants": [
+      "Capacity and fault tolerance are evaluation outputs, not written into layout selection",
+      "Boot pool is explicit",
+      "Expansion options include operation, count, constraints, and risk",
+      "RAIDZ is not backup",
+      "DestructiveActionPlan requires locator observations and safety hash"
+    ]
+  }
+}

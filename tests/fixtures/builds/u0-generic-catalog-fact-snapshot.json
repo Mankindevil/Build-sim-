@@ -1,0 +1,1769 @@
+{
+  "schemaVersion": "u0.catalog-fact-fixture/1.0.0",
+  "id": "u0-generic-catalog-fact-snapshot",
+  "purpose": "Deterministic generic catalog and fact closure for all U0 V3 golden builds; fixture namespace is not a user inventory or paid/owned catalog",
+  "catalog": {
+    "schemaVersion": "u0.offline-catalog/1.0.0",
+    "catalogId": "catalog.fixture.generic-u0",
+    "catalogVersion": "1.0.0",
+    "updatedAt": "2026-08-27T00:00:00.000Z",
+    "contentHash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "entries": [
+      {
+        "skuId": "fixture.case.atx-builder-v1",
+        "category": "case",
+        "brand": "Fixture",
+        "model": "ATX Builder Chassis",
+        "variant": "ATX-01",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.case.atx-builder-v1",
+        "identityClaimIds": [
+          "claim.case.atx"
+        ]
+      },
+      {
+        "skuId": "fixture.board.am5-atx-v1",
+        "category": "motherboard",
+        "brand": "Fixture",
+        "model": "AM5 ATX Board",
+        "variant": "AM5-ATX-01",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.board.am5-atx-v1",
+        "identityClaimIds": [
+          "claim.board.atx"
+        ]
+      },
+      {
+        "skuId": "fixture.cpu.amd-7800x3d-v1",
+        "category": "cpu",
+        "brand": "Fixture",
+        "model": "AMD 8-Core Gaming CPU",
+        "variant": "AM5-7800X3D",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.cpu.amd-7800x3d-v1",
+        "identityClaimIds": [
+          "claim.cpu.am5"
+        ]
+      },
+      {
+        "skuId": "fixture.memory.ddr5-6000-v1",
+        "category": "memory_module",
+        "brand": "Fixture",
+        "model": "DDR5-6000 Kit",
+        "variant": "DDR5-6000-32G",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.memory.ddr5-6000-v1",
+        "identityClaimIds": [
+          "claim.ram.ddr5"
+        ]
+      },
+      {
+        "skuId": "fixture.gpu.pcie-x16-320-v1",
+        "category": "gpu",
+        "brand": "Fixture",
+        "model": "PCIe x16 Gaming GPU",
+        "variant": "X16-320",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.gpu.pcie-x16-320-v1",
+        "identityClaimIds": [
+          "claim.gpu.x16"
+        ]
+      },
+      {
+        "skuId": "fixture.storage.nvme-1tb-v1",
+        "category": "storage_drive",
+        "brand": "Fixture",
+        "model": "NVMe Boot SSD",
+        "variant": "NVME-1TB",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.storage.nvme-1tb-v1",
+        "identityClaimIds": [
+          "claim.boot.nvme"
+        ]
+      },
+      {
+        "skuId": "fixture.psu.atx-850w-v1",
+        "category": "psu",
+        "brand": "Fixture",
+        "model": "ATX 850W PSU",
+        "variant": "ATX-850W",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.psu.atx-850w-v1",
+        "identityClaimIds": [
+          "claim.psu.atx"
+        ]
+      },
+      {
+        "skuId": "fixture.case.matx-office-v1",
+        "category": "case",
+        "brand": "Fixture",
+        "model": "Micro-ATX Office Chassis",
+        "variant": "MATX-OFFICE",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.case.matx-office-v1",
+        "identityClaimIds": [
+          "claim.case.office"
+        ]
+      },
+      {
+        "skuId": "fixture.board.igpu-ddr4-v1",
+        "category": "motherboard",
+        "brand": "Fixture",
+        "model": "Integrated Graphics DDR4 Board",
+        "variant": "IGPU-DDR4",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.board.igpu-ddr4-v1",
+        "identityClaimIds": [
+          "claim.board.igpu"
+        ]
+      },
+      {
+        "skuId": "fixture.cpu.igpu-office-v1",
+        "category": "cpu",
+        "brand": "Fixture",
+        "model": "Integrated Graphics Office CPU",
+        "variant": "IGPU-OFFICE",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.cpu.igpu-office-v1",
+        "identityClaimIds": [
+          "claim.cpu.igpu"
+        ]
+      },
+      {
+        "skuId": "fixture.memory.ddr4-office-v1",
+        "category": "memory_module",
+        "brand": "Fixture",
+        "model": "DDR4 Office Kit",
+        "variant": "DDR4-OFFICE",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.memory.ddr4-office-v1",
+        "identityClaimIds": [
+          "claim.ram.ddr4"
+        ]
+      },
+      {
+        "skuId": "fixture.psu.sfx-450w-v1",
+        "category": "psu",
+        "brand": "Fixture",
+        "model": "SFX 450W PSU",
+        "variant": "SFX-450W",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.psu.sfx-450w-v1",
+      "identityClaimIds": [
+        "claim.psu.sfx-compact",
+        "claim.psu.sfx-office"
+      ]
+      },
+      {
+        "skuId": "fixture.case.itx-compact-v1",
+        "category": "case",
+        "brand": "Fixture",
+        "model": "Mini-ITX Compact Chassis",
+        "variant": "ITX-COMPACT",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.case.itx-compact-v1",
+        "identityClaimIds": [
+          "claim.case.mini-itx"
+        ]
+      },
+      {
+        "skuId": "fixture.board.itx-am5-v1",
+        "category": "motherboard",
+        "brand": "Fixture",
+        "model": "Mini-ITX AM5 Board",
+        "variant": "ITX-AM5",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.board.itx-am5-v1",
+        "identityClaimIds": [
+          "claim.board.mini-itx"
+        ]
+      },
+      {
+        "skuId": "fixture.cpu.low-power-am5-v1",
+        "category": "cpu",
+        "brand": "Fixture",
+        "model": "Low-Power AM5 CPU",
+        "variant": "AM5-LOWPOWER",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.cpu.low-power-am5-v1",
+        "identityClaimIds": [
+          "claim.cpu.low-power"
+        ]
+      },
+      {
+        "skuId": "fixture.gpu.short-180-v1",
+        "category": "gpu",
+        "brand": "Fixture",
+        "model": "Short PCIe GPU",
+        "variant": "X16-180",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.gpu.short-180-v1",
+        "identityClaimIds": [
+          "claim.gpu.short"
+        ]
+      },
+      {
+        "skuId": "fixture.cooler.low-profile-47-v1",
+        "category": "cpu_cooler",
+        "brand": "Fixture",
+        "model": "Low Profile CPU Cooler",
+        "variant": "LP-47",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.cooler.low-profile-47-v1",
+        "identityClaimIds": [
+          "claim.cooler.low-profile"
+        ]
+      },
+      {
+        "skuId": "fixture.case.fulltower-workstation-v1",
+        "category": "case",
+        "brand": "Fixture",
+        "model": "Full Tower Workstation Chassis",
+        "variant": "FULLTOWER-WORKSTATION",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.case.fulltower-workstation-v1",
+        "identityClaimIds": [
+          "claim.case.fulltower"
+        ]
+      },
+      {
+        "skuId": "fixture.board.workstation-w680-v1",
+        "category": "motherboard",
+        "brand": "Fixture",
+        "model": "Workstation W680 Board",
+        "variant": "W680-WORKSTATION",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.board.workstation-w680-v1",
+        "identityClaimIds": [
+          "claim.board.workstation"
+        ]
+      },
+      {
+        "skuId": "fixture.cpu.workstation-xeon-v1",
+        "category": "cpu",
+        "brand": "Fixture",
+        "model": "Workstation CPU",
+        "variant": "WORKSTATION-CPU",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.cpu.workstation-xeon-v1",
+        "identityClaimIds": [
+          "claim.cpu.workstation"
+        ]
+      },
+      {
+        "skuId": "fixture.gpu.workstation-3slot-v1",
+        "category": "gpu",
+        "brand": "Fixture",
+        "model": "Workstation Three-Slot GPU",
+        "variant": "X16-3SLOT",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.gpu.workstation-3slot-v1",
+        "identityClaimIds": [
+          "claim.gpu.workstation"
+        ]
+      },
+      {
+        "skuId": "fixture.capture.pcie-x4-v1",
+        "category": "pcie_card",
+        "brand": "Fixture",
+        "model": "PCIe Capture Card",
+        "variant": "CAPTURE-X4",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.capture.pcie-x4-v1",
+        "identityClaimIds": [
+          "claim.capture.x4"
+        ]
+      },
+      {
+        "skuId": "fixture.nic.pcie-x8-v1",
+        "category": "nic",
+        "brand": "Fixture",
+        "model": "PCIe Network Adapter",
+        "variant": "NIC-X8",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.nic.pcie-x8-v1",
+        "identityClaimIds": [
+          "claim.nic.x8"
+        ]
+      },
+      {
+        "skuId": "fixture.memory.ecc-ddr5-v1",
+        "category": "memory_module",
+        "brand": "Fixture",
+        "model": "ECC DDR5 Kit",
+        "variant": "ECC-DDR5",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.memory.ecc-ddr5-v1",
+        "identityClaimIds": [
+          "claim.ram.ecc"
+        ]
+      },
+      {
+        "skuId": "fixture.psu.workstation-1200w-v1",
+        "category": "psu",
+        "brand": "Fixture",
+        "model": "Workstation 1200W PSU",
+        "variant": "WORKSTATION-1200W",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.psu.workstation-1200w-v1",
+        "identityClaimIds": [
+          "claim.psu.workstation"
+        ]
+      },
+      {
+        "skuId": "fixture.case.nas-8bay-v1",
+        "category": "case",
+        "brand": "Fixture",
+        "model": "Eight-Bay NAS Chassis",
+        "variant": "NAS-8BAY",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.case.nas-8bay-v1",
+        "identityClaimIds": [
+          "claim.case.nas"
+        ]
+      },
+      {
+        "skuId": "fixture.board.server-8x-sata-v1",
+        "category": "motherboard",
+        "brand": "Fixture",
+        "model": "Server Eight-SATA Board",
+        "variant": "SERVER-8XSATA",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.board.server-8x-sata-v1",
+        "identityClaimIds": [
+          "claim.board.server"
+        ]
+      },
+      {
+        "skuId": "fixture.cpu.server-low-power-v1",
+        "category": "cpu",
+        "brand": "Fixture",
+        "model": "Low-Power Server CPU",
+        "variant": "SERVER-LOWPOWER",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.cpu.server-low-power-v1",
+        "identityClaimIds": [
+          "claim.cpu.server"
+        ]
+      },
+      {
+        "skuId": "fixture.hba.sas-9300-it-v1",
+        "category": "hba",
+        "brand": "Fixture",
+        "model": "SAS HBA IT Mode",
+        "variant": "SAS-9300-IT",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.hba.sas-9300-it-v1",
+        "identityClaimIds": [
+          "claim.hba.it"
+        ]
+      },
+      {
+        "skuId": "fixture.backplane.sas-8bay-v1",
+        "category": "backplane",
+        "brand": "Fixture",
+        "model": "Eight-Bay SAS Backplane",
+        "variant": "SAS-8BAY",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.backplane.sas-8bay-v1",
+        "identityClaimIds": [
+          "claim.backplane.sas"
+        ]
+      },
+      {
+        "skuId": "fixture.disk.cmr-12tb-v1",
+        "category": "storage_drive",
+        "brand": "Fixture",
+        "model": "12TB CMR Data Disk",
+        "variant": "CMR-12TB",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.disk.cmr-12tb-v1",
+        "identityClaimIds": [
+          "claim.disk.cmr"
+        ]
+      },
+      {
+        "skuId": "fixture.storage.sata-boot-480gb-v1",
+        "category": "storage_drive",
+        "brand": "Fixture",
+        "model": "480GB SATA Boot SSD",
+        "variant": "SATA-BOOT-480",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.storage.sata-boot-480gb-v1",
+        "identityClaimIds": [
+          "claim.boot.sata"
+        ]
+      },
+      {
+        "skuId": "fixture.psu.nas-650w-v1",
+        "category": "psu",
+        "brand": "Fixture",
+        "model": "NAS 650W PSU",
+        "variant": "NAS-650W",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.psu.nas-650w-v1",
+        "identityClaimIds": [
+          "claim.psu.nas"
+        ]
+      },
+      {
+        "skuId": "fixture.case.user-described-v1",
+        "category": "case",
+        "brand": "Fixture",
+        "model": "User-Described Case Fixture",
+        "variant": "USER-DESCRIBED",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.case.user-described-v1",
+        "identityClaimIds": [
+          "claim.case.user-text"
+        ]
+      },
+      {
+        "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+        "category": "gpu",
+        "brand": "Fixture",
+        "model": "Radeon Pro Fixture GPU",
+        "variant": "RADEON-PRO-A",
+        "revision": "A",
+        "identityFactId": "fact.fixture.identity.gpu.radeon-pro-variant-a-v1",
+        "identityClaimIds": [
+          "claim.gpu.radeon-pro-variant-a"
+        ]
+      }
+    ]
+  },
+  "facts": {
+    "schemaVersion": "u0.fact-store/1.0.0",
+    "records": [
+      {
+        "factId": "fact.fixture.identity.case.atx-builder-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.atx-builder-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.case"
+        },
+        "field": "identity",
+        "value": {
+          "category": "case",
+          "brand": "Fixture",
+          "model": "ATX Builder Chassis",
+          "variant": "ATX-01",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.case.atx-builder-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.board.am5-atx-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.board.am5-atx-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.motherboard"
+        },
+        "field": "identity",
+        "value": {
+          "category": "motherboard",
+          "brand": "Fixture",
+          "model": "AM5 ATX Board",
+          "variant": "AM5-ATX-01",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.board.am5-atx-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.cpu.amd-7800x3d-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.cpu.amd-7800x3d-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.cpu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "cpu",
+          "brand": "Fixture",
+          "model": "AMD 8-Core Gaming CPU",
+          "variant": "AM5-7800X3D",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.cpu.amd-7800x3d-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.memory.ddr5-6000-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.memory.ddr5-6000-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.memory_module"
+        },
+        "field": "identity",
+        "value": {
+          "category": "memory_module",
+          "brand": "Fixture",
+          "model": "DDR5-6000 Kit",
+          "variant": "DDR5-6000-32G",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.memory.ddr5-6000-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.gpu.pcie-x16-320-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.gpu.pcie-x16-320-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.gpu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "gpu",
+          "brand": "Fixture",
+          "model": "PCIe x16 Gaming GPU",
+          "variant": "X16-320",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.gpu.pcie-x16-320-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.storage.nvme-1tb-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.storage.nvme-1tb-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.storage_drive"
+        },
+        "field": "identity",
+        "value": {
+          "category": "storage_drive",
+          "brand": "Fixture",
+          "model": "NVMe Boot SSD",
+          "variant": "NVME-1TB",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.storage.nvme-1tb-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.psu.atx-850w-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.psu.atx-850w-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.psu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "psu",
+          "brand": "Fixture",
+          "model": "ATX 850W PSU",
+          "variant": "ATX-850W",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.psu.atx-850w-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.case.matx-office-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.matx-office-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.case"
+        },
+        "field": "identity",
+        "value": {
+          "category": "case",
+          "brand": "Fixture",
+          "model": "Micro-ATX Office Chassis",
+          "variant": "MATX-OFFICE",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.case.matx-office-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.board.igpu-ddr4-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.board.igpu-ddr4-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.motherboard"
+        },
+        "field": "identity",
+        "value": {
+          "category": "motherboard",
+          "brand": "Fixture",
+          "model": "Integrated Graphics DDR4 Board",
+          "variant": "IGPU-DDR4",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.board.igpu-ddr4-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.cpu.igpu-office-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.cpu.igpu-office-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.cpu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "cpu",
+          "brand": "Fixture",
+          "model": "Integrated Graphics Office CPU",
+          "variant": "IGPU-OFFICE",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.cpu.igpu-office-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.memory.ddr4-office-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.memory.ddr4-office-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.memory_module"
+        },
+        "field": "identity",
+        "value": {
+          "category": "memory_module",
+          "brand": "Fixture",
+          "model": "DDR4 Office Kit",
+          "variant": "DDR4-OFFICE",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.memory.ddr4-office-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.psu.sfx-450w-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.psu.sfx-450w-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.psu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "psu",
+          "brand": "Fixture",
+          "model": "SFX 450W PSU",
+          "variant": "SFX-450W",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.psu.sfx-450w-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.case.itx-compact-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.itx-compact-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.case"
+        },
+        "field": "identity",
+        "value": {
+          "category": "case",
+          "brand": "Fixture",
+          "model": "Mini-ITX Compact Chassis",
+          "variant": "ITX-COMPACT",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.case.itx-compact-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.board.itx-am5-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.board.itx-am5-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.motherboard"
+        },
+        "field": "identity",
+        "value": {
+          "category": "motherboard",
+          "brand": "Fixture",
+          "model": "Mini-ITX AM5 Board",
+          "variant": "ITX-AM5",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.board.itx-am5-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.cpu.low-power-am5-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.cpu.low-power-am5-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.cpu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "cpu",
+          "brand": "Fixture",
+          "model": "Low-Power AM5 CPU",
+          "variant": "AM5-LOWPOWER",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.cpu.low-power-am5-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.gpu.short-180-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.gpu.short-180-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.gpu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "gpu",
+          "brand": "Fixture",
+          "model": "Short PCIe GPU",
+          "variant": "X16-180",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.gpu.short-180-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.cooler.low-profile-47-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.cooler.low-profile-47-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.cpu_cooler"
+        },
+        "field": "identity",
+        "value": {
+          "category": "cpu_cooler",
+          "brand": "Fixture",
+          "model": "Low Profile CPU Cooler",
+          "variant": "LP-47",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.cooler.low-profile-47-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.case.fulltower-workstation-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.fulltower-workstation-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.case"
+        },
+        "field": "identity",
+        "value": {
+          "category": "case",
+          "brand": "Fixture",
+          "model": "Full Tower Workstation Chassis",
+          "variant": "FULLTOWER-WORKSTATION",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.case.fulltower-workstation-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.board.workstation-w680-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.board.workstation-w680-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.motherboard"
+        },
+        "field": "identity",
+        "value": {
+          "category": "motherboard",
+          "brand": "Fixture",
+          "model": "Workstation W680 Board",
+          "variant": "W680-WORKSTATION",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.board.workstation-w680-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.cpu.workstation-xeon-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.cpu.workstation-xeon-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.cpu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "cpu",
+          "brand": "Fixture",
+          "model": "Workstation CPU",
+          "variant": "WORKSTATION-CPU",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.cpu.workstation-xeon-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.gpu.workstation-3slot-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.gpu.workstation-3slot-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.gpu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "gpu",
+          "brand": "Fixture",
+          "model": "Workstation Three-Slot GPU",
+          "variant": "X16-3SLOT",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.gpu.workstation-3slot-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.capture.pcie-x4-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.capture.pcie-x4-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.pcie_card"
+        },
+        "field": "identity",
+        "value": {
+          "category": "pcie_card",
+          "brand": "Fixture",
+          "model": "PCIe Capture Card",
+          "variant": "CAPTURE-X4",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.capture.pcie-x4-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.nic.pcie-x8-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.nic.pcie-x8-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.nic"
+        },
+        "field": "identity",
+        "value": {
+          "category": "nic",
+          "brand": "Fixture",
+          "model": "PCIe Network Adapter",
+          "variant": "NIC-X8",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.nic.pcie-x8-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.memory.ecc-ddr5-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.memory.ecc-ddr5-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.memory_module"
+        },
+        "field": "identity",
+        "value": {
+          "category": "memory_module",
+          "brand": "Fixture",
+          "model": "ECC DDR5 Kit",
+          "variant": "ECC-DDR5",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.memory.ecc-ddr5-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.psu.workstation-1200w-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.psu.workstation-1200w-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.psu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "psu",
+          "brand": "Fixture",
+          "model": "Workstation 1200W PSU",
+          "variant": "WORKSTATION-1200W",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.psu.workstation-1200w-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.case.nas-8bay-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.nas-8bay-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.case"
+        },
+        "field": "identity",
+        "value": {
+          "category": "case",
+          "brand": "Fixture",
+          "model": "Eight-Bay NAS Chassis",
+          "variant": "NAS-8BAY",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.case.nas-8bay-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.board.server-8x-sata-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.board.server-8x-sata-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.motherboard"
+        },
+        "field": "identity",
+        "value": {
+          "category": "motherboard",
+          "brand": "Fixture",
+          "model": "Server Eight-SATA Board",
+          "variant": "SERVER-8XSATA",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.board.server-8x-sata-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.cpu.server-low-power-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.cpu.server-low-power-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.cpu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "cpu",
+          "brand": "Fixture",
+          "model": "Low-Power Server CPU",
+          "variant": "SERVER-LOWPOWER",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.cpu.server-low-power-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.hba.sas-9300-it-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.hba.sas-9300-it-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.hba"
+        },
+        "field": "identity",
+        "value": {
+          "category": "hba",
+          "brand": "Fixture",
+          "model": "SAS HBA IT Mode",
+          "variant": "SAS-9300-IT",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.hba.sas-9300-it-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.backplane.sas-8bay-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.backplane.sas-8bay-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.backplane"
+        },
+        "field": "identity",
+        "value": {
+          "category": "backplane",
+          "brand": "Fixture",
+          "model": "Eight-Bay SAS Backplane",
+          "variant": "SAS-8BAY",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.backplane.sas-8bay-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.disk.cmr-12tb-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.disk.cmr-12tb-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.storage_drive"
+        },
+        "field": "identity",
+        "value": {
+          "category": "storage_drive",
+          "brand": "Fixture",
+          "model": "12TB CMR Data Disk",
+          "variant": "CMR-12TB",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.disk.cmr-12tb-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.storage.sata-boot-480gb-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.storage.sata-boot-480gb-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.storage_drive"
+        },
+        "field": "identity",
+        "value": {
+          "category": "storage_drive",
+          "brand": "Fixture",
+          "model": "480GB SATA Boot SSD",
+          "variant": "SATA-BOOT-480",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.storage.sata-boot-480gb-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.psu.nas-650w-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.psu.nas-650w-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.psu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "psu",
+          "brand": "Fixture",
+          "model": "NAS 650W PSU",
+          "variant": "NAS-650W",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.psu.nas-650w-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.case.user-described-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.user-described-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.case"
+        },
+        "field": "identity",
+        "value": {
+          "category": "case",
+          "brand": "Fixture",
+          "model": "User-Described Case Fixture",
+          "variant": "USER-DESCRIBED",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.case.user-described-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.identity.gpu.radeon-pro-variant-a-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+          "revision": "A",
+          "region": "fixture",
+          "familyId": "family.fixture.gpu"
+        },
+        "field": "identity",
+        "value": {
+          "category": "gpu",
+          "brand": "Fixture",
+          "model": "Radeon Pro Fixture GPU",
+          "variant": "RADEON-PRO-A",
+          "revision": "A"
+        },
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/catalog/fixture.gpu.radeon-pro-variant-a-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.case.mounts.v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.user-described-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "case.mount_count",
+        "value": 2,
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/facts/fact.fixture.case.mounts.v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.board-revision-a",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.board.am5-atx-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "identity.revision",
+        "value": "A",
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/facts/fact.board-revision-a"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.case-revision-a",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.itx-compact-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "identity.revision",
+        "value": "A",
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/facts/fact.case-revision-a"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.case-standoff",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.itx-compact-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "package.standoff",
+        "value": "M3-9mm",
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/facts/fact.case-standoff"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.board-m3-fastener-requirement",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.board.am5-atx-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "assembly.required_fastener",
+        "value": "m3",
+        "scope": "revision",
+        "authority": "official",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/official/board-am5-atx-v1/assembly-manual#fasteners"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.case-drive-bracket-requirement",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.itx-compact-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "assembly.required_bracket",
+        "value": "drive-bracket",
+        "scope": "revision",
+        "authority": "official",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/official/case-itx-compact-v1/assembly-manual#drive-bracket"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.case-driver-tool-requirement",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.case.itx-compact-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "assembly.required_tool",
+        "value": "driver",
+        "scope": "revision",
+        "authority": "official",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/official/case-itx-compact-v1/assembly-manual#required-tools"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.psu-revision-b",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.psu.atx-850w-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "identity.revision",
+        "value": "B",
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/facts/fact.psu-revision-b"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.psu-cable-b",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.psu.atx-850w-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "package.cable_revision",
+        "value": "B",
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/facts/fact.psu-cable-b"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.gpu.radeon-pro-variant-a.identity",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "identity.variant",
+        "value": "RADEON-PRO-A",
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/facts/fact.fixture.gpu.radeon-pro-variant-a.identity"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.fixture.bios.am5-v1",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.board.am5-atx-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "firmware.minimum_release",
+        "value": "release-min-a",
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/facts/fact.fixture.bios.am5-v1"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.hba.it",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.hba.sas-9300-it-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "hba.mode",
+        "value": "IT",
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/facts/fact.hba.it"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      },
+      {
+        "factId": "fact.disk.cmr",
+        "subject": {
+          "kind": "product",
+          "skuId": "fixture.disk.cmr-12tb-v1",
+          "revision": "A",
+          "region": "fixture"
+        },
+        "field": "storage.recording_technology",
+        "value": "CMR",
+        "scope": "revision",
+        "authority": "third_party",
+        "safetyClass": "normal",
+        "status": "active",
+        "evidenceRefs": [
+          "fixture://u0/facts/fact.disk.cmr"
+        ],
+        "derivedFromFactIds": [],
+        "confidence": 1,
+        "retrievedAt": "2026-08-27T00:00:00.000Z"
+      }
+    ]
+  },
+  "factSnapshot": {
+    "schemaVersion": "fact-snapshot-v1",
+    "snapshotId": "snapshot.fixture.generic-u0.v1",
+    "factIds": [
+      "fact.fixture.identity.case.atx-builder-v1",
+      "fact.fixture.identity.board.am5-atx-v1",
+      "fact.fixture.identity.cpu.amd-7800x3d-v1",
+      "fact.fixture.identity.memory.ddr5-6000-v1",
+      "fact.fixture.identity.gpu.pcie-x16-320-v1",
+      "fact.fixture.identity.storage.nvme-1tb-v1",
+      "fact.fixture.identity.psu.atx-850w-v1",
+      "fact.fixture.identity.case.matx-office-v1",
+      "fact.fixture.identity.board.igpu-ddr4-v1",
+      "fact.fixture.identity.cpu.igpu-office-v1",
+      "fact.fixture.identity.memory.ddr4-office-v1",
+      "fact.fixture.identity.psu.sfx-450w-v1",
+      "fact.fixture.identity.case.itx-compact-v1",
+      "fact.fixture.identity.board.itx-am5-v1",
+      "fact.fixture.identity.cpu.low-power-am5-v1",
+      "fact.fixture.identity.gpu.short-180-v1",
+      "fact.fixture.identity.cooler.low-profile-47-v1",
+      "fact.fixture.identity.case.fulltower-workstation-v1",
+      "fact.fixture.identity.board.workstation-w680-v1",
+      "fact.fixture.identity.cpu.workstation-xeon-v1",
+      "fact.fixture.identity.gpu.workstation-3slot-v1",
+      "fact.fixture.identity.capture.pcie-x4-v1",
+      "fact.fixture.identity.nic.pcie-x8-v1",
+      "fact.fixture.identity.memory.ecc-ddr5-v1",
+      "fact.fixture.identity.psu.workstation-1200w-v1",
+      "fact.fixture.identity.case.nas-8bay-v1",
+      "fact.fixture.identity.board.server-8x-sata-v1",
+      "fact.fixture.identity.cpu.server-low-power-v1",
+      "fact.fixture.identity.hba.sas-9300-it-v1",
+      "fact.fixture.identity.backplane.sas-8bay-v1",
+      "fact.fixture.identity.disk.cmr-12tb-v1",
+      "fact.fixture.identity.storage.sata-boot-480gb-v1",
+      "fact.fixture.identity.psu.nas-650w-v1",
+      "fact.fixture.identity.case.user-described-v1",
+      "fact.fixture.identity.gpu.radeon-pro-variant-a-v1",
+      "fact.fixture.case.mounts.v1",
+      "fact.board-revision-a",
+      "fact.case-revision-a",
+      "fact.case-standoff",
+      "fact.board-m3-fastener-requirement",
+      "fact.case-drive-bracket-requirement",
+      "fact.case-driver-tool-requirement",
+      "fact.psu-revision-b",
+      "fact.psu-cable-b",
+      "fact.fixture.gpu.radeon-pro-variant-a.identity",
+      "fact.fixture.bios.am5-v1",
+      "fact.hba.it",
+      "fact.disk.cmr"
+    ],
+    "conflictSetIds": [],
+    "createdAt": "2026-08-27T00:00:00.000Z",
+    "contentHash": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "priceBindings": [
+    {
+      "skuId": "fixture.gpu.radeon-pro-variant-a-v1",
+      "variantIdentityFactIds": [
+        "fact.fixture.gpu.radeon-pro-variant-a.identity"
+      ],
+      "fixture": "u0-price-history.json"
+    }
+  ],
+  "provenance": {
+    "namespace": "fixture",
+    "synthetic": true,
+    "officialProductionEvidence": false,
+    "forbiddenUserInventoryFields": [
+      "paid",
+      "owned",
+      "purchaseStatus"
+    ]
+  }
+}

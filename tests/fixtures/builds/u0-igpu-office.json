@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-igpu-office",
+  "purpose": "Quiet office PC using integrated graphics and an explicitly not-needed discrete GPU",
+  "input": {
+    "buildConfig": {
+      "schemaVersion": "3.0.0", "id": "build-u0-igpu-office", "name": "Reference iGPU Office", "updatedAt": "2026-08-27T00:00:00.000Z",
+      "intent": {"state": "answered", "value": "pc", "source": "user", "confirmedByUser": true}, "requirementSpec": null,
+      "system": {"profileId": "system.windows-11", "versionFactId": "fact.system.windows.version-1", "source": "defaulted", "lockedByUser": false},
+      "components": [
+        {"instanceId": "case-1", "kind": "case", "role": "case", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.case.matx-office-v1", "identityClaimIds": ["claim.case.office"]}, "source": "user"},
+        {"instanceId": "board-1", "kind": "motherboard", "role": "motherboard", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.board.igpu-ddr4-v1", "identityClaimIds": ["claim.board.igpu"]}, "source": "user"},
+        {"instanceId": "cpu-1", "kind": "cpu", "role": "cpu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.cpu.igpu-office-v1", "identityClaimIds": ["claim.cpu.igpu"]}, "source": "user"},
+        {"instanceId": "ram-1", "kind": "memory_module", "role": "memory", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.memory.ddr4-office-v1", "identityClaimIds": ["claim.ram.ddr4"]}, "source": "user"},
+        {"instanceId": "psu-1", "kind": "psu", "role": "psu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.psu.sfx-450w-v1", "identityClaimIds": ["claim.psu.sfx-office"]}, "source": "user"}
+      ],
+      "roleDecisions": [{"roleDecisionId": "role-gpu-none", "role": "gpu", "decision": "not_needed", "source": "user", "confirmedAt": "2026-08-27T00:00:00.000Z"}],
+      "placements": [], "connections": [], "logicalLayouts": [], "firmwareTargets": [], "notes": ["Discrete GPU intentionally omitted"]
+    },
+    "facts": {"integratedGraphics": true, "boardVideoPorts": ["hdmi", "displayport"], "memoryType": "DDR4", "systemDriverRefs": ["windows-igpu-driver"]},
+    "requirementSpec": {"requirementSpecId":"reqspec-igpu-office","schemaVersion":"1.0.0","workloads":[{"workloadId":"wl-office","name":"office display workload","metrics":[{"metricId":"performance.gpu.frame_rate","operator":"gte","value":60,"unitId":"fps","priority":"must","benchmarkId":"benchmark.game.fps","benchmarkContext":{"title":"fixture-office","titleVersion":"1","resolution":"1080p","qualityPreset":"office","graphicsApi":"directx"}}]}],"constraints":[]}
+  },
+  "expected": {
+    "decisions": [
+      {"domain": "gpu-role", "verdict": "pass", "reason": "not_needed is a confirmed role decision, not a fake GPU instance"},
+      {"domain": "display", "verdict": "pass", "reason": "Integrated graphics and board outputs satisfy the office target"},
+      {"domain": "system", "verdict": "blocked", "reason": "Default system version is not user locked until the profile is confirmed"},
+      {"domain": "overall", "verdict": "blocked", "reason": "Safe install verdict waits for the system version lock"}
+    ],
+    "requirements": [{"id": "display.outputs", "strength": "hard", "status": "satisfied"}],
+    "invariants": ["No discrete GPU component is created", "A default system suggestion cannot silently overwrite a later user choice"]
+  }
+}

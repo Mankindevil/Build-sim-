@@ -1,0 +1,228 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-procedures-windows-truenas",
+  "purpose": "Windows and TrueNAS bench/pre-power/first-power procedures with explicit failure branches",
+  "input": {
+    "procedures": [
+      {
+        "procedureId": "proc-windows",
+        "inputEvaluationHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "procedureSafetyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "phases": [
+          "prepare",
+          "bench_test",
+          "wiring",
+          "firmware",
+          "first_power",
+          "system_install",
+          "verification"
+        ],
+        "steps": [
+          {
+            "stepId": "win-bench",
+            "phase": "bench_test",
+            "action": "POST with one DIMM and display path",
+            "dependsOn": [],
+            "instanceIds": [
+              "board-1",
+              "cpu-1",
+              "ram-1"
+            ],
+            "requirementIds": [
+              "req-minimal-post"
+            ],
+            "expectedResult": "POST screen",
+            "failureAction": "stop and inspect",
+            "riskLevel": "caution",
+            "stopConditions": [
+              "no POST",
+              "smell"
+            ],
+            "failureBranchStepIds": [],
+            "confirmationPolicy": "observation_required",
+            "safetyCritical": true,
+            "dependencyHashes": {
+              "compatibilityHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "procedureSafetyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "dependencyHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "evidenceRefs": [
+              "manual.board-bench"
+            ]
+          },
+          {
+            "stepId": "win-power",
+            "phase": "first_power",
+            "action": "Verify PSU switch, EPS, ATX, GPU power before power-on",
+            "dependsOn": [
+              "win-bench"
+            ],
+            "instanceIds": [
+              "psu-1",
+              "board-1",
+              "gpu-1"
+            ],
+            "requirementIds": [
+              "req-power-check"
+            ],
+            "expectedResult": "stable POST",
+            "failureAction": "stop and inspect",
+            "riskLevel": "safety_critical",
+            "stopConditions": [
+              "unexpected shutdown"
+            ],
+            "failureBranchStepIds": [],
+            "confirmationPolicy": "user_confirm",
+            "safetyCritical": true,
+            "dependencyHashes": {
+              "procedureSafetyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "dependencyHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "evidenceRefs": [
+              "manual.psu"
+            ]
+          }
+        ]
+      },
+      {
+        "procedureId": "proc-truenas",
+        "inputEvaluationHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "procedureSafetyHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "phases": [
+          "prepare",
+          "bench_test",
+          "wiring",
+          "firmware",
+          "first_power",
+          "system_install",
+          "verification"
+        ],
+        "steps": [
+          {
+            "stepId": "nas-locator",
+            "phase": "prepare",
+            "action": "Record unique disk serial/slot locators",
+            "dependsOn": [],
+            "instanceIds": [
+              "disk-1",
+              "disk-2"
+            ],
+            "requirementIds": [
+              "req-disk-locators"
+            ],
+            "expectedResult": "one locator per disk",
+            "failureAction": "do not initialize",
+            "riskLevel": "destructive",
+            "stopConditions": [
+              "duplicate locator"
+            ],
+            "failureBranchStepIds": [],
+            "confirmationPolicy": "measurement",
+            "safetyCritical": true,
+            "dependencyHashes": {
+              "procedureSafetyHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            },
+            "dependencyHash": "1111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRefs": [
+              "user-observation.slot-photo"
+            ]
+          },
+          {
+            "stepId": "nas-first-power",
+            "phase": "first_power",
+            "action": "Boot from isolated boot pool and verify HBA IT path",
+            "dependsOn": [
+              "nas-locator"
+            ],
+            "instanceIds": [
+              "boot-1",
+              "hba-1"
+            ],
+            "requirementIds": [
+              "req-hba-it"
+            ],
+            "expectedResult": "TrueNAS detects intended disks",
+            "failureAction": "stop before pool creation",
+            "riskLevel": "safety_critical",
+            "stopConditions": [
+              "unexpected disk mapping"
+            ],
+            "failureBranchStepIds": [],
+            "confirmationPolicy": "observation_required",
+            "safetyCritical": true,
+            "dependencyHashes": {
+              "procedureSafetyHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            },
+            "dependencyHash": "2222222222222222222222222222222222222222222222222222222222222222",
+            "evidenceRefs": [
+              "manual.hba-it"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "decisions": [
+      {
+        "domain": "windows-procedure",
+        "verdict": "pass",
+        "reason": "Bench and pre-power checks have ordered steps and failure branches"
+      },
+      {
+        "domain": "truenas-procedure",
+        "verdict": "blocked",
+        "reason": "Disk locator observation is required before destructive pool work"
+      },
+      {
+        "domain": "safety",
+        "verdict": "pass",
+        "reason": "Safety-critical steps cannot be skipped"
+      }
+    ],
+    "requirements": [
+      {
+        "id": "req-minimal-post",
+        "strength": "hard",
+        "status": "defined"
+      },
+      {
+        "id": "req-disk-locators",
+        "strength": "hard",
+        "status": "residual"
+      }
+    ],
+    "invariants": [
+      "Procedure steps carry dependency hashes",
+      "Execution result confirmation is separate from component state",
+      "Destructive or safety-critical steps require confirmation",
+      "A failed first-power path stops before system initialization"
+    ]
+  },
+  "trustedProcedureContexts": [
+    {
+      "procedureId": "proc-windows",
+      "evaluatorArtifactRef": "fixture/artifacts/evaluator-v1",
+      "evaluatorArtifactHash": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "evaluatorVersion": "fixture-evaluator-v1",
+      "expectedInputEvaluationHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedProcedureSafetyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expectedStepDependencyHashes": {
+        "win-bench": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "win-power": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    },
+    {
+      "procedureId": "proc-truenas",
+      "evaluatorArtifactRef": "fixture/artifacts/evaluator-v1",
+      "evaluatorArtifactHash": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "evaluatorVersion": "fixture-evaluator-v1",
+      "expectedInputEvaluationHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "expectedProcedureSafetyHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expectedStepDependencyHashes": {
+        "nas-locator": "1111111111111111111111111111111111111111111111111111111111111111",
+        "nas-first-power": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    }
+  ]
+}

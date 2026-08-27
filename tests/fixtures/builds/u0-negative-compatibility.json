@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-negative-compatibility",
+  "purpose": "Safety and boot negative matrix; every known violation fails and every unknown critical field blocks",
+  "input": {
+    "cases": [
+      {"caseId": "socket-mismatch", "domain": "socket", "facts": {"cpuSocket": "socket-A", "boardSocket": "socket-B"}},
+      {"caseId": "bios-below-minimum", "domain": "bios", "facts": {"current": "release-old", "minimum": "release-new", "executablePath": true}},
+      {"caseId": "ddr-mismatch", "domain": "memory", "facts": {"dimmType": "DDR4", "boardType": "DDR5"}},
+      {"caseId": "psu-connector-missing", "domain": "power", "facts": {"required": "eps-8", "available": "atx-only"}},
+      {"caseId": "pcie-lane-shortage", "domain": "pcie-lanes", "facts": {"requiredLanes": 28, "availableLanes": 16}},
+      {"caseId": "case-clearance-interference", "domain": "clearance", "facts": {"requiredMm": 52, "availableMm": 50, "uncertaintyMm": 2}},
+      {"caseId": "no-boot-device", "domain": "boot", "facts": {"bootDevices": []}},
+      {"caseId": "no-display-path", "domain": "display", "facts": {"gpu": "none", "integratedGraphics": false, "boardVideoPorts": []}},
+      {"caseId": "missing-nic-driver", "domain": "nic-driver", "facts": {"targetSystem": "system-reference", "driverRefs": []}},
+      {"caseId": "wrong-modular-cable", "domain": "modular-cable", "facts": {"psuFamily": "family-A", "cableFamily": "family-B", "connectorShape": "same"}},
+      {"caseId": "12v2x6-bend", "domain": "12v-2x6-bend", "facts": {"connector": "12v-2x6", "bendDistanceMm": 20, "minimumBendDistanceMm": 35}},
+      {"caseId": "unknown-safety-field", "domain": "power", "facts": {"psuPinout": "unknown", "cableFamily": "unknown"}}
+    ]
+  },
+  "expected": {
+    "decisions": [{"domain": "socket", "verdict": "fail", "reason": "Explicit CPU/board socket mismatch"}, {"domain": "bios", "verdict": "fail", "reason": "Current release is below minimum"}, {"domain": "memory", "verdict": "fail", "reason": "DDR generations differ"}, {"domain": "power", "verdict": "fail", "reason": "Required EPS connector is absent"}, {"domain": "pcie-lanes", "verdict": "fail", "reason": "Required lanes exceed documented availability"}, {"domain": "clearance", "verdict": "fail", "reason": "Interference remains after uncertainty"}, {"domain": "boot", "verdict": "fail", "reason": "No boot device exists"}, {"domain": "display", "verdict": "fail", "reason": "No display output path exists"}, {"domain": "nic-driver", "verdict": "blocked", "reason": "Driver support is unknown, not green"}, {"domain": "modular-cable", "verdict": "fail", "reason": "Cable family mismatch cannot be inferred safe from shape"}, {"domain": "12v-2x6-bend", "verdict": "fail", "reason": "Bend is inside manufacturer/service limit"}, {"domain": "unknown-safety", "verdict": "blocked", "reason": "Unknown pinout/cable family is safety critical"}],
+    "requirements": [{"id": "negative-matrix", "strength": "hard", "status": "covered"}],
+    "invariants": ["No explicit incompatibility can be softened by scoring", "Unknown safety-critical fields never pass", "Socket, BIOS, DDR, PSU, lane, clearance, boot, display, driver, cable, and bend domains remain distinct", "12V-2x6 bend is checked with connector-specific geometry and service margin", "Agent inference cannot authorize modular PSU pinout or cable family"]
+  }
+}

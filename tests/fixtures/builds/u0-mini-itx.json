@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-mini-itx",
+  "purpose": "Compact Mini-ITX build with clearance margins, short GPU, and SFX power",
+  "input": {
+    "buildConfig": {
+      "schemaVersion": "3.0.0", "id": "build-u0-mini-itx", "name": "Reference Mini-ITX", "updatedAt": "2026-08-27T00:00:00.000Z",
+      "intent": {"state": "answered", "value": "pc", "source": "user", "confirmedByUser": true}, "requirementSpec": null,
+      "system": {"profileId": "system.windows-11", "versionFactId": "fact.system.windows.version-1", "source": "user", "lockedByUser": true},
+      "components": [
+        {"instanceId": "case-1", "kind": "case", "role": "case", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.case.itx-compact-v1", "identityClaimIds": ["claim.case.mini-itx"]}, "source": "user"},
+        {"instanceId": "board-1", "kind": "motherboard", "role": "motherboard", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.board.itx-am5-v1", "identityClaimIds": ["claim.board.mini-itx"]}, "source": "user"},
+        {"instanceId": "cpu-1", "kind": "cpu", "role": "cpu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.cpu.low-power-am5-v1", "identityClaimIds": ["claim.cpu.low-power"]}, "source": "user"},
+        {"instanceId": "gpu-1", "kind": "gpu", "role": "gpu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.gpu.short-180-v1", "identityClaimIds": ["claim.gpu.short"]}, "source": "user"},
+        {"instanceId": "cooler-1", "kind": "cpu_cooler", "role": "cooler", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.cooler.low-profile-47-v1", "identityClaimIds": ["claim.cooler.low-profile"]}, "source": "user"},
+        {"instanceId": "psu-1", "kind": "psu", "role": "psu", "state": "planned", "identity": {"status": "resolved", "skuId": "fixture.psu.sfx-450w-v1", "identityClaimIds": ["claim.psu.sfx-compact"]}, "source": "user"}
+      ],
+      "roleDecisions": [], "placements": [{"placementId": "p-gpu", "componentInstanceId": "gpu-1", "mountOwnerInstanceId": "case-1", "mountId": "short-gpu-slot"}], "connections": [], "logicalLayouts": [], "firmwareTargets": [], "notes": []
+    },
+    "facts": {"gpuLengthMm": 180, "caseGpuClearanceMm": 190, "geometryUncertaintyMm": 2, "coolerHeightMm": 47, "caseCoolerClearanceMm": 50, "serviceMarginMm": 4, "psuFormFactor": "SFX"}
+  },
+  "expected": {
+    "decisions": [{"domain": "gpu-clearance", "verdict": "pass", "reason": "10 mm nominal margin exceeds combined 4 mm uncertainty/service requirement"}, {"domain": "cooler-clearance", "verdict": "blocked", "reason": "Remaining 3 mm is below the declared service margin after uncertainty"}, {"domain": "overall", "verdict": "blocked", "reason": "Critical compact clearance cannot be safely green without measurement"}],
+    "requirements": [{"id": "mini-itx.service-margin", "strength": "hard", "status": "residual"}],
+    "invariants": ["Critical clearance uses uncertainty and service margin", "A box fallback is not a vendor CAD claim", "Unknown geometry remains blocked"]
+  }
+}

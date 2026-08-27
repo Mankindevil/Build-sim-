@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "u0.fixture/1.0.0",
+  "id": "u0-blank",
+  "purpose": "True blank plan containing no hidden hardware, BOM, topology, or geometry",
+  "input": {
+    "buildConfig": {"schemaVersion": "3.0.0", "id": "build-u0-blank", "name": "真正空白方案", "updatedAt": "2026-08-27T00:00:00.000Z", "intent": null, "requirementSpec": null, "system": null, "components": [], "roleDecisions": [], "placements": [], "connections": [], "logicalLayouts": [], "firmwareTargets": [], "notes": []}
+  },
+  "expected": {
+    "decisions": [{"domain": "overall", "verdict": "blocked", "reason": "No intent, requirements, or components exist; evaluator must not invent a build"}],
+    "requirements": [],
+    "invariants": ["components.length == 0", "roleDecisions.length == 0", "placements.length == 0", "connections.length == 0", "logicalLayouts.length == 0", "BOM is empty or derived as empty", "No hidden case, board, disk, cable, price, geometry, or purchase state", "Unknown is not pass"]
+  }
+}
