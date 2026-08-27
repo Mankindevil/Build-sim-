@@ -17,6 +17,8 @@ const CATEGORY_WORDS: [SkuCategory, string[]][] = [
   ["hba", ["hba", "sas card", "阵列卡"]],
 ];
 const INTERFACES = ["slimsas", "sff-8643", "sata", "nvme", "pcie", "ddr5", "ddr4", "ecc", "sfx", "atx"];
+const SEASONIC_PSU_MODEL_TOKEN = /^(?:(?:focus|vertex|prime|core)-)?(?:gx|px|sgx|spx)-\d{3,4}(?:-v\d+)?$/i;
+const GPU_CHIP_MODEL_TOKEN = /^(?:(?:geforce|radeon)-?)?(?:(?:rtx|gtx)-?\d{3,4}(?:-?(?:ti|super))?|rx-?\d{3,4}(?:-?(?:xt|xtx|gre))?|arc-?[ab]?\d{3,4})$/i;
 
 function clean(value: string): string {
   return value.normalize("NFKC").replace(/[‐‑‒–—−]/g, "-").replace(/[，、；]/g, " ").replace(/\s+/g, " ").trim();
@@ -46,9 +48,13 @@ function findInterface(normalized: string): string | undefined {
   return found;
 }
 
-function findMpn(normalized: string): string | undefined {
+function findMpn(normalized: string, brand?: string, category?: SkuCategory): string | undefined {
   const tokens = normalized.split(/[^A-Za-z0-9-]+/).filter(Boolean);
-  const candidates = tokens.filter((token) => /[A-Za-z]/.test(token) && /\d/.test(token) && (token.includes("-") || token.length >= 8));
+  const candidates = tokens.filter((token) => /[A-Za-z]/.test(token)
+    && /\d/.test(token)
+    && (token.includes("-") || token.length >= 8)
+    && !((brand?.toLocaleLowerCase() === "seasonic" || category === "psu") && SEASONIC_PSU_MODEL_TOKEN.test(token))
+    && !(category === "gpu" && GPU_CHIP_MODEL_TOKEN.test(token)));
   return candidates.sort((a, b) => b.length - a.length)[0];
 }
 
@@ -59,7 +65,7 @@ export function normalizeModelQuery(raw: string, overrides: Partial<Pick<Normali
   const category = overrides.category ?? findCategory(normalized);
   const capacity = findCapacity(normalized);
   const iface = findInterface(normalized);
-  const mpn = findMpn(normalized);
+  const mpn = findMpn(normalized, brand, category);
   const withoutBrand = brand ? normalized.replace(new RegExp(brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ") : normalized;
   const withoutMpn = mpn ? withoutBrand.replace(mpn, " ") : withoutBrand;
   const model = withoutMpn.replace(/\b\d+(?:\.\d+)?\s*(?:tb|gb|mb)\b/ig, " ").replace(new RegExp(INTERFACES.join("|"), "ig"), " ").replace(/\s+/g, " ").trim() || undefined;

@@ -2,6 +2,7 @@ import type { PlanAgentContext, PlanChangeProposal, PlanRepository } from "../pl
 import { repositoryErrorResponse } from "../plans/file-repository";
 import { PlanProposalError, PlanProposalService } from "../plans/proposals";
 import { recordPlanAgentRunContext, type PlanAgentContextAuditStore } from "../plans/agent-context-audit";
+import type { PlanEvidenceBinding } from "../evidence/contracts";
 
 export interface WorkspaceRouteResponse {
   status: number;
@@ -34,6 +35,18 @@ export async function handleWorkspaceRoute(method: string | undefined, pathname:
       const input = body as { proposal: PlanChangeProposal; operationIndexes?: number[]; approvalConfirmed?: boolean; approvedBy?: string };
       if (proposalMatch[2] === "validate") return { status: 200, payload: { proposal: await service.validate(planId, input.proposal, input.operationIndexes) } };
       return { status: 200, payload: await service.apply(planId, input.proposal, input.operationIndexes, { confirmed: input.approvalConfirmed === true, approvedBy: input.approvedBy ?? "" }) };
+    }
+    const evidenceBindingMatch = pathname.match(/^\/api\/workspace\/plans\/([^/]+)\/evidence-bindings(?:\/([^/]+))?$/);
+    if (evidenceBindingMatch?.[1]) {
+      const planId = decodeURIComponent(evidenceBindingMatch[1]);
+      const bindingId = evidenceBindingMatch[2] ? decodeURIComponent(evidenceBindingMatch[2]) : null;
+      if (method === "GET" && !bindingId) return { status: 200, payload: { bindings: await repository.listEvidenceBindings(planId) } };
+      if (method === "POST" && !bindingId) return { status: 201, payload: await repository.bindEvidence(planId, body as Parameters<PlanRepository["bindEvidence"]>[1]) };
+      if (method === "DELETE" && bindingId) {
+        await repository.unbindEvidence(planId, { ...(body as Omit<Parameters<PlanRepository["unbindEvidence"]>[1], "bindingId">), bindingId: bindingId as PlanEvidenceBinding["id"] });
+        return { status: 204, payload: null };
+      }
+      return { status: 404, payload: { error: "route_not_found", route: `${method} ${pathname}` } };
     }
     const path = planPath(pathname);
     if (!path) return { status: 404, payload: { error: "route_not_found", route: `${method} ${pathname}` } };

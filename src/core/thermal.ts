@@ -151,6 +151,8 @@ export interface ThermalInput {
   diskEvidence: EvidenceLevel;
   /** Everything dissipated in the board chamber (CPU + board + HBA + GPU). */
   upperWatts: number;
+  /** Fan/controller heat physically located in the drive chamber. */
+  lowerAuxWatts?: number;
   /** True when an SFX unit sits in the lower chamber (bottom or dual topology). */
   psuInLowerChamber: boolean;
   /** DC load carried by that lower-chamber PSU. */
@@ -242,13 +244,15 @@ export function computeThermal(input: ThermalInput): ThermalResult {
   const upperCfm = upperFanned ? upperFans : PASSIVE_CFM;
 
   const driveW = input.diskCount * input.diskWattsEach;
+  const lowerAuxW = input.lowerAuxWatts ?? 0;
   const eta = Math.min(0.98, Math.max(0.5, input.psuEfficiency));
   const psuWasteW =
     input.psuInLowerChamber && input.psuDcWatts > 0 ? input.psuDcWatts * (1 / eta - 1) : 0;
 
   // The manual never states which way the bottom PSU's 92mm fan blows, so the
   // chamber load spans "exhausts straight out" to "dumps everything inside".
-  const lowerLoad: Range = { lo: driveW, hi: driveW + psuWasteW };
+  const lowerBaseW = driveW + lowerAuxW;
+  const lowerLoad: Range = { lo: lowerBaseW, hi: lowerBaseW + psuWasteW };
   const lowerRise: Range = {
     lo: airRiseK(lowerLoad.lo, lowerCfm.hi),
     hi: airRiseK(lowerLoad.hi, lowerCfm.lo),
@@ -294,7 +298,7 @@ export function computeThermal(input: ThermalInput): ThermalResult {
     evidence: ci.evidence,
   }));
 
-  const extraRiseK = psuWasteW > 0 ? lowerRise.hi - airRiseK(driveW, lowerCfm.lo) : 0;
+  const extraRiseK = psuWasteW > 0 ? lowerRise.hi - airRiseK(lowerBaseW, lowerCfm.lo) : 0;
 
   const notes: string[] = [
     `下层热负荷 ${round1(lowerLoad.lo)}–${round1(lowerLoad.hi)}W，估算风量 ${round1(lowerCfm.lo)}–${round1(lowerCfm.hi)} CFM，出风温升 ${round1(lowerRise.lo)}–${round1(lowerRise.hi)}K。`,
@@ -306,7 +310,7 @@ export function computeThermal(input: ThermalInput): ThermalResult {
   }
   if (psuWasteW > 0) {
     notes.push(
-      `下置电源废热 ${round1(psuWasteW)}W，占下层热负荷 ${Math.round((psuWasteW / (driveW + psuWasteW)) * 100)}%；若它把废热排进盘区，出风再升约 ${round1(extraRiseK)}K，同时它自己要吸 ${round1(ambientC + 0.5 * lowerRise.lo)}–${round1(ambientC + lowerRise.hi)}°C 的预热空气。`,
+      `下置电源废热 ${round1(psuWasteW)}W，占下层热负荷 ${Math.round((psuWasteW / (lowerBaseW + psuWasteW)) * 100)}%；若它把废热排进盘区，出风再升约 ${round1(extraRiseK)}K，同时它自己要吸 ${round1(ambientC + 0.5 * lowerRise.lo)}–${round1(ambientC + lowerRise.hi)}°C 的预热空气。`,
     );
     notes.push("手册没有给下置位的风向，因此上面给的是「完全排到机外」到「全部排进盘区」两端。");
   }
@@ -395,7 +399,7 @@ export function computeThermal(input: ThermalInput): ThermalResult {
     coupling: {
       active: psuWasteW > 0,
       psuWasteW,
-      shareOfLowerLoad: psuWasteW > 0 ? psuWasteW / (driveW + psuWasteW) : 0,
+      shareOfLowerLoad: psuWasteW > 0 ? psuWasteW / (lowerBaseW + psuWasteW) : 0,
       extraRiseK,
     },
     assumptions,

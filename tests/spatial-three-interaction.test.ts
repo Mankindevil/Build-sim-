@@ -11,6 +11,7 @@ import {
 import { evaluateBuild } from "../src/core/evaluate";
 import { loadBundledCatalog } from "../src/sku/catalog";
 import { initializedStore } from "./helpers/workspace-ui";
+import { createEmptyBuildConfig } from "../src/plans/default-plan";
 
 describe("Three spatial interaction policy", () => {
   it("does not treat a click or an exact five-pixel move as a drag", () => {
@@ -59,6 +60,35 @@ describe("Three spatial interaction policy", () => {
 
     controller.dispose();
     expect(document.querySelector(".case-view-toolbar")?.classList.contains("is-hidden")).toBe(false);
+    context.mockRestore();
+    store.dispose();
+  });
+
+  it("drops a resolved scene as soon as the active draft becomes partial", async () => {
+    document.body.innerHTML = `<main id="n6-lab"><div class="case-view-toolbar"></div><div class="spatial-stage" id="spatial-stage"><svg id="iso-svg" class="case-view" data-case-view="iso"></svg><div class="spatial-help"></div><div class="spatial-data-strip">old scene facts</div></div></main>`;
+    const context = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+    const { store } = await initializedStore();
+    const catalog = loadBundledCatalog();
+    const ready = store.getState().activePlan!.draft.config;
+    store.setEvaluation(evaluateBuild(ready, catalog));
+    const controller = mountSpatialView(document.getElementById("spatial-stage")!, store, () => catalog);
+    expect(controller.getModel()?.nodes.some((node) => node.partId === "board")).toBe(true);
+
+    store.setSelection({ partId: "board", view: "spatial" });
+    store.replaceDraft(createEmptyBuildConfig(ready.id, "2026-08-27T00:00:00.000Z"));
+    await Promise.resolve();
+
+    expect(controller.getModel()).toBeNull();
+    expect(controller.getOverlays()).toBeNull();
+    expect(document.querySelector("[data-three-spatial-root]")?.classList.contains("is-partial")).toBe(true);
+    expect(document.querySelector("[data-three-status]")?.textContent).toContain("完成后再生成 3D 场景");
+    expect(store.getState().selection).toBeNull();
+
+    store.replaceDraft(ready);
+    expect(controller.getModel()?.nodes.some((node) => node.partId === "board")).toBe(true);
+    expect(document.querySelector("[data-three-spatial-root]")?.classList.contains("is-partial")).toBe(false);
+
+    controller.dispose();
     context.mockRestore();
     store.dispose();
   });

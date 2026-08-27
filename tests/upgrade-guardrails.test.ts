@@ -14,7 +14,64 @@ describe("G0 upgrade guardrails", () => {
       catalogAutoAcceptExactMpn: false,
       catalogAutoTrustNewDomains: false,
       adviceEnabled: false,
+      topologyV3Enabled: false,
+      factGraphEnabled: false,
+      userObservationsEnabled: false,
+      genericAdaptersEnabled: false,
+      progressiveEvaluationEnabled: false,
+      wholeBuildSolverEnabled: false,
+      scenarioWhatIfEnabled: false,
+      buildExecutionV3Enabled: false,
+      storageLayoutEnabled: false,
+      priceHistoryEnabled: false,
+      priceTargetsEnabled: false,
+      durableJobsEnabled: false,
+      portabilityEnabled: false,
+      backupRestoreEnabled: false,
+      doctorRepairEnabled: false,
     });
+  });
+
+  it("enables each universal-platform rollout surface independently", async () => {
+    const flags = await loadRuntimeFlags({
+      BUILD_SIM_TOPOLOGY_V3_ENABLED: "true",
+      BUILD_SIM_FACT_GRAPH_ENABLED: "1",
+      BUILD_SIM_USER_OBSERVATIONS_ENABLED: "yes",
+      BUILD_SIM_GENERIC_ADAPTERS_ENABLED: "on",
+      BUILD_SIM_PROGRESSIVE_EVALUATION_ENABLED: "true",
+      BUILD_SIM_WHOLE_BUILD_SOLVER_ENABLED: "true",
+      BUILD_SIM_SCENARIO_WHAT_IF_ENABLED: "true",
+      BUILD_SIM_BUILD_EXECUTION_V3_ENABLED: "true",
+      BUILD_SIM_STORAGE_LAYOUT_ENABLED: "true",
+      BUILD_SIM_PRICE_HISTORY_ENABLED: "true",
+      BUILD_SIM_PRICE_TARGETS_ENABLED: "true",
+      BUILD_SIM_DURABLE_JOBS_ENABLED: "true",
+      BUILD_SIM_PORTABILITY_ENABLED: "true",
+      BUILD_SIM_BACKUP_RESTORE_ENABLED: "true",
+      BUILD_SIM_DOCTOR_REPAIR_ENABLED: "true",
+    });
+
+    expect(flags).toMatchObject({
+      topologyV3Enabled: true,
+      factGraphEnabled: true,
+      userObservationsEnabled: true,
+      genericAdaptersEnabled: true,
+      progressiveEvaluationEnabled: true,
+      wholeBuildSolverEnabled: true,
+      scenarioWhatIfEnabled: true,
+      buildExecutionV3Enabled: true,
+      storageLayoutEnabled: true,
+      priceHistoryEnabled: true,
+      priceTargetsEnabled: true,
+      durableJobsEnabled: true,
+      portabilityEnabled: true,
+      backupRestoreEnabled: true,
+      doctorRepairEnabled: true,
+    });
+  });
+
+  it("rejects malformed rollout flag values", async () => {
+    await expect(loadRuntimeFlags({ BUILD_SIM_TOPOLOGY_V3_ENABLED: "sometimes" })).rejects.toThrow(/must be true or false/);
   });
 
   it("writes through a temporary file and records an old-value rollback", async () => {

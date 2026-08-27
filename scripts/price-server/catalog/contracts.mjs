@@ -37,7 +37,26 @@ export function assertDiscoveryResult(value) {
 }
 
 export function catalogCandidateInputHash(candidate) {
-  const value = { candidateId: candidate?.candidateId, canonicalUrl: candidate?.canonicalUrl, source: candidate?.source, official: candidate?.official, identity: candidate?.identity, extraction: candidate?.extraction, fields: candidate?.fields, conflicts: candidate?.conflicts ?? [] };
+  const value = {
+    candidateId: candidate?.candidateId,
+    skuId: candidate?.skuId,
+    query: candidate?.query,
+    brand: candidate?.brand,
+    model: candidate?.model,
+    mpn: candidate?.mpn,
+    category: candidate?.category,
+    title: candidate?.title,
+    url: candidate?.url,
+    canonicalUrl: candidate?.canonicalUrl,
+    source: candidate?.source,
+    official: candidate?.official,
+    identity: candidate?.identity,
+    match: candidate?.match,
+    extraction: candidate?.extraction,
+    accessBarrier: candidate?.accessBarrier,
+    fields: candidate?.fields,
+    conflicts: candidate?.conflicts ?? [],
+  };
   const stable = (entry) => {
     if (Array.isArray(entry)) return `[${entry.map(stable).join(",")}]`;
     if (entry && typeof entry === "object") return `{${Object.entries(entry).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`).join(",")}}`;

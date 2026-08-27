@@ -11,6 +11,7 @@
   const root = document.getElementById('n6-lab');
   const LAB = window.__N6_LAB__;
   if (!LAB) throw new Error('N6 lab boot data missing — load /src/lab/boot.ts first');
+  const esc = value => LAB.escapeText(value);
   const PROFILE = LAB.profile;
   const IDS = LAB.ids;
   const skuName = id => LAB.skuName(id);
@@ -77,7 +78,7 @@
   function powerView(power){return {base:power.baseW,cpu:power.cpuW,hdd:power.hddW,gpu:power.gpuW,hba:power.hbaW,dc:power.dcW,wall:power.wallW,mainDc:power.mainDcW,driveDc:power.driveDcW,mainPeak:power.pathologicalDcW,drivePeak:null,pathological:power.pathologicalDcW,pathologicalWall:power.pathologicalWallW,headroom:power.headroomRatio,psuWaste:power.psuWasteW,dual:power.psus.length>1};}
   function fitView(ev){const level=ev.occupancy.verdict,issues=ev.findings.filter(f=>f.verdict==='bad').map(f=>f.message),warnings=ev.findings.filter(f=>f.verdict==='warn').map(f=>f.message),oks=ev.findings.filter(f=>f.verdict==='ok').map(f=>f.message);return {level,issues,warnings,oks};}
   function noiseView(ev){return {noise:ev.noise.totalDba,parts:ev.noise.parts,unknown:ev.noise.unknown||[]};}
-  function priceText(price){const known=price.knownCny>0?`¥${Math.round(price.knownCny).toLocaleString('zh-CN')}`:'unknown';return price.unknownSkuIds.length?`已知 ${known} + ${price.unknownSkuIds.length} 项 unknown`:known;}
+  function priceText(price){const known=price.knownCny>0?`¥${Math.round(price.knownCny).toLocaleString('zh-CN')}`:'unknown',unknown=price.unknownSkuIds.length+(price.unresolvedRequirements?.length||0);return unknown?`已知 ${known} + ${unknown} 项 unknown`:known;}
   function linePrice(ev,skuId){const item=ev.price.items.find(x=>x.skuId===skuId);return !item||item.priceCny===null?'unknown':fmt(item.priceCny*item.qty);}
   function frontSfxSelected(){
     const psu=psus[$('#psu-select').value],position=$('#psu-position').value;
@@ -260,7 +261,7 @@
       ...millimetreRuler(plane,tf),
       ...heatSourceMarkers(field,plane,tf),
       ...heatSourceLegend(field),
-      `<text class="thermal-field-note" x="${FIELD.left}" y="${FIELD.h-6}">${plane.note} · 切片 ${plane.fixed} = ${Math.round(offset)}mm · 格 ${grid}mm · ${heatBoundLabel[heatState.bound]}</text>`
+      `<text class="thermal-field-note" x="${FIELD.left}" y="${FIELD.h-6}">${esc(plane.note)} · 切片 ${esc(plane.fixed)} = ${Math.round(offset)}mm · 格 ${grid}mm · ${esc(heatBoundLabel[heatState.bound])}</text>`
     ].join('');
 
     const peak=heatState.bound==='width'
@@ -301,7 +302,7 @@
     return field.sources.map(s=>{
       const u=s.at[AXIS_INDEX[plane.axes[0]]],v=s.at[AXIS_INDEX[plane.axes[1]]];
       const temp=boundTemp(s.tempC);
-      return `<circle class="thermal-source" data-evidence="${s.evidence}" cx="${tf.px(u).toFixed(1)}" cy="${tf.py(v).toFixed(1)}" r="3.4" fill="${thermalCss(temp)}"><title>${s.label} · ${rangeC(s.tempC)} · ${s.watts.toFixed(1)}W · θ 证据 ${evidenceZh[s.evidence]||s.evidence}</title></circle>`;
+      return `<circle class="thermal-source" data-evidence="${esc(s.evidence)}" cx="${tf.px(u).toFixed(1)}" cy="${tf.py(v).toFixed(1)}" r="3.4" fill="${thermalCss(temp)}"><title>${esc(s.label)} · ${esc(rangeC(s.tempC))} · ${s.watts.toFixed(1)}W · θ 证据 ${esc(evidenceZh[s.evidence]||s.evidence)}</title></circle>`;
     });
   }
   function heatSourceLegend(field){
@@ -320,9 +321,9 @@
       const name=row.count>1
         ? `${row.label.split(' · ')[0].replace(/（[^）]*）/,'')} ×${row.count}`
         : shorten(row.label);
-      out.push(`<circle class="thermal-source" data-evidence="${row.evidence}" cx="${FIELD.legendX+4}" cy="${y-4}" r="4" fill="${thermalCss(boundTemp(row.temp))}"></circle>`);
-      out.push(`<text class="thermal-field-label" x="${FIELD.legendX+15}" y="${y}">${name}</text>`);
-      out.push(`<text class="thermal-field-note" x="${FIELD.legendX+15}" y="${y+13}">${rangeC(row.temp)} · ${row.watts.toFixed(1)}W · ${row.chamber==='lower'?'下层':'上层'} · θ ${evidenceZh[row.evidence]||row.evidence}</text>`);
+      out.push(`<circle class="thermal-source" data-evidence="${esc(row.evidence)}" cx="${FIELD.legendX+4}" cy="${y-4}" r="4" fill="${thermalCss(boundTemp(row.temp))}"></circle>`);
+      out.push(`<text class="thermal-field-label" x="${FIELD.legendX+15}" y="${y}">${esc(name)}</text>`);
+      out.push(`<text class="thermal-field-note" x="${FIELD.legendX+15}" y="${y+13}">${esc(rangeC(row.temp))} · ${row.watts.toFixed(1)}W · ${row.chamber==='lower'?'下层':'上层'} · θ ${esc(evidenceZh[row.evidence]||row.evidence)}</text>`);
       y+=34;
     }
     out.push(`<text class="thermal-field-note" x="${FIELD.legendX}" y="${y+4}">隔板跨腔传热系数 ${field.barrierLeak===0?'0（两腔互不影响）':field.barrierLeak}</text>`);
@@ -578,11 +579,11 @@
     $('#spatial-data-strip').innerHTML=`
       <div data-source="official"><b>官方规格证据 · N6 PDF p2</b><span>${env.w}W × ${env.d}D × ${env.h}H mm（含 6mm 底座）；所有毫米坐标只存在于 data/cases/jonsbo-n6/geometry.json 一处，等轴视图、碰撞检测与温度场读同一份。原页可在“官方手册证据”中查看，未与 3D 坐标注册叠加。</span></div>
       <div data-source="official"><b>官方安装关系 · N6 p6–10 / p15 / p17</b><span>ATX 后上、SFX 前/后下、双电源、前置 240 冷排、九盘横向单排；65–160 / 275–320 仅为范围。</span></div>
-      <div data-source="standard"><b>已显示的板上与存储件</b><span>${skuName(IDS.cpuId)} ·1；${c.ram.name} ·${ramCount??'unknown'}；${NVME_NAME} M.2 ·${PROFILE.defaults.ownedNvmeQty}；${bootVisual}；${skuName(IDS.diskId)} ·${c.disks}。</span></div>
-      <div data-source="standard"><b>厂商 / 标准零件包络</b><span>mATX 244×244mm（ASUS p11）；${psuStandard}；3.5\" HDD 101.6×147×26.1mm。</span></div>
+      <div data-source="standard"><b>已显示的板上与存储件</b><span>${esc(skuName(IDS.cpuId))} ·1；${esc(c.ram.name)} ·${ramCount??'unknown'}；${esc(NVME_NAME)} M.2 ·${PROFILE.defaults.ownedNvmeQty}；${esc(bootVisual)}；${esc(skuName(IDS.diskId))} ·${c.disks}。</span></div>
+      <div data-source="standard"><b>厂商 / 标准零件包络</b><span>mATX 244×244mm（ASUS p11）；${esc(psuStandard)}；3.5\" HDD 101.6×147×26.1mm。</span></div>
       <div data-source="official"><b>下层结构关系 · N6 §8.1–8.3 / §13.1</b><span>左侧风扇架 4 螺丝可拆；接背板四路供电需先拆它；装下置电源时由随箱电源架取代，不再装回。背板供电口排列为 SATA×2 + PATA×2。</span></div>
       ${routeStrip}
-      <div data-source="inferred"><b>规划重建 · 不可量内部间隙</b><span>${topologyLabel(c)}；${c.cooler.name} ${c.cooler.height?c.cooler.height+'mm':'冷头 / 泵包络'} / 规划限高 ${coolerLimit}mm；托架钢框、背板 PCB 板形、风扇架 / 电源架板形与安装孔位手册均未标注，图中为包络；锚点、卡高、冷管与线材弯折非厂商 CAD。</span></div>`;
+      <div data-source="inferred"><b>规划重建 · 不可量内部间隙</b><span>${esc(topologyLabel(c))}；${esc(c.cooler.name)} ${c.cooler.height?esc(c.cooler.height+'mm'):'冷头 / 泵包络'} / 规划限高 ${coolerLimit}mm；托架钢框、背板 PCB 板形、风扇架 / 电源架板形与安装孔位手册均未标注，图中为包络；锚点、卡高、冷管与线材弯折非厂商 CAD。</span></div>`;
   }
   function resetSpatialView(){spatialState.yaw=-.72;spatialState.pitch=-.46;spatialState.zoom=.93;if(spatialState.config)renderSpatial(spatialState.config);}
   function installSpatialInteraction(){
@@ -665,17 +666,17 @@
     $('#kpi-price').textContent=priceText(ev.price);
     const levelText={ok:'兼容：推荐组合',warn:'有条件：需处理警告',bad:'不兼容 / 不建议'};$('#fit-chip').dataset.level=fit.level;$('#fit-chip').textContent=levelText[fit.level];
     $('#verdict-title').textContent=fit.level==='ok'?'推荐：可直接装':fit.level==='warn'?'可装，但先解决条件':'当前组合不应下单';
-    const items=[...fit.issues.map(x=>`<li class="status-bad">${x}</li>`),...fit.warnings.map(x=>`<li class="status-warn">${x}</li>`),...fit.oks.map(x=>`<li class="status-ok">${x}</li>`)];$('#verdict-list').innerHTML=items.join('');
+    const items=[...fit.issues.map(x=>`<li class="status-bad">${esc(x)}</li>`),...fit.warnings.map(x=>`<li class="status-warn">${esc(x)}</li>`),...fit.oks.map(x=>`<li class="status-ok">${esc(x)}</li>`)];$('#verdict-list').innerHTML=items.join('');
     const topFinding=ev.findings.find(f=>f.verdict!=='ok');$('#route-title').textContent=fit.level==='bad'?'确定性引擎：当前组合不可直接安装':fit.level==='warn'?'确定性引擎：条件安装':'确定性引擎：未发现阻断';$('#route-copy').textContent=topFinding?topFinding.message:'当前页面只展示 BuildEvaluation 事实，不生成第二套自然语言结论。';
-    const next=ev.bom.map(line=>`${line.qty}× ${line.skuId} · ${line.bucket}`);$('#next-buy-list').innerHTML=next.map(x=>`<li>${x}</li>`).join('');
+    const next=ev.bom.map(line=>`${line.qty}× ${line.skuId} · ${line.bucket}`);$('#next-buy-list').innerHTML=next.map(x=>`<li>${esc(x)}</li>`).join('');
     renderCase(c,p,ev);
   }
-  function metricRows(data,max){return Object.entries(data).map(([name,v])=>{const val=typeof v==='object'?v.value:v,level=typeof v==='object'?v.level:'ok';return `<div class="metric-row"><span>${name}</span><div class="metric-track"><div class="metric-fill" data-level="${level}" style="width:${Math.min(100,val/max*100)}%"></div></div><strong>${Math.round(val)}${name.includes('噪音')?' dBA':'°C'}</strong></div>`;}).join('');}
+  function metricRows(data,max){return Object.entries(data).map(([name,v])=>{const val=typeof v==='object'?v.value:v,level=typeof v==='object'?v.level:'ok';return `<div class="metric-row"><span>${esc(name)}</span><div class="metric-track"><div class="metric-fill" data-level="${esc(level)}" style="width:${Math.min(100,val/max*100)}%"></div></div><strong>${Math.round(val)}${name.includes('噪音')?' dBA':'°C'}</strong></div>`;}).join('');}
   /** Temperature bars draw the band, not a point: the model only ever gives a band. */
   function rangeRows(rows,max){
     return rows.map(row=>{
       const lo=clamp(row.temp.lo/max*100,0,100),hi=clamp(row.temp.hi/max*100,0,100);
-      return `<div class="metric-row"><span>${row.name}</span><div class="metric-track"><div class="metric-band" data-level="${row.level}" style="margin-left:${lo.toFixed(1)}%;width:${Math.max(1.5,hi-lo).toFixed(1)}%"></div></div><strong>${rangeC(row.temp)}</strong></div>`;
+      return `<div class="metric-row"><span>${esc(row.name)}</span><div class="metric-track"><div class="metric-band" data-level="${esc(row.level)}" style="margin-left:${lo.toFixed(1)}%;width:${Math.max(1.5,hi-lo).toFixed(1)}%"></div></div><strong>${esc(rangeC(row.temp))}</strong></div>`;
     }).join('');
   }
   /** Worst-case end drives the verdict: an unacceptable upper bound is the finding. */
@@ -690,68 +691,55 @@
     });
     $('#temperature-bars').innerHTML=rows.length?rangeRows(rows,100):'<p class="lab-note">当前配置没有可定温的部件。</p>';
     const colors=['var(--viz-series-2)','var(--viz-series-5)','var(--viz-series-6)','var(--viz-series-4)','var(--viz-series-1)','var(--viz-series-3)'],parts=[['CPU',p.cpu],['HDD',p.hdd],['GPU',p.gpu],['主板/风扇',p.base],['HBA',p.hba],['PSU 废热',p.psuWaste]].filter(x=>x[1]>0);const heatDenom=Math.max(1,p.dc??1);$('#heat-split').innerHTML=parts.map((x,i)=>`<div class="heat-segment" style="width:${x[1]/heatDenom*100}%;background:${colors[i%colors.length]}">${x[0]} ${Math.round(x[1])}W</div>`).join('');
-    $('#noise-total').textContent=a.noise===null?'unknown':a.noise+' dBA';const noiseData={};Object.entries(a.parts).filter(x=>x[1]!==null&&x[1]>0).forEach(([k,v])=>noiseData[k+'噪音']={value:v,level:v>45?'warn':'ok'});$('#noise-bars').innerHTML=Object.keys(noiseData).length?metricRows(noiseData,55):`<p class="lab-note">缺少 ${a.unknown.map(x=>noiseMissingZh[x]||x).join('、')}，因此不显示未经证实的 dBA 数值。</p>`;
-    const deterministicAdvice=ev.findings.filter(f=>f.id.startsWith('thermal.')||f.id.startsWith('psu.')||f.id.startsWith('wiring.')).map(f=>`${f.verdict} · ${f.message}`);$('#fan-advice').innerHTML='<ul class="compact-list">'+(deterministicAdvice.length?deterministicAdvice:['当前没有额外热/电源建议；详情以 BuildEvaluation findings 为准。']).map(x=>`<li>${x}</li>`).join('')+'</ul>';
-    const scenarios=ev.power.scenarios;$('#power-scenarios').innerHTML=scenarios.map(s=>`<div><span>${s.label}</span><strong>${s.wallW===null?'unknown':Math.round(s.wallW)+' W'}</strong><small>${s.wallW===null?'证据不足':'墙上估算 · '+Math.round(s.wallW*3.412)+' BTU/h'}</small></div>`).join('');renderThermalField(c,ev);
+    $('#noise-total').textContent=a.noise===null?'unknown':a.noise+' dBA';const noiseData={};Object.entries(a.parts).filter(x=>x[1]!==null&&x[1]>0).forEach(([k,v])=>noiseData[k+'噪音']={value:v,level:v>45?'warn':'ok'});$('#noise-bars').innerHTML=Object.keys(noiseData).length?metricRows(noiseData,55):`<p class="lab-note">缺少 ${esc(a.unknown.map(x=>noiseMissingZh[x]||x).join('、'))}，因此不显示未经证实的 dBA 数值。</p>`;
+    const deterministicAdvice=ev.findings.filter(f=>f.id.startsWith('thermal.')||f.id.startsWith('psu.')||f.id.startsWith('wiring.')).map(f=>`${f.verdict} · ${f.message}`);$('#fan-advice').innerHTML='<ul class="compact-list">'+(deterministicAdvice.length?deterministicAdvice:['当前没有额外热/电源建议；详情以 BuildEvaluation findings 为准。']).map(x=>`<li>${esc(x)}</li>`).join('')+'</ul>';
+    const scenarios=ev.power.scenarios;$('#power-scenarios').innerHTML=scenarios.map(s=>`<div><span>${esc(s.label)}</span><strong>${s.wallW===null?'unknown':Math.round(s.wallW)+' W'}</strong><small>${s.wallW===null?'证据不足':'墙上估算 · '+Math.round(s.wallW*3.412)+' BTU/h'}</small></div>`).join('');renderThermalField(c,ev);
   }
   function renderWiring(c,ev){
     const wiring=ev.wiring,bootLabel=c.boot==='bay'?' + SATA Boot':c.boot==='m2'?' + M.2 Boot':' + USB Boot';
     $('#wiring-title').textContent=`${c.disks} HDD${bootLabel} 接线方案`;
     const hba=wiring.bayPaths.some(path=>path.target==='hba');
     $('#controller-badge').textContent=hba?'需要 HBA':'无需 HBA';
-    $('#port-map').innerHTML=wiring.bayPaths.map(path=>`<div class="port-card"><b>Bay ${path.bayIndex}</b><span>${path.target==='none'?'空托架':path.portLabel}</span><small>${path.note||path.evidence}</small></div>`).join('');
+    $('#port-map').innerHTML=wiring.bayPaths.map(path=>`<div class="port-card"><b>Bay ${path.bayIndex}</b><span>${esc(path.target==='none'?'空托架':path.portLabel)}</span><small>${esc(path.note||path.evidence)}</small></div>`).join('');
     $('#wiring-notes').textContent=[...wiring.warnings,...wiring.checklist.filter(item=>item.requiredQty>0).map(item=>`${item.requiredQty}× ${item.label}`)].join(' · ')||'接线清单已按 BuildEvaluation 生成';
     const harness=wiring.backplaneHarness,confirmed=harness.uniquePeripheralLeads,required=(harness.required.sata??0)+(harness.required.molex??0);
     $('#harness-count').textContent=`${harness.feedRole==='backplane-dedicated'?'背板专供':'主电源'} · ${confirmed??'unknown'}/${required} 条独立外围线`;
     $('.wire-4').dataset.missing=String(harness.verdict!=='ok');
     const hw=$('#harness-warning');hw.dataset.level=harness.verdict==='bad'?'bad':harness.verdict==='ok'?'ok':'warn';hw.textContent=harness.notes.join(' ');
-    let rows='';for(let n=1;n<=limits.trays;n++){const selected=n===c.disks;rows+=`<tr data-selected="${selected}"><td>${n}</td><td>${selected?'当前 BuildEvaluation':'—'}</td><td>${hba?HBA_NAME:'主板路径'}</td><td>${c.boot==='m2'?`${NVME_NAME} #1 · M.2`:c.boot==='usbssd'?'外置 USB SSD':n===limits.trays?'第 9 托架 SATA SSD':'数据盘托架'}</td><td>${selected?wiring.warnings[0]||'按当前接线计划':'选择该盘数后重新评估'}</td></tr>`;}$('#drive-matrix').innerHTML=rows;
+    let rows='';for(let n=1;n<=limits.trays;n++){const selected=n===c.disks;rows+=`<tr data-selected="${selected}"><td>${n}</td><td>${selected?'当前 BuildEvaluation':'—'}</td><td>${esc(hba?HBA_NAME:'主板路径')}</td><td>${esc(c.boot==='m2'?`${NVME_NAME} #1 · M.2`:c.boot==='usbssd'?'外置 USB SSD':n===limits.trays?'第 9 托架 SATA SSD':'数据盘托架')}</td><td>${esc(selected?wiring.warnings[0]||'按当前接线计划':'选择该盘数后重新评估')}</td></tr>`;}$('#drive-matrix').innerHTML=rows;
   }
   function renderGpu(c,ev){
-    const g=c.gpu,related=ev.findings.filter(f=>f.related?.includes(c.gpuKey)),worst=related.find(f=>f.verdict==='bad')||related.find(f=>f.verdict==='warn'),v=g.tgp?(worst?{level:worst.verdict,text:worst.verdict==='bad'?'引擎阻断':'条件规划',reason:worst.message}:{level:'ok',text:'包络可规划',reason:'当前 BuildEvaluation 未发现 GPU 相关阻断'}):{level:'ok',text:'暂不安装',reason:'不占 PCIe 与散热空间'};$('#gpu-title').textContent=g.name;$('#gpu-detail').innerHTML=`<p>${g.ai}</p><ul class="compact-list"><li>${g.vram?g.vram+'GB VRAM':'无独显'} · ${g.tgp}W TGP · ${g.cooling}</li><li>${g.length?g.length+'mm / '+g.slots+' 槽':'不占空间'}</li><li>参考价 ${range(g.price)}${g.newPrice?'；全新库存约 '+range(g.newPrice):''}</li><li class="status-${v.level}">${v.text}：${v.reason}</li></ul>`;
+    const g=c.gpu,related=ev.findings.filter(f=>f.related?.includes(c.gpuKey)),worst=related.find(f=>f.verdict==='bad')||related.find(f=>f.verdict==='warn'),v=g.tgp?(worst?{level:worst.verdict,text:worst.verdict==='bad'?'引擎阻断':'条件规划',reason:worst.message}:{level:'ok',text:'包络可规划',reason:'当前 BuildEvaluation 未发现 GPU 相关阻断'}):{level:'ok',text:'暂不安装',reason:'不占 PCIe 与散热空间'};$('#gpu-title').textContent=g.name;$('#gpu-detail').innerHTML=`<p>${esc(g.ai)}</p><ul class="compact-list"><li>${esc(g.vram?g.vram+'GB VRAM':'无独显')} · ${esc(g.tgp)}W TGP · ${esc(g.cooling)}</li><li>${esc(g.length?g.length+'mm / '+g.slots+' 槽':'不占空间')}</li><li>参考价 ${esc(range(g.price))}${g.newPrice?'；全新库存约 '+esc(range(g.newPrice)):''}</li><li class="status-${esc(v.level)}">${esc(v.text)}：${esc(v.reason)}</li></ul>`;
     $('#gpu-safe-basis').textContent='N6 只发布 275–320mm 范围，未给端点拓扑；>275mm 一律标条件区，保留 HBA 时 ≤2 槽';
     const scores=[['显存余量',g.vram===null?null:Math.min(100,g.vram/24*100),g.vram===null?'unknown':g.vram+'GB'],['能效',g.tgp===null||g.vram===null?null:Math.min(100,(g.vram/g.tgp)*450),g.tgp===null?'unknown':g.tgp+'W'],['扩展友好',g.slots===null||g.length===null?null:(g.slots<=2&&g.length<=275?100:g.length<=275?55:20),g.slots===null||g.length===null?'unknown':g.slots+' 槽']];$('#gpu-score').innerHTML=scores.map(([n,s,val])=>`<div><span>${n}</span><b>${val===null?'unknown':val}</b><div class="metric-track"><div class="metric-fill" style="width:${s===null?0:s}%"></div></div></div>`).join('');
-    let rows='';Object.entries(gpus).forEach(([k,x])=>{if(k==='gpu.none')return;const vv=k===c.gpuKey?v:{level:'unknown',text:'需重新评估',reason:'切换型号后 BuildEvaluation 会重新计算'};rows+=`<tr data-selected="${k===c.gpuKey}"><td>${x.name}</td><td>${x.vram}GB</td><td>${x.tgp}W</td><td>${x.length}mm / ${x.slots}槽</td><td>${x.cooling}<br><span class="text-muted">噪音 ${x.noise===0?'unknown':x.noise+'dBA'}</span></td><td>${range(x.price)}${x.newPrice?'<br>全新 '+range(x.newPrice):''}<br><small>${x.official}</small></td><td class="status-${vv.level}">${vv.text}<br><small>${vv.reason}</small></td></tr>`;});$('#gpu-table').innerHTML=rows;
+    let rows='';Object.entries(gpus).forEach(([k,x])=>{if(k==='gpu.none')return;const vv=k===c.gpuKey?v:{level:'unknown',text:'需重新评估',reason:'切换型号后 BuildEvaluation 会重新计算'};rows+=`<tr data-selected="${k===c.gpuKey}"><td>${esc(x.name)}</td><td>${esc(x.vram)}GB</td><td>${esc(x.tgp)}W</td><td>${esc(x.length)}mm / ${esc(x.slots)}槽</td><td>${esc(x.cooling)}<br><span class="text-muted">噪音 ${esc(x.noise===0?'unknown':x.noise+'dBA')}</span></td><td>${esc(range(x.price))}${x.newPrice?'<br>全新 '+esc(range(x.newPrice)):''}<br><small>${esc(x.official)}</small></td><td class="status-${esc(vv.level)}">${esc(vv.text)}<br><small>${esc(vv.reason)}</small></td></tr>`;});$('#gpu-table').innerHTML=rows;
   }
-  function renderProducts(c,ev){
-    const psuRef=['psu.seasonic-focus-gx-850-v5','psu.seasonic-focus-gx-750-v5'].includes(c.psuKey)?officialProducts.focus:null;
-    const coolerRef=c.coolerKey==='cooler.thermalright-axp90-x53-full'?officialProducts.axp90:null;
-    const gpuRef=c.gpuKey==='gpu.rtx-a4000-16gb'?officialProducts.a4000:null;
-    const cards=[
-      {name:skuName(IDS.caseId),status:'已购 · '+linePrice(ev,IDS.caseId),ref:officialProducts[IDS.caseId]||officialProducts.n6},
-      {name:skuName(IDS.boardId),status:'已购 · '+linePrice(ev,IDS.boardId),ref:officialProducts[IDS.boardId]||officialProducts.board},
-      {name:skuName(IDS.cpuId),status:'已购 · '+linePrice(ev,IDS.cpuId),ref:officialProducts[IDS.cpuId]||officialProducts.cpu},
-      {name:c.ram.name,status:'待购 · '+range(c.ram.price),ref:null,note:`料号 ${c.ram.mpn||'—'}；3D 显示 ${c.ram.height}mm DIMM 包络与 ${ramModuleCount(c)} 条内存`},
-      {name:`${skuName(IDS.nvmeId)} ×${PROFILE.defaults.ownedNvmeQty}`,status:'已有 · '+linePrice(ev,IDS.nvmeId),ref:officialProducts[IDS.nvmeId]||officialProducts.ssd,note:c.boot==='m2'?'#1 TrueNAS Boot；#2 单盘 / 待用':'两块都已在主板 M.2 位显示；规划 ZFS 镜像'},
-      {name:c.psu.name,status:'待购 · '+range(c.psu.price),ref:psuRef,note:psuRef?'':'当前备选型号官方图尚未缓存；不用其他型号冒充'},
-      ...(c.psuPosition==='dual'?[{name:c.secondaryPsu.name,status:'双电源分支 · '+range(c.secondaryPsu.price),ref:null,note:c.secondaryPsu.confidence==='unknown'?'仅有 SFX 尺寸/功率包络，线束与效率未知':'第二颗 PSU 需独立核对四条背板线与 PS_ON 同步；当前未缓存对应官方图'}]:[]),
-      {name:c.cooler.name,status:'待购 · '+range(c.cooler.price),ref:coolerRef,note:coolerRef?'':'当前备选型号官方图尚未缓存；3D 仅画尺寸包络'},
-      {name:`${skuName(IDS.diskId)} ×${c.disks}`,status:'待购 · '+linePrice(ev,IDS.diskId),ref:officialProducts[IDS.diskId]||officialProducts.hdd},
-      {name:c.gpu.name,status:c.gpu.tgp?'未来 · '+range(c.gpu.price):'暂不安装',ref:gpuRef,note:gpuRef?'':c.gpu.tgp?'当前 GPU 型号官方图尚未缓存；不用 A4000 图冒充':'不占 PCIe 与散热空间'}
-    ];
-    $('#product-gallery').innerHTML=cards.map(card=>{
-      const ref=card.ref,visual=ref&&ref.image?`<img src="${ref.image}" alt="${card.name} 厂商官方产品图" loading="lazy"><div class="product-placeholder">图片未加载；可打开官方页</div>`:`<div class="product-placeholder">${card.note||ref?.note||'尚无对应官方缓存图'}</div>`;
-      const missing=ref&&ref.image?'false':'true',link=ref&&ref.page?`<a href="${ref.page}" target="_blank" rel="noreferrer">查看厂商官方页</a>`:'';
-      return `<article class="product-card"><div class="product-visual" data-missing="${missing}">${visual}</div><div class="product-card-body"><b>${card.name}</b><span>${card.status}</span><small>${card.note||ref?.note||'当前选项识别卡'}</small>${link}</div></article>`;
-    }).join('');
-    $$('.product-visual img').forEach(img=>img.addEventListener('error',()=>{img.parentElement.dataset.missing='true';}));
-  }
+  function renderProducts(_c,ev){ LAB.renderProductGallery(ev.config); }
   function renderAccessories(c){
-    $('#accessory-grid').innerHTML=Object.entries(accessories).map(([k,a])=>{const checked=accessoryActive(c,k),forced=['boot','usbboot','front','rearfan','sidefans','drivefans','slim','hba','psucable','dualsfx','dualsync','dualcables'].includes(k),price=k==='dualsfx'?c.secondaryPsu.price:a.price,name=k==='dualsfx'?`第二颗背板电源：${c.secondaryPsu.name}`:a.name;return `<label class="accessory-item"><input type="checkbox" data-accessory="${k}" ${checked?'checked':''} ${forced?'disabled':''}><b>${name}</b><strong>${range(price)}</strong><p>${a.why}</p><small>${forced?'由当前配置自动决定':'可选配件'}</small></label>`;}).join('');
+    $('#accessory-grid').innerHTML=Object.entries(accessories).map(([k,a])=>{const checked=accessoryActive(c,k),forced=['boot','usbboot','front','rearfan','sidefans','drivefans','slim','hba','psucable','dualsfx','dualsync','dualcables'].includes(k),price=k==='dualsfx'?c.secondaryPsu.price:a.price,name=k==='dualsfx'?`第二颗背板电源：${c.secondaryPsu.name}`:a.name;return `<label class="accessory-item"><input type="checkbox" data-accessory="${esc(k)}" ${checked?'checked':''} ${forced?'disabled':''}><b>${esc(name)}</b><strong>${esc(range(price))}</strong><p>${esc(a.why)}</p><small>${forced?'由当前配置自动决定':'可选配件'}</small></label>`;}).join('');
     $$('[data-accessory]').forEach(el=>el.addEventListener('change',()=>{el.checked?state.selectedAccessories.add(el.dataset.accessory):state.selectedAccessories.delete(el.dataset.accessory);render();}));
   }
   function renderPrice(c,ev){
     const rows=ev.price.items.map(item=>['BOM',item.skuId,item.qty+'×',item.priceCny===null?'unknown':fmt(item.priceCny*item.qty),item.evidence,item.source||'无来源',item.priceCny===null?'unknown':fmt(item.priceCny*item.qty),'来自 BuildEvaluation.price']);
-    $('#price-table').innerHTML=rows.map(row=>`<tr>${row.map(x=>`<td>${x}</td>`).join('')}</tr>`).join('');
+    $('#price-table').innerHTML=rows.map(row=>`<tr>${row.map(x=>`<td>${esc(x)}</td>`).join('')}</tr>`).join('');
     $('#stage-total').textContent=priceText(ev.price);$('#selected-total-label').textContent=`所选 ${c.disks} 盘待购（不含未来 GPU）`;$('#remaining-total').textContent=priceText(ev.price);$('#grand-total-label').textContent='所选配置整机（不含未来 GPU）';$('#grand-total').textContent=priceText(ev.price);$('#future-total').textContent=priceText(ev.price);renderAccessories(c);
   }
   function renderChecklist(c){
     const bootInstall=c.boot==='bay'?'把 2.5″ SATA 启动 SSD 装入第 9 托架，再装数据 HDD。':c.boot==='m2'?`确认 ${NVME_NAME} #1 已指定为 TrueNAS Boot；#2 暂作单盘或留待后续。`:'把外置 USB 启动 SSD 固定在机箱后方，整理短线并加防误拔标记。';
     const bootPool=c.boot==='bay'?['小 SATA SSD 独占 TrueNAS 启动池。',`两块 ${NVME_NAME} 建镜像 fast pool：应用、缩略图、数据库与索引。`]:c.boot==='m2'?[`${NVME_NAME} #1 被 TrueNAS 启动池独占，不能同时放应用数据。`,`${NVME_NAME} #2 只能单盘使用或暂时留空；不要把它描述成镜像。`]:['外置 USB SSD 独占 TrueNAS 启动池。',`两块 ${NVME_NAME} 建镜像 fast pool：应用、缩略图、数据库与索引。`];
-    $('#install-order-list').innerHTML=['主板外安装 CPU、内存、两块 M.2 与散热器。','先装 PSU，并先穿 EPS 8-pin；ATX 路线这里最紧。','装主板，再按当前拓扑安装可用的风扇 / 冷排并接背板供电和数据线。',bootInstall,'GPU 与 HBA 后装；搬家时建议拆下重型消费卡单独运输。'].map(x=>`<li>${x}</li>`).join('');
-    $('#pool-plan-list').innerHTML=[...bootPool,`单块 ${skuName(IDS.diskId)} 先建单盘数据 VDEV，但重要数据必须另有一份。`,`第二块 ≥${skuName(IDS.diskId)} 到位后用 Attach 转为镜像；容量取较小盘。` ,'长期按镜像对扩容；若用第 9 托架作 SATA Boot，数据 HDD 上限就是 8。'].map(x=>`<li>${x}</li>`).join('');
+    $('#install-order-list').innerHTML=['主板外安装 CPU、内存、两块 M.2 与散热器。','先装 PSU，并先穿 EPS 8-pin；ATX 路线这里最紧。','装主板，再按当前拓扑安装可用的风扇 / 冷排并接背板供电和数据线。',bootInstall,'GPU 与 HBA 后装；搬家时建议拆下重型消费卡单独运输。'].map(x=>`<li>${esc(x)}</li>`).join('');
+    $('#pool-plan-list').innerHTML=[...bootPool,`单块 ${skuName(IDS.diskId)} 先建单盘数据 VDEV，但重要数据必须另有一份。`,`第二块 ≥${skuName(IDS.diskId)} 到位后用 Attach 转为镜像；容量取较小盘。` ,'长期按镜像对扩容；若用第 9 托架作 SATA Boot，数据 HDD 上限就是 8。'].map(x=>`<li>${esc(x)}</li>`).join('');
   }
   function render(){
+    // A new plan is a genuine partial draft. Never project hidden legacy select
+    // defaults into it or run N6-only panels before its core parts are explicit.
+    if(!LAB.isConfigReady()){
+      const ev=LAB.evaluate();
+      lastEval=ev;lastConfig=null;
+      spatialState.config=null;spatialState.parts=[];spatialState.routing=null;spatialState.showRoutes=false;spatialState.routeFocus=null;
+      LAB.afterRender(ev);
+      return;
+    }
     const diskInput=$('#disk-range'),bootMode=$('#boot-select').value,frontToggle=$('#front-fans'),frontSfx=frontSfxSelected();
     diskInput.max=bootMode==='bay'?String(limits.trays-1):String(limits.trays);
     if(+diskInput.value>+diskInput.max)diskInput.value=diskInput.max;
@@ -801,7 +789,7 @@
   const bindFieldMode=(attr,key)=>$$(`[data-${attr}]`).forEach(btn=>btn.addEventListener('click',()=>{
     heatState[key]=btn.dataset[attr.replace(/-([a-z])/g,(_,ch)=>ch.toUpperCase())];
     $$(`[data-${attr}]`).forEach(x=>x.setAttribute('aria-pressed',String(x===btn)));
-    if(lastEval)renderThermalField(lastConfig,lastEval);
+    if(lastEval&&lastConfig)renderThermalField(lastConfig,lastEval);
   }));
   bindFieldMode('heat-bound','bound');
   bindFieldMode('heat-plane','plane');

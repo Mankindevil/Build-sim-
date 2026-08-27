@@ -38,6 +38,30 @@ describe("catalog identity assessment", () => {
     expect(result.unknowns).toContain("psuMpnSuffix");
   });
 
+  it("proves the legacy FOCUS PLUS Gold identity without requiring the user to enter its MPN", () => {
+    const result = assessCatalogIdentity(
+      candidate("Seasonic FOCUS PLUS Gold 850 FX", "psu", "Seasonic"),
+      extracted("Seasonic FOCUS PLUS Gold 850 SSR-850FX", [
+        { field: "model", value: "FOCUS PLUS Gold 850" },
+        { field: "mpn", value: "SSR-850FX" },
+      ]),
+      { brand: "Seasonic" },
+    );
+    expect(result.verdict).toBe("exact");
+    expect(result.queryFingerprint.mpn).toBeUndefined();
+    expect(result.candidateFingerprint.mpn).toBe("ssr850fx");
+  });
+
+  it("does not treat the canonical FOCUS PLUS Gold 850 identity as a V5 ATX 3.1 unit", () => {
+    const result = assessCatalogIdentity(
+      candidate("Seasonic FOCUS PLUS Gold 850", "psu", "Seasonic"),
+      extracted("Seasonic FOCUS GX-850 V5 ATX 3.1"),
+      { brand: "Seasonic" },
+    );
+    expect(result.verdict).not.toBe("exact");
+    expect(result.agentReviewRequired).toBe(true);
+  });
+
   it("does not confuse WD Red Plus with WD Red Pro", () => {
     const result = assessCatalogIdentity(
       candidate("Western Digital WD Red Plus 8TB", "storage", "Western Digital"),

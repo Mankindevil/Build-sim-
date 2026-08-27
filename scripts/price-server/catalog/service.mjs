@@ -23,6 +23,9 @@ const catalogJson = createRequire(import.meta.url)("../../../data/skus/catalog.j
 const jobs = new Map();
 const contentCache = new Map();
 const fetchCache = new Map();
+const standaloneCandidates = new Map();
+const STANDALONE_CANDIDATE_TTL_MS = 30 * 60_000;
+const STANDALONE_CANDIDATE_LIMIT = 128;
 
 function sha256(value) { return crypto.createHash("sha256").update(value).digest("hex"); }
 function now() { return new Date().toISOString(); }
@@ -30,6 +33,33 @@ function candidateId(input) { return `catalog-candidate-${sha256(input).slice(0,
 function jobId(input) { return `catalog-search-${sha256(input).slice(0, 20)}`; }
 function domainOf(url) { return new URL(url).hostname; }
 function safeText(value) { return String(value ?? "").slice(0, 240); }
+function successfulFetch(fetchResult) {
+  const status = Number(fetchResult?.status ?? 0);
+  return status >= 200 && status < 300;
+}
+function fetchContentCacheKey(fetchResult) { return `${fetchResult.finalUrl}|${fetchResult.contentHash}`; }
+function fetchAudit(fetchResult) {
+  return {
+    requestedUrl: fetchResult.requestedUrl,
+    finalUrl: fetchResult.finalUrl,
+    httpStatus: fetchResult.status,
+    retrievedAt: fetchResult.retrievedAt,
+    contentHash: fetchResult.contentHash,
+    redirects: fetchResult.redirects ?? [],
+  };
+}
+
+function retainStandaloneCandidate(candidate) {
+  const timestamp = Date.now();
+  for (const [id, entry] of standaloneCandidates) {
+    if (entry.expiresAt <= timestamp) standaloneCandidates.delete(id);
+  }
+  standaloneCandidates.delete(candidate.candidateId);
+  standaloneCandidates.set(candidate.candidateId, { candidate: structuredClone(candidate), expiresAt: timestamp + STANDALONE_CANDIDATE_TTL_MS });
+  while (standaloneCandidates.size > STANDALONE_CANDIDATE_LIMIT) {
+    standaloneCandidates.delete(standaloneCandidates.keys().next().value);
+  }
+}
 
 async function persistJob(job, root) {
   if (!root) return;
@@ -105,57 +135,124 @@ const REQUIRED_FIELDS_BY_CATEGORY = {
   cpu: ["power.tdpW"],
   psu: ["power.ratedW"],
   cooler: ["dims.heightMm"],
-  gpu: ["dims.lengthMm", "dims.slots"],
+  gpu: ["dims.lengthMm", "power.tgpW"],
   memory: ["attrs.capacity"],
   storage: ["attrs.capacity", "attrs.interface"],
   hba: ["attrs.interface"],
   fan: ["dims.lengthMm"],
   accessory: [],
 };
+const REQUIRED_FIELD_ALTERNATIVES_BY_CATEGORY = {
+  gpu: [["dims.slots", "dims.thicknessMm"]],
+};
+
+function requiredFieldGroups(candidate) {
+  const category = candidate.category ?? candidate.query?.category;
+  return [
+    ["brand"],
+    ["model"],
+    ...(candidate.query?.mpn || candidate.mpn ? [["mpn"]] : []),
+    ...(REQUIRED_FIELDS_BY_CATEGORY[category] ?? []).map((field) => [field]),
+    ...(REQUIRED_FIELD_ALTERNATIVES_BY_CATEGORY[category] ?? []),
+  ];
+}
 
 function extractionStatus(candidate, extracted, fetchResult) {
   if (fetchResult.status >= 400) return "failed";
   if (extracted.accessBarrier || fetchResult.pdfExtraction?.mode === "ocr") return "partial";
-  const required = ["brand", "model", ...(candidate.query?.mpn || candidate.mpn ? ["mpn"] : []), ...(REQUIRED_FIELDS_BY_CATEGORY[candidate.category ?? candidate.query?.category] ?? [])];
-  const missingRequired = required.some((field) => !extracted.fields.some((entry) => entry.field === field));
-  return extracted.fields.length && !missingRequired && !extracted.conflicts.length ? "ok" : "partial";
+  return extracted.fields.length && !missingRequiredFields(candidate, extracted).length && !extracted.conflicts.length ? "ok" : "partial";
 }
 
 export function missingRequiredFields(candidate, extracted) {
-  const required = ["brand", "model", ...(candidate.query?.mpn || candidate.mpn ? ["mpn"] : []), ...(REQUIRED_FIELDS_BY_CATEGORY[candidate.category ?? candidate.query?.category] ?? [])];
-  return required.filter((field) => !extracted.fields.some((entry) => entry.field === field));
+  return requiredFieldGroups(candidate)
+    .filter((alternatives) => !alternatives.some((field) => extracted.fields.some((entry) => entry.field === field)))
+    .map((alternatives) => alternatives.join("|"));
 }
 
-async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFallback } = {}) {
+function uniqueRecords(records) {
+  const seen = new Set();
+  return records.filter((record) => {
+    const key = JSON.stringify(record);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function renderedExtraction(extracted, fetchResult) {
+  return {
+    ...extracted,
+    fields: (extracted.fields ?? []).map((field) => ({
+      ...field,
+      sourceKind: "official-rendered-page",
+      sourceUrl: fetchResult.finalUrl,
+      retrievedAt: fetchResult.retrievedAt,
+    })),
+  };
+}
+
+/** Rendered values win per field, while static-only evidence and diagnostics survive. */
+export function mergeFallbackExtraction(initial, rendered) {
+  const fields = [...(initial.fields ?? [])];
+  const indexByField = new Map(fields.map((field, index) => [field.field, index]));
+  for (const field of rendered.fields ?? []) {
+    const index = indexByField.get(field.field);
+    if (index === undefined) {
+      indexByField.set(field.field, fields.length);
+      fields.push(field);
+    } else {
+      fields[index] = field;
+    }
+  }
+  const merged = {
+    ...initial,
+    ...rendered,
+    title: rendered.title ?? initial.title,
+    fields,
+    conflicts: uniqueRecords([...(initial.conflicts ?? []), ...(rendered.conflicts ?? [])]),
+    warnings: [...new Set([...(initial.warnings ?? []), ...(rendered.warnings ?? [])])],
+    adapter: `${initial.adapter}+${rendered.adapter}+playwright-fallback`,
+  };
+  // A successful rendered document resolves a barrier on the initial response;
+  // the initial warning and fetch audit remain available without blocking it.
+  if (!rendered.accessBarrier) delete merged.accessBarrier;
+  return merged;
+}
+
+async function inspectCandidate(candidate, {
+  fetcher = fetchOfficial,
+  browserFallback,
+  responseCache = fetcher === fetchOfficial ? fetchCache : null,
+} = {}) {
   try {
-    const fetchResult = fetcher === fetchOfficial && fetchCache.has(candidate.url)
-      ? fetchCache.get(candidate.url)
-      : await fetcher(candidate.url);
-    if (fetcher === fetchOfficial) fetchCache.set(candidate.url, fetchResult);
-    const canonicalMatch = fetchResult.body.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)/i) ?? fetchResult.body.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i);
-    let canonicalUrl;
-    if (canonicalMatch?.[1]) canonicalUrl = validateOfficialUrl(new URL(canonicalMatch[1], fetchResult.finalUrl).toString()).toString();
-    const cacheKey = `${fetchResult.finalUrl}|${fetchResult.contentHash}`;
-    let extracted = contentCache.get(cacheKey);
+    let fetchResult = responseCache?.get(candidate.url) ?? await fetcher(candidate.url);
+    const initialCacheKey = fetchContentCacheKey(fetchResult);
+    let extracted = contentCache.get(initialCacheKey);
     if (!extracted) {
       const adapter = adapterForUrl(fetchResult.finalUrl);
       extracted = adapter?.extract(fetchResult) ?? (fetchResult.contentType.includes("pdf") ? extractOfficialPdf(fetchResult) : extractOfficialHtml(fetchResult));
-      if (missingRequiredFields(candidate, extracted).length && browserFallback && !fetchResult.contentType.includes("pdf")) {
-        try {
-          const fallbackResult = await browserFallback(fetchResult.finalUrl);
-          const fallbackAdapter = adapterForUrl(fallbackResult.finalUrl);
-          const fallbackExtracted = fallbackAdapter?.extract(fallbackResult) ?? extractOfficialHtml(fallbackResult, { sourceKind: "official-rendered-page" });
-          extracted = {
-            ...fallbackExtracted,
-            warnings: [...extracted.warnings, ...fallbackExtracted.warnings],
-            adapter: `${extracted.adapter}+${fallbackExtracted.adapter}+playwright-fallback`,
-          };
-        } catch (error) {
-          extracted = { ...extracted, warnings: [...extracted.warnings, `Playwright fallback failed: ${safeText(error?.message ?? error)}`] };
-        }
+      if (successfulFetch(fetchResult) && !extracted.accessBarrier) contentCache.set(initialCacheKey, extracted);
+    }
+    if (missingRequiredFields(candidate, extracted).length && browserFallback && !fetchResult.contentType.includes("pdf") && fetchResult.fallback !== "playwright") {
+      try {
+        const initialFetch = fetchResult.initialFetch ?? fetchAudit(fetchResult);
+        const fallbackResult = await browserFallback(fetchResult.finalUrl);
+        const fallbackAdapter = adapterForUrl(fallbackResult.finalUrl);
+        const fallbackExtracted = renderedExtraction(fallbackAdapter?.extract(fallbackResult) ?? extractOfficialHtml(fallbackResult, { sourceKind: "official-rendered-page" }), fallbackResult);
+        extracted = mergeFallbackExtraction(extracted, fallbackExtracted);
+        fetchResult = { ...fallbackResult, initialFetch };
+        if (successfulFetch(fetchResult) && !extracted.accessBarrier) contentCache.set(fetchContentCacheKey(fetchResult), extracted);
+      } catch (error) {
+        extracted = { ...extracted, warnings: [...extracted.warnings, `Playwright fallback failed: ${safeText(error?.message ?? error)}`] };
       }
     }
-    contentCache.set(cacheKey, extracted);
+    if (responseCache) {
+      if (successfulFetch(fetchResult) && !extracted.accessBarrier) responseCache.set(candidate.url, fetchResult);
+      else responseCache.delete(candidate.url);
+    }
+    const canonicalMatch = fetchResult.body.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)/i) ?? fetchResult.body.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i);
+    let canonicalUrl;
+    if (canonicalMatch?.[1]) canonicalUrl = validateOfficialUrl(new URL(canonicalMatch[1], fetchResult.finalUrl).toString()).toString();
     const fields = extracted.fields;
     const canonical = canonicalUrl ?? fetchResult.canonicalUrl ?? fetchResult.finalUrl;
     const officialEntry = registryForUrl(new URL(canonical));
@@ -164,7 +261,7 @@ async function inspectCandidate(candidate, { fetcher = fetchOfficial, browserFal
     const inspected = {
       ...candidate,
       canonicalUrl: canonical,
-      source: { ...candidate.source, kind: "official", retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
+      source: { ...candidate.source, kind: "official", retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.fallback ? { fetchMode: fetchResult.fallback } : {}), ...(fetchResult.initialFetch ? { initialFetch: fetchResult.initialFetch } : {}), ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
       official: { trustStatus: officialEntry?.trustStatus ?? "untrusted", brand: officialEntry?.brand, pageKind: page.kind, reasons: page.reasons },
       identity,
       match: scoreExtracted(identity),
@@ -270,12 +367,20 @@ export function findCandidate(candidateId) {
     const candidate = (job.candidates ?? []).find((entry) => entry.candidateId === candidateId);
     if (candidate) return candidate;
   }
-  return null;
+  const standalone = standaloneCandidates.get(candidateId);
+  if (!standalone) return null;
+  if (standalone.expiresAt <= Date.now()) {
+    standaloneCandidates.delete(candidateId);
+    return null;
+  }
+  return structuredClone(standalone.candidate);
 }
 
 export async function inspectUrl(body, options = {}) {
   const url = validateOfficialUrl(String(body.url ?? "")).toString();
   const query = normalizeModelQuery(String(body.query ?? new URL(url).pathname), { brand: body.brand, category: body.category, locale: body.locale ?? "zh-CN" });
   const candidate = { candidateId: candidateId(`${query.raw}|${url}`), query, ...(query.brand ? { brand: query.brand } : {}), ...(query.model ? { model: query.model } : {}), ...(query.mpn ? { mpn: query.mpn } : {}), ...(query.category ? { category: query.category } : {}), title: query.raw, url, source: { kind: "official", domain: domainOf(url), retrievedAt: now() }, match: { score: 0, kind: "weak", reasons: ["inspection pending"] }, extraction: { status: "not-run", fieldsFound: 0, fieldsMissing: 0 } };
-  return inspectCandidate(candidate, options);
+  const inspected = await inspectCandidate(candidate, options);
+  retainStandaloneCandidate(inspected);
+  return inspected;
 }

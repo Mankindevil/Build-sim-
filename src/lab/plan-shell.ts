@@ -1,5 +1,5 @@
 import type { BuildConfig } from "../config/types";
-import { createAgentInitializationScaffold, createDefaultN6Config } from "../plans/default-plan";
+import { createAgentInitializationScaffold, createDefaultN6Config, createEmptyBuildConfig } from "../plans/default-plan";
 import type { PlanStore, PlanStoreState } from "../plans/client-store";
 import { WorkspaceRouter, type WorkspaceRoute } from "./workspace-router";
 import "./workspace-shell.css";
@@ -49,7 +49,8 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
     <dialog class="workspace-new-plan-dialog" data-new-plan-dialog aria-labelledby="new-plan-title">
       <form method="dialog">
         <h2 id="new-plan-title">新建方案</h2>
-        <p>从空白需求开始和 Agent 对话，或继续使用当前 N6 模板。</p>
+        <p>默认从空白开始，部件可以一件一件加入；模板只是明确的可选起点。</p>
+        <button type="button" data-new-blank-plan><strong>创建空白方案</strong><span>不预选任何部件，逐件选择或让 Agent 提议</span></button>
         <button type="button" data-new-agent-plan><strong>使用 Agent 初始化</strong><span>先收集预算与用途，完整提案经你批准后才写入草稿</span></button>
         <button type="button" data-new-template-plan><strong>使用 N6 模板</strong><span>立即创建现有默认配置</span></button>
         <button type="submit">取消</button>
@@ -60,7 +61,13 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
   const switcher = shell.querySelector<HTMLSelectElement>("[data-plan-switcher]")!;
   const error = shell.querySelector<HTMLElement>("[data-workspace-error]")!;
   const render = (state: PlanStoreState) => {
-    switcher.innerHTML = state.plans.map((plan) => `<option value="${plan.id}">${plan.name}${plan.initializationStatus === "pending" ? "（待初始化）" : ""}${plan.status === "archived" ? "（已归档）" : ""}</option>`).join("");
+    const options = state.plans.map((plan) => {
+      const option = document.createElement("option");
+      option.value = plan.id;
+      option.textContent = `${plan.name}${plan.initializationStatus === "pending" ? "（待初始化）" : ""}${plan.status === "archived" ? "（已归档）" : ""}`;
+      return option;
+    });
+    switcher.replaceChildren(...options);
     switcher.value = state.activePlan?.id ?? "";
     switcher.disabled = !state.plans.length;
     shell.querySelector<HTMLElement>("[data-plan-name]")!.textContent = state.activePlan?.name ?? "尚无方案";
@@ -87,6 +94,18 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
     const target = guidedDialog ?? dialog;
     if (typeof target.showModal === "function") target.showModal();
     else target.setAttribute("open", "");
+  });
+  shell.querySelector<HTMLButtonElement>("[data-new-blank-plan]")!.addEventListener("click", () => {
+    const timestamp = new Date().toISOString();
+    const config = createEmptyBuildConfig("new-plan", timestamp);
+    void store.create(`装机方案 ${new Date().toLocaleDateString("zh-CN")}`, config).then(() => {
+      dialog.close?.();
+      dialog.removeAttribute("open");
+      router.navigate("editor");
+    }).catch((cause) => {
+      error.hidden = false;
+      error.textContent = cause instanceof Error ? cause.message : "无法创建方案";
+    });
   });
   shell.querySelector<HTMLButtonElement>("[data-new-agent-plan]")!.addEventListener("click", () => {
     const timestamp = new Date().toISOString();

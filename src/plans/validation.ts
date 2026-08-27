@@ -1,4 +1,5 @@
 import { parseConfig, type BuildConfig } from "../config/types";
+import { EVIDENCE_SCHEMA_VERSION, type PlanEvidenceBinding } from "../evidence/contracts";
 import {
   PLAN_PATCH_PATHS,
   PLAN_SCHEMA_VERSION,
@@ -15,6 +16,12 @@ import {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const HASH = /^[a-f0-9]{64}$/;
+const DOCUMENT_ID = /^doc-sha256-[a-f0-9]{64}$/;
+const CAPTURE_ID = /^capture-sha256-[a-f0-9]{64}$/;
+const BINDING_ID = /^binding-sha256-[a-f0-9]{64}$/;
+const EVIDENCE_PURPOSES = new Set(["identity", "compatibility", "geometry", "power", "wiring", "thermal", "assembly"]);
+const EVIDENCE_SUBJECTS = new Set(["plan", "sku", "case-profile", "component"]);
+const EVIDENCE_CATEGORIES = new Set(["case", "motherboard", "cpu", "psu", "cooler", "gpu", "memory", "storage", "hba", "fan", "accessory"]);
 const patchPaths = new Set<string>(PLAN_PATCH_PATHS);
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -47,7 +54,7 @@ function validateInitialization(value: unknown): string[] {
   if (!input) return ["initialization must be an object"];
   const errors: string[] = [];
   if (input.status !== "pending" && input.status !== "initialized") errors.push("initialization.status invalid");
-  if (input.source !== "agent" && input.source !== "template") errors.push("initialization.source invalid");
+  if (input.source !== "agent" && input.source !== "template" && input.source !== "manual") errors.push("initialization.source invalid");
   if (input.proposalId !== undefined && (typeof input.proposalId !== "string" || !input.proposalId)) errors.push("initialization.proposalId invalid");
   if (input.initializedAt !== undefined) isoDate(input, "initializedAt", errors);
   if (input.intent !== undefined) {
@@ -58,6 +65,69 @@ function validateInitialization(value: unknown): string[] {
   return errors;
 }
 
+function validateEvidenceLocator(value: unknown): string[] {
+  const input = record(value);
+  if (!input) return ["locator must be an object"];
+  const errors: string[] = [];
+  const page = input.page;
+  if (page !== undefined && !(
+    (Number.isSafeInteger(page) && Number(page) > 0)
+    || (Array.isArray(page) && page.length > 0 && page.every((item) => Number.isSafeInteger(item) && Number(item) > 0))
+  )) errors.push("locator.page invalid");
+  const printedPage = input.printedPage;
+  if (printedPage !== undefined && !(
+    (typeof printedPage === "string" && printedPage.trim())
+    || (Array.isArray(printedPage) && printedPage.length > 0 && printedPage.every((item) => typeof item === "string" && item.trim()))
+  )) errors.push("locator.printedPage invalid");
+  for (const key of ["section", "field", "locator", "snippet"]) {
+    if (input[key] !== undefined && (typeof input[key] !== "string" || !String(input[key]).trim())) errors.push(`locator.${key} invalid`);
+  }
+  if (!["page", "printedPage", "section", "field", "locator", "snippet"].some((key) => input[key] !== undefined)) errors.push("locator must identify a document location");
+  return errors;
+}
+
+export function validatePlanEvidenceBinding(value: unknown): string[] {
+  const input = record(value);
+  if (!input) return ["evidence binding must be an object"];
+  const errors: string[] = [];
+  if (input.schemaVersion !== EVIDENCE_SCHEMA_VERSION) errors.push(`evidence binding schemaVersion must be ${EVIDENCE_SCHEMA_VERSION}`);
+  if (typeof input.id !== "string" || !BINDING_ID.test(input.id)) errors.push("evidence binding id invalid");
+  requiredString(input, "planId", errors);
+  if (input.planVersionId !== undefined && input.planVersionId !== null && (typeof input.planVersionId !== "string" || !input.planVersionId)) errors.push("evidence binding planVersionId invalid");
+  if (typeof input.documentId !== "string" || !DOCUMENT_ID.test(input.documentId)) errors.push("evidence binding documentId invalid");
+  if (typeof input.contentHash !== "string" || !HASH.test(input.contentHash)) errors.push("evidence binding contentHash invalid");
+  if (input.captureId !== undefined && (typeof input.captureId !== "string" || !CAPTURE_ID.test(input.captureId))) errors.push("evidence binding captureId invalid");
+  const subject = record(input.subject);
+  if (!subject || !EVIDENCE_SUBJECTS.has(String(subject.kind)) || typeof subject.id !== "string" || !subject.id.trim()) errors.push("evidence binding subject invalid");
+  if (subject?.category !== undefined && !EVIDENCE_CATEGORIES.has(String(subject.category))) errors.push("evidence binding subject category invalid");
+  if (!Array.isArray(input.purposes) || input.purposes.length === 0 || new Set(input.purposes).size !== input.purposes.length || input.purposes.some((purpose) => !EVIDENCE_PURPOSES.has(String(purpose)))) errors.push("evidence binding purposes invalid");
+  if (input.locators !== undefined) {
+    if (!Array.isArray(input.locators) || input.locators.length === 0) errors.push("evidence binding locators invalid");
+    else input.locators.forEach((locator, index) => errors.push(...validateEvidenceLocator(locator).map((error) => `locators.${index}.${error}`)));
+  }
+  isoDate(input, "boundAt", errors);
+  if (input.note !== undefined && (typeof input.note !== "string" || input.note.length > 500)) errors.push("evidence binding note invalid");
+  return errors;
+}
+
+function validateEvidenceBindings(value: unknown, ownerPlanId?: unknown, versionId?: unknown): string[] {
+  if (!Array.isArray(value)) return ["evidenceBindings must be an array"];
+  const errors: string[] = [];
+  const ids = new Set<string>();
+  value.forEach((binding, index) => {
+    errors.push(...validatePlanEvidenceBinding(binding).map((error) => `evidenceBindings.${index}.${error}`));
+    const item = record(binding);
+    if (!item) return;
+    if (ownerPlanId !== undefined && item.planId !== ownerPlanId) errors.push(`evidenceBindings.${index}.planId does not match owner`);
+    if (versionId !== undefined && item.planVersionId !== versionId) errors.push(`evidenceBindings.${index}.planVersionId does not match version`);
+    if (typeof item.id === "string") {
+      if (ids.has(item.id)) errors.push(`evidenceBindings.${index}.id duplicated`);
+      ids.add(item.id);
+    }
+  });
+  return errors;
+}
+
 export function validatePlanDraft(value: unknown): string[] {
   const input = record(value);
   if (!input) return ["draft must be an object"];
@@ -65,6 +135,7 @@ export function validatePlanDraft(value: unknown): string[] {
   schema(input, errors);
   if (input.baseVersionId !== null && (typeof input.baseVersionId !== "string" || !input.baseVersionId)) errors.push("baseVersionId invalid");
   if (!validConfig(input.config)) errors.push("config must be a valid BuildConfig");
+  if (input.evidenceBindings !== undefined) errors.push(...validateEvidenceBindings(input.evidenceBindings));
   if (typeof input.dirty !== "boolean") errors.push("dirty must be boolean");
   isoDate(input, "updatedAt", errors);
   return errors;
@@ -83,6 +154,8 @@ export function validateBuildPlan(value: unknown): string[] {
   if (input.activeVersionId !== null && (typeof input.activeVersionId !== "string" || !input.activeVersionId)) errors.push("activeVersionId invalid");
   if (!Number.isSafeInteger(input.draftRevision) || Number(input.draftRevision) < 0) errors.push("draftRevision invalid");
   errors.push(...validatePlanDraft(input.draft).map((error) => `draft.${error}`));
+  const draft = record(input.draft);
+  if (draft?.evidenceBindings !== undefined) errors.push(...validateEvidenceBindings(draft.evidenceBindings, input.id).map((error) => `draft.${error}`));
   const metadata = record(input.metadata);
   if (!metadata) errors.push("metadata must be an object");
   else if (metadata.initialization !== undefined) errors.push(...validateInitialization(metadata.initialization));
@@ -101,6 +174,9 @@ export function validatePlanVersion(value: unknown): string[] {
   if (input.summary !== undefined && (typeof input.summary !== "string" || input.summary.length > 500)) errors.push("summary invalid");
   if (!validConfig(input.config)) errors.push("config must be a valid BuildConfig");
   if (typeof input.configHash !== "string" || !HASH.test(input.configHash)) errors.push("configHash must be a sha256 hex digest");
+  if (input.evidenceBindings !== undefined) errors.push(...validateEvidenceBindings(input.evidenceBindings, input.planId, input.id));
+  if (input.evidenceHash !== undefined && (typeof input.evidenceHash !== "string" || !HASH.test(input.evidenceHash))) errors.push("evidenceHash invalid");
+  if ((input.evidenceBindings === undefined) !== (input.evidenceHash === undefined)) errors.push("evidenceBindings and evidenceHash must be present together");
   if (input.evaluationHash !== undefined && (typeof input.evaluationHash !== "string" || !HASH.test(input.evaluationHash))) errors.push("evaluationHash invalid");
   if (input.evaluatedAt !== undefined) isoDate(input, "evaluatedAt", errors);
   if (input.parentVersionId !== null && (typeof input.parentVersionId !== "string" || !input.parentVersionId)) errors.push("parentVersionId invalid");
@@ -144,6 +220,17 @@ export function validatePlanAgentContext(value: unknown): string[] {
   if ("spatialViewContext" in input && input.spatialViewContext !== null && !record(input.spatialViewContext)) errors.push("spatialViewContext invalid");
   if (!("purchaseSummary" in input)) errors.push("purchaseSummary missing");
   if (!("buildTaskSummary" in input)) errors.push("buildTaskSummary missing");
+  if (input.evidenceSummary !== undefined) {
+    const summary = record(input.evidenceSummary);
+    if (!summary || !Number.isSafeInteger(summary.count) || Number(summary.count) < 0 || !Array.isArray(summary.bindings) || summary.bindings.length > 40 || Number(summary.count) < summary.bindings.length) errors.push("evidenceSummary invalid");
+    else summary.bindings.forEach((binding, index) => {
+      const row = record(binding);
+      if (!row || typeof row.documentId !== "string" || !DOCUMENT_ID.test(row.documentId)) errors.push(`evidenceSummary.bindings.${index} invalid`);
+      if (row?.captureId !== undefined && (typeof row.captureId !== "string" || !CAPTURE_ID.test(row.captureId))) errors.push(`evidenceSummary.bindings.${index}.captureId invalid`);
+      if (!record(row?.subject) || !Array.isArray(row?.purposes)) errors.push(`evidenceSummary.bindings.${index}.claims invalid`);
+      if (row?.locators !== undefined && !Array.isArray(row.locators)) errors.push(`evidenceSummary.bindings.${index}.locators invalid`);
+    });
+  }
   if (input.initialization !== undefined) errors.push(...validateInitialization(input.initialization));
   return errors;
 }
@@ -152,6 +239,8 @@ export function validatePlanPatchOperation(value: unknown): string[] {
   const input = record(value);
   if (!input) return ["operation must be an object"];
   const errors: string[] = [];
+  const allowedKeys = input.op === "remove" ? ["op", "path"] : ["op", "path", "value"];
+  if (Object.keys(input).some((key) => !allowedKeys.includes(key))) errors.push("operation contains unknown fields");
   if (input.op !== "add" && input.op !== "replace" && input.op !== "remove") errors.push("operation op invalid");
   if (typeof input.path !== "string" || !patchPaths.has(input.path)) errors.push("operation path is not allowlisted");
   if ((input.op === "add" || input.op === "replace") && !("value" in input)) errors.push("operation value missing");
@@ -237,4 +326,4 @@ export function assertValidPlanAgentContext(value: unknown): asserts value is Pl
   if (errors.length) throw new Error(`Invalid PlanAgentContext: ${errors.join("; ")}`);
 }
 
-export type ValidatedPlanTypes = BuildPlan | PlanDraft | PlanVersion | PlanChangeProposal | PlanPatchOperation | PlanTransactionLink | BuildTask;
+export type ValidatedPlanTypes = BuildPlan | PlanDraft | PlanVersion | PlanChangeProposal | PlanPatchOperation | PlanTransactionLink | BuildTask | PlanEvidenceBinding;

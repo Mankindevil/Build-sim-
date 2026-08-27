@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { mountWorkspacePages } from "../src/lab/workspace-pages";
 import { WorkspaceRouter } from "../src/lab/workspace-router";
 import { initializedStore, makePlan, mountWorkspaceDom } from "./helpers/workspace-ui";
+import { evaluateBuild } from "../src/core/evaluate";
+import { loadBundledCatalog } from "../src/sku/catalog";
 
 describe("R3 workspace dashboard", () => {
   it("renders active, alternate and archived plans with explicit next actions", async () => {
@@ -57,6 +59,22 @@ describe("R3 workspace dashboard", () => {
     pages.dispose(); store.dispose();
   });
 
+  it("includes non-SKU fan requirements in the visible pending-price count", async () => {
+    const root = mountWorkspaceDom();
+    const { store } = await initializedStore();
+    const active = store.getState().activePlan!;
+    const evaluation = evaluateBuild(active.draft.config, loadBundledCatalog());
+    expect(evaluation.price.unresolvedRequirements).toHaveLength(1);
+    store.setEvaluation(evaluation);
+    const router = new WorkspaceRouter();
+    const pages = mountWorkspacePages(root, store, router);
+    router.navigate("evaluation");
+
+    const pricePending = [...root.querySelectorAll("dt")].find((item) => item.textContent === "价格待补")?.nextElementSibling;
+    expect(pricePending?.textContent).toBe(`${evaluation.price.unknownSkuIds.length + evaluation.price.unresolvedRequirements.length} 项`);
+    pages.dispose(); store.dispose();
+  });
+
   it("captures beginner goals before creating a new plan", async () => {
     const root = mountWorkspaceDom();
     const { api, store } = await initializedStore();
@@ -71,6 +89,11 @@ describe("R3 workspace dashboard", () => {
     root.querySelector<HTMLInputElement>("[data-create-owned]")!.value = "两块 NVMe";
     root.querySelector<HTMLButtonElement>("[data-create-submit]")!.click();
     await vi.waitFor(() => expect(api.plans).toHaveLength(2));
+    expect(api.plans.at(-1)?.draft.config).toMatchObject({
+      caseId: "", boardId: "", cpuId: "",
+      selection: { psuId: "", coolerId: "", gpuId: "", memoryId: "", diskCount: 0, fanGroups: [] },
+      bom: [],
+    });
     expect(api.plans.at(-1)?.metadata).toMatchObject({
       useCase: "家庭存储 / NAS",
       budgetCny: 9000,

@@ -11,6 +11,8 @@ const FIELD_ALIASES = [
   ["power.tdpW", /^(tdp|tdp\s*power|热设计功耗)$/i],
   ["power.tgpW", /^(tgp|graphics\s*power|显卡功耗)$/i],
   ["power.ratedW", /^(rated\s*(power|output)|continuous\s*power|output\s*capacity|power\s*output|额定功率)$/i],
+  ["attrs.noiseDba", /^(noise(\s*level)?|acoustic(\s*noise)?|maximum\s*noise|噪音|噪声)$/i],
+  ["attrs.maxOperatingTempC", /^(max(?:imum)?\s*(operating|gpu)?\s*temperature|maximum\s*temperature|最高(?:工作)?温度)$/i],
   ["attrs.capacity", /^(capacity|容量)$/i],
   ["attrs.interface", /^(interface|接口)$/i],
 ];
@@ -28,7 +30,7 @@ function numberWithUnit(value) {
   return number;
 }
 function fieldValue(field, value) {
-  if (field === "dims.lengthMm" || field === "dims.widthMm" || field === "dims.heightMm" || field === "dims.slots" || field === "power.tdpW" || field === "power.tgpW" || field === "power.ratedW") return numberWithUnit(value);
+  if (field === "dims.lengthMm" || field === "dims.widthMm" || field === "dims.heightMm" || field === "dims.slots" || field === "power.tdpW" || field === "power.tgpW" || field === "power.ratedW" || field === "attrs.noiseDba" || field === "attrs.maxOperatingTempC") return numberWithUnit(value);
   return strip(value);
 }
 function addField(fields, conflicts, fetch, field, value, locator, snippet, sourceKind = "official-page") {

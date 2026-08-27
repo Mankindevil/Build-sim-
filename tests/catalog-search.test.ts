@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { normalizeModelQuery } from "../src/catalog-search/normalize";
+import { normalizeModelQuery as normalizeServerModelQuery } from "../scripts/price-server/catalog/normalize.mjs";
 import { extractOfficialHtml, extractOfficialPdf } from "../scripts/price-server/catalog/extract.mjs";
 import { extractPdfText, fetchOfficial } from "../scripts/price-server/catalog/fetch.mjs";
 import { validateOfficialUrl, validateRedirect } from "../scripts/price-server/catalog/security.mjs";
@@ -12,6 +13,8 @@ import { OFFICIAL_ADAPTERS, adapterForUrl } from "../scripts/price-server/catalo
 import { MsiProductDiscoveryProvider } from "../scripts/price-server/catalog/discovery.mjs";
 import { transactionCatalogSearchRequest } from "../scripts/price-server/transactions/catalog-search-request.mjs";
 import { acceptOfficial, confirmDraft, createDraft, rejectDraft, rollbackCatalogAcceptance } from "../scripts/price-server/catalog/write.mjs";
+import { catalogCandidateInputHash } from "../scripts/price-server/catalog/contracts.mjs";
+import { runAutoEnrichment } from "../scripts/price-server/catalog/auto-enrichment.mjs";
 import type { SkuCatalog } from "../src/sku/types";
 
 const fixturePath = new URL("./fixtures/catalog/official-product.html", import.meta.url);
@@ -26,7 +29,7 @@ const fetchResult = {
   contentHash: crypto.createHash("sha256").update(html).digest("hex"),
   redirects: [],
 };
-const publicDnsLookup = async () => [{ address: "203.0.113.10", family: 4 }];
+const publicDnsLookup = async () => [{ address: "93.184.216.34", family: 4 }];
 
 afterEach(() => {
   // The fetcher tests temporarily replace the global network primitive.
@@ -54,6 +57,30 @@ describe("G3 model query normalization", () => {
   it("recognizes the WD alias without matching it inside unrelated words", () => {
     expect(normalizeModelQuery("WD Red Plus 8TB SATA").brand).toBe("Western Digital");
     expect(normalizeModelQuery("hardware GX-850").brand).toBeUndefined();
+  });
+
+  it("keeps Seasonic family models distinct from exact manufacturer part numbers", () => {
+    for (const normalize of [normalizeModelQuery, normalizeServerModelQuery]) {
+      const family = normalize("Seasonic GX-850 FX", { category: "psu" });
+      expect(family).toMatchObject({ brand: "Seasonic", model: "GX-850 FX", category: "psu" });
+      expect(family.mpn).toBeUndefined();
+      expect(normalize("GX-850", { category: "psu" }).mpn).toBeUndefined();
+
+      const exact = normalize("Seasonic SSR-850FX", { category: "psu" });
+      expect(exact.mpn).toBe("SSR-850FX");
+    }
+  });
+
+  it("keeps GPU chip marketing names out of the MPN field", () => {
+    for (const normalize of [normalizeModelQuery, normalizeServerModelQuery]) {
+      for (const raw of ["MSI RTX-5060TI 16GB", "AMD RX-7900-XTX 24GB", "Intel ARC-A770 16GB", "NVIDIA GTX1080TI"]) {
+        const normalized = normalize(raw, { category: "gpu" });
+        expect(normalized.mpn, raw).toBeUndefined();
+        expect(normalized.model, raw).toBeTruthy();
+      }
+      expect(normalize("Seasonic SSR-850FX", { category: "psu" }).mpn).toBe("SSR-850FX");
+      expect(normalize("MSI 912-V390-001", { category: "gpu" }).mpn).toBe("912-V390-001");
+    }
   });
 });
 
@@ -115,17 +142,15 @@ describe("G3 official URL safety", () => {
   });
 
   it("enforces redirect and response-size limits without forwarding credentials", async () => {
-    const originalFetch = globalThis.fetch;
     let calls = 0;
-    globalThis.fetch = (async (input, init) => {
+    const redirectingFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       calls += 1;
       expect(init?.headers).not.toHaveProperty("authorization");
       return new Response("", { status: 302, headers: { location: calls === 1 ? "https://www.asus.com/next" : "https://127.0.0.1/blocked" } });
     }) as typeof fetch;
-    await expect(fetchOfficial("https://www.asus.com/start", { timeoutMs: 200, lookup: publicDnsLookup })).rejects.toThrow(/private|local/);
-    globalThis.fetch = originalFetch;
-    globalThis.fetch = (async () => new Response("x".repeat(120), { status: 200, headers: { "content-type": "text/html" } })) as typeof fetch;
-    await expect(fetchOfficial("https://www.asus.com/large", { maxBytes: 32, lookup: publicDnsLookup })).rejects.toThrow(/size limit/);
+    await expect(fetchOfficial("https://www.asus.com/start", { timeoutMs: 200, lookup: publicDnsLookup, fetchImpl: redirectingFetch })).rejects.toThrow(/private|local/);
+    const oversizedFetch = (async () => new Response("x".repeat(120), { status: 200, headers: { "content-type": "text/html" } })) as typeof fetch;
+    await expect(fetchOfficial("https://www.asus.com/large", { maxBytes: 32, lookup: publicDnsLookup, fetchImpl: oversizedFetch })).rejects.toThrow(/size limit/);
   });
 });
 
@@ -226,8 +251,29 @@ describe("G3 catalog search job", () => {
       canonicalUrl: url,
       official: { trustStatus: "trusted", pageKind: "spec" },
       identity: { verdict: "exact" },
+      extraction: { status: "ok" },
     });
     expect(completed?.candidates[0]?.identity.candidateFingerprint.capacity).toBe("8GB");
+    const candidate = completed?.candidates[0];
+    if (!candidate) throw new Error("MSI fixture candidate missing");
+    const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-msi-thickness-"));
+    const catalogPath = path.join(root, "catalog.json");
+    try {
+      await writeFile(catalogPath, JSON.stringify({ schemaVersion: "2.0.0", catalogVersion: "2.0.0", updatedAt: "2026-08-26", skus: [] }), "utf8");
+      const draft = await runAutoEnrichment(candidate.candidateId, {
+        expectedHash: catalogCandidateInputHash(candidate),
+        autoEnrichTrustedOfficial: true,
+        catalogWriteEnabled: true,
+        catalogPath,
+        draftRoot: path.join(root, "drafts"),
+        auditRoot: path.join(root, "audit"),
+        rollbackRoot: path.join(root, "rollback"),
+        rollbackManifestPath: path.join(root, "rollback/catalog-manifest.json"),
+      });
+      expect(draft).toMatchObject({ status: "draft", missing: [], proposed: { dims: { lengthMm: 232, thicknessMm: 52, slots: 3 }, power: { tgpW: 220 } } });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("persists candidates atomically with an audit manifest", async () => {
@@ -305,34 +351,40 @@ describe("G4 official adapters and audited writes", () => {
     const auditRoot = path.join(root, "audit");
     try {
       await writeFile(catalogPath, `${JSON.stringify(catalog)}\n`, "utf8");
-      const disabled = await acceptOfficial(candidate!.candidateId, { catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: false });
+      const review = { approved: true, expectedHash: catalogCandidateInputHash(candidate) };
+      const noApproval = await acceptOfficial(candidate!.candidateId, { catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true, expectedHash: review.expectedHash });
+      expect(noApproval).toMatchObject({ status: "blocked", reasons: ["official acceptance requires approved=true"] });
+      const disabled = await acceptOfficial(candidate!.candidateId, { ...review, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: false });
       expect(disabled.status).toBe("blocked");
-      const accepted = await acceptOfficial(candidate!.candidateId, { catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
+      const accepted = await acceptOfficial(candidate!.candidateId, { ...review, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
       expect(accepted.status).toBe("accepted");
       expect(accepted.catalogHash).toMatch(/^[a-f0-9]{64}$/);
       const saved = JSON.parse(await readFile(catalogPath, "utf8"));
       const sku = saved.skus.find((entry: { mpn?: string }) => entry.mpn === "ASUS-G4-001");
       expect(sku.provenance.length).toBeGreaterThan(0);
       expect(sku.dims.lengthMm).toBe(244);
-      const repeated = await acceptOfficial(candidate!.candidateId, { catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
+      const repeated = await acceptOfficial(candidate!.candidateId, { ...review, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
       expect(repeated).toEqual(accepted);
       const rolledBack = await rollbackCatalogAcceptance(catalogPath, { rollbackManifestPath });
       expect(rolledBack.target).toContain("catalog.json");
       const restored = JSON.parse(await readFile(catalogPath, "utf8"));
       expect(restored.skus.some((entry: { mpn?: string }) => entry.mpn === "ASUS-G4-001")).toBe(false);
-      const conflict = await acceptOfficial(candidate!.candidateId, { candidate: { ...candidate, conflicts: [{ field: "mpn", values: ["ASUS-G4-001", "ASUS-G4-002"], reason: "fixture conflict" }] }, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
+      const conflictCandidate = { ...candidate, conflicts: [{ field: "mpn", values: ["ASUS-G4-001", "ASUS-G4-002"], reason: "fixture conflict" }] };
+      const conflict = await acceptOfficial(candidate!.candidateId, { approved: true, expectedHash: catalogCandidateInputHash(conflictCandidate), candidate: conflictCandidate, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
       expect(conflict.status).toBe("blocked");
       expect(conflict.reasons.join(" ")).toContain("conflict");
-      const missing = await acceptOfficial(candidate!.candidateId, { candidate: { ...candidate, fields: candidate!.fields.filter((field: { field: string }) => field.field !== "dims.widthMm") }, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
+      const missingCandidate = { ...candidate, fields: candidate!.fields.filter((field: { field: string }) => field.field !== "dims.widthMm") };
+      const missing = await acceptOfficial(candidate!.candidateId, { approved: true, expectedHash: catalogCandidateInputHash(missingCandidate), candidate: missingCandidate, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
       expect(missing.status).toBe("blocked");
-      const nonAllowlisted = await acceptOfficial(candidate!.candidateId, { candidate: { ...candidate, canonicalUrl: "https://evil.example/g4" }, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
+      const nonAllowlistedCandidate = { ...candidate, canonicalUrl: "https://evil.example/g4" };
+      const nonAllowlisted = await acceptOfficial(candidate!.candidateId, { approved: true, expectedHash: catalogCandidateInputHash(nonAllowlistedCandidate), candidate: nonAllowlistedCandidate, catalogPath, rollbackRoot, rollbackManifestPath, auditRoot, catalogWriteEnabled: true });
       expect(nonAllowlisted.status).toBe("blocked");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("keeps non-direct candidates in drafts and rejection does not touch catalog", async () => {
+  it("does not let partial/conflicting search candidates enter the governed draft path", async () => {
     const conflictHtml = await readFile(new URL("./fixtures/catalog/conflict-product.html", import.meta.url), "utf8");
     const conflictResult = { ...fetchResult, finalUrl: "https://www.asus.com/conflict", body: conflictHtml, contentHash: "g4-conflict" };
     const job = queueSearch({ query: "EX-CONFLICT-1", category: "motherboard", brand: "ASUS", officialOnly: true }, {
@@ -345,19 +397,15 @@ describe("G4 official adapters and audited writes", () => {
     expect(candidate?.extraction.status).toBe("partial");
     const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-g4-draft-"));
     try {
-      const draft = await createDraft(candidate!.candidateId, {}, { draftRoot: root, rollbackRoot: path.join(root, "rollback") });
-      expect(draft.status).toBe("draft");
-      expect(draft.conflicts.length).toBe(1);
-      const rejected = await rejectDraft(draft.draftId, { draftRoot: root, rollbackRoot: path.join(root, "rollback") });
-      expect(rejected.status).toBe("rejected");
-      expect((await readFile(path.join(root, `${new Date().toISOString().slice(0, 10)}.json`), "utf8"))).toContain(draft.draftId);
+      const expectedHash = catalogCandidateInputHash(candidate);
+      const draft = await createDraft(candidate!.candidateId, {}, { expectedHash, draftRoot: root, rollbackRoot: path.join(root, "rollback") });
+      expect(draft.status).toBe("blocked");
+      expect(draft.reasons.join(" ")).toMatch(/extraction status|conflict/i);
       const catalogPath = path.join(root, "catalog.json");
       await writeFile(catalogPath, JSON.stringify({ schemaVersion: "2.0.0", updatedAt: "2026-08-23", skus: [] }), "utf8");
-      const manualDraft = await createDraft(candidate!.candidateId, { brand: "ASUS", model: "Manual Board", mpn: "MANUAL-001", "dims.lengthMm": 244, "dims.widthMm": 244 }, { draftRoot: root, rollbackRoot: path.join(root, "rollback"), catalogPath });
-      expect(manualDraft.conflicts).toHaveLength(0);
-      const confirmed = await confirmDraft(manualDraft.draftId, { draftRoot: root, rollbackRoot: path.join(root, "rollback"), auditRoot: path.join(root, "audit"), catalogPath, catalogWriteEnabled: true });
-      expect(confirmed.status).toBe("confirmed");
-      expect(JSON.parse(await readFile(catalogPath, "utf8")).skus.some((entry: { mpn?: string }) => entry.mpn === "MANUAL-001")).toBe(true);
+      const manualDraft = await createDraft(candidate!.candidateId, { brand: "ASUS", model: "Manual Board", mpn: "MANUAL-001", "dims.lengthMm": 244, "dims.widthMm": 244 }, { expectedHash, draftRoot: root, rollbackRoot: path.join(root, "rollback"), catalogPath });
+      expect(manualDraft.status).toBe("blocked");
+      expect(JSON.parse(await readFile(catalogPath, "utf8")).skus).toHaveLength(0);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

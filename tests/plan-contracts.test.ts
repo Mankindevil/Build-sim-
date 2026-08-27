@@ -32,6 +32,7 @@ function config(): BuildConfig {
 describe("R0 plan contracts", () => {
   it("canonicalizes key order and hashes equal values identically", async () => {
     expect(canonicalJson({ b: 2, a: { d: 4, c: 3 } })).toBe('{"a":{"c":3,"d":4},"b":2}');
+    expect(canonicalJson({ present: true, omitted: undefined, array: [undefined] })).toBe('{"array":[null],"present":true}');
     await expect(sha256Hex({ b: 2, a: 1 })).resolves.toBe(await sha256Hex({ a: 1, b: 2 }));
   });
 
@@ -86,6 +87,10 @@ describe("R0 plan contracts", () => {
       ...proposal,
       operations: [{ op: "replace", path: "/schemaVersion", value: "evil" }],
     })).toContain("operations.0.operation path is not allowlisted");
+    expect(validatePlanChangeProposal({
+      ...proposal,
+      operations: [{ op: "replace", path: "/selection/psuId", value: "new-psu", executable: "free text" }],
+    })).toContain("operations.0.operation contains unknown fields");
   });
 
   it("rejects stale revisions and hashes as structured 409 conflicts", () => {

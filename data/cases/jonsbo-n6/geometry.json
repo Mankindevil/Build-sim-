@@ -80,7 +80,7 @@
   "psu": {
     "rearUpperAtx": {
       "c": [15, 100],
-      "zRear": 105,
+      "zRear": 176.5,
       "w": 150,
       "h": 86,
       "sizeEvidence": "standard",

@@ -43,6 +43,7 @@ describe("A2 Agent runtime", () => {
       AGENT_SESSION_ROOT: "var/sessions",
       AGENT_AUDIT_ROOT: "var/audit",
       BUILD_SIM_SKILLS_ROOT: "var/skills",
+      CATALOG_PERSIST_ROOT: "var/catalog-runtime",
     })).toMatchObject({
       enabled: true,
       port: 5176,
@@ -53,6 +54,7 @@ describe("A2 Agent runtime", () => {
       sessionRoot: path.resolve("var/sessions"),
       auditRoot: path.resolve("var/audit"),
       skillsRoot: path.resolve("var/skills"),
+      catalogPersistRoot: path.resolve("var/catalog-runtime"),
       deepseek: { enabled: true },
     });
     expect(() => parseAgentRuntimeConfig({ AGENT_SERVER_PORT: "70000" })).toThrow(/AGENT_SERVER_PORT/);

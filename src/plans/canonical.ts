@@ -1,25 +1,10 @@
-function normalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(normalize);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([, item]) => item !== undefined)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, item]) => [key, normalize(item)]),
-    );
-  }
-  return value;
-}
+import { legacyCanonicalize, legacySha256Hex } from "../hash";
 
-export function canonicalJson(value: unknown): string {
-  return JSON.stringify(normalize(value));
-}
+/** @deprecated New persisted contracts must use `hashContent` with a domain and schema. */
+export const canonicalJson = legacyCanonicalize;
 
-export async function sha256Hex(value: unknown): Promise<string> {
-  const bytes = new TextEncoder().encode(canonicalJson(value));
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
+/** @deprecated Compatibility adapter for the pre-U0 unscoped hash API. */
+export const sha256Hex = legacySha256Hex;
 
 export function deepReadonly<T>(value: T): Readonly<T> {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -27,4 +12,3 @@ export function deepReadonly<T>(value: T): Readonly<T> {
   for (const item of Object.values(value as Record<string, unknown>)) deepReadonly(item);
   return value;
 }
-

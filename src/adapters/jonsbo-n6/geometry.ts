@@ -44,12 +44,16 @@ export type PsuPlacement =
   | "frontSfx+bottomSfx"
   | "invalidAtxBottom";
 
-/** Runtime knobs the build config does not carry (fan population, custom card). */
+/** Adapter projection of persisted fan groups plus the legacy custom-card envelope. */
 export interface GeometryEnv {
   frontFans?: "none" | "140x2" | "120x2";
+  frontFanCount?: number;
   rearFan?: boolean;
+  rearFanCount?: number;
   driveFans?: boolean;
+  driveFanCount?: number;
   sideFans?: boolean;
+  sideFanCount?: number;
   /** Keep the chipset x4 envelope drawn even before an HBA is bought. */
   reserveHbaSlot?: boolean;
   /** User-entered card envelope; the V1 "custom GPU" path has no SKU. */
@@ -392,9 +396,9 @@ export function buildN6Geometry(
   const maxRam = cooler?.attrs?.["maxRamHeightMm"] as number | undefined;
   const radiatorMm = cooler?.attrs?.["radiatorMm"] as number | undefined;
 
-  if (coolerHeight === null) {
-    // No vendor height means no geometry claim; the evaluator/UI must surface unknown.
-  } else if (coolerType === "aio") {
+  if (coolerType === "aio") {
+    // AIO placement is defined by the reviewed radiator mount. A missing tower
+    // height is not a reason to suppress its pump/radiator/fan envelopes.
     const pump = geo.cooler.aioPump;
     b.push({
       id: "cooler.pump",
@@ -444,8 +448,21 @@ export function buildN6Geometry(
           chamber: "upper",
         });
       });
+    } else {
+      const mount = geo.fanMounts.rear120;
+      b.push({
+        id: "fan.radiator.1",
+        name: "120mm 冷排风扇",
+        kind: "fan",
+        box: centered(mount.c as Vec3, mount.frameMm, mount.frameMm, mount.thicknessMm),
+        sizeEvidence: "standard",
+        anchorEvidence: INFERRED,
+        dimsLabel: "120×120×25mm 标准框",
+        mountedOn: "cooler.radiator",
+        chamber: "upper",
+      });
     }
-  } else {
+  } else if (coolerHeight !== null) {
     const footprint = coolerFootprintMm(config.selection.coolerId, coolerType);
     const keepout = Math.min(footprint, geo.socket.keepoutMm);
     const baseHeight = Math.min(geo.cooler.baseHeightMm, coolerHeight);
@@ -695,9 +712,10 @@ export function buildN6Geometry(
     axis: "x" | "z",
     parent?: string,
     slotId?: string,
+    requestedCount?: number,
   ): void => {
     const offsets = (axis === "x" ? mount.xOffsets : mount.zOffsets) ?? [0];
-    offsets.forEach((off, i) => {
+    offsets.slice(0, Math.max(0, Math.min(offsets.length, requestedCount ?? offsets.length))).forEach((off, i) => {
       const box: CenteredBox =
         axis === "x"
           ? centered([off, mount.c[1]!, mount.c[2]!], mount.frameMm, mount.frameMm, mount.thicknessMm)
@@ -719,14 +737,14 @@ export function buildN6Geometry(
 
   if (coolerType !== "aio" || radiatorMm !== 240) {
     if (env.frontFans === "140x2") {
-      pushFanRow("fan.front", "140mm 前进风", geo.fanMounts.front140, "x", undefined, "fan.front");
+      pushFanRow("fan.front", "140mm 前进风", geo.fanMounts.front140, "x", undefined, "fan.front", env.frontFanCount);
     } else if (env.frontFans === "120x2") {
-      pushFanRow("fan.front", "120mm 前进风", geo.fanMounts.front120, "x", undefined, "fan.front");
+      pushFanRow("fan.front", "120mm 前进风", geo.fanMounts.front120, "x", undefined, "fan.front", env.frontFanCount);
     }
   }
-  if (env.rearFan) pushFanRow("fan.rear", "后置 120mm 排风", geo.fanMounts.rear120, "x");
+  if (env.rearFan && !(coolerType === "aio" && radiatorMm === 120)) pushFanRow("fan.rear", "后置 120mm 排风", geo.fanMounts.rear120, "x", undefined, undefined, env.rearFanCount);
   if (env.sideFans) {
-    pushFanRow("fan.side_right", "GPU/HBA 侧吹 120mm", geo.fanMounts.sideRight120, "z");
+    pushFanRow("fan.side_right", "GPU/HBA 侧吹 120mm", geo.fanMounts.sideRight120, "z", undefined, undefined, env.sideFanCount);
   }
   // Manual §14 puts the drive-area 120×2 on the bracket §8.1 removes.
   if (env.driveFans && !lowerPsu) {
@@ -736,7 +754,7 @@ export function buildN6Geometry(
       thicknessMm: 15,
       zOffsets: wall.driveFanZ,
     };
-    pushFanRow("fan.drive", "盘区 120mm 风扇", mount, "z", "fan.left_bracket");
+    pushFanRow("fan.drive", "盘区 120mm 风扇", mount, "z", "fan.left_bracket", undefined, env.driveFanCount);
   }
 
   if (config.selection.boot === "usbssd") {

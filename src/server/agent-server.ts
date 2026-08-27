@@ -5,7 +5,7 @@ import { DeepSeekProviderAdapter } from "../agent/providers/deepseek";
 import { ClaudeProviderAdapter } from "../agent/providers/claude";
 import { AgentToolRegistry } from "../agent/tool-registry";
 import { AgentSkillLoader } from "../agent/skill-loader";
-import { evaluateBuildAuthoritatively, parseAuthoritativeBuildConfig } from "./evaluation-service";
+import { configureAuthoritativeCatalogRepository, evaluateBuildAuthoritatively, parseAuthoritativeBuildConfig } from "./evaluation-service";
 import { FileAgentSessionStore } from "./file-session-store";
 import { FileAgentRunAuditStore } from "./file-audit-store";
 import { loadAgentRuntimeConfig } from "./agent-env";
@@ -194,6 +194,7 @@ const isMain = process.argv[1] !== undefined && fileURLToPath(import.meta.url) =
 if (isMain) {
   void (async () => {
     const config = await loadAgentRuntimeConfig();
+    configureAuthoritativeCatalogRepository({ persistRoot: config.catalogPersistRoot });
     const toolRegistry = new AgentToolRegistry(createBuildSimTools({ priceServiceUrl: config.priceServiceUrl }));
     const adapters = [
       new DeepSeekProviderAdapter(config.deepseek),

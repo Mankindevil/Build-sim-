@@ -209,7 +209,7 @@ describe("transaction screenshot review UI", () => {
     expect(document.querySelector(".transaction-candidate-review")).toBeNull();
     const confirm = document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")!;
     expect(confirm.disabled).toBe(false);
-    expect(confirm.textContent).toBe("按当前内容保存");
+    expect(confirm.textContent).toBe("加入待保存采购清单");
     expect(onImport).not.toHaveBeenCalled();
   });
 
@@ -279,8 +279,9 @@ describe("transaction screenshot review UI", () => {
     }), expect.any(File));
   });
 
-  it("drops a stale OCR brand after manual correction and exposes an empty GPU plan slot", async () => {
+  it("turns an exact no-MPN GPU result into an Agent draft that the user can review and add to the plan", async () => {
     const onImport = vi.fn();
+    const onCatalogSkuAccepted = vi.fn(async () => ({ appliedToPlan: true, message: "已加入当前方案" }));
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
@@ -296,6 +297,7 @@ describe("transaction screenshot review UI", () => {
         stage: "score",
         candidates: [{
           candidateId: "candidate-msi-3070",
+          expectedHash: "e".repeat(64),
           title: "GeForce RTX 3070 VENTUS 2X OC",
           canonicalUrl: "https://www.msi.com/Graphics-Card/GeForce-RTX-3070-VENTUS-2X-OC/Specification",
           official: { trustStatus: "trusted", pageKind: "spec", reasons: ["official specification path with identity fields"] },
@@ -311,13 +313,38 @@ describe("transaction screenshot review UI", () => {
         }],
         summary: { discovered: 1, inspected: 1, fetchSucceeded: 1, productPages: 1, exact: 1, sameFamily: 0, conflicts: 0 },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/candidates/candidate-msi-3070/enrich") return new Response(JSON.stringify({
+        status: "draft", candidateId: "candidate-msi-3070", draftId: "sku-draft-msi-3070", inputHash: "f".repeat(64), writeEnabled: true,
+        draft: {
+          draftId: "sku-draft-msi-3070", candidateId: "candidate-msi-3070", inputHash: "f".repeat(64), status: "draft", missing: [], conflicts: [],
+          fields: [
+            { field: "brand", value: "MSI", evidence: "official", sourceKind: "official-page" },
+            { field: "model", value: "GeForce RTX 3070 VENTUS 2X OC", evidence: "official", sourceKind: "official-page" },
+            { field: "attrs.capacity", value: "8GB GDDR6", evidence: "official", sourceKind: "official-page" },
+            { field: "power.tgpW", value: 220, evidence: "official", sourceKind: "official-page" },
+            { field: "dims.lengthMm", value: 232, evidence: "official", sourceKind: "official-page" },
+            { field: "dims.slots", value: 3, evidence: "inferred", sourceKind: "official-page", note: "由官网 52mm 厚度按 PCI 槽距保守换算" },
+          ],
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/price/transactions/catalog-drafts/sku-draft-msi-3070/confirm") return new Response(JSON.stringify({
+        status: "confirmed", draftId: "sku-draft-msi-3070", skuId: "gpu.msi-geforce-rtx-3070-ventus-2x-oc",
+        sku: {
+          id: "gpu.msi-geforce-rtx-3070-ventus-2x-oc", category: "gpu", brand: "MSI", model: "GeForce RTX 3070 VENTUS 2X OC", name: "MSI GeForce RTX 3070 VENTUS 2X OC",
+          dims: { lengthMm: 232, heightMm: 124, thicknessMm: 52, slots: 3, evidence: "inferred", note: "长度/厚度来自官网；槽位由厚度保守换算" },
+          power: { tgpW: 220, evidence: "official" },
+          price: { currency: "CNY", historicalLowEvidence: "unknown", currentEvidence: "unknown" },
+          attrs: { capacity: "8GB GDDR6", vramGb: 8 }, appearance: { page: "https://www.msi.com/Graphics-Card/GeForce-RTX-3070-VENTUS-2X-OC/Specification" }, provenance: [],
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
       throw new Error(`unexpected request ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
     initTransactionImport({
       onImport,
+      onCatalogSkuAccepted,
       getPlanContext: () => ({
-        planId: "plan-gpu-slot-12345678", planVersionId: null, planName: "GPU plan",
+        planId: "plan-gpu-slot-12345678", planVersionId: null, localRevision: 7, planName: "GPU plan",
         items: [{ id: "gpu.primary", skuId: "gpu.none", name: "显卡未配置（可关联本次购买）", category: "gpu", placeholder: true }],
       }),
     });
@@ -339,6 +366,25 @@ describe("transaction screenshot review UI", () => {
     expect(document.querySelector(".transaction-search-log")?.textContent).toContain("已忽略冲突的 OCR 品牌 · Intel");
     expect(document.querySelector<HTMLAnchorElement>(".transaction-candidate-review a")?.href).toBe("https://www.msi.com/Graphics-Card/GeForce-RTX-3070-VENTUS-2X-OC/Specification");
     expect(document.querySelector('[data-state="empty"]')).toBeNull();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-catalog-draft-review")?.textContent).toContain("无需填写料号"));
+    expect(document.querySelector(".transaction-catalog-draft-review")?.textContent).toContain("Agent 推导");
+    expect(document.querySelector(".transaction-catalog-planning-summary")?.textContent).toContain("发热");
+    expect(document.querySelector(".transaction-catalog-planning-summary")?.textContent).toContain("噪音：官网未公布可靠声学值");
+    const approval = document.querySelector<HTMLInputElement>(".transaction-candidate-approval")!;
+    approval.checked = true;
+    approval.dispatchEvent(new Event("change"));
+    const accept = [...document.querySelectorAll<HTMLButtonElement>(".transaction-catalog-draft-review button")].find((button) => button.textContent?.includes("接纳 SKU"))!;
+    expect(accept.disabled).toBe(false);
+    accept.click();
+    await vi.waitFor(() => expect(onCatalogSkuAccepted).toHaveBeenCalled());
+    expect(onCatalogSkuAccepted).toHaveBeenCalledWith(expect.objectContaining({
+      sku: expect.objectContaining({ id: "gpu.msi-geforce-rtx-3070-ventus-2x-oc", category: "gpu" }),
+      planId: "plan-gpu-slot-12345678", localRevisionAtReview: 7, planItemId: "gpu.primary",
+    }));
+    expect(onImport).toHaveBeenCalledWith(expect.objectContaining({
+      skuId: "gpu.msi-geforce-rtx-3070-ventus-2x-oc",
+      evidence: expect.objectContaining({ verification: "matched-catalog", draftId: "sku-draft-msi-3070" }),
+    }), expect.any(File));
   });
 
   it("blocks a category-conflicted search, corrects it, and requires a second confirmation", async () => {
@@ -405,6 +451,38 @@ describe("transaction screenshot review UI", () => {
       category: "gpu",
       evidence: expect.objectContaining({ verification: "search-no-result" }),
     }), expect.any(File));
+  });
+
+  it("distinguishes a blocked official page from finding no official URL", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
+        receiptId: "receipt-seasonic-blocked", status: "catalog-search-required",
+        detected: { name: "Seasonic FOCUS Plus Gold 850 FX", brand: "Seasonic", model: "FOCUS Plus Gold 850 FX", category: "psu", qty: 1, unitPriceCny: 400 },
+        catalogMatch: null, evidence: { receiptId: "receipt-seasonic-blocked", fileName: "psu.png", contentHash: "6".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 98, excerpt: "FOCUS Plus Gold 850 FX" }, catalogSearch: null,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/price/transactions/catalog-search") return new Response(JSON.stringify({ jobId: "job-seasonic-blocked", status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/search/job-seasonic-blocked") return new Response(JSON.stringify({
+        jobId: "job-seasonic-blocked", status: "partial", stage: "score",
+        candidates: [{
+          candidateId: "candidate-seasonic-blocked", title: "Seasonic FOCUS PLUS Gold", canonicalUrl: "https://seasonic.com/product/focus-plus-gold/",
+          official: { trustStatus: "trusted", pageKind: "blocked", reasons: ["HTTP 403"] }, identity: { verdict: "same-family", score: 0.53, reasons: ["suffix unknown"], unknowns: ["psuMpnSuffix"], criticalConflicts: [] },
+          extraction: { status: "failed", fieldsFound: 0, error: "official page returned HTTP 403" },
+        }], summary: { discovered: 1, inspected: 1, fetchSucceeded: 0, productPages: 0, exact: 0, sameFamily: 1, conflicts: 0, blocked: 1 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({ onImport: vi.fn() });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["psu"], "psu.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    startRecognition();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-state="empty"]')?.textContent).toContain("官网拒绝自动读取"));
+    expect(document.querySelector('[data-state="empty"]')?.textContent).toContain("当成事实");
+    expect(document.querySelector<HTMLAnchorElement>('[data-state="empty"] a')?.href).toBe("https://seasonic.com/product/focus-plus-gold/");
   });
 
   it("cancels an in-flight OCR request without staging or losing retry state", async () => {

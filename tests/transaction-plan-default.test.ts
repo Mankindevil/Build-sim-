@@ -36,4 +36,24 @@ describe("transaction plan defaults", () => {
     expect(applyArchivedPurchasesAsDefaults(config, [item], planId, loadBundledCatalog())).toEqual([]);
     expect(config.selection.psuId).toBe(before);
   });
+
+  it("sets a linked, formally catalogued GPU after the archived purchase is confirmed", () => {
+    const planId = "plan-gpu-default-12345678";
+    const config = createDefaultN6Config(planId, "2026-08-26T00:00:00.000Z");
+    config.selection.gpuId = "gpu.none";
+    const item: BuildProgressItem = {
+      id: "transaction-gpu",
+      skuId: "gpu.plan.rtx-5060ti-16",
+      name: "RTX 5060 Ti 16GB",
+      category: "gpu",
+      qty: 1,
+      unitPriceCny: 3_499,
+      stage: "purchased",
+      source: "transaction",
+      planLink: { schemaVersion: "1.0.0", planId, planVersionIdAtCapture: null, planItemId: "gpu.primary", linkStatus: "linked" },
+    };
+
+    expect(applyArchivedPurchasesAsDefaults(config, [item], planId, loadBundledCatalog())).toEqual(["RTX 5060 Ti 16GB 规划包络"]);
+    expect(config.selection.gpuId).toBe("gpu.plan.rtx-5060ti-16");
+  });
 });

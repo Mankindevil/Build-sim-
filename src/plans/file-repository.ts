@@ -1,23 +1,37 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
+import type { BuildConfig } from "../config/types";
+import {
+  EVIDENCE_SCHEMA_VERSION,
+  type EvidenceCapture,
+  type EvidenceDocument,
+  type PlanEvidenceBinding,
+} from "../evidence/contracts";
 import { canonicalJson, deepReadonly, sha256Hex } from "./canonical";
 import { assertExpectedConfigHash, assertExpectedRevision, PlanConflictError } from "./conflict";
 import {
   PLAN_SCHEMA_VERSION,
   type BuildPlan,
   type BuildPlanSummary,
+  type BindPlanEvidenceInput,
   type CreatePlanInput,
   type DuplicatePlanInput,
+  type EvidenceCaptureLookup,
+  type EvidenceDocumentLookup,
   type PlanRepository,
   type PlanVersion,
   type SaveVersionInput,
+  type UnbindPlanEvidenceInput,
   type UpdateDraftInput,
   type UpdatePlanInfoInput,
 } from "./contracts";
 import { PlanRepositoryError } from "./errors";
-import { assertValidBuildPlan, assertValidPlanVersion } from "./validation";
+import { assertValidBuildPlan, assertValidPlanVersion, validatePlanEvidenceBinding } from "./validation";
 import { createImmutablePlanVersion } from "./version";
+import { assertValidConfig } from "../config/validate";
+import { loadBundledCatalog } from "../sku/catalog";
+import type { SkuCatalog } from "../sku/types";
 
 const STORED_SCHEMA_VERSION = "1.0.0" as const;
 const SAFE_ID = /^[a-z0-9][a-z0-9-]{7,79}$/;
@@ -35,10 +49,20 @@ interface IdempotencyRecord {
   result: { planId?: string; versionId?: string; value?: unknown };
 }
 
+type EvidenceBindingIdentity = Pick<PlanEvidenceBinding,
+  "planId" | "documentId" | "captureId" | "subject" | "purposes" | "locators"
+>;
+
 export interface FilePlanRepositoryOptions {
   root?: string;
   now?: () => string;
   id?: (prefix: "plan" | "version") => string;
+  /** Production supplies the merged runtime catalog; tests/defaults use the bundled facts. */
+  getCatalog?: () => SkuCatalog;
+  /** Authoritative immutable evidence metadata lookup; required only for binding operations. */
+  getEvidenceDocument?: EvidenceDocumentLookup;
+  /** Authoritative capture lookup; required when a binding includes captureId. */
+  getEvidenceCapture?: EvidenceCaptureLookup;
 }
 
 function checksum(value: unknown): string {
@@ -53,16 +77,80 @@ export class FilePlanRepository implements PlanRepository {
   private readonly root: string;
   private readonly now: () => string;
   private readonly id: (prefix: "plan" | "version") => string;
+  private readonly getCatalog: () => SkuCatalog;
+  private readonly getEvidenceDocument: EvidenceDocumentLookup;
+  private readonly getEvidenceCapture: EvidenceCaptureLookup;
   private readonly queues = new Map<string, Promise<unknown>>();
 
   constructor(options: FilePlanRepositoryOptions = {}) {
     this.root = path.resolve(options.root ?? "runtime/plans");
     this.now = options.now ?? (() => new Date().toISOString());
     this.id = options.id ?? ((prefix) => `${prefix}-${randomUUID()}`);
+    this.getCatalog = options.getCatalog ?? loadBundledCatalog;
+    this.getEvidenceDocument = options.getEvidenceDocument ?? (() => null);
+    this.getEvidenceCapture = options.getEvidenceCapture ?? (() => null);
+  }
+
+  /**
+   * Drafts may be incomplete, but every fact already present must be valid.
+   * In particular, fan groups are checked against the selected case adapter so
+   * HTTP callers cannot persist a count/size that the UI or geometry would clamp.
+   */
+  private assertSemanticConfig(config: BuildConfig): void {
+    try {
+      assertValidConfig(config, this.getCatalog());
+    } catch (error) {
+      throw new PlanRepositoryError("invalid_input", error instanceof Error ? error.message : "Invalid BuildConfig", 400);
+    }
   }
 
   private assertId(id: string): void {
     if (!SAFE_ID.test(id)) throw new PlanRepositoryError("invalid_id", "Invalid plan storage id", 400);
+  }
+
+  private evidenceBindingIdentity(value: EvidenceBindingIdentity): unknown {
+    const purposes = [...value.purposes].sort();
+    const locators = value.locators
+      ? [...value.locators].map((locator) => clone(locator)).sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)))
+      : undefined;
+    return {
+      planId: value.planId,
+      documentId: value.documentId,
+      ...(value.captureId ? { captureId: value.captureId } : {}),
+      subject: clone(value.subject),
+      purposes,
+      ...(locators ? { locators } : {}),
+    };
+  }
+
+  private evidenceBindingId(value: EvidenceBindingIdentity): PlanEvidenceBinding["id"] {
+    return `binding-sha256-${checksum(this.evidenceBindingIdentity(value))}` as PlanEvidenceBinding["id"];
+  }
+
+  private async resolveEvidenceDocument(documentId: PlanEvidenceBinding["documentId"], expectedHash?: string): Promise<EvidenceDocument> {
+    if (!/^doc-sha256-[a-f0-9]{64}$/.test(documentId)) throw new PlanRepositoryError("invalid_input", "Evidence document id is invalid", 400);
+    const document = await this.getEvidenceDocument(documentId);
+    if (!document) throw new PlanRepositoryError("not_found", "Evidence document was not found", 404);
+    if (
+      document.schemaVersion !== EVIDENCE_SCHEMA_VERSION
+      || document.id !== documentId
+      || !/^[a-f0-9]{64}$/.test(document.sha256)
+      || document.id !== `doc-sha256-${document.sha256}`
+    ) throw new PlanRepositoryError("invalid_input", "Evidence document identity or content hash is invalid", 400);
+    if (expectedHash !== undefined && (!/^[a-f0-9]{64}$/.test(expectedHash) || expectedHash !== document.sha256)) {
+      throw new PlanRepositoryError("invalid_input", "Evidence document content hash does not match the requested pin", 409);
+    }
+    return document;
+  }
+
+  private async resolveEvidenceCapture(captureId: NonNullable<PlanEvidenceBinding["captureId"]>, documentId: PlanEvidenceBinding["documentId"]): Promise<EvidenceCapture> {
+    if (!/^capture-sha256-[a-f0-9]{64}$/.test(captureId)) throw new PlanRepositoryError("invalid_input", "Evidence capture id is invalid", 400);
+    const capture = await this.getEvidenceCapture(captureId);
+    if (!capture) throw new PlanRepositoryError("not_found", "Evidence capture was not found", 404);
+    if (capture.schemaVersion !== EVIDENCE_SCHEMA_VERSION || capture.id !== captureId || capture.documentId !== documentId) {
+      throw new PlanRepositoryError("invalid_input", "Evidence capture does not belong to the requested document", 400);
+    }
+    return capture;
   }
 
   private planDirectory(planId: string): string {
@@ -115,7 +203,13 @@ export class FilePlanRepository implements PlanRepository {
   }
 
   private async readPlan(planId: string): Promise<BuildPlan> {
-    const plan = await this.readEnvelope<BuildPlan>(this.planFile(planId), "plan");
+    const stored = await this.readEnvelope<BuildPlan>(this.planFile(planId), "plan");
+    // Legacy records predate draft evidence bindings. Normalize only after the
+    // stored-envelope checksum has been verified so their original bytes remain valid.
+    const plan: BuildPlan = {
+      ...stored,
+      draft: { ...stored.draft, evidenceBindings: clone(stored.draft?.evidenceBindings ?? []) },
+    };
     try {
       assertValidBuildPlan(plan);
     } catch (error) {
@@ -129,6 +223,7 @@ export class FilePlanRepository implements PlanRepository {
     try {
       assertValidPlanVersion(version);
       if (version.configHash !== await sha256Hex(version.config)) throw new Error("PlanVersion config hash mismatch");
+      if (version.evidenceBindings && version.evidenceHash !== await sha256Hex(version.evidenceBindings)) throw new Error("PlanVersion evidence hash mismatch");
     } catch (error) {
       throw new PlanRepositoryError("corrupt_data", error instanceof Error ? error.message : "Invalid version data", 500);
     }
@@ -225,10 +320,11 @@ export class FilePlanRepository implements PlanRepository {
           updatedAt: timestamp,
           activeVersionId: null,
           draftRevision: 0,
-          draft: { schemaVersion: PLAN_SCHEMA_VERSION, baseVersionId: null, config, dirty: true, updatedAt: timestamp },
+          draft: { schemaVersion: PLAN_SCHEMA_VERSION, baseVersionId: null, config, evidenceBindings: [], dirty: true, updatedAt: timestamp },
           metadata: clone(input.metadata ?? {}),
         };
         assertValidBuildPlan(plan);
+        this.assertSemanticConfig(plan.draft.config);
         await this.atomicWrite(this.planFile(planId), "plan", plan);
         return { value: clone(plan), result: { planId, value: clone(plan) } };
       },
@@ -261,6 +357,7 @@ export class FilePlanRepository implements PlanRepository {
           draft: { ...plan.draft, config, dirty: true, updatedAt: timestamp },
         };
         assertValidBuildPlan(updated);
+        this.assertSemanticConfig(updated.draft.config);
         await this.atomicWrite(this.planFile(planId), "plan", updated);
         return { value: clone(updated), result: { planId, value: clone(updated) } };
       },
@@ -307,6 +404,7 @@ export class FilePlanRepository implements PlanRepository {
         if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
         if (plan.metadata.initialization?.status === "pending") throw new PlanRepositoryError("initialization_pending", "Pending Agent initialization scaffolds cannot be saved as versions", 409);
         assertExpectedRevision(input.expectedRevision, plan.draftRevision);
+        this.assertSemanticConfig(plan.draft.config);
         const actualHash = await sha256Hex(plan.draft.config);
         assertExpectedConfigHash(input.expectedConfigHash, actualHash);
         const versions = await this.listVersions(planId);
@@ -321,6 +419,7 @@ export class FilePlanRepository implements PlanRepository {
           ...(input.evaluationHash ? { evaluationHash: input.evaluationHash } : {}),
           ...(input.evaluatedAt ? { evaluatedAt: input.evaluatedAt } : {}),
           config: plan.draft.config,
+          evidenceBindings: plan.draft.evidenceBindings ?? [],
           parentVersionId: plan.activeVersionId,
         });
         await this.atomicWrite(this.versionFile(planId, versionId), "version", version);
@@ -345,7 +444,26 @@ export class FilePlanRepository implements PlanRepository {
       async (record) => clone(record.result.value as BuildPlan),
       async () => {
         const source = await this.readPlan(planId);
-        const created = await this.create({ name: input.name, config: source.draft.config, metadata: clone(source.metadata) });
+        let created = await this.create({ name: input.name, config: source.draft.config, metadata: clone(source.metadata) });
+        const copiedBindingsById = new Map<PlanEvidenceBinding["id"], PlanEvidenceBinding>();
+        for (const binding of source.draft.evidenceBindings ?? []) {
+          const { id: _sourceBindingId, planId: _sourcePlanId, planVersionId: _sourceVersionId, ...reference } = binding;
+          const copiedBase = {
+            ...clone(reference),
+            planId: created.id,
+          };
+          const copied = {
+            ...copiedBase,
+            id: this.evidenceBindingId(copiedBase),
+          } satisfies PlanEvidenceBinding;
+          copiedBindingsById.set(copied.id, copied);
+        }
+        const copiedBindings = [...copiedBindingsById.values()];
+        if (copiedBindings.length) {
+          created = { ...created, draft: { ...created.draft, evidenceBindings: copiedBindings } };
+          assertValidBuildPlan(created);
+          await this.atomicWrite(this.planFile(created.id), "plan", created);
+        }
         if (source.metadata.initialization?.status === "pending") {
           return { value: created, result: { planId: created.id, value: clone(created) } };
         }
@@ -353,6 +471,98 @@ export class FilePlanRepository implements PlanRepository {
         await this.saveVersion(created.id, { expectedRevision: created.draftRevision, expectedConfigHash: hash, reason: "initial" });
         const saved = await this.get(created.id);
         return { value: saved, result: { planId: saved.id, value: clone(saved) } };
+      },
+    ));
+  }
+
+  async listEvidenceBindings(planId: string): Promise<PlanEvidenceBinding[]> {
+    const plan = await this.readPlan(planId);
+    return clone(plan.draft.evidenceBindings ?? []);
+  }
+
+  async bindEvidence(planId: string, input: BindPlanEvidenceInput): Promise<PlanEvidenceBinding> {
+    return this.serialize(planId, () => this.idempotent(
+      `bindEvidence:${planId}`,
+      input.idempotencyKey,
+      input,
+      async (record) => clone(record.result.value as PlanEvidenceBinding),
+      async () => {
+        const plan = await this.readPlan(planId);
+        if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
+        const document = await this.resolveEvidenceDocument(input.documentId, input.contentHash);
+        if (input.captureId) await this.resolveEvidenceCapture(input.captureId, document.id);
+        if (input.subject.kind === "plan" && input.subject.id !== planId) {
+          throw new PlanRepositoryError("invalid_input", "Plan evidence subject must reference the active plan", 400);
+        }
+        const timestamp = this.now();
+        const bindingBase = {
+          schemaVersion: EVIDENCE_SCHEMA_VERSION,
+          planId,
+          documentId: document.id,
+          contentHash: document.sha256,
+          ...(input.captureId ? { captureId: input.captureId } : {}),
+          subject: clone(input.subject),
+          purposes: clone(input.purposes),
+          ...(input.locators ? { locators: clone(input.locators) } : {}),
+          boundAt: timestamp,
+          ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+        };
+        const binding: PlanEvidenceBinding = {
+          ...bindingBase,
+          id: this.evidenceBindingId(bindingBase),
+        };
+        const errors = validatePlanEvidenceBinding(binding);
+        if (errors.length) throw new PlanRepositoryError("invalid_input", `Invalid evidence binding: ${errors.join("; ")}`, 400);
+        const existing = (plan.draft.evidenceBindings ?? []).find((candidate) => this.evidenceBindingId(candidate) === binding.id);
+        if (existing) return { value: clone(existing), result: { planId, value: clone(existing) } };
+        assertExpectedRevision(input.expectedRevision, plan.draftRevision);
+        const updated: BuildPlan = {
+          ...plan,
+          updatedAt: timestamp,
+          draftRevision: plan.draftRevision + 1,
+          draft: {
+            ...plan.draft,
+            evidenceBindings: [...(plan.draft.evidenceBindings ?? []), binding],
+            dirty: true,
+            updatedAt: timestamp,
+          },
+        };
+        assertValidBuildPlan(updated);
+        await this.atomicWrite(this.planFile(planId), "plan", updated);
+        return { value: clone(binding), result: { planId, value: clone(binding) } };
+      },
+    ));
+  }
+
+  async unbindEvidence(planId: string, input: UnbindPlanEvidenceInput): Promise<void> {
+    await this.serialize(planId, () => this.idempotent(
+      `unbindEvidence:${planId}`,
+      input.idempotencyKey,
+      input,
+      async () => undefined,
+      async () => {
+        const plan = await this.readPlan(planId);
+        if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
+        assertExpectedRevision(input.expectedRevision, plan.draftRevision);
+        const bindings = plan.draft.evidenceBindings ?? [];
+        if (!bindings.some((binding) => binding.id === input.bindingId)) {
+          throw new PlanRepositoryError("not_found", "Plan evidence binding was not found", 404);
+        }
+        const timestamp = this.now();
+        const updated: BuildPlan = {
+          ...plan,
+          updatedAt: timestamp,
+          draftRevision: plan.draftRevision + 1,
+          draft: {
+            ...plan.draft,
+            evidenceBindings: bindings.filter((binding) => binding.id !== input.bindingId),
+            dirty: true,
+            updatedAt: timestamp,
+          },
+        };
+        assertValidBuildPlan(updated);
+        await this.atomicWrite(this.planFile(planId), "plan", updated);
+        return { value: undefined, result: { planId } };
       },
     ));
   }

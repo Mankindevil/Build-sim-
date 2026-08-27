@@ -70,6 +70,21 @@ export function deriveBuildTasks(input: DeriveBuildTasksInput): BuildTask[] {
     }));
   });
 
+  // A generic case-fan group is a reviewed mounting requirement, not a product.
+  // Keep it out of the SKU BOM while making the procurement gap impossible to
+  // mistake for a completed budget or shopping list.
+  (evaluation.price.unresolvedRequirements ?? []).forEach((requirement, index) => {
+    const sourceRef = `purchase:requirement:${requirement.id}`;
+    tasks.push(task({
+      planId, sourceVersionId, sourceRef, kind: "purchase", order: 500 + index,
+      title: `先确认 ${requirement.mountLabel} ${requirement.sizeMm}mm 风扇具体 SKU（${requirement.qty} 个）`,
+      status: "blocked",
+      staleReason: "当前只记录了安装位、尺寸和数量；具体风扇 SKU、单价、噪音与具体产品的实际风量均未知，不能视为已完成采购。",
+      findingId: `procurement.unresolved:${requirement.id}`,
+      evidenceRefs: [`requirement:${requirement.id}`, `config:selection.fanGroups.${requirement.mountId}`],
+    }));
+  });
+
   const assemblyByStep = new Map(evaluation.assembly.steps.map((step) => [step.id, buildTaskId(planId, `assembly:${step.id}`)]));
   evaluation.assembly.steps.forEach((step, index) => {
     const sourceRef = `assembly:${step.id}`;
@@ -100,7 +115,7 @@ export function deriveBuildTasks(input: DeriveBuildTasksInput): BuildTask[] {
     }));
   });
 
-  evaluation.findings.forEach((finding, index) => {
+  evaluation.findings.filter((finding) => !finding.id.startsWith("procurement.unresolved:")).forEach((finding, index) => {
     tasks.push(task({
       planId, sourceVersionId, sourceRef: `verification:${finding.id}`, kind: "verification", order: 3_000 + index,
       title: finding.message,

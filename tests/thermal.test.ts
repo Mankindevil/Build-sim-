@@ -153,8 +153,9 @@ describe("left fan bracket", () => {
   });
 
   it("drops left-side fans from the balance instead of silently crediting them", () => {
-    const withLeft = evaluateBuild(config({ psuTopology: "auto" }), catalog, env({ fans: { left: { size: 120, count: 2 } } }));
-    const bottom = evaluateBuild(config({ psuTopology: "bottom" }), catalog, env({ fans: { left: { size: 120, count: 2 } } }));
+    const fanGroups = [{ mountId: "left", sizeMm: 120 as const, count: 2 }];
+    const withLeft = evaluateBuild(config({ psuTopology: "auto", fanGroups }), catalog, env());
+    const bottom = evaluateBuild(config({ psuTopology: "bottom", fanGroups }), catalog, env());
     expect(withLeft.thermal?.chambers.lower.fanned).toBe(true);
     expect(bottom.thermal?.chambers.lower.fanned).toBe(false);
     expect(bottom.findings.find((f) => f.id === "thermal.left-fan-mount-conflict")?.verdict).toBe(

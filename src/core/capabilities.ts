@@ -2,16 +2,25 @@ import type { SkuCatalog } from "../sku/types";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 
 export interface FanMountCapability {
+  /** Adapter-issued id; other cases may expose top/bottom or split zones. */
+  id: string;
+  label: string;
   size: 120 | 140;
   count: number;
+  supportedSizes: (120 | 140)[];
+  maxCountBySize: Partial<Record<120 | 140, number>>;
+  direction: "intake" | "exhaust";
+  chamber: "upper" | "lower";
   evidence: "official" | "standard" | "inferred" | "unknown";
+  source: string;
 }
 
 export interface CaseCapabilities {
   caseId: string;
   trayCount: number;
   backplane: { sataPowerInlets: number; molexInlets: number; evidence: "official" | "standard" | "inferred" | "unknown" };
-  fanMounts: { front: FanMountCapability; rear: FanMountCapability; left: FanMountCapability; right: FanMountCapability };
+  /** Ordered, case-specific mounts. Core/UI code must not assume N6 positions. */
+  fanMounts: FanMountCapability[];
   psuLimits: { atxMaxLengthMm: number; sfxMaxLengthMm: number };
   coolerLimits: { overheadAtxMm: number; openTopMm: number };
   gpuLimits: { planningMinMm: number; publishedMaxMm: number };
@@ -68,16 +77,25 @@ export function n6CaseCapabilities(): CaseCapabilities {
       molexInlets: p.backplanePower.connectors.molex,
       evidence: evidence(p.backplanePower.evidence),
     },
-    fanMounts: {
-      front: { size: fanSize(p.fanMounts.front.altSize), count: p.fanMounts.front.altCount, evidence: evidence(p.fanMounts.evidence) },
-      rear: { size: fanSize(p.fanMounts.rear.size), count: p.fanMounts.rear.count, evidence: evidence(p.fanMounts.evidence) },
-      left: { size: fanSize(p.fanMounts.left.size), count: p.fanMounts.left.count, evidence: evidence(p.fanMounts.evidence) },
-      right: { size: fanSize(p.fanMounts.right.size), count: p.fanMounts.right.count, evidence: evidence(p.fanMounts.evidence) },
-    },
+    fanMounts: [
+      { id: "front", label: "前部进风", size: fanSize(p.fanMounts.front.altSize), count: p.fanMounts.front.altCount, supportedSizes: [120, 140], maxCountBySize: { 120: p.fanMounts.front.count, 140: p.fanMounts.front.altCount }, direction: "intake", chamber: "upper", evidence: evidence(p.fanMounts.evidence), source: p.fanMounts.source },
+      { id: "rear", label: "后部排风", size: fanSize(p.fanMounts.rear.size), count: p.fanMounts.rear.count, supportedSizes: [120], maxCountBySize: { 120: p.fanMounts.rear.count }, direction: "exhaust", chamber: "upper", evidence: evidence(p.fanMounts.evidence), source: p.fanMounts.source },
+      { id: "left", label: "左侧盘区进风", size: fanSize(p.fanMounts.left.size), count: p.fanMounts.left.count, supportedSizes: [120], maxCountBySize: { 120: p.fanMounts.left.count }, direction: "intake", chamber: "lower", evidence: evidence(p.fanMounts.evidence), source: p.fanMounts.source },
+      { id: "right", label: "右侧 GPU / HBA 进风", size: fanSize(p.fanMounts.right.size), count: p.fanMounts.right.count, supportedSizes: [120], maxCountBySize: { 120: p.fanMounts.right.count }, direction: "intake", chamber: "upper", evidence: evidence(p.fanMounts.evidence), source: p.fanMounts.source },
+    ],
     psuLimits: p.psuLimits,
     coolerLimits: p.coolerLimits,
     gpuLimits: p.gpuLimits,
   };
+}
+
+/** Explicit registry boundary: an unknown case never inherits N6 capabilities. */
+export function caseCapabilities(caseId: string): CaseCapabilities | null {
+  return caseId === n6Profile.caseId ? n6CaseCapabilities() : null;
+}
+
+export function orderedFanMounts(capabilities: CaseCapabilities): FanMountCapability[] {
+  return [...capabilities.fanMounts];
 }
 
 function finiteAttr(attrs: Record<string, unknown> | undefined, key: string): number | null {

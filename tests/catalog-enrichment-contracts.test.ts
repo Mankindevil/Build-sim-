@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CATALOG_CONTRACT_VERSION,
   assertDiscoveryResult,
+  catalogCandidateInputHash,
   isOfficialFieldProvenance,
 } from "../scripts/price-server/catalog/contracts.mjs";
 
@@ -40,5 +41,11 @@ describe("C0 official catalog enrichment contracts", () => {
     expect(isOfficialFieldProvenance({ ...base, sourceKind: "searxng" })).toBe(false);
     expect(isOfficialFieldProvenance({ ...base, sourceKind: "model-text" })).toBe(false);
     expect(isOfficialFieldProvenance({ ...base, sourceKind: "third-party-page" })).toBe(false);
+  });
+
+  it("hashes acceptance-relevant query identity as well as extracted evidence", () => {
+    const candidate = { candidateId: "candidate-hash", query: { raw: "ASUS Board A", brand: "ASUS", model: "Board A", category: "motherboard" }, category: "motherboard", canonicalUrl: "https://www.asus.com/board-a", source: { kind: "official" }, official: { trustStatus: "trusted", pageKind: "product" }, identity: { verdict: "exact" }, match: { kind: "brand-model" }, extraction: { contentHash: "a".repeat(64) }, fields: [], conflicts: [] };
+    expect(catalogCandidateInputHash({ ...candidate, query: { ...candidate.query, model: "Board B" } })).not.toBe(catalogCandidateInputHash(candidate));
+    expect(catalogCandidateInputHash({ ...candidate, category: "gpu" })).not.toBe(catalogCandidateInputHash(candidate));
   });
 });

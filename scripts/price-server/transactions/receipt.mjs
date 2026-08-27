@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { requestDeepSeekOcr } from "./deepseek-ocr.mjs";
 
 const require = createRequire(import.meta.url);
+const officialDomains = require("../../../data/catalog/official-domains.json");
 const DEFAULT_MAX_BYTES = 5_000_000;
 const DEFAULT_MAX_PIXELS = 24_000_000;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -104,6 +105,116 @@ const CATEGORY_WORDS = [
   ["hba", ["hba", "sas card", "阵列卡"]], ["fan", ["case fan", "cooling fan", "风扇"]],
 ];
 
+const STRONG_GPU_MODELS = [
+  {
+    family: "nvidia",
+    pattern: /\b((?:GeForce\s+)?(?:RTX|GTX)\s*[A-Z]?\s*\d{3,4}(?:\s*(?:Ti|SUPER))?(?:(?:\s+VENTUS\s*[23]X)|(?:\s+GAMING\s+(?:X\s+)?TRIO)|(?:\s+SUPRIM\s*X?)|(?:\s+TUF\s+GAMING)|(?:\s+DUAL(?:[- ]FAN)?)|(?:\s+STRIX)|(?:\s+(?:OC|Overclocked|LHR|\d+\s*GB|GDDR\dX?))){0,6})\b/i,
+  },
+  {
+    family: "amd",
+    pattern: /\b((?:Radeon\s+)?RX\s*\d{3,4}(?:\s*(?:XT|XTX|GRE))?(?:(?:\s+GAMING\s+(?:X\s+)?TRIO)|(?:\s+TUF\s+GAMING)|(?:\s+DUAL(?:[- ]FAN)?)|(?:\s+(?:OC|\d+\s*GB|GDDR\dX?))){0,5})\b/i,
+  },
+  {
+    family: "arc",
+    pattern: /\b(?:Intel\s+)?(Arc\s+[AB]\s*\d{3}(?:(?:\s+Limited\s+Edition)|(?:\s+OC)|(?:\s+\d+\s*GB)|(?:\s+GDDR\dX?)){0,4})\b/i,
+  },
+];
+
+const GENERIC_MODEL_PATTERN = /[A-Za-z0-9]+(?:[-_./][A-Za-z0-9]+)+|[A-Za-z]{1,12}\d{2,}[A-Za-z0-9-]*/g;
+const REJECTED_MODEL_TOKEN = /^(?:20\d{2}|\d{8,}|order|total|amount)$/i;
+const ORDER_ID_LINE = /(?:\border\s*(?:id|no\.?|number)?|\btransaction\s*(?:id|no\.?|number)|订单(?:号|编号)?|交易号|流水号)\s*[:：#-]?/iu;
+const NAVIGATION_LINE = /(?:品牌馆|品牌专区|店铺首页|商家店铺|导航|\bbrand\s+store\b|\bshop\s+home\b)/iu;
+
+function ocrLines(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/[‐‑‒–—−]/g, "-")
+    .split(/\r?\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function escaped(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+function governedBrandCandidates(catalog) {
+  const entries = new Map();
+  const add = (brand, aliases = []) => {
+    const canonical = String(brand ?? "").trim();
+    if (!canonical || ["Unknown", "Generic", "—"].includes(canonical)) return;
+    const key = canonical.toLocaleLowerCase();
+    const current = entries.get(key) ?? { brand: canonical, aliases: new Set() };
+    current.aliases.add(canonical);
+    for (const alias of aliases) if (String(alias ?? "").trim()) current.aliases.add(String(alias).trim());
+    entries.set(key, current);
+  };
+  for (const entry of Array.isArray(officialDomains?.brands) ? officialDomains.brands : []) add(entry?.brand, entry?.aliases);
+  for (const sku of catalog?.skus ?? []) add(sku?.brand);
+  return [...entries.values()].map((entry) => ({ brand: entry.brand, aliases: [...entry.aliases].sort((a, b) => b.length - a.length) }));
+}
+
+function brandOccurrences(lines, candidates) {
+  const found = [];
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    for (const candidate of candidates) {
+      for (const alias of candidate.aliases) {
+        const pattern = new RegExp(`(^|[^a-z0-9])(${escaped(alias)})(?=$|[^a-z0-9])`, "ig");
+        for (const match of line.matchAll(pattern)) {
+          const index = Number(match.index ?? 0) + String(match[1] ?? "").length;
+          found.push({ brand: candidate.brand, alias, lineIndex, index, length: String(match[2] ?? alias).length });
+        }
+      }
+    }
+  }
+  return found.filter((entry, index) => !found.some((other, otherIndex) => otherIndex < index && other.brand === entry.brand && other.lineIndex === entry.lineIndex && other.index === entry.index));
+}
+
+function compatibleGpuBrand(brand, family) {
+  const key = String(brand).toLocaleLowerCase();
+  if (family === "nvidia" && key === "intel") return false;
+  if (family === "amd" && ["intel", "nvidia"].includes(key)) return false;
+  return true;
+}
+
+function nearestBrand(lines, occurrences, lineIndex, modelIndex, modelLength, family) {
+  const modelCenter = modelIndex + modelLength / 2;
+  return occurrences
+    .filter((entry) => compatibleGpuBrand(entry.brand, family) && !NAVIGATION_LINE.test(lines[entry.lineIndex]) && Math.abs(entry.lineIndex - lineIndex) <= 1)
+    .flatMap((entry) => {
+      const lineDistance = Math.abs(entry.lineIndex - lineIndex);
+      const characterDistance = lineDistance === 0 ? Math.abs(entry.index + entry.length / 2 - modelCenter) : 0;
+      if (lineDistance === 0 && characterDistance > 140) return [];
+      if (lineDistance === 1 && lines[entry.lineIndex].length > 100) return [];
+      return [{ ...entry, score: lineDistance === 0 ? 1_000 - characterDistance : 450 }];
+    })
+    .sort((a, b) => b.score - a.score)[0]?.brand ?? null;
+}
+
+function normalizedGpuModel(value) {
+  return text(value).replace(/\boverclocked\b/gi, "OC");
+}
+
+function detectStrongGpuIdentity(lines, brandEntries) {
+  const occurrences = brandOccurrences(lines, brandEntries);
+  const detected = [];
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    for (const definition of STRONG_GPU_MODELS) {
+      const match = line.match(definition.pattern);
+      if (!match?.[1]) continue;
+      const model = normalizedGpuModel(match[1]);
+      const modelIndex = Math.max(0, line.toLocaleLowerCase().indexOf(match[1].toLocaleLowerCase()));
+      const brand = nearestBrand(lines, occurrences, lineIndex, modelIndex, match[1].length, definition.family);
+      const block = lines.slice(Math.max(0, lineIndex - 1), Math.min(lines.length, lineIndex + 2)).join(" ");
+      const transactionCue = /(?:商品|型号|数量|实付|成交价|\b(?:item|product|qty|paid|total)\b)/iu.test(block);
+      const specificity = /(?:VENTUS|TRIO|SUPRIM|TUF|DUAL|STRIX|\bOC\b|\b\d+\s*GB\b|GDDR)/i.test(model);
+      detected.push({ brand, model, category: "gpu", score: 100 + (brand ? 40 : 0) + (transactionCue ? 20 : 0) + (specificity ? 10 : 0), lineIndex });
+    }
+  }
+  const best = detected.sort((a, b) => b.score - a.score || a.lineIndex - b.lineIndex)[0];
+  return best ? { brand: best.brand, model: best.model, category: best.category, query: [best.brand, best.model].filter(Boolean).join(" ") } : null;
+}
+
 function priceFromText(raw) {
   const patterns = [
     /(?:实付|合计|总计|成交价|paid|payment|total|amount)\s*[:：]?\s*(?:cny|rmb|[¥￥$])?\s*([0-9]{1,7}(?:[.,][0-9]{1,2})?)/iu,
@@ -126,7 +237,7 @@ function quantityFromText(raw) {
 function matchCatalog(raw, catalog) {
   const haystack = comparable(raw);
   const rows = (catalog?.skus ?? []).flatMap((sku) => {
-    const identities = [sku.mpn, sku.model, sku.name].filter(Boolean).map((value) => comparable(value));
+    const identities = [sku.mpn, sku.model, sku.name, ...(Array.isArray(sku.attrs?.searchTerms) ? sku.attrs.searchTerms : [])].filter(Boolean).map((value) => comparable(value));
     const exact = identities.find((identity) => identity.length >= 2 && haystack.includes(identity));
     if (!exact) return [];
     const kind = sku.mpn && haystack.includes(comparable(sku.mpn)) ? "exact-mpn" : "brand-model";
@@ -143,7 +254,7 @@ function matchCatalog(raw, catalog) {
     .map((value) => comparable(value))
     .filter((value) => value.length >= 5 && /[a-z]{2,}/.test(value) && /\d{2,}/.test(value));
   for (const fragment of [...new Set(fragments)].sort((a, b) => b.length - a.length)) {
-    const partial = (catalog?.skus ?? []).filter((sku) => [sku.mpn, sku.model]
+    const partial = (catalog?.skus ?? []).filter((sku) => [sku.mpn, sku.model, ...(Array.isArray(sku.attrs?.searchTerms) ? sku.attrs.searchTerms : [])]
       .filter(Boolean)
       .some((identity) => comparable(identity).includes(fragment)));
     if (partial.length === 1) return { sku: partial[0], score: 0.82, kind: "brand-model" };
@@ -152,18 +263,36 @@ function matchCatalog(raw, catalog) {
 }
 
 function detectIdentity(raw, catalog) {
+  const lines = ocrLines(raw);
   const normalized = text(raw);
-  const lower = normalized.toLocaleLowerCase();
-  const brands = [...new Set((catalog?.skus ?? []).map((sku) => sku.brand).filter((brand) => brand && !["Unknown", "Generic", "—"].includes(brand)))].sort((a, b) => b.length - a.length);
-  const brand = brands.find((value) => lower.includes(value.toLocaleLowerCase()));
-  const tokens = normalized.match(/[A-Za-z0-9]+(?:[-_./][A-Za-z0-9]+)+|[A-Za-z]{1,12}\d{2,}[A-Za-z0-9-]*/g) ?? [];
-  const rejected = /^(?:20\d{2}|\d{8,}|order|total|amount)$/i;
-  const model = tokens.filter((token) => !rejected.test(token) && /[A-Za-z]/.test(token) && /\d/.test(token)).sort((a, b) => b.length - a.length)[0];
-  const explicitCategory = CATEGORY_WORDS.find(([, words]) => words.some((word) => lower.includes(word)))?.[0];
+  const brandEntries = governedBrandCandidates(catalog);
+  const strongGpu = detectStrongGpuIdentity(lines, brandEntries);
+  if (strongGpu) return strongGpu;
+
+  const occurrences = brandOccurrences(lines, brandEntries);
+  const tokens = lines.flatMap((line, lineIndex) => {
+    const lineBrands = occurrences.filter((entry) => entry.lineIndex === lineIndex && !NAVIGATION_LINE.test(line));
+    return [...line.matchAll(new RegExp(GENERIC_MODEL_PATTERN.source, "g"))].flatMap((match) => {
+      const token = String(match[0] ?? "");
+      if (REJECTED_MODEL_TOKEN.test(token) || !/[A-Za-z]/.test(token) || !/\d/.test(token)) return [];
+      if (NAVIGATION_LINE.test(line) || (ORDER_ID_LINE.test(line) && lineBrands.length === 0)) return [];
+      const tokenIndex = Number(match.index ?? 0);
+      const nearbyBrand = lineBrands.some((entry) => Math.abs(entry.index + entry.length / 2 - (tokenIndex + token.length / 2)) <= 120);
+      const categoryCue = CATEGORY_WORDS.some(([, words]) => words.some((word) => line.toLocaleLowerCase().includes(word.toLocaleLowerCase())));
+      return [{ token, lineIndex, index: tokenIndex, score: token.length + (nearbyBrand ? 50 : 0) + (categoryCue ? 20 : 0) }];
+    });
+  });
+  const modelCandidate = tokens.sort((a, b) => b.score - a.score || b.token.length - a.token.length)[0];
+  const model = modelCandidate?.token;
+  const brand = modelCandidate
+    ? nearestBrand(lines, occurrences, modelCandidate.lineIndex, modelCandidate.index, modelCandidate.token.length)
+    : occurrences.find((entry) => !NAVIGATION_LINE.test(lines[entry.lineIndex]) && !ORDER_ID_LINE.test(lines[entry.lineIndex]))?.brand ?? null;
+  const categoryText = modelCandidate?.lineIndex !== undefined ? lines[modelCandidate.lineIndex].toLocaleLowerCase() : normalized.toLocaleLowerCase();
+  const explicitCategory = CATEGORY_WORDS.find(([, words]) => words.some((word) => categoryText.includes(word.toLocaleLowerCase())))?.[0];
   const modelFragment = comparable(model);
   const catalogCategories = new Set(modelFragment.length >= 5
     ? (catalog?.skus ?? [])
-      .filter((sku) => [sku.mpn, sku.model].filter(Boolean).some((identity) => comparable(identity).includes(modelFragment)))
+      .filter((sku) => [sku.mpn, sku.model, ...(Array.isArray(sku.attrs?.searchTerms) ? sku.attrs.searchTerms : [])].filter(Boolean).some((identity) => comparable(identity).includes(modelFragment)))
       .map((sku) => sku.category)
     : []);
   // A model fragment that resolves to one governed catalog category is
@@ -180,7 +309,7 @@ export function analyzeTransactionText(raw, catalog, meta = {}) {
   const catalogMatch = matchCatalog(normalized, catalog);
   const identity = catalogMatch
     ? { brand: catalogMatch.sku.brand, model: catalogMatch.sku.model, category: catalogMatch.sku.category, query: catalogMatch.sku.mpn ?? `${catalogMatch.sku.brand} ${catalogMatch.sku.model}` }
-    : detectIdentity(normalized, catalog);
+    : detectIdentity(raw, catalog);
   const receiptId = String(meta.receiptId ?? `receipt-${sha256(normalized).slice(0, 20)}`);
   const fileName = String(meta.fileName ?? "transaction-screenshot").slice(0, 160);
   const price = priceFromText(normalized);

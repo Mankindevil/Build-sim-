@@ -82,6 +82,24 @@ describe("build progress", () => {
     });
   });
 
+  it("counts configured fan groups without a reviewed SKU as pending price lines", () => {
+    const evaluation = {
+      bom: [],
+      price: {
+        items: [],
+        unresolvedRequirements: [
+          { id: "case-fan:front:140mm:2", mountId: "front", sizeMm: 140, qty: 2 },
+          { id: "case-fan:right:120mm:1", mountId: "right", sizeMm: 120, qty: 1 },
+        ],
+      },
+    } as unknown as import("../src/core/evaluate").BuildEvaluation;
+
+    expect(summarizePurchasePricing(evaluation, [])).toMatchObject({
+      remainingNowKnownCny: 0,
+      remainingNowUnknownItems: 2,
+    });
+  });
+
   it("falls back to an empty versioned state", () => {
     expect(normalizeProgressState(null)).toMatchObject({ schemaVersion: 1, items: {} });
     expect(emptyProgressState()).toMatchObject({ schemaVersion: 1, items: {} });

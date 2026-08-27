@@ -69,6 +69,52 @@ describe("transaction screenshot receipt agent", () => {
     expect(result.searchQuery).toContain("VERTEX-GX-1000");
   });
 
+  it("suggests an MSI GPU identity from the governed brand registry and ignores nearby Intel navigation/order text", () => {
+    const result = analyzeTransactionText([
+      "Intel 品牌馆",
+      "订单号: I41-PO-15053045",
+      "商品名称: MSI GeForce RTX 3070 Ventus 2X OC 8GB GDDR6",
+      "数量: 1 实付: ¥1800",
+    ].join("\n"), catalog);
+    expect(result).toMatchObject({
+      status: "catalog-search-required",
+      detected: {
+        name: "MSI GeForce RTX 3070 Ventus 2X OC 8GB GDDR6",
+        brand: "MSI",
+        model: "GeForce RTX 3070 Ventus 2X OC 8GB GDDR6",
+        category: "gpu",
+        qty: 1,
+        unitPriceCny: 1800,
+      },
+      catalogMatch: null,
+      searchQuery: "MSI GeForce RTX 3070 Ventus 2X OC 8GB GDDR6",
+    });
+  });
+
+  it.each([
+    ["Micro-Star\nGeForce GTX 1660 SUPER OC 6GB GDDR6", "MSI"],
+    ["ASUS Radeon RX 7900 XTX 24GB GDDR6", "ASUS"],
+    ["Intel Arc A770 16GB GDDR6", "Intel"],
+  ])("uses strong GPU model patterns for %s", (product, brand) => {
+    const result = analyzeTransactionText(product, catalog);
+    expect(result.catalogMatch).toBeNull();
+    expect(result.status).toBe("catalog-search-required");
+    expect(result.detected).toMatchObject({ brand, category: "gpu" });
+    expect(result.searchQuery).toContain(brand);
+  });
+
+  it("does not turn a governed navigation brand and order identifier into a product identity", () => {
+    const result = analyzeTransactionText([
+      "Intel 品牌馆",
+      "订单号: I41-PO-15053045",
+      "感谢您的购买",
+    ].join("\n"), catalog);
+    expect(result.status).toBe("identity-review-required");
+    expect(result.catalogMatch).toBeNull();
+    expect(result.detected).toMatchObject({ name: "待确认交易部件", brand: null, model: null, category: "accessory" });
+    expect(result.searchQuery).toBeNull();
+  });
+
   it("does not invent a price or launch a weak identity search", () => {
     const result = analyzeTransactionText("Thanks for your order. Delivery tomorrow.", catalog);
     expect(result.status).toBe("identity-review-required");

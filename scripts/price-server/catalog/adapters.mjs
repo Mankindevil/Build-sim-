@@ -60,6 +60,10 @@ function extractMsiGpu(fetchResult) {
   add("harness.pciePower", values.get("power connectors"), "Power connectors");
   const recommendedPsu = values.get("recommended psu")?.match(/(\d+(?:\.\d+)?)\s*w/i)?.[1];
   add("attrs.recommendedPsuW", recommendedPsu ? Number(recommendedPsu) : undefined, "Recommended PSU");
+  const noise = (values.get("noise level") || values.get("acoustic noise"))?.match(/(\d+(?:\.\d+)?)\s*dba/i)?.[1];
+  add("attrs.noiseDba", noise ? Number(noise) : undefined, "Noise Level");
+  const maxTemperature = (values.get("maximum gpu temperature") || values.get("maximum operating temperature"))?.match(/(\d+(?:\.\d+)?)\s*°?c/i)?.[1];
+  add("attrs.maxOperatingTempC", maxTemperature ? Number(maxTemperature) : undefined, "Maximum GPU Temperature");
   const dimensionsText = values.get("card dimension (mm)");
   const dimensions = dimensionsText?.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
   if (dimensions) {

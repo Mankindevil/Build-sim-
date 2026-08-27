@@ -1,6 +1,7 @@
 import { BUILD_STAGE_LABELS, BUILD_STAGES, type BuildStage, type TransactionEvidence, type TransactionImportRecord } from "./build-progress";
 import type { PlanTransactionLink } from "../plans/contracts";
 import type { SkuRecord } from "../sku/types";
+import type { FieldProvenance } from "../catalog-search/types";
 
 const MAX_FILE_BYTES = 5_000_000;
 const TERMINAL_JOB_STATUS = new Set(["completed", "partial", "failed"]);
@@ -46,7 +47,41 @@ interface CatalogCandidate {
     unknowns?: string[];
     criticalConflicts?: Array<{ field?: string; input?: unknown; candidate?: unknown }>;
   };
-  fields?: Array<{ field?: string; value?: unknown; evidence?: string }>;
+  fields?: Array<Partial<FieldProvenance> & { field?: string; value?: unknown; evidence?: string }>;
+}
+
+interface CatalogDraft {
+  draftId: string;
+  candidateId: string;
+  inputHash: string;
+  status: "draft" | "confirmed" | "rejected";
+  proposed?: Partial<SkuRecord>;
+  fields?: CatalogCandidate["fields"];
+  conflicts?: Array<{ field?: string; reason?: string; proposed?: unknown }>;
+  missing?: string[];
+}
+
+interface CatalogEnrichmentResult {
+  status: "candidate" | "draft" | "accepted" | "blocked";
+  candidateId: string;
+  draftId?: string;
+  inputHash?: string;
+  draft?: CatalogDraft;
+  proposed?: Partial<SkuRecord>;
+  fields?: CatalogCandidate["fields"];
+  conflicts?: CatalogDraft["conflicts"];
+  missing?: string[];
+  reasons?: string[];
+  writeEnabled?: boolean;
+}
+
+interface CatalogAcceptanceResult {
+  status: "confirmed" | "accepted" | "blocked";
+  draftId?: string;
+  skuId?: string;
+  sku?: SkuRecord;
+  reason?: string;
+  reasons?: string[];
 }
 
 interface CatalogJob {
@@ -62,13 +97,17 @@ interface CatalogJob {
 interface CatalogLookupResult {
   record: TransactionImportRecord;
   candidate: CatalogCandidate | null;
+  candidates: CatalogCandidate[];
 }
 
 function $(id: string): HTMLElement | null { return document.getElementById(id); }
 function sleep(ms: number): Promise<void> { return new Promise((resolve) => window.setTimeout(resolve, ms)); }
 async function jsonResponse<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({ error: "invalid_json", message: "本地服务返回了无效数据" }));
-  if (!response.ok) throw new Error(String((payload as { message?: string; error?: string }).message ?? (payload as { error?: string }).error ?? `HTTP ${response.status}`));
+  if (!response.ok) {
+    const problem = payload as { message?: string; error?: string; reason?: string; reasons?: string[] };
+    throw new Error(String(problem.message ?? problem.reason ?? problem.reasons?.join("；") ?? problem.error ?? `HTTP ${response.status}`));
+  }
   return payload as T;
 }
 
@@ -111,6 +150,37 @@ function candidateIdentityLabel(candidate: CatalogCandidate): string {
 
 function extractionLabel(value: string | undefined): string {
   return ({ ok: "参数完整", partial: "参数不完整", failed: "读取失败", "not-run": "尚未读取" } as Record<string, string>)[value ?? ""] ?? "参数状态待确认";
+}
+
+function catalogFieldLabel(value: string | undefined): string {
+  return ({
+    brand: "品牌", model: "型号", mpn: "制造商料号（可选）",
+    "attrs.capacity": "显存/容量", "attrs.memoryTechnology": "显存类型", "attrs.interface": "接口",
+    "attrs.noiseDba": "噪音", "attrs.maxOperatingTempC": "最高工作温度",
+    "dims.lengthMm": "长度", "dims.widthMm": "宽度", "dims.heightMm": "高度", "dims.thicknessMm": "厚度", "dims.slots": "占用槽位",
+    "power.tgpW": "显卡功耗 TGP", "power.tdpW": "热设计功耗", "power.ratedW": "额定功率",
+    "harness.pciePower": "显卡供电接口",
+  } as Record<string, string>)[value ?? ""] ?? value ?? "字段";
+}
+
+function renderedCatalogValue(field: string | undefined, value: unknown): string {
+  if (value === null || value === undefined || value === "") return "未知";
+  const suffix = field?.startsWith("dims.") && field !== "dims.slots" ? " mm"
+    : field?.startsWith("power.") ? " W"
+      : field === "attrs.noiseDba" ? " dBA"
+        : field === "attrs.maxOperatingTempC" ? " °C"
+          : "";
+  const rendered = typeof value === "string" ? value : JSON.stringify(value);
+  return `${rendered}${suffix}`;
+}
+
+function trustedCandidateUrl(candidate: CatalogCandidate): string | null {
+  if (candidate.official?.trustStatus && candidate.official.trustStatus !== "trusted") return null;
+  const raw = candidate.canonicalUrl ?? candidate.url;
+  try {
+    const parsed = new URL(String(raw));
+    return parsed.protocol === "https:" ? parsed.href : null;
+  } catch { return null; }
 }
 
 function comparableIdentity(value: unknown): string {
@@ -209,13 +279,34 @@ function recordFromAnalysis(analysis: TransactionAnalysis, verification: Transac
 export interface TransactionImportPlanContext {
   planId: string;
   planVersionId: string | null;
+  localRevision?: number;
   planName: string;
   items: Array<{ id: string; skuId: string; name: string; category: string; placeholder?: boolean }>;
 }
 
 export interface TransactionImportController { dispose(): void; }
 
-export function initTransactionImport(options: { onImport: (record: TransactionImportRecord, screenshot: File) => void; getPlanContext?: () => TransactionImportPlanContext | null; getCatalogSku?: (skuId: string) => SkuRecord | null }): TransactionImportController | null {
+export interface AcceptedCatalogSkuContext {
+  sku: SkuRecord;
+  draftId: string;
+  candidateId: string;
+  planId: string | null;
+  planVersionIdAtReview: string | null;
+  localRevisionAtReview: number | null;
+  planItemId: string | null;
+}
+
+export interface AcceptedCatalogSkuResult {
+  appliedToPlan: boolean;
+  message: string;
+}
+
+export function initTransactionImport(options: {
+  onImport: (record: TransactionImportRecord, screenshot: File) => void;
+  onCatalogSkuAccepted?: (context: AcceptedCatalogSkuContext) => Promise<AcceptedCatalogSkuResult> | AcceptedCatalogSkuResult;
+  getPlanContext?: () => TransactionImportPlanContext | null;
+  getCatalogSku?: (skuId: string) => SkuRecord | null;
+}): TransactionImportController | null {
   const input = $("transaction-screenshot-input") as HTMLInputElement | null;
   const drop = $("transaction-screenshot-drop");
   const selection = $("transaction-screenshot-selection");
@@ -267,8 +358,8 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
   };
   retry.hidden = true;
   const readProgress = document.createElement("progress"); readProgress.max = 100; readProgress.hidden = true; readProgress.setAttribute("aria-label", "读取截图进度"); cancel.insertAdjacentElement("afterend", readProgress);
-  const showReview = (record: TransactionImportRecord, screenshot: File, copy: string, reviewOptions: { enrichmentAnalysis?: TransactionAnalysis; searchCompleted?: boolean; ocrText?: string; catalogCandidate?: CatalogCandidate; searchLogs?: string[] } = {}): void => {
-    const { enrichmentAnalysis, searchCompleted = false, ocrText, catalogCandidate, searchLogs = [] } = reviewOptions;
+  const showReview = (record: TransactionImportRecord, screenshot: File, copy: string, reviewOptions: { enrichmentAnalysis?: TransactionAnalysis; searchCompleted?: boolean; ocrText?: string; catalogCandidate?: CatalogCandidate; searchCandidates?: CatalogCandidate[]; searchLogs?: string[] } = {}): void => {
+    const { enrichmentAnalysis, searchCompleted = false, ocrText, catalogCandidate, searchCandidates = [], searchLogs = [] } = reviewOptions;
     result.hidden = false;
     result.replaceChildren();
     const heading = document.createElement("div");
@@ -413,6 +504,10 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
 
     let candidateApproval: HTMLInputElement | null = null;
     let candidateReview: HTMLElement | null = null;
+    let catalogDraft: CatalogDraft | null = null;
+    let acceptDraft: HTMLButtonElement | null = null;
+    let rejectDraft: HTMLButtonElement | null = null;
+    let draftStatus: HTMLElement | null = null;
     if (catalogCandidate && record.evidence.officialUrl) {
       candidateReview = document.createElement("section");
       candidateReview.className = "transaction-candidate-review";
@@ -438,10 +533,9 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       fieldsList.className = "transaction-candidate-fields";
       for (const field of catalogCandidate.fields ?? []) {
         const term = document.createElement("dt");
-        term.textContent = field.field ?? "字段";
+        term.textContent = catalogFieldLabel(field.field);
         const value = document.createElement("dd");
-        const renderedValue = typeof field.value === "string" ? field.value : JSON.stringify(field.value);
-        value.textContent = `${renderedValue}${field.evidence ? ` · 证据 ${field.evidence}` : ""}`;
+        value.textContent = `${renderedCatalogValue(field.field, field.value)}${field.evidence ? ` · 证据 ${field.evidence}` : ""}`;
         fieldsList.append(term, value);
       }
       if (!fieldsList.childElementCount) {
@@ -454,6 +548,100 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       candidateApproval.type = "checkbox";
       candidateApproval.className = "transaction-candidate-approval";
       approvalLabel.append(candidateApproval, document.createTextNode("我已核对：页面的品牌、型号和版本与实物一致"));
+      const draftReview = document.createElement("section");
+      draftReview.className = "transaction-catalog-draft-review";
+      draftStatus = document.createElement("p");
+      if (catalogCandidate.skuId) {
+        draftStatus.textContent = `该候选已是正式目录 SKU：${catalogCandidate.skuId}。确认来源后可随采购记录采用。`;
+      } else if (catalogCandidate.candidateId && catalogCandidate.expectedHash) {
+        draftStatus.textContent = "Agent 正在根据官网证据生成 SKU 草稿；料号不是必填项。";
+        acceptDraft = document.createElement("button");
+        acceptDraft.type = "button";
+        acceptDraft.disabled = true;
+        acceptDraft.textContent = "接纳 SKU 并加入当前方案";
+        rejectDraft = document.createElement("button");
+        rejectDraft.type = "button";
+        rejectDraft.className = "case-view-btn";
+        rejectDraft.disabled = true;
+        rejectDraft.textContent = "拒绝 SKU 草稿";
+        draftReview.append(draftStatus, acceptDraft, rejectDraft);
+
+        void (async () => {
+          try {
+            const enriched = await jsonResponse<CatalogEnrichmentResult>(await fetch(`/api/catalog/candidates/${encodeURIComponent(catalogCandidate.candidateId!)}/enrich`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify({ expectedHash: catalogCandidate.expectedHash }),
+            }));
+            const draft = enriched.draft ?? (enriched.draftId && (enriched.inputHash || enriched.proposed || enriched.fields) ? {
+              draftId: enriched.draftId,
+              candidateId: enriched.candidateId,
+              inputHash: enriched.inputHash ?? "",
+              status: "draft" as const,
+              ...(enriched.proposed ? { proposed: enriched.proposed } : {}),
+              ...(enriched.fields ? { fields: enriched.fields } : {}),
+              ...(enriched.conflicts ? { conflicts: enriched.conflicts } : {}),
+              ...(enriched.missing ? { missing: enriched.missing } : {}),
+            } : null);
+            if (!draft || enriched.status !== "draft") {
+              throw new Error(enriched.reasons?.join("；") || "候选暂时不能生成受治理 SKU 草稿");
+            }
+            catalogDraft = draft;
+            draftReview.querySelector("dl")?.remove();
+            const suggested = document.createElement("dl");
+            suggested.className = "transaction-candidate-fields";
+            for (const field of draft.fields ?? []) {
+              const term = document.createElement("dt");
+              term.textContent = catalogFieldLabel(field.field);
+              const value = document.createElement("dd");
+              const evidenceLabel = field.evidence === "inferred" ? "Agent 推导，待你确认" : field.sourceKind === "manual" ? "人工覆核" : "官网证据";
+              value.textContent = `${renderedCatalogValue(field.field, field.value)} · ${evidenceLabel}`;
+              suggested.append(term, value);
+            }
+            const draftFields = new Map((draft.fields ?? []).map((field) => [field.field, field.value]));
+            const planning = document.createElement("ul");
+            planning.className = "transaction-catalog-planning-summary";
+            const planningRows: Array<[string, string]> = [
+              ["大小", draftFields.has("dims.lengthMm")
+                ? `${renderedCatalogValue("dims.lengthMm", draftFields.get("dims.lengthMm"))} · ${draftFields.has("dims.slots") ? renderedCatalogValue("dims.slots", draftFields.get("dims.slots")) + " 槽" : "槽位未知"}`
+                : "官网未给出可核验尺寸"],
+              ["发热", draftFields.has("power.tgpW")
+                ? `按 ${renderedCatalogValue("power.tgpW", draftFields.get("power.tgpW"))} 功耗进入机箱热包络计算，不冒充实测温度`
+                : "功耗未知，温度模型会保持 unknown"],
+              ["噪音", draftFields.has("attrs.noiseDba")
+                ? `${renderedCatalogValue("attrs.noiseDba", draftFields.get("attrs.noiseDba"))}（仍不能直接当作整机噪音）`
+                : "官网未公布可靠声学值，保持 unknown"],
+            ];
+            for (const [label, value] of planningRows) {
+              const row = document.createElement("li");
+              const title = document.createElement("strong");
+              title.textContent = `${label}：`;
+              row.append(title, document.createTextNode(value));
+              planning.append(row);
+            }
+            const missing = draft.missing ?? [];
+            const conflicts = draft.conflicts ?? [];
+            draftStatus!.textContent = enriched.writeEnabled === false
+              ? "Agent 已生成 SKU 草稿，但当前服务器关闭了正式目录写入；可以先审核并保存采购记录。"
+              : conflicts.length
+              ? `草稿有 ${conflicts.length} 项冲突，不能接纳：${conflicts.map((entry) => catalogFieldLabel(entry.field)).join("、")}`
+              : missing.length
+                ? `Agent 已尽量补齐参数，仍有 ${missing.map(catalogFieldLabel).join("、")} 无可靠证据；未知值不会被编造。`
+                : "Agent 已生成可审核 SKU 草稿：官网字段自动带入，推导字段已明确标记；无需填写料号。";
+            draftReview.insertBefore(suggested, acceptDraft);
+            draftReview.insertBefore(planning, acceptDraft);
+            acceptDraft!.disabled = enriched.writeEnabled === false || !candidateApproval?.checked || conflicts.length > 0 || missing.length > 0;
+            acceptDraft!.dataset.writeEnabled = String(enriched.writeEnabled !== false);
+            rejectDraft!.disabled = false;
+          } catch (error) {
+            draftStatus!.textContent = `SKU 草稿生成失败：${error instanceof Error ? error.message : "服务不可用"}。仍可只保存采购记录。`;
+            draftReview.dataset.state = "blocked";
+          }
+        })();
+      } else {
+        draftStatus.textContent = "候选缺少不可变校验哈希，不能生成正式 SKU 草稿；仍可只保存采购证据。";
+      }
+      if (!draftReview.childElementCount) draftReview.append(draftStatus);
       const removeSource = document.createElement("button");
       removeSource.type = "button";
       removeSource.className = "case-view-btn";
@@ -470,7 +658,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
           searchLogs,
         });
       });
-      candidateReview.append(candidateTitle, candidateMeta, candidateWarning, candidateLink, fieldsList, approvalLabel, removeSource);
+      candidateReview.append(candidateTitle, candidateMeta, candidateWarning, candidateLink, fieldsList, approvalLabel, draftReview, removeSource);
     } else if (searchLogs.length) {
       candidateReview = document.createElement("section");
       candidateReview.className = "transaction-candidate-review";
@@ -478,8 +666,27 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       const candidateTitle = document.createElement("strong");
       candidateTitle.textContent = "官网参数校验结果 · 0 个可用候选";
       const empty = document.createElement("p");
-      empty.textContent = "没有找到能同时证明品牌、型号并提供参数的官网页面。本次不会附加来源或猜测尺寸、功耗等参数。";
+      const blocked = searchCandidates.filter((entry) => entry.official?.pageKind === "blocked" && trustedCandidateUrl(entry));
+      empty.textContent = blocked.length
+        ? `发现 ${searchCandidates.length} 个候选页面，其中 ${blocked.length} 个官网拒绝自动读取，因此没有可自动核验的参数页。你可以打开官网人工查看，但系统不会把未读取的尺寸、功耗、发热或噪音当成事实。`
+        : "没有找到能同时证明品牌、型号并提供参数的官网页面。本次不会附加来源或猜测尺寸、功耗、发热或噪音等参数。";
       candidateReview.append(candidateTitle, empty);
+      if (blocked.length) {
+        const links = document.createElement("ul");
+        for (const entry of blocked.slice(0, 5)) {
+          const url = trustedCandidateUrl(entry);
+          if (!url) continue;
+          const row = document.createElement("li");
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.target = "_blank";
+          anchor.rel = "noreferrer";
+          anchor.textContent = entry.title ?? new URL(url).hostname;
+          row.append(anchor, document.createTextNode(" · 官网阻止自动读取"));
+          links.append(row);
+        }
+        candidateReview.append(links);
+      }
     }
 
     const actions = document.createElement("div");
@@ -490,9 +697,10 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
     discard.textContent = "放弃识别结果";
     const confirm = document.createElement("button");
     confirm.type = "button";
-    confirm.textContent = "按当前内容保存";
+    confirm.textContent = "加入待保存采购清单";
     candidateApproval?.addEventListener("change", () => {
-      confirm.textContent = candidateApproval?.checked ? "采用官网候选并保存" : "按当前内容保存";
+      confirm.textContent = candidateApproval?.checked ? "采用官网来源并加入采购清单" : "加入待保存采购清单";
+      if (acceptDraft && catalogDraft) acceptDraft.disabled = acceptDraft.dataset.writeEnabled === "false" || !candidateApproval?.checked || Boolean(catalogDraft.conflicts?.length) || Boolean(catalogDraft.missing?.length);
     });
     const reviewedRecord = (): TransactionImportRecord => {
       const rawPrice = price.value.trim();
@@ -536,6 +744,77 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
         evidence: baseEvidence,
       };
     };
+    acceptDraft?.addEventListener("click", async () => {
+      if (!catalogDraft || !catalogCandidate?.candidateId || !candidateApproval?.checked) return;
+      acceptDraft!.disabled = true;
+      rejectDraft!.disabled = true;
+      confirm.disabled = true;
+      setPhase("enriching", "正在按你审核的草稿接纳正式 SKU", "busy");
+      try {
+        const accepted = await jsonResponse<CatalogAcceptanceResult>(await fetch(`/api/price/transactions/catalog-drafts/${encodeURIComponent(catalogDraft.draftId)}/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ approved: true, expectedHash: catalogDraft.inputHash }),
+        }));
+        if (!accepted.sku || !["confirmed", "accepted"].includes(accepted.status)) {
+          throw new Error(accepted.reasons?.join("；") || accepted.reason || "服务没有返回已接纳的 SKU");
+        }
+        const reviewed = reviewedRecord();
+        const finalRecord: TransactionImportRecord = {
+          ...reviewed,
+          skuId: accepted.sku.id,
+          name: accepted.sku.name,
+          category: accepted.sku.category,
+          evidence: {
+            ...reviewed.evidence,
+            verification: "matched-catalog",
+            candidateId: catalogCandidate.candidateId,
+            draftId: catalogDraft.draftId,
+            officialUrl: catalogCandidate.canonicalUrl ?? catalogCandidate.url ?? record.evidence.officialUrl ?? null,
+            sourceReview: "user-confirmed",
+          },
+        };
+        const planResult = options.onCatalogSkuAccepted
+          ? await options.onCatalogSkuAccepted({
+            sku: accepted.sku,
+            draftId: catalogDraft.draftId,
+            candidateId: catalogCandidate.candidateId,
+            planId: planContext?.planId ?? null,
+            planVersionIdAtReview: planContext?.planVersionId ?? null,
+            localRevisionAtReview: planContext?.localRevision ?? null,
+            planItemId: finalRecord.planLink?.planItemId ?? null,
+          })
+          : { appliedToPlan: false, message: "SKU 已进入目录；当前页面未连接方案更新器。" };
+        options.onImport(finalRecord, screenshot);
+        result.hidden = true;
+        result.replaceChildren();
+        setPhase("staged", `${planResult.message} 采购记录已加入待保存清单，点击“保存采购记录”后归档。`, planResult.appliedToPlan ? "ok" : "warn");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "服务不可用";
+        draftStatus!.textContent = `SKU 接纳失败：${message}。草稿和交易信息仍保留，可重试或只保存采购记录。`;
+        setPhase("reviewing", `SKU 接纳失败：${message}`, "warn");
+        acceptDraft!.disabled = false;
+        rejectDraft!.disabled = false;
+        confirm.disabled = false;
+      }
+    });
+    rejectDraft?.addEventListener("click", async () => {
+      if (!catalogDraft) return;
+      rejectDraft!.disabled = true;
+      acceptDraft!.disabled = true;
+      try {
+        await jsonResponse(await fetch(`/api/price/transactions/catalog-drafts/${encodeURIComponent(catalogDraft.draftId)}/reject`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ approved: false, expectedHash: catalogDraft.inputHash }),
+        }));
+        draftStatus!.textContent = "已拒绝这个 SKU 草稿；目录和当前方案都没有改动。你仍可只保存采购记录。";
+        catalogDraft = null;
+      } catch (error) {
+        draftStatus!.textContent = `拒绝草稿失败：${error instanceof Error ? error.message : "服务不可用"}`;
+        rejectDraft!.disabled = false;
+      }
+    });
     discard.addEventListener("click", () => {
       result.hidden = true;
       result.replaceChildren();
@@ -562,7 +841,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       const enrich = document.createElement("button");
       enrich.type = "button";
       enrich.className = "case-view-btn transaction-review-enrich";
-      enrich.textContent = searchCompleted ? "重新核验官网型号" : "核验官网型号（可选）";
+      enrich.textContent = searchCompleted ? "让 Agent 重新核验官网" : "确认名称，交给 Agent 搜官网";
       enrich.addEventListener("click", async () => {
         const reviewed = reviewedRecord();
         const inferredCategory = inferReviewedCategory(reviewed.name);
@@ -642,6 +921,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
             searchCompleted: true,
             ...(retainedOcrText ? { ocrText: retainedOcrText } : {}),
             ...(lookup.candidate ? { catalogCandidate: lookup.candidate } : {}),
+            searchCandidates: lookup.candidates,
             searchLogs: progressMessages,
           });
         } catch (error) {
@@ -668,7 +948,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
 
   const updateFromCatalogJob = async (analysis: TransactionAnalysis, signal: AbortSignal, onProgress?: (message: string) => void): Promise<CatalogLookupResult> => {
     const jobId = analysis.catalogSearch?.jobId;
-    if (!jobId) return { record: recordFromAnalysis(analysis, "search-failed"), candidate: null };
+    if (!jobId) return { record: recordFromAnalysis(analysis, "search-failed"), candidate: null, candidates: [] };
     onProgress?.(`搜索任务已创建 · ${jobId}`);
     let job: CatalogJob | null = null;
     let lastProgress = "";
@@ -685,7 +965,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       const timedOut = recordFromAnalysis(analysis, "search-failed");
       setStatus("官网参数搜索超时；请先检查识别结果，参数稍后可继续补齐。", "warn");
       onProgress?.("搜索超时 · 未附加来源");
-      return { record: timedOut, candidate: null };
+      return { record: timedOut, candidate: null, candidates: [] };
     }
     onProgress?.(`候选发现完成 · ${job.candidates?.length ?? 0} 个页面`);
     if (job.summary) {
@@ -701,7 +981,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
       const explained = (job.candidates ?? []).find((entry) => entry.identity?.reasons?.length || entry.extraction?.error);
       if (explained?.identity?.reasons?.length) onProgress?.(`首个未通过原因 · ${explained.identity.reasons.join("；")}`);
       else if (explained?.extraction?.error) onProgress?.(`首个读取失败 · ${explained.extraction.error}`);
-      return { record: noResult, candidate: null };
+      return { record: noResult, candidate: null, candidates: job.candidates ?? [] };
     }
     onProgress?.(`候选入选 · ${candidate.title ?? candidate.canonicalUrl ?? candidate.url ?? "未命名页面"}`);
     const enriched = recordFromAnalysis(analysis, "catalog-candidate");
@@ -710,7 +990,7 @@ export function initTransactionImport(options: { onImport: (record: TransactionI
     enriched.evidence.officialUrl = candidate.canonicalUrl ?? candidate.url ?? null;
     setStatus("已找到可核验的官网候选；只有你主动勾选确认后，候选来源才会随交易保存。", "ok");
     onProgress?.(`参数读取 · ${extractionLabel(candidate.extraction?.status)} · ${candidate.extraction?.fieldsFound ?? 0} 个字段`);
-    return { record: enriched, candidate };
+    return { record: enriched, candidate, candidates: job.candidates ?? [] };
   };
 
   const selectFile = (file: File): void => {

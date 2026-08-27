@@ -27,6 +27,16 @@ export function createPlanAgentContext(input: CreatePlanAgentContextInput): Plan
     ...(input.spatialViewContext ? { spatialViewContext: structuredClone(input.spatialViewContext) } : {}),
     purchaseSummary: structuredClone(input.purchaseSummary),
     buildTaskSummary: structuredClone(input.buildTaskSummary),
+    evidenceSummary: {
+      count: input.plan.draft.evidenceBindings?.length ?? 0,
+      bindings: (input.plan.draft.evidenceBindings ?? []).slice(0, 40).map(({ documentId, captureId, subject, purposes, locators }) => ({
+        documentId,
+        ...(captureId ? { captureId } : {}),
+        subject: structuredClone(subject),
+        purposes: structuredClone(purposes),
+        ...(locators ? { locators: structuredClone(locators) } : {}),
+      })),
+    },
     ...(input.plan.metadata.initialization ? { initialization: structuredClone(input.plan.metadata.initialization) } : {}),
   };
   assertValidPlanAgentContext(context);
@@ -49,6 +59,7 @@ export function planAgentContextEnvelope(content: string, context: PlanAgentCont
     ...(context.spatialViewContext ? { spatialViewContext: context.spatialViewContext } : {}),
     purchaseSummary: context.purchaseSummary,
     buildTaskSummary: context.buildTaskSummary,
+    ...(context.evidenceSummary ? { evidenceSummary: context.evidenceSummary } : {}),
     ...(context.initialization ? { initialization: context.initialization } : {}),
     authoritativeFacts: "Use get_build_evaluation; BuildConfig is attached to the Agent session.",
   };

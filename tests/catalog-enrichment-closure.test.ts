@@ -10,7 +10,7 @@ import type { BuildConfig } from "../src/config/types";
 import type { SkuCatalog } from "../src/sku/types";
 import { runAutoEnrichment } from "../scripts/price-server/catalog/auto-enrichment.mjs";
 import { queueSearch, waitForJob } from "../scripts/price-server/catalog/service.mjs";
-import { rollbackCatalogAcceptance } from "../scripts/price-server/catalog/write.mjs";
+import { confirmDraft, rollbackCatalogAcceptance } from "../scripts/price-server/catalog/write.mjs";
 
 describe("C7 official enrichment delivery closure", () => {
   it("runs exact-MPN discovery, inspection, enrichment, evaluation and rollback", async () => {
@@ -56,8 +56,20 @@ describe("C7 official enrichment delivery closure", () => {
         rollbackRoot,
         rollbackManifestPath,
         auditRoot: path.join(root, "audit"),
+        draftRoot: path.join(root, "drafts"),
       });
-      expect(accepted).toMatchObject({ status: "accepted", rollbackManifest: rollbackManifestPath });
+      expect(accepted).toMatchObject({ status: "draft", writeEnabled: true, proposed: expect.any(Object), fields: expect.any(Array), missing: [] });
+      const confirmed = await confirmDraft(accepted.draftId, {
+        approved: true,
+        expectedHash: accepted.expectedHash,
+        catalogWriteEnabled: true,
+        catalogPath,
+        draftRoot: path.join(root, "drafts"),
+        rollbackRoot,
+        rollbackManifestPath,
+        auditRoot: path.join(root, "audit"),
+      });
+      expect(confirmed).toMatchObject({ status: "confirmed", rollbackManifest: rollbackManifestPath, sku: expect.any(Object) });
 
       const enriched = JSON.parse(await readFile(catalogPath, "utf8")) as SkuCatalog;
       expect(enriched.skus.some((sku) => sku.mpn === "ASUS-G4-001")).toBe(true);

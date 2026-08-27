@@ -51,6 +51,13 @@ export async function previewPlanProposal(config: BuildConfig, input: PreviewPla
   const candidate = applyPlanPatchOperations(config, input.operations);
   const before = evaluateBuildAuthoritatively(config).evaluation;
   const after = evaluateBuildAuthoritatively(candidate).evaluation;
+  if (input.kind === "initialization" && after.readiness.status !== "ready") {
+    throw new PlanProposalError(
+      "initialization_incomplete",
+      `Initialization candidate is incomplete: ${after.readiness.missing.join(", ")}`,
+      409,
+    );
+  }
   const impact = diffEvaluations(before, after);
   const proposal: PlanChangeProposal = {
     schemaVersion: PLAN_SCHEMA_VERSION,
@@ -97,6 +104,9 @@ export class PlanProposalService {
     }
     if (operationIndexes && new Set(operationIndexes).size !== operationIndexes.length) throw new PlanProposalError("proposal_indexes_invalid", "Proposal operation indexes must be unique");
     const plan = await this.repository.get(planId);
+    if (plan.metadata.initialization?.status === "pending" && proposal.kind !== "initialization") {
+      throw new PlanProposalError("initialization_kind_required", "A pending Agent plan only accepts an atomic initialization proposal", 409);
+    }
     if (proposal.kind === "initialization") {
       if (plan.metadata.initialization?.status !== "pending") throw new PlanProposalError("initialization_status_invalid", "Only a pending Agent plan can be initialized", 409);
       if (!proposal.intent?.useCase.trim()) throw new PlanProposalError("initialization_intent_required", "Initialization requires a structured build intent");
@@ -120,6 +130,10 @@ export class PlanProposalService {
     if (replay) return structuredClone(replay);
     const canonical = await this.validate(planId, proposal, operationIndexes);
     const current = await this.repository.get(planId);
+    // Recheck after validation so a concurrent draft write cannot make the
+    // reviewed proposal apply to a newer configuration between the two reads.
+    assertExpectedRevision(proposal.expectedDraftRevision, current.draftRevision);
+    assertExpectedConfigHash(proposal.expectedConfigHash, await sha256Hex(current.draft.config));
     const candidate = applyPlanPatchOperations(current.draft.config, canonical.operations);
     const indexes = requestedIndexes;
     const idempotencyKey = `proposal-${proposal.id}-${indexes.join("-")}`;

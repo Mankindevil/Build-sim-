@@ -1,13 +1,16 @@
 import type {
+  BindPlanEvidenceInput,
   BuildPlan,
   BuildPlanSummary,
   CreatePlanInput,
   DuplicatePlanInput,
   PlanVersion,
   SaveVersionInput,
+  UnbindPlanEvidenceInput,
   UpdateDraftInput,
   UpdatePlanInfoInput,
 } from "./contracts";
+import type { PlanEvidenceBinding } from "../evidence/contracts";
 
 export class WorkspaceApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
@@ -30,6 +33,14 @@ export interface WorkspacePlanApi {
   listVersions(planId: string): Promise<PlanVersion[]>;
 }
 
+/** Evidence-edge operations used by the explicit browser review flow. */
+export interface WorkspaceEvidenceApi {
+  get(planId: string): Promise<BuildPlan>;
+  listEvidenceBindings(planId: string): Promise<PlanEvidenceBinding[]>;
+  bindEvidence(planId: string, input: BindPlanEvidenceInput): Promise<PlanEvidenceBinding>;
+  unbindEvidence(planId: string, input: UnbindPlanEvidenceInput): Promise<void>;
+}
+
 async function payload<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({ error: "invalid_response", message: "Workspace returned invalid JSON" }));
   if (!response.ok) {
@@ -39,7 +50,7 @@ async function payload<T>(response: Response): Promise<T> {
   return body as T;
 }
 
-export class WorkspaceApiClient implements WorkspacePlanApi {
+export class WorkspaceApiClient implements WorkspacePlanApi, WorkspaceEvidenceApi {
   constructor(
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly base = "/api/workspace/plans",
@@ -84,5 +95,14 @@ export class WorkspaceApiClient implements WorkspacePlanApi {
   }
   async listVersions(planId: string): Promise<PlanVersion[]> {
     return (await payload<{ versions: PlanVersion[] }>(await this.request(`/${encodeURIComponent(planId)}/versions`))).versions;
+  }
+  async listEvidenceBindings(planId: string): Promise<PlanEvidenceBinding[]> {
+    return (await payload<{ bindings: PlanEvidenceBinding[] }>(await this.request(`/${encodeURIComponent(planId)}/evidence-bindings`))).bindings;
+  }
+  async bindEvidence(planId: string, input: BindPlanEvidenceInput): Promise<PlanEvidenceBinding> {
+    return payload(await this.request(`/${encodeURIComponent(planId)}/evidence-bindings`, { method: "POST", body: JSON.stringify(input) }));
+  }
+  async unbindEvidence(planId: string, input: UnbindPlanEvidenceInput): Promise<void> {
+    await payload(await this.request(`/${encodeURIComponent(planId)}/evidence-bindings/${encodeURIComponent(input.bindingId)}`, { method: "DELETE", body: JSON.stringify({ expectedRevision: input.expectedRevision, ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}) }) }));
   }
 }

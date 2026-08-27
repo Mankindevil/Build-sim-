@@ -3,6 +3,7 @@ import { agentAuditHash } from "../src/agent/audit";
 import { AGENT_CONTRACT_VERSION, type AgentToolContext, type AgentWriteApprovalEnvelope, type ProviderAdapter, type ProviderTurnRequest } from "../src/agent/contracts";
 import { AgentRuntime } from "../src/agent/runtime";
 import { MemoryAgentSessionStore } from "../src/agent/session-store";
+import type { AgentSkillLoader } from "../src/agent/skill-loader";
 import { AgentToolRegistry } from "../src/agent/tool-registry";
 import { createBuildSimTools } from "../src/server/domain-tools";
 
@@ -59,7 +60,10 @@ describe("C6 approval-bound catalog write Tool", () => {
       models: [{ provider: "deepseek", id: "deepseek-v4-flash", label: "fixture", capabilities: { streaming: true, tools: true, parallelTools: true, structuredOutput: true, thinking: true } }],
       async createTurn(request) {
         requests.push(request);
-        if (requests.length === 1) return { provider: "deepseek", providerRequestId: "p1", model: request.model, content: "", toolCalls: [{ id: "write-1", name: "enrich_official_catalog", input }], stopReason: "tool_use", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, latencyMs: 1 };
+        if (requests.length === 1) {
+          expect(request.tools.map((tool) => tool.name)).toEqual(["enrich_official_catalog"]);
+          return { provider: "deepseek", providerRequestId: "p1", model: request.model, content: "", toolCalls: [{ id: "write-1", name: "enrich_official_catalog", input }], stopReason: "tool_use", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, latencyMs: 1 };
+        }
         expect(JSON.parse(request.messages.at(-1)?.content ?? "{}")).toMatchObject({ ok: true, content: { status: "draft" } });
         return { provider: "deepseek", providerRequestId: "p2", model: request.model, content: "已生成草稿。", toolCalls: [], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, latencyMs: 1 };
       },
@@ -68,10 +72,29 @@ describe("C6 approval-bound catalog write Tool", () => {
     try {
       const registry = new AgentToolRegistry(createBuildSimTools({ priceServiceUrl: "http://127.0.0.1:6174" }));
       const store = new MemoryAgentSessionStore();
-      const runtime = new AgentRuntime([provider], store, { toolRegistry: registry });
+      const skillLoader = {
+        async load() {
+          return {
+            manifest: {
+              contractVersion: AGENT_CONTRACT_VERSION,
+              id: "catalog-write-fixture",
+              name: "Catalog write fixture",
+              version: "1.0.0",
+              description: "Test-only Skill that explicitly scopes the legacy approval-bound write Tool.",
+              allowedTools: ["enrich_official_catalog"],
+              readOnly: false,
+              contextBudget: 1_000,
+              triggers: ["fixture"],
+            },
+            instructions: "Use only the explicitly approved fixture write Tool.",
+            definitionHash: "d".repeat(64),
+          };
+        },
+      } as unknown as AgentSkillLoader;
+      const runtime = new AgentRuntime([provider], store, { toolRegistry: registry, skillLoader });
       const session = await runtime.createSession();
       const envelope = approval(registry, session.id, input, { approvalId: "approval-runtime-0001", idempotencyKey: "catalog-enrich-runtime-0001" });
-      const run = await runtime.startRun(session.id, { content: "对已检查候选生成目录草稿", approvals: [envelope] });
+      const run = await runtime.startRun(session.id, { content: "对已检查候选生成目录草稿", skillId: "catalog-write-fixture", approvals: [envelope] });
       await runtime.waitForRun(run.runId);
       expect(runtime.getRun(run.runId).status).toBe("completed");
       expect(JSON.stringify((await runtime.getSession(session.id)).messages)).not.toContain(envelope.approvalToken);

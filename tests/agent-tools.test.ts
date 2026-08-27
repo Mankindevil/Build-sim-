@@ -15,11 +15,14 @@ describe("A3 Build Sim Tool registry", () => {
   it("registers governed read/external-read tools and one approval-bound write tool", () => {
     const registry = new AgentToolRegistry(createBuildSimTools());
     expect(registry.names()).toEqual([
-      "compare_builds", "enrich_official_catalog", "get_build_evaluation", "get_catalog_search_job", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "list_official_domain_proposals", "propose_plan_change", "propose_plan_initialization", "search_catalog_skus", "search_official_catalog", "search_price_candidates",
+      "compare_builds", "discover_official_documents", "enrich_official_catalog", "get_build_evaluation", "get_catalog_search_job", "get_evidence_document", "get_evidence_excerpt", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "list_official_domain_proposals", "propose_catalog_review", "propose_plan_change", "propose_plan_initialization", "search_catalog_skus", "search_official_catalog", "search_price_candidates",
     ]);
-    expect(registry.catalog()).toHaveLength(13);
+    expect(registry.catalog()).toHaveLength(17);
     expect(registry.catalog().every((tool) => /^[a-f0-9]{64}$/.test(tool.definitionHash))).toBe(true);
     expect(registry.catalog().filter((tool) => tool.effect === "write")).toEqual([expect.objectContaining({ name: "enrich_official_catalog", approval: "required" })]);
+    expect(registry.definitions().map((tool) => tool.name)).toContain("propose_catalog_review");
+    expect(registry.definitions().map((tool) => tool.name)).not.toContain("enrich_official_catalog");
+    expect(registry.definitions(new Set(["enrich_official_catalog"])).map((tool) => tool.name)).toEqual(["enrich_official_catalog"]);
   });
 
   it("returns bounded authoritative evaluation projections and rejects schema drift", async () => {
@@ -27,6 +30,16 @@ describe("A3 Build Sim Tool registry", () => {
     const valid = await registry.dispatch("get_build_evaluation", { sections: ["findings", "calibration"] }, context());
     expect(valid.result.ok).toBe(true);
     expect(valid.result.content).toMatchObject({ verdict: "bad", sections: { calibration: { hash: expect.stringMatching(/^fnv1a-/) } } });
+    const spatial = await registry.dispatch("get_build_evaluation", { sections: ["config", "geometry"] }, context());
+    expect(spatial.result.ok).toBe(true);
+    expect(spatial.result.content).toMatchObject({
+      sections: {
+        config: { caseId: "case.jonsbo-n6" },
+        geometry: expect.arrayContaining([
+          expect.objectContaining({ id: "psu.primary", slotId: "psu.rear_upper", chamber: "upper" }),
+        ]),
+      },
+    });
     const invalid = await registry.dispatch("get_build_evaluation", { sections: ["findings"], invented: true }, context());
     expect(invalid.result).toMatchObject({ ok: false, errorCode: "tool_input_invalid" });
   });
@@ -38,6 +51,8 @@ describe("A3 Build Sim Tool registry", () => {
     expect(compared.result.ok).toBe(true);
     expect(compared.result.content).toMatchObject({ selectionPatch: { diskCount: 4 }, baseline: { evaluationHash: expect.stringMatching(/^[a-f0-9]{64}$/) }, candidate: { evaluationHash: expect.stringMatching(/^[a-f0-9]{64}$/) } });
     expect(baseline).toEqual(before);
+    const fans = await registry.dispatch("compare_builds", { selectionPatch: { fanMode: "quiet", fanGroups: [{ mountId: "front", sizeMm: 140, count: 1 }] } }, context());
+    expect(fans.result).toMatchObject({ ok: true, content: { selectionPatch: { fanMode: "quiet", fanGroups: [{ mountId: "front", sizeMm: 140, count: 1 }] } } });
   });
 
   it("keeps SKU facts and audited snapshots distinct from external candidates", async () => {
@@ -52,6 +67,8 @@ describe("A3 Build Sim Tool registry", () => {
     const registry = new AgentToolRegistry(createBuildSimTools());
     const searched = await registry.dispatch("search_catalog_skus", { category: "gpu", query: "A2000", limit: 5 }, context());
     expect(searched.result.content).toMatchObject({ count: 1, records: [{ id: "gpu.rtx-a2000-12gb", category: "gpu" }] });
+    const alias = await registry.dispatch("search_catalog_skus", { category: "psu", query: "GX-850 FX", limit: 5 }, context());
+    expect(alias.result.content).toMatchObject({ count: 1, records: [{ id: "psu.seasonic-focus-plus-gold-850-fx", category: "psu" }] });
     const configuration = structuredClone(baseline) as typeof baseline;
     configuration.name = "Agent 游戏方案";
     configuration.selection.gpuId = "gpu.rtx-a2000-12gb";
@@ -75,6 +92,27 @@ describe("A3 Build Sim Tool registry", () => {
     expect(proposed.result.ok).toBe(true);
     expect(proposed.result.content).toMatchObject({ proposal: { kind: "initialization", intent: { useCase: "游戏", budgetCny: 8000 }, status: "proposed" }, confirmation: { required: true, atomic: true } });
     expect(baseline.selection.gpuId).not.toBe("gpu.rtx-a2000-12gb");
+
+    const incomplete = structuredClone(configuration);
+    Reflect.deleteProperty(incomplete.selection, "diskSkuId");
+    incomplete.selection.diskCount = 1;
+    const rejected = await registry.dispatch("propose_plan_initialization", {
+      planId: "plan-agent-init",
+      expectedDraftRevision: 0,
+      expectedConfigHash: await sha256Hex(baseline),
+      summary: "缺少数据盘 SKU 的初始化",
+      rationale: ["测试完整性门禁"],
+      intent: { useCase: "游戏" },
+      configuration: {
+        name: incomplete.name,
+        caseId: incomplete.caseId,
+        boardId: incomplete.boardId,
+        cpuId: incomplete.cpuId,
+        selection: incomplete.selection,
+        bom: incomplete.bom,
+      },
+    }, context());
+    expect(rejected.result).toMatchObject({ ok: false, errorCode: "tool_execution_failed", message: expect.stringContaining("selection.diskSkuId") });
   });
 
   it("routes external reads only through the configured local service", async () => {
@@ -92,6 +130,10 @@ describe("A3 Build Sim Tool registry", () => {
     expect((await registry.dispatch("search_official_catalog", { query: "ASUS W680M", limit: 3 }, context())).result.ok).toBe(true);
     expect((await registry.dispatch("get_catalog_search_job", { jobId: "job-agent" }, context())).result.ok).toBe(true);
     expect((await registry.dispatch("list_official_domain_proposals", {}, context())).result.ok).toBe(true);
+    expect((await registry.dispatch("discover_official_documents", { skuId: "case.jonsbo-n6" }, context())).result.ok).toBe(true);
+    expect((await registry.dispatch("get_evidence_document", { documentId: `doc-sha256-${"a".repeat(64)}` }, context())).result.ok).toBe(true);
+    expect((await registry.dispatch("get_evidence_excerpt", { documentId: `doc-sha256-${"a".repeat(64)}`, query: "power supply", page: 8, limit: 2 }, context())).result.ok).toBe(true);
+    expect((await registry.dispatch("propose_catalog_review", { candidateId: "catalog-candidate-fixture", expectedHash: "a".repeat(64), intent: "supplement-information" }, context())).result.ok).toBe(true);
     expect((await registry.dispatch("inspect_catalog_candidate", { url: "http://127.0.0.1/private" }, context())).result).toMatchObject({ ok: false, errorCode: "tool_input_invalid" });
     expect((await registry.dispatch("search_price_candidates", { skuIds: ["case.jonsbo-n6"], channels: ["official"], limit: 1 }, context())).result.ok).toBe(true);
     expect(calls).toEqual([
@@ -99,6 +141,10 @@ describe("A3 Build Sim Tool registry", () => {
       { url: "http://127.0.0.1:6174/api/catalog/search/job-agent", body: null },
       { url: "http://127.0.0.1:6174/api/catalog/search/job-agent", body: null },
       { url: "http://127.0.0.1:6174/api/catalog/domain-proposals", body: null },
+      { url: "http://127.0.0.1:6174/api/evidence/discover", body: { skuId: "case.jonsbo-n6" } },
+      { url: `http://127.0.0.1:6174/api/evidence/documents/doc-sha256-${"a".repeat(64)}`, body: null },
+      { url: `http://127.0.0.1:6174/api/evidence/documents/doc-sha256-${"a".repeat(64)}/excerpts`, body: { query: "power supply", page: 8, limit: 2 } },
+      { url: "http://127.0.0.1:6174/api/price/catalog/candidates/catalog-candidate-fixture/review", body: { expectedHash: "a".repeat(64) } },
       { url: "http://127.0.0.1:6174/api/price/collect", body: { skuIds: ["case.jonsbo-n6"], channels: ["official"], limit: 1 } },
     ]);
     vi.unstubAllGlobals();
@@ -119,6 +165,50 @@ describe("A3 Build Sim Tool registry", () => {
 });
 
 describe("A3 Agent Tool loop", () => {
+  it("gives normal chat safe catalog-review and plan-proposal tools without direct writes", async () => {
+    const provider: ProviderAdapter = {
+      id: "deepseek",
+      models: [{ provider: "deepseek", id: "deepseek-v4-flash", label: "fixture", capabilities: { streaming: true, tools: true, parallelTools: true, structuredOutput: true, thinking: true } }],
+      async createTurn(request) {
+        expect(request.system).toContain("MPN is optional");
+        expect(request.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["search_catalog_skus", "search_official_catalog", "propose_catalog_review", "propose_plan_change"]));
+        expect(request.tools.map((tool) => tool.name)).not.toContain("enrich_official_catalog");
+        return { provider: "deepseek", providerRequestId: "normal-chat", model: request.model, content: "我会先生成审核建议。", toolCalls: [], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, latencyMs: 1 };
+      },
+    };
+    const runtime = new AgentRuntime([provider], new MemoryAgentSessionStore(), { toolRegistry: new AgentToolRegistry(createBuildSimTools()) });
+    const session = await runtime.createSession();
+    const run = await runtime.startRun(session.id, { content: "把这张显卡加入配置选项，并补齐尺寸和噪音", buildConfig: baseline as never });
+    await runtime.waitForRun(run.runId);
+    expect(runtime.getRun(run.runId).status).toBe("completed");
+  });
+
+  it("rejects an undeclared write Tool emitted by a provider in general chat", async () => {
+    let turn = 0;
+    const provider: ProviderAdapter = {
+      id: "deepseek",
+      models: [{ provider: "deepseek", id: "deepseek-v4-flash", label: "fixture", capabilities: { streaming: true, tools: true, parallelTools: true, structuredOutput: true, thinking: true } }],
+      async createTurn(request) {
+        turn += 1;
+        expect(request.tools.map((tool) => tool.name)).not.toContain("enrich_official_catalog");
+        if (turn === 1) {
+          return {
+            provider: "deepseek", providerRequestId: "hidden-write-1", model: request.model, content: "",
+            toolCalls: [{ id: "hidden-write", name: "enrich_official_catalog", input: { candidateId: "catalog-candidate-hidden-write", expectedHash: "a".repeat(64) } }],
+            stopReason: "tool_use", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, latencyMs: 1,
+          };
+        }
+        expect(JSON.parse(request.messages.at(-1)?.content ?? "{}")).toMatchObject({ ok: false, errorCode: "tool_not_allowed" });
+        return { provider: "deepseek", providerRequestId: "hidden-write-2", model: request.model, content: "写入未执行。", toolCalls: [], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, latencyMs: 1 };
+      },
+    };
+    const runtime = new AgentRuntime([provider], new MemoryAgentSessionStore(), { toolRegistry: new AgentToolRegistry(createBuildSimTools()) });
+    const session = await runtime.createSession();
+    const run = await runtime.startRun(session.id, { content: "补充这个 SKU", buildConfig: baseline as never });
+    await runtime.waitForRun(run.runId);
+    expect(runtime.getRun(run.runId).events).toContainEqual(expect.objectContaining({ type: "tool_result", result: expect.objectContaining({ errorCode: "tool_not_allowed" }) }));
+  });
+
   it("executes a model-selected Tool and returns its result for a final turn", async () => {
     const requests: Parameters<ProviderAdapter["createTurn"]>[0][] = [];
     const provider: ProviderAdapter = {

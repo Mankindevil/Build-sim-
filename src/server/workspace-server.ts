@@ -1,16 +1,41 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { FileEvidenceRepository } from "../evidence/repository.mjs";
 import { FilePlanRepository } from "../plans/file-repository";
 import type { PlanRepository } from "../plans/contracts";
 import { ensureDefaultPlan } from "../plans/seed";
 import { handleWorkspaceRoute } from "./workspace-routes";
 import { PlanProposalService } from "../plans/proposals";
 import { FilePlanAgentContextAuditStore, MemoryPlanAgentContextAuditStore, type PlanAgentContextAuditStore } from "../plans/agent-context-audit";
+import { loadAuthoritativeCatalog } from "./evaluation-service";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 5176;
 const MAX_BODY_BYTES = 1_000_000;
+
+export interface WorkspaceRepositoryEnvironment {
+  PLAN_REPOSITORY_ROOT?: string;
+  EVIDENCE_REPOSITORY_ROOT?: string;
+}
+
+export function createWorkspaceRepositories(environment: WorkspaceRepositoryEnvironment = process.env): {
+  repository: FilePlanRepository;
+  evidenceRepository: FileEvidenceRepository;
+  planRoot: string;
+  evidenceRoot: string;
+} {
+  const planRoot = path.resolve(environment.PLAN_REPOSITORY_ROOT ?? "runtime/plans");
+  const evidenceRoot = path.resolve(environment.EVIDENCE_REPOSITORY_ROOT ?? "runtime/evidence");
+  const evidenceRepository = new FileEvidenceRepository({ root: evidenceRoot });
+  const repository = new FilePlanRepository({
+    root: planRoot,
+    getCatalog: loadAuthoritativeCatalog,
+    getEvidenceDocument: (documentId) => evidenceRepository.getDocument(documentId),
+    getEvidenceCapture: (captureId) => evidenceRepository.getCapture(captureId),
+  });
+  return { repository, evidenceRepository, planRoot, evidenceRoot };
+}
 
 function send(response: ServerResponse, status: number, payload: unknown): void {
   response.writeHead(status, {
@@ -41,7 +66,7 @@ export function createWorkspaceServer(repository: PlanRepository, options: { age
     const url = new URL(request.url ?? "/", `http://${HOST}`);
     let body: unknown = {};
     try {
-      if (request.method === "POST" || request.method === "PATCH") body = await readJson(request);
+      if (request.method === "POST" || request.method === "PATCH" || request.method === "DELETE") body = await readJson(request);
     } catch (error) {
       send(response, 400, { error: "invalid_request", message: error instanceof Error ? error.message : "Invalid request" });
       return;
@@ -55,10 +80,9 @@ const isMain = process.argv[1] !== undefined && fileURLToPath(import.meta.url) =
 if (isMain) {
   void (async () => {
     const port = Number(process.env.WORKSPACE_SERVER_PORT ?? DEFAULT_PORT);
-    const root = path.resolve(process.env.PLAN_REPOSITORY_ROOT ?? "runtime/plans");
-    const repository = new FilePlanRepository({ root });
+    const { repository, planRoot } = createWorkspaceRepositories();
     await ensureDefaultPlan(repository);
-    const agentContextAuditStore = new FilePlanAgentContextAuditStore(path.join(root, ".agent-context-audit"));
+    const agentContextAuditStore = new FilePlanAgentContextAuditStore(path.join(planRoot, ".agent-context-audit"));
     createWorkspaceServer(repository, { agentContextAuditStore }).listen(port, HOST, () => {
       console.log(`Build Sim workspace server listening on http://${HOST}:${port}`);
     });

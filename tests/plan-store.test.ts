@@ -66,6 +66,20 @@ describe("R1 file plan repository", () => {
     expect((await store.get(plan.id)).draftRevision).toBe(1);
   });
 
+  it("atomically rejects fan groups that the selected case cannot install", async () => {
+    const { store } = await repository();
+    const plan = await store.create({ name: "Fan bounds", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
+    for (const fanGroups of [
+      [{ mountId: "top", sizeMm: 120 as const, count: 1 }],
+      [{ mountId: "rear", sizeMm: 140 as const, count: 16 }],
+    ]) {
+      const invalid = structuredClone(plan.draft.config);
+      invalid.selection.fanGroups = fanGroups;
+      await expect(store.updateDraft(plan.id, { expectedRevision: plan.draftRevision, config: invalid })).rejects.toMatchObject({ code: "invalid_input", status: 400 });
+      await expect(store.get(plan.id)).resolves.toMatchObject({ draftRevision: plan.draftRevision, draft: { config: { selection: { fanGroups: plan.draft.config.selection.fanGroups } } } });
+    }
+  });
+
   it("renames plan metadata with revision protection and persists version summaries", async () => {
     const { store } = await repository();
     const plan = await store.create({ name: "Before", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
@@ -90,18 +104,21 @@ describe("R1 file plan repository", () => {
     expect(await store.listVersions(copy.id)).toHaveLength(1);
   });
 
-  it("seeds the former DOM default exactly once with an initial version", async () => {
+  it("seeds a genuinely empty first profile exactly once without a template checkpoint", async () => {
     const { store } = await repository();
     const first = await ensureDefaultPlan(store, () => "2026-08-25T00:00:00.000Z");
     const second = await ensureDefaultPlan(store, () => "2026-08-25T00:00:00.000Z");
     expect(second.id).toBe(first.id);
     expect(first.draft.config).toMatchObject({
       id: first.id,
-      caseId: "case.jonsbo-n6",
-      boardId: "board.asus-w680m-ace-se",
-      selection: { psuId: "psu.seasonic-focus-gx-850-v5", diskCount: 1 },
+      caseId: "",
+      boardId: "",
+      cpuId: "",
+      selection: { psuId: "", coolerId: "", gpuId: "", memoryId: "", diskCount: 0, fanGroups: [] },
+      bom: [],
     });
-    expect(await store.listVersions(first.id)).toHaveLength(1);
+    expect(first.metadata.initialization).toMatchObject({ status: "initialized", source: "manual" });
+    expect(await store.listVersions(first.id)).toHaveLength(0);
   });
 
   it("detects corrupt files and soft-deletes plans into trash", async () => {

@@ -31,12 +31,57 @@ const routeTransactions = async (target) => target.route("**/api/price/transacti
 });
 await routeTransactions(page);
 
+const revealCreateModes = async () => {
+  const advanced = page.locator("[data-create-dialog] details");
+  if (!await advanced.evaluate((details) => details.open)) await advanced.locator("summary").click();
+};
+
+const resolveFrontSfxConflict = async () => {
+  await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation?.findings.some((finding) => finding.verdict === "bad" && finding.message.includes("前置 SFX")));
+  await page.selectOption('[data-fan-mount="front"] [data-fan-count]', "0");
+  await page.waitForFunction(() => {
+    const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+    return !state?.activePlan?.draft.config.selection.fanGroups?.some((group) => group.mountId === "front")
+      && !state?.evaluation?.findings.some((finding) => finding.verdict === "bad" && finding.message.includes("前置 SFX"));
+  });
+};
+
 const started = Date.now();
 await page.goto("http://127.0.0.1:5173/index.html#/workspace", { waitUntil: "networkidle" });
 await page.waitForFunction(() => Boolean(window.__BUILD_SIM_PLAN_STORE__?.getState().evaluationSnapshot));
 const firstLoadMs = Date.now() - started;
+const browserHashGoldens = await page.evaluate(async () => {
+  const { hashContent } = await import("/src/hash/browser.ts");
+  const response = await fetch("/tests/fixtures/baseline/u0-content-hash-golden-vectors.json", { cache: "no-store" });
+  if (!response.ok) throw new Error(`cannot load U0 hash golden fixture: ${response.status}`);
+  const fixture = await response.json();
+  return Promise.all(fixture.vectors.map(async (vector) => ({
+    id: vector.id,
+    actual: await hashContent(vector.value, vector.contract),
+    expected: vector.expectedSha256,
+  })));
+});
+const browserHashMismatches = browserHashGoldens.filter(({ actual, expected }) => actual !== expected);
+if (browserHashGoldens.length !== 7 || browserHashMismatches.length) {
+  throw new Error(`browser HashSpec golden mismatch: ${JSON.stringify({ count: browserHashGoldens.length, browserHashMismatches })}`);
+}
 
 await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
+await page.fill("[data-create-name]", "R10 空白方案");
+await page.click("[data-create-submit]");
+await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.name === "R10 空白方案");
+const blankConfig = await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.config);
+if (blankConfig?.caseId || blankConfig?.boardId || blankConfig?.cpuId || blankConfig?.selection.psuId || blankConfig?.selection.coolerId || blankConfig?.selection.gpuId || blankConfig?.selection.memoryId) {
+  throw new Error(`new blank plan prefilled hardware: ${JSON.stringify(blankConfig)}`);
+}
+await page.click('[data-route="spatial"]');
+await page.locator('[data-three-spatial-root].is-partial').waitFor({ state: "visible" });
+if (await page.locator("[data-edit-finding]").isVisible()) throw new Error("blank plan exposed a spatial repair action before a scene exists");
+await page.click('[data-route="workspace"]');
+
+await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
+await revealCreateModes();
+await page.selectOption("[data-create-mode]", "template");
 await page.fill("[data-create-name]", "R10 完整验收方案");
 await page.click("[data-create-submit]");
 await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.name === "R10 完整验收方案");
@@ -50,6 +95,7 @@ await page.waitForFunction(() => {
   const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
   return state?.evaluation?.config.selection.diskCount === 2 && state.evaluation.config.selection.psuId === "psu.corsair-sf750-atx31";
 });
+await resolveFrontSfxConflict();
 const reevaluationMs = Date.now() - evaluationStarted;
 await page.click("[data-open-save]");
 await page.fill("[data-version-summary]", "R10 v1 · 双盘与 SF750");
@@ -58,7 +104,7 @@ await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().act
 
 await page.click('[data-route="workspace"]');
 await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
-await page.click('[data-create-dialog] details > summary');
+await revealCreateModes();
 await page.selectOption("[data-create-mode]", "duplicate");
 await page.fill("[data-create-name]", "R10 独立副本");
 await page.click("[data-create-submit]");
@@ -144,12 +190,15 @@ for (const [name, width, height, route] of [["desktop", 1440, 1000, "workspace"]
 // Mobile completion path: create, edit, save a version, review and archive a transaction.
 await page.click('[data-route="workspace"]');
 await page.click('[data-workspace-page="workspace"] > header [data-open-create]');
+await revealCreateModes();
+await page.selectOption("[data-create-mode]", "template");
 await page.fill("[data-create-name]", "R10 手机方案");
 await page.click("[data-create-submit]");
 await page.fill('[data-config-field="selection.diskCount"]', "3");
 await page.locator('[data-config-field="selection.diskCount"]').dispatchEvent("change");
 await page.selectOption('[data-config-field="selection.psuId"]', "psu.corsair-sf750-atx31");
 await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation?.config.selection.diskCount === 3);
+await resolveFrontSfxConflict();
 await page.click("[data-open-save]");
 await page.fill("[data-version-summary]", "R10 mobile version");
 await page.click("[data-version-submit]");
@@ -166,12 +215,42 @@ if (await page.locator("#build-base-close").isVisible()) await page.click("#buil
 await page.selectOption("[data-plan-switcher]", saved.id);
 await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id === id, saved.id);
 
+const cdp = await page.context().newCDPSession(page);
+await cdp.send("HeapProfiler.collectGarbage");
+const heapBeforeReload = await cdp.send("Runtime.getHeapUsage");
 await page.reload({ waitUntil: "networkidle" });
 await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id === id, saved.id);
+await cdp.send("HeapProfiler.collectGarbage");
+const heapAfterReload = await cdp.send("Runtime.getHeapUsage");
 const restored = await page.evaluate(() => ({ versionId: window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.activeVersionId, task: localStorage.getItem(`build-sim.tasks.v1:${window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.id}`), progress: localStorage.getItem(`build-sim.progress.v2:${window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.id}`) }));
 if (restored.versionId !== saved.versionId || !restored.task || !restored.progress) throw new Error("refresh did not restore version/task/progress state");
+const apiPayloadBytes = await page.evaluate(async (planId) => {
+  const paths = ["/api/workspace/plans", `/api/workspace/plans/${encodeURIComponent(planId)}`];
+  const entries = await Promise.all(paths.map(async (pathname) => {
+    const response = await fetch(pathname);
+    if (!response.ok) throw new Error(`API baseline request failed: ${pathname} -> ${response.status}`);
+    return [pathname, (await response.arrayBuffer()).byteLength];
+  }));
+  const state = window.__BUILD_SIM_PLAN_STORE__.getState();
+  entries.push(["in-memory:evaluationSnapshot", new TextEncoder().encode(JSON.stringify(state.evaluationSnapshot)).byteLength]);
+  return Object.fromEntries(entries);
+}, saved.id);
 if (errors.length) throw new Error(`page errors:\n${errors.join("\n")}`);
 
-console.log("Platform acceptance browser passed", { plans: [firstPlan, secondPlan], savedVersion: saved.versionId, archives: archives.length, performance: { firstLoadMs, reevaluationMs, planSwitchMs, spatialInitMs }, accessibility: a11y, screenshots });
+console.log("Platform acceptance browser passed", {
+  plans: [firstPlan, secondPlan],
+  savedVersion: saved.versionId,
+  archives: archives.length,
+  browserHashGoldens,
+  performance: { firstLoadMs, reevaluationMs, planSwitchMs, spatialInitMs },
+  memoryRelease: {
+    heapBeforeReloadBytes: heapBeforeReload.usedSize,
+    heapAfterReloadBytes: heapAfterReload.usedSize,
+    deltaBytes: heapAfterReload.usedSize - heapBeforeReload.usedSize,
+  },
+  apiPayloadBytes,
+  accessibility: a11y,
+  screenshots,
+});
 await browser.close();
 await rm(visualRoot, { recursive: true, force: true });

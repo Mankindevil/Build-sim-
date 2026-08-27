@@ -90,12 +90,18 @@ function verdict(evaluation: BuildEvaluation): EvaluationDiff["beforeVerdict"] {
 export function diffEvaluations(before: BuildEvaluation, after: BuildEvaluation): EvaluationDiff {
   const beforeIds = new Set(before.findings.filter((finding) => finding.verdict !== "ok").map((finding) => finding.id));
   const afterIds = new Set(after.findings.filter((finding) => finding.verdict !== "ok").map((finding) => finding.id));
+  // Older cached payloads may not carry `complete`, so also inspect both kinds
+  // of unresolved line. A partial known sum is never a budget delta.
+  const priceIsComplete = (price: BuildEvaluation["price"]): boolean =>
+    price.complete !== false &&
+    (price.unknownSkuIds?.length ?? 0) === 0 &&
+    (price.unresolvedRequirements?.length ?? 0) === 0;
+  const pricesComplete = priceIsComplete(before.price) && priceIsComplete(after.price);
   return {
     resolvedFindingIds: [...beforeIds].filter((id) => !afterIds.has(id)).sort(),
     introducedFindingIds: [...afterIds].filter((id) => !beforeIds.has(id)).sort(),
-    budgetDeltaCny: Number.isFinite(before.price.knownCny) && Number.isFinite(after.price.knownCny) ? after.price.knownCny - before.price.knownCny : null,
+    budgetDeltaCny: pricesComplete && Number.isFinite(before.price.knownCny) && Number.isFinite(after.price.knownCny) ? after.price.knownCny - before.price.knownCny : null,
     beforeVerdict: verdict(before),
     afterVerdict: verdict(after),
   };
 }
-

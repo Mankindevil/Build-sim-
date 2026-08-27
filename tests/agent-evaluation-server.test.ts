@@ -12,7 +12,7 @@ describe("A1 authoritative server evaluation", () => {
     const serverEvaluation = evaluateBuildAuthoritatively(baseline);
     expect(serverEvaluation.evaluationHash).toBe(sha256AgentValue(authoritativeEvaluationPayload(browserEvaluation)));
     expect(serverEvaluation.evaluation).toEqual(browserEvaluation);
-    expect(serverEvaluation.catalogVersion).toMatch(/^2\.0\.0:/);
+    expect(serverEvaluation.catalogVersion).toBe("2.0.0");
     expect(serverEvaluation.priceSnapshotVersion).toBe("1.0.0:2026-08-21");
   });
 

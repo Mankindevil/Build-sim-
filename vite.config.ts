@@ -38,6 +38,10 @@ export default defineConfig(async () => {
           target: `http://127.0.0.1:${pricePort}`,
           changeOrigin: false,
         },
+        "/api/evidence": {
+          target: `http://127.0.0.1:${pricePort}`,
+          changeOrigin: false,
+        },
         "/api/agent": {
           target: `http://127.0.0.1:${agentPort}`,
           changeOrigin: false,

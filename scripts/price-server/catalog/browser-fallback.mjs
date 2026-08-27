@@ -31,15 +31,19 @@ export async function renderOfficialFallback(rawUrl, options = {}) {
         await route.abort("blockedbyclient");
       }
     });
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    const navigationResponse = await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
     const finalUrl = (await validateOfficialUrlResolved(page.url(), options)).toString();
     const body = await page.content();
     if (Buffer.byteLength(body) > maxBytes) throw new Error("official rendered response exceeds size limit");
+    const navigationStatus = typeof navigationResponse?.status === "function" ? Number(navigationResponse.status()) : 200;
+    const status = Number.isInteger(navigationStatus) && navigationStatus >= 100 && navigationStatus <= 599 ? navigationStatus : 200;
+    const responseContentType = typeof navigationResponse?.headerValue === "function" ? await navigationResponse.headerValue("content-type") : null;
+    const contentType = String(responseContentType ?? "text/html").split(";")[0].trim() || "text/html";
     return {
       requestedUrl: rawUrl,
       finalUrl,
-      status: 200,
-      contentType: "text/html",
+      status,
+      contentType,
       retrievedAt: new Date().toISOString(),
       body,
       contentHash: crypto.createHash("sha256").update(body).digest("hex"),

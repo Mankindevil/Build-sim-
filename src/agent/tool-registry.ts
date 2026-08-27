@@ -40,7 +40,11 @@ export class AgentToolRegistry {
 
   definitions(allowedTools?: Set<string>): ProviderToolDefinition[] {
     return [...this.tools.values()]
-      .filter((tool) => !allowedTools || allowedTools.has(tool.name))
+      // General chat is proposal-oriented: it may read external sources and
+      // prepare immutable review objects, but it must never receive a direct
+      // write Tool. A deliberately selected Skill can still expose a write Tool
+      // and remains subject to the execution-bound approval envelope below.
+      .filter((tool) => allowedTools ? allowedTools.has(tool.name) : tool.effect !== "write")
       .map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, strict: true }));
   }
 

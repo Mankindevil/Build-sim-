@@ -137,7 +137,7 @@
       "id": "psu.seasonic-focus-plus-gold-850-fx",
       "category": "psu",
       "brand": "Seasonic",
-      "model": "GX-850 FX",
+      "model": "FOCUS PLUS Gold 850",
       "name": "Seasonic FOCUS Plus Gold 850 (SSR-850FX)",
       "mpn": "SSR-850FX",
       "dims": {
@@ -181,6 +181,10 @@
       ],
       "attrs": {
         "form": "ATX",
+        "searchTerms": [
+          "GX-850 FX",
+          "FOCUS PLUS Gold 850"
+        ],
         "planningEfficiency": 0.89,
         "efficiencyEvidence": "inferred",
         "certification": "80 PLUS Gold",

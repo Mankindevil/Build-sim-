@@ -8,6 +8,8 @@ RUN npm run build
 
 FROM build AS runtime
 WORKDIR /app
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN ./node_modules/.bin/playwright install --with-deps chromium
 
 FROM nginx:1.29-alpine AS web
 COPY --from=build /app/dist /usr/share/nginx/html

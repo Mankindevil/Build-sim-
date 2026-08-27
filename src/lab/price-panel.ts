@@ -7,6 +7,7 @@
 import type { SkuCatalog, SkuRecord } from "../sku/types";
 import type { PriceProvenance, PriceQuote, PriceSnapshotFile } from "../price/types";
 import { buildSkuSearchLinks, pickOfficialUrl } from "../price/search";
+import { escapeRuntimeHtml, safeHttpsUrl } from "./runtime-dom";
 import {
   canAuditWithoutOverride,
   scoreTitleAgainstMpn,
@@ -91,7 +92,12 @@ function $(id: string): HTMLElement | null {
 }
 
 function esc(text: string): string {
-  return text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
+  return escapeRuntimeHtml(text);
+}
+
+function safeHref(value: unknown): string | null {
+  const href = safeHttpsUrl(value);
+  return href ? esc(href) : null;
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -152,7 +158,7 @@ function renderChannelPicker(): void {
     .map((c) => {
       const av = state?.availability?.[c];
       const hint = av?.available ? "" : ` title="${esc(av?.api.reason ?? av?.browser.reason ?? "不可用")}"`;
-      return `<label${hint}><input type="checkbox" data-price-channel="${c}" ${av?.available ? "checked" : ""}> ${CHANNEL_LABELS[c] ?? c}</label>`;
+      return `<label${hint}><input type="checkbox" data-price-channel="${esc(c)}" ${av?.available ? "checked" : ""}> ${esc(CHANNEL_LABELS[c] ?? c)}</label>`;
     })
     .join("");
   box.dataset.ready = "true";
@@ -290,8 +296,9 @@ function renderCandidates(): void {
     ? `<ul class="price-problem-list">${problems
         .map((r) => {
           const label = CHANNEL_LABELS[r.channel] ?? r.channel;
-          const link = r.searchUrl
-            ? ` <a href="${esc(r.searchUrl)}" target="_blank" rel="noreferrer">手动打开</a>`
+          const href = safeHref(r.searchUrl);
+          const link = href
+            ? ` <a href="${href}" target="_blank" rel="noreferrer">手动打开</a>`
             : "";
           const tag = r.status === "needsLogin" ? "需登录" : "未取到";
           return `<li><b>${esc(label)}</b> ${tag}：${esc(r.reason ?? "")}${link}</li>`;
@@ -388,9 +395,14 @@ function renderCandidates(): void {
               ? ""
               : `<button type="button" class="price-audit-btn" data-price-audit="${i}" ${canOneClick ? "" : "disabled"} ${block ? `title="${esc(block)}"` : ""}>确认入账</button>`;
           const blockNote = block && match.kind !== "reject" ? `<br><small>${esc(block)}</small>` : "";
+          const href = safeHref(c.url);
+          const title = esc(c.title.slice(0, 80));
+          const listing = href
+            ? `<a href="${href}" target="_blank" rel="noreferrer">${title}</a>`
+            : `<span>${title}</span>`;
           return `<tr data-level="${level}">
             <td>${esc(CHANNEL_LABELS[c.channel] ?? c.channel)}<br><small>搜「${esc(c.query ?? "")}」</small></td>
-            <td><a href="${esc(c.url)}" target="_blank" rel="noreferrer">${esc(c.title.slice(0, 80))}</a></td>
+            <td>${listing}</td>
             <td>${priceCell(c)}</td>
             <td>${variantCell(raw, i)}</td>
             <td class="status-${level}">${MATCH_BADGE[match.kind]}<br><small>${esc(match.reasons.join("；"))}</small></td>
@@ -587,7 +599,7 @@ function renderLocalQuotes(): void {
         `<li><b>${esc(skuById(q.skuId)?.name ?? q.skuId)}</b> · ${esc(CHANNEL_LABELS[q.platform] ?? q.platform)} · ¥${q.priceCny}${
           q.variantLabel ? ` · <small>规格「${esc(q.variantLabel)}」</small>` : ""
         }${q.fetchedAt ? ` · <small>snapshot ${esc(q.fetchedAt.slice(0, 10))}</small>` : ""}${
-          q.listingUrl ? ` · <a href="${esc(q.listingUrl)}" target="_blank" rel="noreferrer">来源</a>` : ""
+          safeHref(q.listingUrl) ? ` · <a href="${safeHref(q.listingUrl)}" target="_blank" rel="noreferrer">来源</a>` : ""
         }${q.provenanceId ? ` · <small>prov ${esc(q.provenanceId.slice(0, 12))}</small>` : ""}
          <button type="button" class="price-unaudit-btn" data-price-unaudit="${esc(q.skuId)}" data-price-platform="${esc(q.platform)}" data-price-variant-label="${esc(q.variantLabel ?? "")}">撤销</button></li>`,
     )
@@ -633,10 +645,13 @@ function renderSkuList(): void {
     .map((entry) => {
       const sku = skuById(entry.id);
       const links = (sku ? buildSkuSearchLinks(sku, pickOfficialUrl(sku)) : [])
-        .map(
-          (l) =>
-            `<a href="${esc(l.url)}" target="_blank" rel="noreferrer" title="搜索词：${esc(l.query)}">${esc(l.label)}</a>`,
-        )
+        .map((l) => {
+          const href = safeHref(l.url);
+          return href
+            ? `<a href="${href}" target="_blank" rel="noreferrer" title="搜索词：${esc(l.query)}">${esc(l.label)}</a>`
+            : "";
+        })
+        .filter(Boolean)
         .join(" · ");
       const fetchBtn = serviceOnline
         ? `<button type="button" class="price-fetch-btn" data-price-fetch="${esc(entry.id)}">抓取</button>`

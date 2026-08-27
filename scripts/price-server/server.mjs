@@ -12,7 +12,6 @@ import { runAutoEnrichment } from "./catalog/auto-enrichment.mjs";
 import {
   buildAndWriteLatest,
   loadCandidates,
-  loadCatalog,
   loadLocalQuotes,
   loadManualQuotes,
   readJson,
@@ -34,7 +33,7 @@ import { listingKey } from "./adapters/variant.mjs";
 import { buildSearchQueries, isPriceTrackable } from "../../src/price/queries.mjs";
 import { getJob, inspectUrl, queueSearch } from "./catalog/service.mjs";
 import { renderOfficialFallback } from "./catalog/browser-fallback.mjs";
-import { acceptOfficial, confirmDraft, createDraft, rejectDraft } from "./catalog/write.mjs";
+import { acceptOfficial, confirmDraft, createDraft, previewDraft, recoverPendingDrafts, rejectDraft } from "./catalog/write.mjs";
 import { loadRuntimeFlags } from "../runtime/flags.mjs";
 import { buildAuditedQuote } from "./price-audit.mjs";
 import { createAdviceJob, getAdviceBillingSummary, getAdviceJob } from "../deepseek/advice.mjs";
@@ -44,6 +43,17 @@ import { transactionCatalogSearchRequest } from "./transactions/catalog-search-r
 import { CatalogCacheDiscoveryProvider, MsiProductDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./catalog/discovery.mjs";
 import { createSearXngDiscoveryProvider } from "./catalog/searxng-discovery.mjs";
 import { archiveTransaction, deleteTransactionArchive, deleteTransactionImage, listTransactionArchives, readTransactionImage, updateTransactionArchive } from "./transactions/archive.mjs";
+import {
+  catalogWriteOptions,
+  initializeRuntimeCatalog,
+  loadMergedCatalog,
+  markRuntimeCatalogSkuAccepted,
+  resultRequiresRuntimeCatalogRetention,
+  resolveCatalogRepositoryPaths,
+  sanitizeMergedCatalog,
+} from "./catalog/repository.mjs";
+import { FileEvidenceRepository } from "../../src/evidence/repository.mjs";
+import { checkEvidencePostRequest, handleEvidenceRoute, matchesEvidenceEtag } from "../../src/evidence/http-routes.mjs";
 
 const HOST = "127.0.0.1";
 const env = await loadEnv();
@@ -54,7 +64,33 @@ const TRANSACTION_OCR_TIMEOUT_MS = intEnv(env, "TRANSACTION_SCREENSHOT_OCR_TIMEO
 const TRANSACTION_OCR_PROVIDER = env.TRANSACTION_OCR_PROVIDER || "deepseek-ocr";
 const DEEPSEEK_OCR_MAX_TOKENS = intEnv(env, "DEEPSEEK_OCR_MAX_TOKENS", 2_048, { min: 128, max: 8_192 });
 const TRANSACTION_ARCHIVE_ROOT = env.TRANSACTION_ARCHIVE_ROOT || `${process.cwd()}/runtime/transactions`;
+const CATALOG_REPOSITORY = resolveCatalogRepositoryPaths({ persistRoot: env.CATALOG_PERSIST_ROOT || `${process.cwd()}/runtime` });
+const EVIDENCE_REPOSITORY = new FileEvidenceRepository({ root: env.EVIDENCE_REPOSITORY_ROOT || `${process.cwd()}/runtime/evidence` });
+const EVIDENCE_FETCH_TIMEOUT_MS = intEnv(env, "EVIDENCE_FETCH_TIMEOUT_MS", 30_000, { min: 1_000, max: 120_000 });
+const EVIDENCE_FETCH_MAX_BYTES = intEnv(env, "EVIDENCE_FETCH_MAX_BYTES", 25_000_000, { min: 1_000_000, max: 50_000_000 });
+const EVIDENCE_FETCH_MAX_REDIRECTS = intEnv(env, "EVIDENCE_FETCH_MAX_REDIRECTS", 4, { min: 0, max: 8 });
+const EVIDENCE_CACHE_TTL_MS = intEnv(env, "EVIDENCE_CACHE_TTL_MS", 86_400_000, { min: 0, max: 2_592_000_000 });
 if (!["deepseek-ocr", "tesseract"].includes(TRANSACTION_OCR_PROVIDER)) throw new Error("TRANSACTION_OCR_PROVIDER must be deepseek-ocr or tesseract");
+await initializeRuntimeCatalog(CATALOG_REPOSITORY);
+const CATALOG_RECOVERY_RESULTS = await recoverPendingDrafts({ ...catalogWriteOptions(CATALOG_REPOSITORY), catalogWriteEnabled: true });
+const blockedCatalogRecovery = CATALOG_RECOVERY_RESULTS.find((result) => result.status !== "confirmed");
+if (blockedCatalogRecovery) throw new Error(`Unable to recover pending catalog confirmation: ${(blockedCatalogRecovery.reasons ?? [blockedCatalogRecovery.status]).join("; ")}`);
+
+async function loadCatalog() {
+  return loadMergedCatalog(CATALOG_REPOSITORY);
+}
+
+async function governedCatalogOptions(extra = {}) {
+  const catalog = await loadCatalog();
+  return { ...catalogWriteOptions(CATALOG_REPOSITORY, catalog), ...extra };
+}
+
+async function retainAcceptedCatalogResult(result) {
+  if (resultRequiresRuntimeCatalogRetention(result) && !result.runtimeCatalogRetained) {
+    await markRuntimeCatalogSkuAccepted(result.skuId, CATALOG_REPOSITORY);
+  }
+  return result;
+}
 
 function send(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -75,6 +111,16 @@ function sendImage(res, payload) {
     "X-Content-Type-Options": "nosniff",
   });
   res.end(payload.buffer);
+}
+
+function sendEvidenceContent(req, res, result) {
+  if (matchesEvidenceEtag(req.headers["if-none-match"], result.headers.ETag)) {
+    res.writeHead(304, { ETag: result.headers.ETag, "Cache-Control": result.headers["Cache-Control"] });
+    res.end();
+    return;
+  }
+  res.writeHead(result.status, result.headers);
+  res.end(result.binary);
 }
 
 async function readBody(req, maxBytes = MAX_BODY_BYTES) {
@@ -203,7 +249,7 @@ async function handleVariants(body) {
 async function handleAudit(body) {
   const catalog = await loadCatalog();
   const row = await upsertLocalQuote(buildAuditedQuote(body, catalog));
-  const snapshot = await buildAndWriteLatest(today());
+  const snapshot = await buildAndWriteLatest(today(), undefined, { catalog });
   return { saved: row, asOf: snapshot.asOf, quoteCount: snapshot.quotes.length };
 }
 
@@ -212,8 +258,28 @@ async function handleUnaudit(url) {
   if (!skuId) throw new Error("skuId is required");
   const variantLabel = url.searchParams.has("variantLabel") ? url.searchParams.get("variantLabel") ?? "" : undefined;
   const removed = await removeLocalQuote(skuId, url.searchParams.get("platform") ?? undefined, variantLabel);
-  const snapshot = await buildAndWriteLatest(today());
+  const snapshot = await buildAndWriteLatest(today(), undefined, { catalog: await loadCatalog() });
   return { removed, asOf: snapshot.asOf, quoteCount: snapshot.quotes.length };
+}
+
+async function handleDraftConfirmation(draftId, body = {}) {
+  const flags = await loadRuntimeFlags();
+  const result = await confirmDraft(draftId, await governedCatalogOptions({
+    expectedHash: body.expectedHash,
+    approved: body.approved,
+    catalogWriteEnabled: flags.catalogWriteEnabled,
+  }));
+  await retainAcceptedCatalogResult(result);
+  return { status: result.status === "blocked" ? 409 : 200, result };
+}
+
+async function handleDraftRejection(draftId, body = {}) {
+  const result = await rejectDraft(draftId, {
+    ...catalogWriteOptions(CATALOG_REPOSITORY),
+    expectedHash: body.expectedHash,
+    approved: body.approved,
+  });
+  return { status: result.status === "blocked" ? 409 : 200, result };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -222,6 +288,28 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (route === "GET /api/price/health") return send(res, 200, { ok: true, port: PORT });
+    if (url.pathname.startsWith("/api/evidence/")) {
+      const rejected = req.method === "POST" ? checkEvidencePostRequest(req.headers) : null;
+      if (rejected) return send(res, rejected.status, rejected.payload);
+      const body = req.method === "POST" ? await readBody(req) : {};
+      const result = await handleEvidenceRoute(req.method, url.pathname, body, EVIDENCE_REPOSITORY, {
+        catalog: req.method === "POST" ? await loadCatalog() : undefined,
+        acquisitionOptions: {
+          cacheTtlMs: EVIDENCE_CACHE_TTL_MS,
+          maxBytes: EVIDENCE_FETCH_MAX_BYTES,
+          fetchOptions: { timeoutMs: EVIDENCE_FETCH_TIMEOUT_MS, maxRedirects: EVIDENCE_FETCH_MAX_REDIRECTS },
+        },
+        discoveryOptions: {
+          fetchOptions: { timeoutMs: EVIDENCE_FETCH_TIMEOUT_MS, maxBytes: EVIDENCE_FETCH_MAX_BYTES, maxRedirects: EVIDENCE_FETCH_MAX_REDIRECTS },
+        },
+      });
+      if (result.binary) return sendEvidenceContent(req, res, result);
+      return send(res, result.status, result.payload);
+    }
+    if (route === "GET /api/price/catalog") {
+      const [catalog, flags] = await Promise.all([loadCatalog(), loadRuntimeFlags()]);
+      return send(res, 200, { ...sanitizeMergedCatalog(catalog), writeEnabled: flags.catalogWriteEnabled });
+    }
     if (route === "GET /api/price/transactions/archive") return send(res, 200, { records: await listTransactionArchives({ root: TRANSACTION_ARCHIVE_ROOT }) });
     if (route === "POST /api/price/transactions/archive") {
       const body = await readBody(req, TRANSACTION_BODY_MAX_BYTES);
@@ -263,7 +351,7 @@ const server = http.createServer(async (req, res) => {
         ...(transactionDiscoveryMode === "searxng" ? [createSearXngDiscoveryProvider(env)] : []),
         new RegistrySearchDiscoveryProvider(),
       ];
-      return send(res, 202, queueSearch(transactionCatalogSearchRequest(body), { discoveryProviders, catalog, persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd(), browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
+      return send(res, 202, queueSearch(transactionCatalogSearchRequest(body), { discoveryProviders, catalog, persistRoot: CATALOG_REPOSITORY.persistRoot, browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
     }
     if (route === "POST /api/catalog/search") {
       const body = await readBody(req);
@@ -276,7 +364,7 @@ const server = http.createServer(async (req, res) => {
         ...(discoveryMode === "searxng" ? [createSearXngDiscoveryProvider(env)] : []),
         new RegistrySearchDiscoveryProvider(),
       ];
-      return send(res, 202, queueSearch(body, { discoveryProviders, catalog, persistRoot: env.CATALOG_PERSIST_ROOT || env.CATALOG_CANDIDATES_ROOT || process.cwd(), browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
+      return send(res, 202, queueSearch(body, { discoveryProviders, catalog, persistRoot: CATALOG_REPOSITORY.persistRoot, browserFallback: renderOfficialFallback, browserFallbackLimit: 2 }));
     }
     if (route === "POST /api/advice/build") {
       const flags = await loadRuntimeFlags();
@@ -300,39 +388,81 @@ const server = http.createServer(async (req, res) => {
       const result = await inspectUrl(await readBody(req), { browserFallback: renderOfficialFallback });
       return send(res, 200, result);
     }
-    if (route === "GET /api/catalog/domain-proposals") return send(res, 200, await listDomainProposals({ persistRoot: process.cwd() }));
+    if (route === "GET /api/catalog/domain-proposals") return send(res, 200, await listDomainProposals({ persistRoot: CATALOG_REPOSITORY.persistRoot }));
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/domain-proposals/") && (url.pathname.endsWith("/approve") || url.pathname.endsWith("/reject"))) {
       const approve = url.pathname.endsWith("/approve");
       const suffix = approve ? "/approve" : "/reject";
       const proposalId = decodeURIComponent(url.pathname.slice("/api/catalog/domain-proposals/".length, -suffix.length));
       const body = await readBody(req);
-      return send(res, 200, await decideDomainProposal(proposalId, approve ? "approved" : "rejected", body.expectedHash, { persistRoot: process.cwd() }));
+      return send(res, 200, await decideDomainProposal(proposalId, approve ? "approved" : "rejected", body.expectedHash, { persistRoot: CATALOG_REPOSITORY.persistRoot }));
+    }
+    const priceCatalogCandidateMatch = url.pathname.match(/^\/api\/price\/catalog\/candidates\/([^/]+)\/(review|draft)$/);
+    if (req.method === "POST" && priceCatalogCandidateMatch?.[1] && priceCatalogCandidateMatch[2]) {
+      const candidateId = decodeURIComponent(priceCatalogCandidateMatch[1]);
+      const body = await readBody(req);
+      const flags = await loadRuntimeFlags();
+      const options = await governedCatalogOptions({ expectedHash: body.expectedHash, expectedDraftHash: body.expectedDraftHash });
+      const result = priceCatalogCandidateMatch[2] === "review"
+        ? await previewDraft(candidateId, body.selections ?? {}, options)
+        : await createDraft(candidateId, body.selections ?? {}, options);
+      return send(res, result.status === "blocked" ? 409 : 200, { ...result, writeEnabled: flags.catalogWriteEnabled });
+    }
+    if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/review")) {
+      const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/review".length));
+      const body = await readBody(req);
+      const flags = await loadRuntimeFlags();
+      const result = await previewDraft(candidateId, body.selections ?? {}, await governedCatalogOptions({ expectedHash: body.expectedHash }));
+      return send(res, result.status === "blocked" ? 409 : 200, { ...result, writeEnabled: flags.catalogWriteEnabled });
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/enrich")) {
       const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/enrich".length));
       const flags = await loadRuntimeFlags();
       const body = await readBody(req);
-      const result = await runAutoEnrichment(candidateId, { expectedHash: body.expectedHash, autoEnrichTrustedOfficial: flags.catalogAutoEnrichTrustedOfficial, autoAcceptExactMpn: flags.catalogAutoAcceptExactMpn, catalogWriteEnabled: flags.catalogWriteEnabled });
+      const result = await runAutoEnrichment(candidateId, await governedCatalogOptions({ expectedHash: body.expectedHash, autoEnrichTrustedOfficial: flags.catalogAutoEnrichTrustedOfficial, autoAcceptExactMpn: flags.catalogAutoAcceptExactMpn, catalogWriteEnabled: flags.catalogWriteEnabled }));
+      await retainAcceptedCatalogResult(result);
       return send(res, result.status === "accepted" || result.status === "draft" ? 200 : 409, result);
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/accept-official")) {
       const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/accept-official".length));
       const flags = await loadRuntimeFlags();
-      const result = await acceptOfficial(candidateId, { ...(await readBody(req)), catalogWriteEnabled: flags.catalogWriteEnabled });
+      const body = await readBody(req);
+      const result = await acceptOfficial(candidateId, await governedCatalogOptions({ expectedHash: body.expectedHash, approved: body.approved, catalogWriteEnabled: flags.catalogWriteEnabled }));
+      await retainAcceptedCatalogResult(result);
       return send(res, result.status === "accepted" ? 200 : 409, result);
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/candidates/") && url.pathname.endsWith("/draft")) {
       const candidateId = decodeURIComponent(url.pathname.slice("/api/catalog/candidates/".length, -"/draft".length));
-      return send(res, 200, await createDraft(candidateId, (await readBody(req)).selections ?? {}));
+      const body = await readBody(req);
+      const result = await createDraft(candidateId, body.selections ?? {}, await governedCatalogOptions({ expectedHash: body.expectedHash, expectedDraftHash: body.expectedDraftHash }));
+      return send(res, result.status === "blocked" ? 409 : 200, result);
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/drafts/") && url.pathname.endsWith("/confirm")) {
       const draftId = decodeURIComponent(url.pathname.slice("/api/catalog/drafts/".length, -"/confirm".length));
-      const flags = await loadRuntimeFlags();
-      return send(res, 200, await confirmDraft(draftId, { catalogWriteEnabled: flags.catalogWriteEnabled }));
+      const handled = await handleDraftConfirmation(draftId, await readBody(req));
+      return send(res, handled.status, handled.result);
     }
     if (req.method === "POST" && url.pathname.startsWith("/api/catalog/drafts/") && url.pathname.endsWith("/reject")) {
       const draftId = decodeURIComponent(url.pathname.slice("/api/catalog/drafts/".length, -"/reject".length));
-      return send(res, 200, await rejectDraft(draftId));
+      const handled = await handleDraftRejection(draftId, await readBody(req));
+      return send(res, handled.status, handled.result);
+    }
+    const transactionDraftMatch = url.pathname.match(/^\/api\/price\/transactions\/catalog-drafts\/([^/]+)\/(confirm|reject)$/);
+    if (req.method === "POST" && transactionDraftMatch?.[1] && transactionDraftMatch[2]) {
+      const draftId = decodeURIComponent(transactionDraftMatch[1]);
+      const body = await readBody(req);
+      const handled = transactionDraftMatch[2] === "confirm"
+        ? await handleDraftConfirmation(draftId, body)
+        : await handleDraftRejection(draftId, body);
+      return send(res, handled.status, handled.result);
+    }
+    const priceDraftMatch = url.pathname.match(/^\/api\/price\/catalog-drafts\/([^/]+)\/(confirm|reject)$/);
+    if (req.method === "POST" && priceDraftMatch?.[1] && priceDraftMatch[2]) {
+      const draftId = decodeURIComponent(priceDraftMatch[1]);
+      const body = await readBody(req);
+      const handled = priceDraftMatch[2] === "confirm"
+        ? await handleDraftConfirmation(draftId, body)
+        : await handleDraftRejection(draftId, body);
+      return send(res, handled.status, handled.result);
     }
     if (route === "GET /api/price/state") return send(res, 200, await handleState());
     if (route === "POST /api/price/collect") return send(res, 200, await handleCollect(await readBody(req)));
@@ -340,7 +470,7 @@ const server = http.createServer(async (req, res) => {
     if (route === "POST /api/price/audit") return send(res, 200, await handleAudit(await readBody(req)));
     if (route === "DELETE /api/price/audit") return send(res, 200, await handleUnaudit(url));
     if (route === "POST /api/price/rebuild") {
-      const snapshot = await buildAndWriteLatest(today());
+      const snapshot = await buildAndWriteLatest(today(), undefined, { catalog: await loadCatalog() });
       return send(res, 200, { asOf: snapshot.asOf, quoteCount: snapshot.quotes.length });
     }
     return send(res, 404, { error: `No route for ${route}` });

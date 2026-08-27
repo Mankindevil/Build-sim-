@@ -84,13 +84,17 @@ Build Sim is usable as a local alpha and is under active development.
 - Candidate discovery, detail-page variant inspection, plausibility gates, and explicit user confirmation.
 - Trusted-domain registry, SSRF protection, bounded redirects and payloads, HTML/JSON-LD/spec-table/PDF extraction, optional scanned-PDF OCR, and field-level provenance.
 - Unknown official domains become proposals; discovered candidates, review drafts, and committed catalog facts remain separate states.
+- Official manuals and datasheets can be discovered from governed product/support pages, fetched through the existing SSRF boundary, and archived in a global SHA-256 content-addressed store. One immutable document can have multiple official capture URLs and can be referenced by multiple plans without copying its bytes.
+- Capture metadata keeps identity confidence explicit: `official-document-explicit` means the checked document itself identifies the model, while `governed-sku-user-asserted` and `official-domain-only` remain associations to review. A user-selected document kind is likewise marked `user-asserted` instead of silently becoming an official fact.
+- Draft evidence bindings use optimistic revisions; immutable plan versions pin their exact document hash, capture, subject, purpose, and page/section locators. Deleting or unbinding a plan never cascades to the shared document.
 
 ### Advice and Agent
 
 - Optional DeepSeek-backed structured build advice with local usage and estimated-cost audit records.
 - Provider-neutral, streaming multi-turn Agent service with persistent local sessions, cancellation, Skills, Tools, definition hashes, and tamper-evident audit records.
-- Seven local read/proposal tools, five external-read tools, and one governed write tool (`enrich_official_catalog`).
-- Built-in Skills: `plan-initializer`, `build-diagnosis`, `upgrade-advisor`, `shopping-research`, and `assembly-and-wiring`.
+- Safe local/external-read Tools plus immutable plan and catalog-review proposals. General chat never receives a direct catalog-write Tool; the browser performs the governed write only after an explicit human review.
+- Built-in Skills: `plan-initializer`, `build-diagnosis`, `upgrade-advisor`, `shopping-research`, `assembly-and-wiring`, and `geometry-evidence-audit`.
+- The geometry/evidence audit Skill can inspect bound evidence metadata and discover same-brand official document candidates. Discovery is still read-only: archiving and plan binding remain explicit persisted operations.
 - **Use Agent to initialize** creates a pending plan whose valid config is explicitly an internal rendering scaffold. The Agent collects intent, selects exact governed catalog SKU ids, and can only return an atomic initialization proposal that requires whole-proposal human approval.
 - Tool schemas, budgets, allowed-tool restrictions, loopback service boundaries, and out-of-band write approval are enforced server-side.
 
@@ -362,7 +366,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-The final proxy exposes only the UI, Price/Advice/Agent routes, catalog search polling, and candidate enrichment. Other `/api/catalog/` administration routes return `404`. The supplied hostname is specific to the current Osaka address; change the `server_name` and certificate paths together when deploying elsewhere.
+The final proxy exposes only the UI, Price/Advice/Agent routes, catalog search polling, and the narrowly scoped review endpoints under `/api/price/catalog/`. Other `/api/catalog/` administration and direct-write routes return `404`. The supplied hostname is specific to the current Osaka address; change the `server_name` and certificate paths together when deploying elsewhere.
 
 #### 4. Verify, update, and stop
 
@@ -619,10 +623,12 @@ Amazon USD values use a declared exchange rate and remain reference-only. The UI
 1. Enable and start the Agent service and, for external-read tools, the Price service.
 2. Choose **Use Agent to initialize** when creating a plan; the UI opens Agent and selects `plan-initializer`. Other Skills remain available for normal plans.
 3. Start a session, ask a build-specific question, and inspect Tool results, evidence, definition hashes, usage, and the per-run local cost estimate.
-4. Review and approve an initialization proposal as a whole before it can replace the scaffold draft. Pending scaffolds cannot be saved as versions.
-5. Cancel a run from the UI if necessary. Sessions persist locally until their files are removed through an appropriate maintenance process.
+4. In a normal conversation, ask the Agent to add a configuration option or supplement an existing SKU. It searches the governed catalog and trusted official pages, then presents a no-form review card with field provenance, before/after values, size, power/thermal envelope, noise, temperature, and explicit unknowns. An MPN is optional.
+5. Accepting that card adds or updates the formal catalog option only. Applying the option to the active plan is a separate plan-change proposal and a separate approval; it is never selected silently.
+6. Review and approve an initialization proposal as a whole before it can replace the scaffold draft. Pending scaffolds cannot be saved as versions.
+7. Cancel a run from the UI if necessary. Sessions persist locally until their files are removed through an appropriate maintenance process.
 
-Initialization currently selects only from the governed local catalog. Out-of-catalog gaming hardware and cross-publication performance benchmarks remain explicit coverage gaps; web-search results never become selected parts directly.
+Initialization and plan changes still select only from the governed local catalog. An exact out-of-catalog result can enter that catalog only after trusted-source extraction and a separate human catalog review; a web result or candidate id never becomes a selected part directly. Cross-publication performance benchmarks remain an explicit coverage gap.
 
 The browser never receives provider API keys. Fixture output is labeled as fixture evidence and must not be treated as proof of live-provider availability.
 
@@ -638,7 +644,7 @@ discovery candidate -> trusted final fetch -> extracted fields -> review draft -
 - Unknown domains become proposals, not automatically trusted sources.
 - Conflicts, access barriers, sparse PDFs, and OCR output require review.
 - Formal writes require the master write flag plus the relevant acceptance gate.
-- Agent writes additionally require a short-lived, out-of-band approval envelope bound to the exact tool definition, session, input hash, idempotency key, backup target, and rollback policy.
+- General Agent chat can create only a non-persistent review preview from a server-issued candidate id and hash. The browser persists and confirms the matching immutable draft only after the user checks the approval box; the model cannot submit fields, trust decisions, or approval state.
 - Catalog writes use backup and rollback manifests; verify the resulting diff before committing it.
 
 ## API overview
@@ -649,6 +655,7 @@ discovery candidate -> trusted final fetch -> extracted fields -> review draft -
 | --- | --- | --- |
 | `GET` | `/api/price/health` | Service health |
 | `GET` | `/api/price/state` | Collector and snapshot state |
+| `GET` | `/api/price/catalog` | Read the merged base + accepted runtime catalog |
 | `POST` | `/api/price/collect` | Collect price candidates |
 | `POST` | `/api/price/variants` | Inspect listing variants |
 | `POST` | `/api/price/audit` | Confirm and persist an audited quote |
@@ -660,6 +667,16 @@ discovery candidate -> trusted final fetch -> extracted fields -> review draft -
 | `GET` | `/api/catalog/search/:id` | Read a discovery job |
 | `POST` | `/api/catalog/inspect` | Fetch and inspect a candidate |
 | `GET` | `/api/catalog/domain-proposals` | List unknown-domain proposals |
+| `POST` | `/api/price/catalog/candidates/:id/review` | Build a non-persistent governed SKU review preview |
+| `POST` | `/api/price/catalog/candidates/:id/draft` | Persist the exact reviewed draft hash |
+| `POST` | `/api/price/catalog-drafts/:id/confirm` | Confirm a reviewed draft and return the committed SKU |
+| `POST` | `/api/price/catalog-drafts/:id/reject` | Reject a persisted draft |
+| `POST` | `/api/evidence/discover` | Discover same-brand official manuals/datasheets from a governed SKU or URL |
+| `POST` | `/api/evidence/acquisitions` | Fetch and archive one explicit trusted official document URL |
+| `GET` | `/api/evidence/documents/:id` | Read immutable metadata and capture history |
+| `GET` | `/api/evidence/documents/:id/content` | Read exact archived bytes with a SHA-256 ETag |
+| `POST` | `/api/evidence/documents/:id/excerpts` | Read bounded, read-only excerpts from an archived PDF/text document |
+| `GET` | `/api/evidence/captures/:id` | Read one official retrieval record |
 
 Additional proposal, draft, and acceptance endpoints are administrative interfaces. Keep them private and consult the implementation/tests before integrating automation.
 
@@ -681,11 +698,16 @@ Additional proposal, draft, and acceptance endpoints are administrative interfac
 
 These APIs are alpha contracts and may change before a stable release.
 
+Plan evidence bindings are exposed by the Workspace service at `GET/POST /api/workspace/plans/:id/evidence-bindings` and `DELETE /api/workspace/plans/:id/evidence-bindings/:bindingId`. Bind/unbind requests require the current draft revision.
+
 ## Data, evidence, and security
 
 - Official, measured, reconstructed, estimated, synthetic-fixture, OCR, and live-provider evidence are separate categories.
 - Missing or conflicting values remain `unknown`; the application must not invent a precise fact to fill a gap.
 - Official URL fetching enforces trusted domains, DNS/IP checks, redirect limits, payload limits, and SSRF defenses.
+- Evidence bytes are stored once under `runtime/evidence/blobs/sha256/`; metadata and URL indexes are checksummed, atomically written, and verified again on read. Run `npm run evidence:import-bundled` once to migrate the two checked-in manual snapshots.
+- The plan editor's Official Evidence flow requires explicit discover, archive, and bind actions. Multiple plans store references to the same document hash instead of copying its bytes.
+- The Agent can discover documents and read bounded excerpts, but cannot archive or bind them. Excerpts are treated as untrusted external text, and identity/kind assertions expose their evidence strength.
 - Provider credentials stay in server environment files and are never browser variables.
 - Agent Tool input/output is schema-checked and bounded; Skill `allowedTools` is enforced at dispatch, not only in the prompt.
 - Audit files redact sensitive key/Bearer patterns and include integrity hashes, but local operators are still responsible for filesystem permissions, backups, retention, and incident response.

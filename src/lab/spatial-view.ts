@@ -5,6 +5,7 @@ import { detectWebGl } from "../spatial/fallback";
 import { SpatialSelectionController } from "../spatial/selection";
 import { buildSpatialOverlayModel, configFieldPartIds, primaryPartForFinding, type SpatialOverlayModel } from "../spatial/overlays";
 import type { WorkspaceRouter } from "./workspace-router";
+import { buildReadiness } from "../config/validate";
 import "./spatial-view.css";
 
 export interface SpatialViewController {
@@ -106,6 +107,17 @@ export interface SpatialEvaluationIdentity {
   snapshotHash: string | null;
 }
 
+function emptySpatialModel(): SpatialSceneModel {
+  return {
+    schemaVersion: "1.0.0",
+    coordinateSystem: { units: "mm", origin: "case-envelope-center", axes: { x: "right", y: "up", z: "rear" }, anchor: "center" },
+    caseSkuId: "",
+    bounds: { c: [0, 0, 0], w: 0, h: 0, d: 0 },
+    nodes: [],
+    evaluationFindingIds: [],
+  };
+}
+
 /** Store emissions are frequent; only a changed evaluation identity may rebuild WebGL resources. */
 export function shouldRebuildSpatialModel(
   previous: SpatialEvaluationIdentity | null,
@@ -179,6 +191,7 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
   let mode: "pending" | "three" | "fallback" = "pending";
   let disposed = false;
   let loading: Promise<void> | null = null;
+  let sceneGeneration = 0;
   let evaluationIdentity: SpatialEvaluationIdentity | null = null;
   let syncedPartId: string | null = null;
   let syncedFindingId: string | null = null;
@@ -229,8 +242,9 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
     if (renderer || loading || disposed || !model || !overlays) return;
     if (!capability.available) { showFallback(capability.reason); return; }
     status.textContent = "正在按需载入 Three.js…";
+    const generation = sceneGeneration;
     loading = import("../spatial/three-renderer").then(({ createThreeSpatialRenderer }) => {
-      if (disposed || !model || !overlays) return;
+      if (disposed || generation !== sceneGeneration || !model || !overlays) return;
       renderer = createThreeSpatialRenderer({
         host: canvasHost,
         root,
@@ -251,11 +265,62 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
       hideLegacyToolbar();
       fallback.classList.add("is-hidden");
       status.textContent = "Three.js 场景已加载 · 单位 mm · 结论来自当前 BuildEvaluation";
-    }).catch((error: unknown) => showFallback(error instanceof Error ? error.message : "renderer error")).finally(() => { loading = null; });
+    }).catch((error: unknown) => {
+      if (!disposed && generation === sceneGeneration) showFallback(error instanceof Error ? error.message : "renderer error");
+    }).finally(() => {
+      const retryCurrentScene = generation !== sceneGeneration && Boolean(model && overlays);
+      loading = null;
+      if (retryCurrentScene) ensureRenderer();
+    });
   };
 
   const onState = (state: PlanStoreState) => {
     if (!state.evaluation) return;
+    const readiness = state.activePlan ? buildReadiness(state.activePlan.draft.config, getCatalog()) : state.evaluation.readiness;
+    if (readiness.status === "incomplete") {
+      sceneGeneration += 1;
+      renderer?.dispose();
+      renderer = null;
+      model = null;
+      overlays = null;
+      evaluationIdentity = null;
+      evaluationHash = null;
+      syncedPartId = null;
+      syncedFindingId = null;
+      selection.select(null, false);
+      selection.setModel(emptySpatialModel());
+      canvasHost.replaceChildren();
+      findingSelect.replaceChildren(option("方案未完整", ""));
+      assemblySelect.replaceChildren(option("等待核心选择", ""));
+      findingSelect.disabled = true;
+      assemblySelect.disabled = true;
+      assemblyPrev.disabled = true;
+      assemblyNext.disabled = true;
+      renderInspector(inspector, null, null);
+      workflowNote.textContent = "完整配置前不生成空间、走线或热场结论。";
+      status.textContent = `方案还缺 ${readiness.missing.length} 项核心选择；完成后再生成 3D 场景。`;
+      root.classList.remove("is-hidden");
+      root.classList.add("is-partial");
+      fallback.classList.add("is-hidden");
+      stage.classList.remove("spatial-three-active");
+      stage.classList.add("spatial-three-pending");
+      mode = "pending";
+      hideLegacyToolbar();
+      if (state.selection) queueMicrotask(() => {
+        const current = store.getState();
+        if (!disposed && current.activePlan && buildReadiness(current.activePlan.draft.config, getCatalog()).status === "incomplete") publishSelection(null);
+      });
+      return;
+    }
+    root.classList.remove("is-partial", "is-hidden");
+    findingSelect.disabled = false;
+    assemblySelect.disabled = false;
+    fallback.classList.add("is-hidden");
+    if (!renderer) {
+      mode = "pending";
+      stage.classList.add("spatial-three-pending");
+      hideLegacyToolbar();
+    }
     const nextIdentity: SpatialEvaluationIdentity = {
       sourceKey: `${state.activePlan?.id ?? "no-plan"}:${state.activePlan?.draftRevision ?? -1}:${state.localRevision}`,
       snapshotHash: state.evaluationSnapshot?.evaluationHash ?? null,

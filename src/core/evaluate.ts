@@ -1,4 +1,5 @@
-import type { BuildConfig, BuildLineItem } from "../config/types";
+import type { BuildConfig, BuildLineItem, CaseFanGroupSelection } from "../config/types";
+import { buildReadiness, validateConfig, type BuildReadiness } from "../config/validate";
 import type { SkuCatalog } from "../sku/types";
 import { requireSku } from "../sku/catalog";
 import { evaluateOccupancy, type EngineFinding, type EngineResult } from "./engine";
@@ -28,8 +29,8 @@ import {
   type ThermalResult,
 } from "./thermal";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
-import { n6PowerProfile } from "./capabilities";
-import { evaluatePhysicalConstraints, type PhysicalEvaluation } from "./physical";
+import { caseCapabilities, n6PowerProfile } from "./capabilities";
+import { evaluatePhysicalConstraints, PHYSICAL_RULESET_VERSION, type PhysicalEvaluation } from "./physical";
 import { evaluateCalibration, type CalibrationEvaluation } from "./calibration";
 
 /**
@@ -86,6 +87,9 @@ export interface PowerEvaluation {
   hddW: number | null;
   hbaW: number | null;
   fanW: number | null;
+  /** Fan electrical heat split by the physical chamber of each mount. */
+  upperFanW: number | null;
+  lowerFanW: number | null;
   mainDcW: number | null;
   driveDcW: number | null;
   dcW: number | null;
@@ -117,9 +121,31 @@ export interface PriceLine {
   source?: string;
 }
 
+/**
+ * A purchase requirement that is physically configured but cannot enter the
+ * SKU BOM yet.  It deliberately carries no placeholder identity or estimates:
+ * the concrete product must be found and reviewed before procurement closes.
+ */
+export interface UnresolvedProcurementRequirement {
+  id: string;
+  category: "case-fan";
+  mountId: string;
+  mountLabel: string;
+  sizeMm: 120 | 140;
+  qty: number;
+  skuId: null;
+  unitPriceCny: null;
+  reason: "concrete-sku-not-reviewed";
+  unknownFields: ("skuId" | "unitPriceCny" | "noiseDba" | "airflowCfm")[];
+}
+
 export interface PriceEvaluation {
   knownCny: number;
   unknownSkuIds: string[];
+  /** Non-SKU requirements are excluded from knownCny and remain explicit here. */
+  unresolvedRequirements: UnresolvedProcurementRequirement[];
+  /** False when either a BOM price or a concrete requirement is unresolved. */
+  complete: boolean;
   items: PriceLine[];
   catalogUpdatedAt: string;
 }
@@ -135,13 +161,17 @@ export interface NoiseEvaluation {
  * Which fan mounts are populated is already in `ThermalEnv.fans`, so the geometry
  * model reads the same field rather than keeping a second copy that could drift.
  */
-export function geometryEnvFrom(env?: ThermalEnv): GeometryEnv {
+export function geometryEnvFrom(env?: Pick<ThermalEnv, "fans"> & Partial<ThermalEnv>): GeometryEnv {
   if (!env) return {};
   return {
     frontFans: env.fans.front ? (env.fans.front.size === 140 ? "140x2" : "120x2") : "none",
+    frontFanCount: env.fans.front?.count ?? 0,
     rearFan: Boolean(env.fans.rear?.count),
+    rearFanCount: env.fans.rear?.count ?? 0,
     driveFans: Boolean(env.fans.left?.count),
+    driveFanCount: env.fans.left?.count ?? 0,
     sideFans: Boolean(env.fans.right?.count),
+    sideFanCount: env.fans.right?.count ?? 0,
     ...(env.reserveHbaSlot ? { reserveHbaSlot: true } : {}),
     ...(env.gpuOverride ? { gpuOverride: env.gpuOverride } : {}),
   };
@@ -149,6 +179,8 @@ export function geometryEnvFrom(env?: ThermalEnv): GeometryEnv {
 
 export interface BuildEvaluation {
   config: BuildConfig;
+  /** Incomplete drafts are valid workspace state, but never masquerade as a full case evaluation. */
+  readiness: BuildReadiness;
   occupancy: EngineResult;
   wiring: WiringPlan;
   findings: EngineFinding[];
@@ -173,6 +205,40 @@ export interface BuildEvaluation {
   physical: PhysicalEvaluation;
   /** Raw calibration snapshot plus optional narrowed planning ranges. */
   calibration: CalibrationEvaluation;
+}
+
+/** Exclude mount rows that cannot physically contribute to this evaluation. */
+function effectiveGenericCaseFanGroups(config: BuildConfig, catalog?: SkuCatalog): CaseFanGroupSelection[] {
+  if (config.caseId !== n6Profile.caseId) return [];
+  const groups = config.selection.fanGroups ?? [];
+  return groups.filter((found) => {
+    if (catalog) {
+      const mount = caseCapabilities(config.caseId)?.fanMounts.find((entry) => entry.id === found.mountId);
+      const max = mount?.maxCountBySize[found.sizeMm];
+      if (!mount || !mount.supportedSizes.includes(found.sizeMm) || max === undefined || found.count < 1 || found.count > max) return false;
+      if (found.mountId === "left" && (config.selection.psuTopology === "bottom" || config.selection.psuTopology === "dual")) return false;
+      if (found.mountId === "rear" && !isSfx(config.selection.psuId, catalog) && (config.selection.psuTopology === "auto" || config.selection.psuTopology === "dual")) return false;
+      if (found.mountId === "front" && isSfx(config.selection.psuId, catalog) && (config.selection.psuTopology === "auto" || config.selection.psuTopology === "dual")) return false;
+      const cooler = catalog.skus.find((sku) => sku.id === config.selection.coolerId);
+      if (found.mountId === "front" && cooler?.attrs?.fitHint === "front240") return false;
+    }
+    return true;
+  });
+}
+
+/** Translate reviewed case mounts (and a reviewed AIO's bundled fans) into N6 airflow zones. */
+export function configuredFanGroups(config: BuildConfig, catalog?: SkuCatalog): ThermalEnv["fans"] {
+  const groups = effectiveGenericCaseFanGroups(config, catalog);
+  if (config.caseId !== n6Profile.caseId) return {};
+  const group = (mountId: string): FanGroupInput | null => {
+    const found = groups.find((entry) => entry.mountId === mountId);
+    return found ? { size: found.sizeMm, count: found.count } : null;
+  };
+  const fans: ThermalEnv["fans"] = { front: group("front"), rear: group("rear"), left: group("left"), right: group("right") };
+  const cooler = catalog?.skus.find((sku) => sku.id === config.selection.coolerId);
+  if (cooler?.attrs?.type === "aio" && cooler.attrs.radiatorMm === 240) fans.front = { size: 120, count: 2 };
+  if (cooler?.attrs?.type === "aio" && cooler.attrs.radiatorMm === 120) fans.rear = { size: 120, count: 1 };
+  return fans;
 }
 
 function isSfx(psuId: string, catalog: SkuCatalog): boolean {
@@ -215,17 +281,14 @@ export function derivePower(
   const unknown: string[] = [];
   const base = profile.boardBaseW;
   const fanBase = profile.fanBaseW;
-  const fanGroups = [env.fans?.front, env.fans?.rear, env.fans?.left, env.fans?.right].filter(Boolean);
-  const fanW =
-    fanBase === null ||
-    fanGroups.some((fan) => typeof fan?.count !== "number") ||
-    fanGroups.some((fan) => (fan?.size === 140 ? profile.fan140W : profile.fan120W) === null)
-      ? null
-      : fanBase +
-        fanGroups.reduce(
-          (sum, fan) => sum + (fan?.count ?? 0) * (fan?.size === 140 ? profile.fan140W! : profile.fan120W!),
-          0,
-        );
+  const fanGroupW = (fan: FanGroupInput | null | undefined): number | null => {
+    if (!fan) return 0;
+    const perFan = fan.size === 140 ? profile.fan140W : profile.fan120W;
+    return perFan === null ? null : fan.count * perFan;
+  };
+  const upperFanW = fanBase === null ? null : sumNullable([fanBase, fanGroupW(env.fans?.front), fanGroupW(env.fans?.rear), fanGroupW(env.fans?.right)]);
+  const lowerFanW = fanGroupW(env.fans?.left);
+  const fanW = sumNullable([upperFanW, lowerFanW]);
   if (base === null) unknown.push("power.boardBaseW");
   if (fanW === null) unknown.push("power.fanW");
 
@@ -275,7 +338,8 @@ export function derivePower(
     if (efficiency === null) unknown.push(`${role}.efficiency`);
     return { psuId: sku?.id ?? (role === "primary" ? config.selection.psuId : config.selection.secondaryPsuId ?? "unknown"), role, chamber, capacityW, dcLoadW: dc, wallW, wasteHeatW, efficiency, evidence };
   };
-  const psus = [psuLoad(mainPsu, "primary", dual ? "upper" : "upper", mainDcW)];
+  const primaryInLowerChamber = config.selection.psuTopology === "bottom";
+  const psus = [psuLoad(mainPsu, "primary", primaryInLowerChamber ? "lower" : "upper", mainDcW)];
   if (dual) psus.push(psuLoad(secondaryPsu, "secondary", "lower", driveDcW));
   const wallW = sumNullable(psus.map((load) => load.wallW));
   const psuWasteW = sumNullable(psus.map((load) => load.wasteHeatW));
@@ -288,8 +352,10 @@ export function derivePower(
   const headroomRatio = psus.every((load) => load.capacityW !== null && load.dcLoadW !== null)
     ? Math.min(...psus.map((load) => ((load.capacityW ?? 0) - (load.dcLoadW ?? 0)) / (load.capacityW ?? 1)))
     : null;
-  const upperDcW = sumNullable([base, fanW, cpuW, gpuW, hbaW]);
-  const lowerDcW = dual ? driveDcW : 0;
+  const upperDcW = sumNullable([base, upperFanW, cpuW, gpuW, hbaW]);
+  // This is the load carried by whichever PSU physically sits below the deck;
+  // thermal coupling must not confuse it with the chamber's component heat.
+  const lowerDcW = primaryInLowerChamber ? mainDcW : dual ? driveDcW : 0;
   const loads = { cpuW, gpuW, hbaW, psuDcW: mainDcW };
   const scenarios = [
     { label: "当前负载", wallW },
@@ -303,6 +369,8 @@ export function derivePower(
     hddW,
     hbaW,
     fanW,
+    upperFanW,
+    lowerFanW,
     mainDcW,
     driveDcW,
     dcW,
@@ -320,7 +388,30 @@ export function derivePower(
   };
 }
 
-function derivePrice(bom: BuildLineItem[], catalog: SkuCatalog): PriceEvaluation {
+function deriveFanProcurementRequirements(config: BuildConfig, catalog: SkuCatalog): UnresolvedProcurementRequirement[] {
+  const mounts = new Map((caseCapabilities(config.caseId)?.fanMounts ?? []).map((mount) => [mount.id, mount]));
+  return effectiveGenericCaseFanGroups(config, catalog).map((group) => {
+    const mount = mounts.get(group.mountId);
+    return {
+      id: `case-fan:${group.mountId}:${group.sizeMm}mm:${group.count}`,
+      category: "case-fan",
+      mountId: group.mountId,
+      mountLabel: mount?.label ?? group.mountId,
+      sizeMm: group.sizeMm,
+      qty: group.count,
+      skuId: null,
+      unitPriceCny: null,
+      reason: "concrete-sku-not-reviewed",
+      unknownFields: ["skuId", "unitPriceCny", "noiseDba", "airflowCfm"],
+    };
+  });
+}
+
+function derivePrice(
+  bom: BuildLineItem[],
+  catalog: SkuCatalog,
+  unresolvedRequirements: UnresolvedProcurementRequirement[] = [],
+): PriceEvaluation {
   const items = bom.map((line) => {
     const sku = catalog.skus.find((entry) => entry.id === line.skuId);
     const currentCny = typeof sku?.price.current === "number" ? sku.price.current : null;
@@ -344,11 +435,28 @@ function derivePrice(bom: BuildLineItem[], catalog: SkuCatalog): PriceEvaluation
       ...(sku?.price.listingUrl ? { source: sku.price.listingUrl } : {}),
     };
   });
-  return { knownCny: items.reduce((sum, item) => sum + (item.priceCny ?? 0) * item.qty, 0), unknownSkuIds: items.filter((item) => item.priceCny === null).map((item) => item.skuId), items, catalogUpdatedAt: catalog.updatedAt };
+  const unknownSkuIds = items.filter((item) => item.priceCny === null).map((item) => item.skuId);
+  return {
+    knownCny: items.reduce((sum, item) => sum + (item.priceCny ?? 0) * item.qty, 0),
+    unknownSkuIds,
+    unresolvedRequirements,
+    complete: unknownSkuIds.length === 0 && unresolvedRequirements.length === 0,
+    items,
+    catalogUpdatedAt: catalog.updatedAt,
+  };
 }
 
-function deriveNoise(): NoiseEvaluation {
-  return { totalDba: null, evidence: "unknown", parts: {}, unknown: ["fan SKU/noise profile", "in-chassis acoustic measurement"] };
+function deriveNoise(config: BuildConfig, catalog: SkuCatalog): NoiseEvaluation {
+  const gpu = catalog.skus.find((sku) => sku.id === config.selection.gpuId);
+  const gpuNoise = typeof gpu?.attrs?.noiseDba === "number" && Number.isFinite(gpu.attrs.noiseDba) ? gpu.attrs.noiseDba : null;
+  return {
+    // A component's published sound pressure cannot be arithmetically promoted
+    // to an in-chassis total without distance, fan curves and the other sources.
+    totalDba: null,
+    evidence: "unknown",
+    parts: gpuNoise === null ? {} : { gpu: gpuNoise },
+    unknown: ["fan SKU/noise profile", "in-chassis acoustic measurement", ...(gpuNoise === null && config.selection.gpuId !== "gpu.none" ? ["gpu acoustic measurement"] : [])],
+  };
 }
 
 export function deriveBom(config: BuildConfig, catalog: SkuCatalog): BuildLineItem[] {
@@ -684,8 +792,11 @@ function runThermal(
     : undefined;
   const working = env.workload !== "idle";
   const diskW = working ? disk?.power?.maxOperatingW : disk?.power?.idleW;
-  const psu = catalog.skus.find((s) => s.id === config.selection.psuId);
-  const eff = Number(psu?.attrs?.["cybeneticsEfficiency"]);
+  const lowerPsuId = config.selection.psuTopology === "dual"
+    ? config.selection.secondaryPsuId
+    : config.selection.psuId;
+  const psu = catalog.skus.find((s) => s.id === lowerPsuId);
+  const eff = Number(psu?.attrs?.["cybeneticsEfficiency"] ?? psu?.attrs?.["planningEfficiency"]);
 
   return computeThermal({
     components: componentInputs(
@@ -702,6 +813,7 @@ function runThermal(
     diskWattsEach: diskW!,
     diskEvidence: disk?.power?.evidence ?? "unknown",
     upperWatts: env.upperWatts,
+    lowerAuxWatts: env.power?.lowerFanW ?? 0,
     psuInLowerChamber,
     psuDcWatts: env.psuDcWatts,
     psuEfficiency: eff,
@@ -710,13 +822,91 @@ function runThermal(
   });
 }
 
+const MISSING_LABELS: Record<string, string> = {
+  caseId: "机箱",
+  boardId: "主板",
+  cpuId: "处理器",
+  "case.adapter": "机箱能力适配器",
+  "selection.psuId": "电源",
+  "selection.coolerId": "CPU 散热器",
+  "selection.gpuId": "显卡（也可明确选择暂不安装）",
+  "selection.memoryId": "内存",
+  "selection.diskSkuId": "数据硬盘型号",
+};
+
+function incompleteEvaluation(config: BuildConfig, catalog: SkuCatalog, readiness: BuildReadiness): BuildEvaluation {
+  const findings: EngineFinding[] = readiness.missing.map((path) => ({
+    id: `config.missing:${path}`,
+    verdict: "bad",
+    evidence: "unknown",
+    message: `${MISSING_LABELS[path] ?? path}尚未选择；可以继续逐件加入，完整兼容、接线与空间评估会在核心部件齐全后开始。`,
+    related: [path],
+  }));
+  const wiring: WiringPlan = {
+    caseId: config.caseId,
+    bayPaths: [],
+    backplanePower: [],
+    backplaneHarness: {
+      feedPsuId: config.selection.psuId,
+      feedRole: "main",
+      inlets: 0,
+      required: { sata: 0, molex: 0 },
+      confirmed: { sata: null, molex: null },
+      connectors: { sata: null, molex: null },
+      uniquePeripheralLeads: null,
+      oneLeadPerInlet: false,
+      daisyChainOnly: false,
+      peripheralSockets: null,
+      socketLimited: false,
+      spinUp: { diskCount: config.selection.diskCount, perDiskA: null, totalA: null, perInletA: null, perSharedLeadA: null, leadLimitW: null, evidence: "unknown", notes: ["方案尚未完整，未生成启转负载。"] },
+      verdict: "unknown",
+      evidence: "unknown",
+      notes: ["方案尚未完整，未生成背板线束结论。"],
+    },
+    checklist: [],
+    warnings: [],
+  };
+  const power: PowerEvaluation = {
+    workload: "idle", baseW: null, cpuW: null, gpuW: null, hddW: null, hbaW: null, fanW: null, upperFanW: null, lowerFanW: null,
+    mainDcW: null, driveDcW: null, dcW: null, wallW: null, pathologicalDcW: null, pathologicalWallW: null,
+    headroomRatio: null, psuWasteW: null, upperDcW: null, lowerDcW: null,
+    loads: { cpuW: null, gpuW: null, hbaW: null, psuDcW: null }, psus: [], scenarios: [], unknown: [...readiness.missing],
+  };
+  const physical: PhysicalEvaluation = {
+    schemaVersion: "1.0.0", rulesetVersion: PHYSICAL_RULESET_VERSION, hash: "unavailable", provenance: [], plugSweeps: [], bendRadius: [],
+    slotWidth: { gpuSlots: null, hbaSlots: 0, totalSlots: 0, evidence: "unknown" },
+    lane: { nvmeCount: config.selection.nvmeCount ?? 0, m2Slots: 0, slimSasClaimed: false, hbaPresent: false, evidence: "unknown" },
+    serviceSpace: { minimumInsertionMm: null, blockedPorts: [], evidence: "unknown" }, findings: [],
+  };
+  const calibration: CalibrationEvaluation = {
+    snapshot: {
+      schemaVersion: "1.0.0", calibrationVersion: "unavailable", caseId: config.caseId, source: "No resolved case evaluation", provenance: [],
+      wallPowerW: { value: null, evidence: "unknown", unit: "W" }, smartTemperatureC: { value: null, evidence: "unknown", unit: "°C" },
+      cpuTemperatureC: { value: null, evidence: "unknown", unit: "°C" }, gpuTemperatureC: { value: null, evidence: "unknown", unit: "°C" },
+      noiseDba: { value: null, evidence: "unknown", unit: "dBA" }, fanCurve: { mode: null, rpm: null, cfm: null, evidence: "unknown" },
+    },
+    unknown: ["wallPowerW", "smartTemperatureC", "cpuTemperatureC", "gpuTemperatureC", "noiseDba", "fanCurve"], provenance: [], narrowedRanges: {}, hash: "unavailable",
+  };
+  return {
+    config, readiness,
+    occupancy: { verdict: "bad", findings, conflicts: [] },
+    wiring, findings, bom: [], geometry: [], routing: { cables: [], ports: [], findings: [] }, assembly: { steps: [], constraints: [], findings: [] },
+    power, price: derivePrice([], catalog), noise: { totalDba: null, evidence: "unknown", parts: {}, unknown: ["方案尚未完整"] }, physical, calibration,
+  };
+}
+
 export function evaluateBuild(
   config: BuildConfig,
   catalog: SkuCatalog,
   env?: ThermalEnv,
 ): BuildEvaluation {
-  const power = env?.power ?? derivePower(config, catalog, env ?? {});
-  const geomEnv = geometryEnvFrom(env);
+  const readiness = buildReadiness(config, catalog);
+  if (readiness.status === "incomplete") return incompleteEvaluation(config, catalog, readiness);
+  const fans = configuredFanGroups(config, catalog);
+  const resolvedEnv = env ? { ...env, fanMode: config.selection.fanMode ?? "balanced", fans } : undefined;
+  const power = resolvedEnv?.power ?? derivePower(config, catalog, { ...(resolvedEnv ?? {}), fans });
+  const thermalEnv = resolvedEnv ? { ...resolvedEnv, power, loads: resolvedEnv.loads ?? power.loads } : undefined;
+  const geomEnv = geometryEnvFrom(resolvedEnv ?? { fans });
   const geometry = buildN6Geometry(config, catalog, geomEnv);
   const occupancyModel = buildN6Occupancy(config, catalog, geomEnv);
   const extra: EngineFinding[] = [
@@ -724,22 +914,21 @@ export function evaluateBuild(
     ...memoryCoolerFindings(config, catalog),
     ...psuLengthFindings(config, catalog),
     ...gpuHbaFindings(config, catalog),
+    ...validateConfig(config, catalog)
+      .filter((issue) => issue.verdict === "bad" && issue.path.startsWith("selection.fan"))
+      .map((issue, index): EngineFinding => ({ id: `fan.config:${index}:${issue.path}`, verdict: "bad", evidence: "official", message: issue.message, related: [config.caseId, issue.path] })),
   ];
-
-  const claimsFront = occupancyModel.occupants.some((o) => o.slotIds.includes("fan.front"));
-  const frontSfxOcc = occupancyModel.occupants.some((o) => o.slotIds.includes("psu.front_sfx"));
-  if (!claimsFront && (frontSfxOcc || config.selection.psuTopology === "auto")) {
-    occupancyModel.occupants.push({
-      id: "occ-front-fans-default",
-      skuId: "fan.front-placeholder",
-      slotIds: ["fan.front"],
-      evidence: "inferred",
-    });
-  }
 
   const occupancy = evaluateOccupancy(occupancyModel, extra);
   const wiring = planN6Wiring(config, catalog);
   const bom = deriveBom(config, catalog);
+  const unresolvedFanRequirements = deriveFanProcurementRequirements(config, catalog);
+  const fanProcurementFindings: EngineFinding[] = unresolvedFanRequirements.map((requirement) => ({
+    id: `procurement.unresolved:${requirement.id}`,
+    verdict: "warn",
+    evidence: "unknown",
+    message: `${requirement.mountLabel}已配置 ${requirement.qty} 个 ${requirement.sizeMm}mm 风扇，但这只是安装需求；具体风扇 SKU、单价、噪音与具体产品的实际风量尚未审核，不能视为预算或采购已完成。`,
+  }));
 
   const harness = wiring.backplaneHarness;
   const harnessFinding: EngineFinding = {
@@ -776,20 +965,23 @@ export function evaluateBuild(
   }
 
   const diskForThermal = catalog.skus.find((sku) => sku.id === (config.selection.diskSkuId ?? n6Profile.defaults.diskSkuId));
-  const diskWattsForThermal = env?.workload === "idle" ? diskForThermal?.power.idleW : diskForThermal?.power.maxOperatingW;
-  const psuForThermal = catalog.skus.find((sku) => sku.id === config.selection.psuId);
+  const diskWattsForThermal = thermalEnv?.workload === "idle" ? diskForThermal?.power.idleW : diskForThermal?.power.maxOperatingW;
+  const lowerPsuId = config.selection.psuTopology === "dual"
+    ? config.selection.secondaryPsuId
+    : config.selection.psuId;
+  const psuForThermal = catalog.skus.find((sku) => sku.id === lowerPsuId);
   const efficiencyForThermal = Number(psuForThermal?.attrs?.["cybeneticsEfficiency"] ?? psuForThermal?.attrs?.["planningEfficiency"]);
   const thermalInputsKnown = Boolean(
-    env &&
+    thermalEnv &&
       power.upperDcW !== null &&
       power.lowerDcW !== null &&
       typeof diskWattsForThermal === "number" &&
       Number.isFinite(efficiencyForThermal) &&
       efficiencyForThermal > 0,
   );
-  const thermal = thermalInputsKnown ? runThermal(config, catalog, env!, psuInLowerChamber) : undefined;
+  const thermal = thermalInputsKnown ? runThermal(config, catalog, thermalEnv!, psuInLowerChamber) : undefined;
   const thermalFindings: EngineFinding[] = [];
-  if (env && !thermalInputsKnown) {
+  if (thermalEnv && !thermalInputsKnown) {
     thermalFindings.push({
       id: "thermal.input-unknown",
       verdict: "warn",
@@ -798,13 +990,14 @@ export function evaluateBuild(
       related: [config.selection.diskSkuId ?? n6Profile.defaults.diskSkuId, config.selection.psuId],
     });
   }
-  if (thermal && env) {
-    if (psuInLowerChamber && (env.fans.left?.count ?? 0) > 0) {
+  if (thermal && thermalEnv) {
+    const requestedLeftFans = config.selection.fanGroups?.find((group) => group.mountId === "left")?.count ?? 0;
+    if (psuInLowerChamber && requestedLeftFans > 0) {
       thermalFindings.push({
         id: "thermal.left-fan-mount-conflict",
         verdict: "bad",
         evidence: "official",
-        message: `配置里装了左侧 ${env.fans.left?.count} 个风扇，但下置电源已按 §8.1 拆掉那块支架——两者不能同时成立。`,
+        message: `配置里请求安装左侧 ${requestedLeftFans} 个风扇，但下置电源已按 §8.1 拆掉那块支架——两者不能同时成立，评估未计入该风量。`,
         related: [config.selection.psuId, config.caseId],
       });
     }
@@ -845,6 +1038,7 @@ export function evaluateBuild(
     ...routing.findings,
     ...assembly.findings,
     ...physical.findings,
+    ...fanProcurementFindings,
     ...wiring.warnings.map(
       (w, i): EngineFinding => ({
         id: `wiring.warn.${i}`,
@@ -866,6 +1060,7 @@ export function evaluateBuild(
 
   return {
     config,
+    readiness,
     occupancy,
     wiring,
     findings: dedupeFindings(findings),
@@ -876,8 +1071,8 @@ export function evaluateBuild(
     routing,
     assembly,
     power,
-    price: derivePrice(bom, catalog),
-    noise: deriveNoise(),
+    price: derivePrice(bom, catalog, unresolvedFanRequirements),
+    noise: deriveNoise(config, catalog),
     physical,
     calibration,
     ...(thermal

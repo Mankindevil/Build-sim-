@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BuildPlan, BuildPlanSummary, PlanRepository, PlanVersion } from "../src/plans/contracts";
 import { PlanConflictError } from "../src/plans/conflict";
+import { PlanRepositoryError } from "../src/plans/errors";
 import { handleWorkspaceRoute } from "../src/server/workspace-routes";
 
 function repository(): PlanRepository {
@@ -13,6 +14,9 @@ function repository(): PlanRepository {
     updateDraft: async () => plan,
     saveVersion: async () => ({ id: "version-12345678" } as PlanVersion),
     duplicate: async () => ({ ...plan, id: "plan-87654321" }),
+    listEvidenceBindings: async () => [],
+    bindEvidence: async () => ({ id: "binding-sha256-" + "a".repeat(64) } as never),
+    unbindEvidence: async () => undefined,
     archive: async () => undefined,
     restore: async () => undefined,
     delete: async () => undefined,
@@ -28,6 +32,9 @@ describe("R1 workspace plan API", () => {
     await expect(handleWorkspaceRoute("PATCH", "/api/workspace/plans/plan-12345678", {}, store)).resolves.toMatchObject({ status: 200 });
     await expect(handleWorkspaceRoute("PATCH", "/api/workspace/plans/plan-12345678/draft", {}, store)).resolves.toMatchObject({ status: 200 });
     await expect(handleWorkspaceRoute("POST", "/api/workspace/plans/plan-12345678/versions", {}, store)).resolves.toMatchObject({ status: 201 });
+    await expect(handleWorkspaceRoute("GET", "/api/workspace/plans/plan-12345678/evidence-bindings", {}, store)).resolves.toMatchObject({ status: 200, payload: { bindings: [] } });
+    await expect(handleWorkspaceRoute("POST", "/api/workspace/plans/plan-12345678/evidence-bindings", {}, store)).resolves.toMatchObject({ status: 201 });
+    await expect(handleWorkspaceRoute("DELETE", `/api/workspace/plans/plan-12345678/evidence-bindings/binding-sha256-${"a".repeat(64)}`, { expectedRevision: 1 }, store)).resolves.toMatchObject({ status: 204 });
     await expect(handleWorkspaceRoute("POST", "/api/workspace/plans/plan-12345678/archive", {}, store)).resolves.toMatchObject({ status: 204 });
     await expect(handleWorkspaceRoute("POST", "/api/workspace/plans/plan-12345678/restore", {}, store)).resolves.toMatchObject({ status: 204 });
     await expect(handleWorkspaceRoute("DELETE", "/api/workspace/plans/plan-12345678", {}, store)).resolves.toMatchObject({ status: 204 });
@@ -46,6 +53,15 @@ describe("R1 workspace plan API", () => {
     await expect(handleWorkspaceRoute("PATCH", "/api/workspace/plans/plan-12345678/draft", {}, store)).resolves.toMatchObject({
       status: 409,
       payload: { error: "stale_revision" },
+    });
+  });
+
+  it("returns a 400 when authoritative draft validation rejects a fan group", async () => {
+    const store = repository();
+    store.updateDraft = async () => { throw new PlanRepositoryError("invalid_input", "Invalid BuildConfig: fan mount unavailable", 400); };
+    await expect(handleWorkspaceRoute("PATCH", "/api/workspace/plans/plan-12345678/draft", {}, store)).resolves.toEqual({
+      status: 400,
+      payload: { error: "invalid_input", message: "Invalid BuildConfig: fan mount unavailable" },
     });
   });
 });

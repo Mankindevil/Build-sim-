@@ -7,6 +7,7 @@ import { extractOfficialHtml, extractOfficialPdf } from "../scripts/price-server
 import { extractPdfContent } from "../scripts/price-server/catalog/fetch.mjs";
 import { inspectUrl } from "../scripts/price-server/catalog/service.mjs";
 import { acceptOfficial } from "../scripts/price-server/catalog/write.mjs";
+import { catalogCandidateInputHash } from "../scripts/price-server/catalog/contracts.mjs";
 
 const fetchResult = {
   requestedUrl: "https://www.asus.com/example",
@@ -141,6 +142,8 @@ describe("bounded scanned-PDF OCR", () => {
     try {
       const result = await acceptOfficial(candidate.candidateId, {
         candidate,
+        approved: true,
+        expectedHash: catalogCandidateInputHash(candidate),
         catalogWriteEnabled: true,
         catalogPath: path.join(root, "catalog.json"),
         auditRoot: path.join(root, "audit"),

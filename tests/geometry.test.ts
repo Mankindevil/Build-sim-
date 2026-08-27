@@ -3,6 +3,7 @@ import {
   AXES,
   clearanceGap,
   containsBox,
+  maxOn,
   toBoxMm,
   toCentered,
   type CenteredBox,
@@ -117,11 +118,24 @@ describe("everything lives inside the published envelope", () => {
     expect(N6_INTERIOR_BOX.h).toBe(N6_ENVELOPE_BOX.h - 6);
   });
 
+  it("keeps the rear-upper ATX PSU flush with the rear panel", () => {
+    const psu = byId(buildN6Geometry(cfg(), catalog), "psu.primary");
+    expect(maxOn(psu.box, "z")).toBeCloseTo(maxOn(N6_ENVELOPE_BOX, "z"), 6);
+    expect(psu.box.c[1]).toBeGreaterThan(0);
+  });
+
   it("leaves room in the lower chamber for the 120mm fans the manual puts there", () => {
     const parts = buildN6Geometry(cfg({ diskCount: 9, boot: "m2" }), catalog, { driveFans: true });
     const fans = parts.filter((p) => p.id.startsWith("fan.drive"));
     expect(fans).toHaveLength(2);
     for (const fan of fans) expect(containsBox(N6_INTERIOR_BOX, fan.box)).toBe(true);
+  });
+
+  it("draws the reviewed front 240 radiator and its two fans without inventing a tower height", () => {
+    const parts = buildN6Geometry(cfg({ coolerId: "cooler.aio-240-front" }), catalog);
+    expect(parts.some((part) => part.id === "cooler.pump")).toBe(true);
+    expect(parts.some((part) => part.id === "cooler.radiator")).toBe(true);
+    expect(parts.filter((part) => part.id.startsWith("fan.radiator."))).toHaveLength(2);
   });
 
   it("derives the tray cage from its own frame bars", () => {

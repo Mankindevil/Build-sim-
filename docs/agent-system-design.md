@@ -50,6 +50,7 @@ External-read Tools connect only to the fixed loopback catalog/price service and
 | `shopping-research` | official discovery, proposal explanation, governed enrichment and price candidates |
 | `assembly-and-wiring` | deterministic evaluation projection |
 | `plan-initializer` | requirement collection, governed local SKU discovery, research, comparison and atomic initialization proposal |
+| `geometry-evidence-audit` | read-only geometry, topology and local-evidence consistency audit |
 
 Skill metadata is discovered first. Instructions are loaded only after activation and included in the skill definition hash.
 
@@ -61,7 +62,7 @@ A4 implements a strict frontmatter parser, manifest validation against the live 
 - A1: server/browser evaluation parity.
 - A2: persistent multi-turn DeepSeek streaming chat with cancellation and usage. Implemented with provider fixtures and local disabled-provider HTTP/SSE smoke; live provider behavior remains unverified without an enabled key.
 - A3: registry, schema validation, dispatcher, budgets and seven read-only tools.
-- A4: lazy Skill loader and five built-in skills. Implemented with manifest/hash/integrity tests and runtime enforcement of `allowedTools`.
+- A4: lazy Skill loader and six built-in skills. Implemented with manifest/hash/integrity tests and runtime enforcement of `allowedTools`.
 - A5: real chat UI and browser end-to-end flow. Implemented with model/Skill selection, current BuildConfig snapshots, persistent sessions, SSE text/Tool/usage events, cancellation, disabled-service handling, desktop/mobile QA, and a local DeepSeek-protocol fixture. The fixture is not live-provider evidence.
 - A6: audit, redaction, definition hashes and write-approval contract; writes remain disabled. Implemented with atomic `0600` run records, content hashes rather than raw prompts/results, credential-shaped redaction, integrity verification, a read-only audit endpoint, and a short-lived execution-bound approval envelope contract. The Tool dispatcher still rejects every write Tool.
 - A7: Claude fixture adapter contract, full regression, browser QA, secret scan, documentation and implementation matrix. Implemented against Anthropic's official Messages streaming event flow and client Tool content blocks; live Claude remains unverified without an enabled key.

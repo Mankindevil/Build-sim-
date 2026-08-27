@@ -77,8 +77,9 @@ describe("G7 physical expansion, calibration and cross-layer facts", () => {
   });
 
   it("keeps fan count, missing fields, official conflict and advice provenance explicit", async () => {
-    const noFan = evaluateBuild(baseConfig, catalog, { ambientC: 25, fanMode: "balanced", fans: { front: null }, upperWatts: 120, psuDcWatts: 80 });
-    const twoFans = evaluateBuild(baseConfig, catalog, { ambientC: 25, fanMode: "balanced", fans: { front: { size: 120, count: 2 } }, upperWatts: 120, psuDcWatts: 80 });
+    const thermalEnv = { ambientC: 25, fanMode: "balanced" as const, fans: {}, upperWatts: 120, psuDcWatts: 80 };
+    const noFan = evaluateBuild({ ...baseConfig, selection: { ...baseConfig.selection, fanMode: "balanced", fanGroups: [] } }, catalog, thermalEnv);
+    const twoFans = evaluateBuild({ ...baseConfig, selection: { ...baseConfig.selection, fanMode: "balanced", fanGroups: [{ mountId: "front", sizeMm: 120, count: 2 }] } }, catalog, thermalEnv);
     expect(noFan.thermal?.chambers.upper.fanned).toBe(false);
     expect(twoFans.thermal?.chambers.upper.fanned).toBe(true);
     const missing = JSON.parse(await readFile(path.join(fixtureDir, "missing-fields.json"), "utf8")) as { fields?: Record<string, unknown> };

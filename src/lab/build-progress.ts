@@ -225,6 +225,10 @@ export function summarizePurchasePricing(evaluation: BuildEvaluation | null, ite
     } else if (future) result.remainingFutureKnownCny += price * line.qty;
     else result.remainingNowKnownCny += price * line.qty;
   }
+  // These requirements intentionally have no synthetic SKU/BOM row. Count each
+  // configured group as a pending price line so existing budget surfaces remain
+  // honest until a concrete fan product is reviewed.
+  result.remainingNowUnknownItems += evaluation.price.unresolvedRequirements?.length ?? 0;
   return result;
 }
 

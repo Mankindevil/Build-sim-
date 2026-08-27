@@ -23,19 +23,44 @@ export function createDefaultN6Config(planId: string, timestamp: string): BuildC
       boot: "bay",
       hbaMode: "auto",
       hbaSkuId: null,
+      fanMode: "balanced",
+      fanGroups: [{ mountId: "front", sizeMm: 140, count: 2 }],
     },
     bom: [],
   };
 }
 
-/**
- * A pending Agent plan still carries a valid internal config so the existing
- * deterministic UI can render while requirements are being collected. The
- * metadata flag is authoritative: none of these scaffold selections represent
- * a user recommendation until an initialization proposal is approved.
- */
+/** A real empty draft: no hidden case or component selection is implied. */
+export function createEmptyBuildConfig(planId: string, timestamp: string): BuildConfig {
+  return {
+    schemaVersion: "2.0.0",
+    id: planId,
+    name: "空白装机方案",
+    updatedAt: timestamp,
+    caseId: "",
+    boardId: "",
+    cpuId: "",
+    selection: {
+      psuId: "",
+      psuTopology: "auto",
+      coolerId: "",
+      gpuId: "",
+      memoryId: "",
+      diskCount: 0,
+      nvmeCount: 0,
+      boot: "m2",
+      hbaMode: "auto",
+      hbaSkuId: null,
+      fanMode: "balanced",
+      fanGroups: [],
+    },
+    bom: [],
+  };
+}
+
+/** A pending Agent plan uses the same honest empty draft; metadata gates atomic initialization. */
 export function createAgentInitializationScaffold(planId: string, timestamp: string): { config: BuildConfig; metadata: BuildPlanMetadata } {
-  const config = createDefaultN6Config(planId, timestamp);
+  const config = createEmptyBuildConfig(planId, timestamp);
   config.name = "待 Agent 初始化方案";
   return {
     config,

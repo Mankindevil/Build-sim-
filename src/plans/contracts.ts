@@ -1,5 +1,10 @@
 import type { BuildConfig } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
+import type {
+  EvidenceCapture,
+  EvidenceDocument,
+  PlanEvidenceBinding,
+} from "../evidence/contracts";
 
 export const PLAN_SCHEMA_VERSION = "1.0.0" as const;
 
@@ -21,7 +26,7 @@ export interface BuildIntent {
 
 export interface PlanInitializationState {
   status: "pending" | "initialized";
-  source: "agent" | "template";
+  source: "agent" | "template" | "manual";
   intent?: BuildIntent;
   proposalId?: string;
   initializedAt?: string;
@@ -38,6 +43,8 @@ export interface PlanDraft {
   schemaVersion: PlanSchemaVersion;
   baseVersionId: string | null;
   config: BuildConfig;
+  /** Mutable evidence edges for the draft. Legacy plans may omit this field. */
+  evidenceBindings?: PlanEvidenceBinding[];
   dirty: boolean;
   updatedAt: string;
 }
@@ -78,9 +85,20 @@ export interface PlanVersion {
   readonly summary?: string;
   readonly config: Readonly<BuildConfig>;
   readonly configHash: string;
+  /** Immutable evidence edges pinned when this version was saved. */
+  readonly evidenceBindings?: readonly PlanEvidenceBinding[];
+  /** Canonical SHA-256 of evidenceBindings for version-integrity checks. */
+  readonly evidenceHash?: string;
   readonly evaluationHash?: string;
   readonly evaluatedAt?: string;
   readonly parentVersionId: string | null;
+}
+
+export interface PlanEvidenceSummary {
+  readonly count: number;
+  readonly bindings: ReadonlyArray<Pick<PlanEvidenceBinding,
+    "documentId" | "captureId" | "subject" | "purposes" | "locators"
+  >>;
 }
 
 export interface PlanEvaluationSnapshot {
@@ -111,10 +129,12 @@ export interface PlanAgentContext {
   spatialViewContext?: unknown;
   purchaseSummary: unknown;
   buildTaskSummary: unknown;
+  /** Read-only, bounded projection of draft evidence bindings. */
+  evidenceSummary?: PlanEvidenceSummary;
   initialization?: PlanInitializationState;
 }
 
-export const PLAN_PATCH_PATHS = [
+export const PLAN_PATCH_PATHS = Object.freeze([
   "/name",
   "/caseId",
   "/boardId",
@@ -132,9 +152,11 @@ export const PLAN_PATCH_PATHS = [
   "/selection/boot",
   "/selection/hbaMode",
   "/selection/hbaSkuId",
+  "/selection/fanMode",
+  "/selection/fanGroups",
   "/bom",
   "/notes",
-] as const;
+] as const);
 
 export type PlanPatchPath = (typeof PLAN_PATCH_PATHS)[number];
 
@@ -230,6 +252,33 @@ export interface DuplicatePlanInput {
   idempotencyKey?: string;
 }
 
+export interface BindPlanEvidenceInput {
+  expectedRevision: number;
+  documentId: PlanEvidenceBinding["documentId"];
+  /** Optional optimistic pin supplied by a caller; repository facts remain authoritative. */
+  contentHash?: string;
+  captureId?: PlanEvidenceBinding["captureId"];
+  subject: PlanEvidenceBinding["subject"];
+  purposes: PlanEvidenceBinding["purposes"];
+  locators?: PlanEvidenceBinding["locators"];
+  note?: string;
+  idempotencyKey?: string;
+}
+
+export interface UnbindPlanEvidenceInput {
+  expectedRevision: number;
+  bindingId: PlanEvidenceBinding["id"];
+  idempotencyKey?: string;
+}
+
+export type EvidenceDocumentLookup = (
+  documentId: PlanEvidenceBinding["documentId"],
+) => EvidenceDocument | null | Promise<EvidenceDocument | null>;
+
+export type EvidenceCaptureLookup = (
+  captureId: NonNullable<PlanEvidenceBinding["captureId"]>,
+) => EvidenceCapture | null | Promise<EvidenceCapture | null>;
+
 export interface PlanRepository {
   list(): Promise<BuildPlanSummary[]>;
   get(planId: string): Promise<BuildPlan>;
@@ -238,6 +287,9 @@ export interface PlanRepository {
   updateDraft(planId: string, input: UpdateDraftInput): Promise<BuildPlan>;
   saveVersion(planId: string, input: SaveVersionInput): Promise<PlanVersion>;
   duplicate(planId: string, input: DuplicatePlanInput): Promise<BuildPlan>;
+  listEvidenceBindings(planId: string): Promise<PlanEvidenceBinding[]>;
+  bindEvidence(planId: string, input: BindPlanEvidenceInput): Promise<PlanEvidenceBinding>;
+  unbindEvidence(planId: string, input: UnbindPlanEvidenceInput): Promise<void>;
   archive(planId: string): Promise<void>;
   restore(planId: string): Promise<void>;
   delete(planId: string): Promise<void>;

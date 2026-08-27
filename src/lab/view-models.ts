@@ -390,21 +390,27 @@ export function buildLabCatalogs(catalog: SkuCatalog): {
   for (const sku of byCategory(catalog, "gpu")) {
     const ex = GPU_EXTRAS[sku.id] ?? {};
     const band = displayBand(sku, ex.price);
+    const capacityText = typeof sku.attrs?.capacity === "string" ? sku.attrs.capacity : "";
+    const parsedVram = capacityText.match(/(\d+(?:\.\d+)?)\s*GB\b/i)?.[1];
+    const parsedMemoryTechnology = capacityText.match(/\b(GDDR\d+X?|HBM\d*[A-Z]?)\b/i)?.[1]?.toLocaleUpperCase();
+    const noiseFromSku = typeof sku.attrs?.noiseDba === "number" ? sku.attrs.noiseDba
+      : typeof sku.attrs?.planningNoiseDba === "number" ? sku.attrs.planningNoiseDba
+        : null;
     gpus[sku.id] = {
       name: sku.name,
-      kind: ex.kind ?? "—",
-      vram: (sku.attrs?.vramGb as number | undefined) ?? null,
+      kind: (sku.attrs?.memoryTechnology as string | undefined) ?? parsedMemoryTechnology ?? ex.kind ?? "—",
+      vram: (sku.attrs?.vramGb as number | undefined) ?? (parsedVram ? Number(parsedVram) : null),
       tgp: sku.power.tgpW ?? null,
       idle: sku.power.idleW ?? null,
       length: sku.dims.lengthMm ?? null,
       slots: sku.dims.slots ?? null,
-      noise: ex.noise ?? null,
+      noise: noiseFromSku ?? ex.noise ?? null,
       price: band,
       mid: typeof sku.price.current === "number" ? sku.price.current : (ex.mid ?? midOf(band)),
       official: sku.price.note ?? "—",
-      cooling: ex.cooling ?? "—",
+      cooling: (sku.attrs?.cooling as string | undefined) ?? ex.cooling ?? "待官网/实测补充",
       ai: ex.ai ?? "—",
-      specificGeometry: ex.specificGeometry ?? false,
+      specificGeometry: ex.specificGeometry ?? Boolean(sku.dims.lengthMm && sku.dims.slots),
       ...(ex.newPrice ? { newPrice: ex.newPrice } : {}),
     };
   }

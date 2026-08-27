@@ -27,6 +27,7 @@
     "price:serve": "node scripts/price-server/server.mjs",
     "price:login": "node scripts/price-server/login.mjs",
     "price:fixture": "node scripts/price-server/fixture.mjs",
+    "evidence:import-bundled": "node scripts/evidence/import-bundled-manuals.mjs",
     "agent:build": "vite build --config vite.agent.config.ts",
     "agent:serve": "npm run agent:build && node dist-agent/agent-server.js",
     "agent:fixture": "node scripts/agent-provider-fixture.mjs",

@@ -84,13 +84,16 @@ Build Sim 当前可作为本地 Alpha 版本使用，仍在持续开发中。
 - 支持候选发现、详情页规格检查、合理性门禁和显式人工确认。
 - 具备可信官网域名注册表、SSRF 防护、重定向与响应体上限、HTML / JSON-LD / 规格表 / PDF 提取、可选扫描 PDF OCR 和字段级来源记录。
 - 未知官网域名会进入提案状态；搜索候选、待审草稿和正式目录事实保持为不同阶段。
+- 官方手册和数据表可从受治理的商品页 / 支持页发现，经现有 SSRF 安全边界获取，并归档到全局 SHA-256 内容寻址仓库。同一份不可变文档可对应多个官方获取记录，也可被多个方案引用而不复制字节。
+- capture 会明确保留型号关联的证据强度：`official-document-explicit` 表示已从受检文档本身确认型号，`governed-sku-user-asserted` 与 `official-domain-only` 仍是待复核关联。用户选择的文档类型同样标为 `user-asserted`，不会静默升级成官方事实。
+- 草稿证据绑定使用 revision 乐观锁；不可变方案版本会固定文档 hash、capture、适用对象、用途和页码 / 章节 locator。删除方案或解绑不会级联删除共享文档。
 
 ### Advice 与 Agent
 
 - 可选 DeepSeek 结构化装机建议，并在本地记录 usage 和费用估算审计。
 - Provider-neutral 流式多轮 Agent，支持本地会话持久化、取消、Skills、Tools、定义哈希和可校验审计记录。
-- 当前包含 7 个本地只读/提案 Tool、5 个外部只读 Tool，以及 1 个受治理的写 Tool：`enrich_official_catalog`。
-- 内置五个 Skill：`plan-initializer`、`build-diagnosis`、`upgrade-advisor`、`shopping-research`、`assembly-and-wiring`。
+- Agent 提供受治理的本地 / 外部只读 Tool、不可变提案 Tool，以及带审批边界的目录写 Tool；几何审计现在可以读取已绑定证据，并发现同品牌官网文档候选。
+- 内置六个 Skill：`plan-initializer`、`build-diagnosis`、`upgrade-advisor`、`shopping-research`、`assembly-and-wiring`、`geometry-evidence-audit`。
 - 新建方案可选择“使用 Agent 初始化”：待初始化方案只保留内部渲染脚手架；Agent 收集用途、预算等需求，只能从受治理目录选择精确 SKU，并生成必须整体人工批准的原子初始化提案。
 - Tool schema、运行预算、Skill 可用 Tool、回环服务边界和带外写审批均由服务端执行，而不是只依赖 Prompt。
 
@@ -660,6 +663,12 @@ Amazon 美元价格使用明确汇率，并保持为参考价格。UI 不会把�
 | `GET` | `/api/catalog/search/:id` | 读取发现任务 |
 | `POST` | `/api/catalog/inspect` | 抓取并检查候选 |
 | `GET` | `/api/catalog/domain-proposals` | 列出未知域名提案 |
+| `POST` | `/api/evidence/discover` | 从受治理 SKU 或 URL 发现同品牌官方手册 / 数据表 |
+| `POST` | `/api/evidence/acquisitions` | 获取并归档一个明确的可信官方文档 URL |
+| `GET` | `/api/evidence/documents/:id` | 读取不可变元数据与 capture 历史 |
+| `GET` | `/api/evidence/documents/:id/content` | 按 SHA-256 ETag 读取原始归档字节 |
+| `POST` | `/api/evidence/documents/:id/excerpts` | 从已归档 PDF / 文本中读取有界、只读摘录 |
+| `GET` | `/api/evidence/captures/:id` | 读取一次官方获取记录 |
 
 其余提案、草稿和接受接口属于管理接口。请保持私有，并在接入自动化前以实现和测试为准。
 
@@ -681,11 +690,16 @@ Amazon 美元价格使用明确汇率，并保持为参考价格。UI 不会把�
 
 这些 API 仍属于 Alpha 契约，稳定版之前可能变化。
 
+Workspace 服务通过 `GET/POST /api/workspace/plans/:id/evidence-bindings` 和 `DELETE /api/workspace/plans/:id/evidence-bindings/:bindingId` 管理方案证据绑定；绑定和解绑都要求当前草稿 revision。
+
 ## 数据、证据与安全
 
 - 官方、实测、重建、估算、合成 fixture、OCR 和真实 Provider 证据是不同类别。
 - 缺失或冲突的数据保持 `unknown`，不得为填补空白而虚构精确数值。
 - 官网 URL 抓取执行可信域名、DNS / IP 检查、重定向上限、响应体上限和 SSRF 防护。
+- 证据字节只在 `runtime/evidence/blobs/sha256/` 保存一份；元数据和 URL 索引带校验和、原子写入，并在读取时重新校验。首次升级可运行 `npm run evidence:import-bundled` 迁移仓库内两份手册快照。
+- 方案编辑页的“官方证据”流程要求用户明确执行“发现 → 归档 → 绑定”；多个方案只保存同一文档哈希的引用，不复制文档字节。
+- Agent 只能发现和读取有界摘录，不能自行归档或绑定；摘录按不可信外部文本处理，型号关联和文档类型会展示其证据强度。
 - Provider 凭据只保存在服务端环境中，不进入浏览器变量。
 - Agent Tool 输入输出经过 schema 和预算限制；Skill `allowedTools` 在实际派发时再次执行。
 - 审计文件会脱敏 Key / Bearer 模式并包含完整性哈希，但部署者仍需负责文件权限、备份、保留策略和事件响应。

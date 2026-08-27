@@ -69,6 +69,7 @@ export interface AgentRuntimeConfig {
   sessionRoot: string;
   auditRoot: string;
   skillsRoot: string;
+  catalogPersistRoot: string;
   deepseek: DeepSeekAgentConfig;
   claude: ClaudeAgentConfig;
 }
@@ -104,6 +105,7 @@ export function parseAgentRuntimeConfig(env: Record<string, string | undefined>)
     sessionRoot: path.resolve(env.AGENT_SESSION_ROOT || "data/agent/sessions"),
     auditRoot: path.resolve(env.AGENT_AUDIT_ROOT || "data/agent/audit"),
     skillsRoot: path.resolve(env.BUILD_SIM_SKILLS_ROOT || "skills"),
+    catalogPersistRoot: path.resolve(env.CATALOG_PERSIST_ROOT || "runtime"),
     deepseek: { ...deepseek, enabled: enabled && deepseek.enabled },
     claude,
   };

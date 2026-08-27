@@ -32,7 +32,8 @@ export class CatalogCacheDiscoveryProvider {
   async discover({ query, limit }) {
     const wanted = `${query.brand ?? ""} ${query.model ?? ""} ${query.mpn ?? ""}`.trim().toLocaleLowerCase();
     return (this.catalog.skus ?? []).flatMap((sku) => {
-      const haystack = `${sku.brand} ${sku.model} ${sku.name} ${sku.mpn ?? ""}`.toLocaleLowerCase();
+      const aliases = Array.isArray(sku.attrs?.searchTerms) ? sku.attrs.searchTerms.join(" ") : "";
+      const haystack = `${sku.brand} ${sku.model} ${sku.name} ${sku.mpn ?? ""} ${aliases}`.toLocaleLowerCase();
       const exactMpn = Boolean(query.mpn && sku.mpn && query.mpn.toLocaleLowerCase() === sku.mpn.toLocaleLowerCase());
       const significantTokens = (query.tokens ?? []).filter((token) => token.length >= 2);
       const tokenMatch = significantTokens.length >= 2 && significantTokens.every((token) => haystack.includes(token));

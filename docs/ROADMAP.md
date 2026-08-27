@@ -1,5 +1,14 @@
 # Roadmap
 
+> Status note: the universal hardware platform plan below is a contract and
+> execution roadmap, not a claim that the capabilities are deployed. U0 freezes
+> schemas, boundaries, fixtures, and feature-flag defaults; it does not turn on
+> the implementation.
+
+The authoritative plan is [Universal Hardware Platform Follow Plan](./superpowers/plans/2026-08-27-universal-hardware-platform-follow-plan.md).
+It replaces the former “additional case adapters are unscheduled” position.
+JONSBO N6 remains the first regression adapter, not the product boundary.
+
 ## Done (V1 import)
 
 - Interactive N6 preview (primary UI at `index.html`)
@@ -28,6 +37,19 @@
 | Build execution | Stable sourceRef tasks reconciled from BOM/assembly/wiring/findings; saved-version checklist hashes |
 | Quality gates | Full lifecycle E2E, desktop/tablet/mobile screenshots, offline/corruption/failure tests, accessibility, cleanup and performance budgets |
 
+## U0 contract freeze (verified contracts; runtime capabilities remain gated)
+
+| Deliverable | Status |
+|---|---|
+| 4.0–4.12 contract documents, registries, trusted resolver gates, and patch boundaries | Frozen and contract-tested in `docs/architecture/` and `src/` |
+| Golden vectors and universal fixtures | Frozen; seven formal domains match in Node and Chromium, with offline catalog/fact closure |
+| Feature flags | Present and default off until the corresponding U-stage exits |
+
+U0 is complete only when the contract, fixtures, tests, hashes, and baseline
+evidence described by the authoritative plan exist. A document in this section
+must not be read as proof that runtime repositories, a solver, durable jobs,
+portable import, or Doctor already exist.
+
 ## Next up
 
 | Track | State |
@@ -38,14 +60,14 @@
 | Legacy shell reduction | Continue extracting the remaining detail-panel template only after the current uncommitted UI work is integrated; do not risk silently dropping working controls |
 | Public hosting | Authentication, tenancy, application rate limiting, backup/restore automation, and deployment-specific hardening remain prerequisites |
 
-## V2.1 (explicitly later)
+## V2.1 (superseded by the U plan where overlapping)
 
-- Price **history** series + optional SMZDM OpenAPI over the same snapshot schema
 - Post-build calibration (wall power, temps, SMART, noise)
 - Richer spatial views / product textures on 3D envelopes (manual pages remain evidence only)
 
 ## Future (not scheduled)
 
-- Additional case adapters beyond JONSBO N6
-- General ATX / mATX / ITX desktop build flows
-- Multi-board catalogs without a locked NAS baseline
+- Capabilities outside the authoritative U0–U12 contract (for example,
+  multi-user tenancy or public-hosting features)
+- Product behavior that would silently broaden the frozen safety, evidence, or
+  topology boundaries

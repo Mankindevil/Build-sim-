@@ -4,6 +4,14 @@ export type BootMode = "bay" | "m2" | "usbssd";
 export type HbaMode = "auto" | "always";
 export type PsuTopology = "auto" | "bottom" | "dual";
 export type DualStart = "sync" | "none" | null;
+export type FanMode = "quiet" | "balanced" | "performance";
+
+/** A populated fan row on a case mount. Mount ids are issued by the case profile. */
+export interface CaseFanGroupSelection {
+  mountId: string;
+  sizeMm: 120 | 140;
+  count: number;
+}
 
 export interface BuildSelection {
   psuId: string;
@@ -20,6 +28,10 @@ export interface BuildSelection {
   boot: BootMode;
   hbaMode: HbaMode;
   hbaSkuId?: string | null;
+  /** Fan policy is persisted with the plan so local and authoritative evaluations agree. */
+  fanMode?: FanMode;
+  /** Missing on legacy 2.0 configs means “not recorded”; consumers treat it as empty. */
+  fanGroups?: CaseFanGroupSelection[];
 }
 
 export interface BuildLineItem {
@@ -79,6 +91,8 @@ export function parseConfig(raw: string): BuildConfig {
         boot: (oldSelection.boot ?? "bay") as BootMode,
         hbaMode: (oldSelection.hbaMode ?? "auto") as HbaMode,
         ...(oldSelection.hbaSkuId ? { hbaSkuId: String(oldSelection.hbaSkuId) } : {}),
+        fanMode: "balanced",
+        fanGroups: [],
       },
       bom: Array.isArray(input.bom) ? input.bom as BuildLineItem[] : [],
       ...(Array.isArray(input.notes) ? { notes: input.notes.map(String) } : {}),
@@ -93,5 +107,19 @@ export function parseConfig(raw: string): BuildConfig {
   if (!["auto", "bottom", "dual"].includes(data.selection.psuTopology)) throw new Error("Malformed BuildConfig: invalid PSU topology");
   if (!["bay", "m2", "usbssd"].includes(data.selection.boot)) throw new Error("Malformed BuildConfig: invalid boot mode");
   if (!["auto", "always"].includes(data.selection.hbaMode)) throw new Error("Malformed BuildConfig: invalid HBA mode");
+  if (data.selection.fanMode !== undefined && !["quiet", "balanced", "performance"].includes(data.selection.fanMode)) throw new Error("Malformed BuildConfig: invalid fan mode");
+  if (data.selection.fanGroups !== undefined) {
+    if (!Array.isArray(data.selection.fanGroups) || data.selection.fanGroups.length > 16) throw new Error("Malformed BuildConfig: invalid fan groups");
+    const seen = new Set<string>();
+    for (const group of data.selection.fanGroups) {
+      if (!group || typeof group !== "object" || typeof group.mountId !== "string" || !group.mountId.trim()) throw new Error("Malformed BuildConfig: invalid fan mount id");
+      if (seen.has(group.mountId)) throw new Error("Malformed BuildConfig: duplicate fan mount id");
+      seen.add(group.mountId);
+      if (group.sizeMm !== 120 && group.sizeMm !== 140) throw new Error("Malformed BuildConfig: invalid fan size");
+      if (!Number.isSafeInteger(group.count) || group.count < 1 || group.count > 16) throw new Error("Malformed BuildConfig: invalid fan count");
+      const keys = Object.keys(group as unknown as Record<string, unknown>);
+      if (keys.some((key) => !["mountId", "sizeMm", "count"].includes(key))) throw new Error("Malformed BuildConfig: unexpected fan group field");
+    }
+  }
   return data;
 }

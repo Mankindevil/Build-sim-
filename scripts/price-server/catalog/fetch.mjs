@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
-import { DEFAULT_FETCH_LIMITS, validateOfficialUrlResolved } from "./security.mjs";
+import https from "node:https";
+import { Readable } from "node:stream";
+import { DEFAULT_FETCH_LIMITS, resolvePublicAddresses, validateOfficialUrl } from "./security.mjs";
+import { registryForUrl } from "./registry.mjs";
 import { ocrPdfBuffer } from "./pdf-ocr.mjs";
 
 async function readLimited(response, maxBytes) {
@@ -66,38 +69,119 @@ function boundedEnvInt(name, fallback, min, max) {
   return Number.isInteger(value) && value >= min && value <= max ? value : fallback;
 }
 
+function conditionalRequestHeaders(input) {
+  const provided = new Headers(input ?? {});
+  const headers = {};
+  for (const [name, maxLength] of [["if-none-match", 1_024], ["if-modified-since", 256]]) {
+    const value = provided.get(name);
+    if (value === null) continue;
+    if (!value || value.length > maxLength || /[\r\n]/.test(value)) throw new Error(`official ${name} header is invalid`);
+    headers[name] = value;
+  }
+  return headers;
+}
+
+function pinnedHttpsFetch(url, init, addresses) {
+  const selected = addresses.find((entry) => entry.family === 4) ?? addresses[0];
+  if (!selected) throw new Error("official DNS lookup returned no addresses");
+  return new Promise((resolve, reject) => {
+    const request = https.request(url, {
+      method: "GET",
+      headers: init.headers,
+      signal: init.signal,
+      servername: url.hostname,
+      lookup: (_hostname, lookupOptions, callback) => {
+        if (lookupOptions?.all) callback(null, [{ address: selected.address, family: selected.family }]);
+        else callback(null, selected.address, selected.family);
+      },
+    }, (incoming) => {
+      const headers = new Headers();
+      for (let index = 0; index < incoming.rawHeaders.length; index += 2) {
+        const name = incoming.rawHeaders[index];
+        const value = incoming.rawHeaders[index + 1];
+        if (name && value !== undefined) headers.append(name, value);
+      }
+      const status = incoming.statusCode ?? 502;
+      const withoutBody = status === 204 || status === 205 || status === 304;
+      if (withoutBody) incoming.resume();
+      resolve(new Response(withoutBody ? null : Readable.toWeb(incoming), {
+        status,
+        statusText: incoming.statusMessage,
+        headers,
+      }));
+    });
+    request.once("error", reject);
+    request.end();
+  });
+}
+
+async function resolveOfficialTarget(rawUrl, options) {
+  const url = validateOfficialUrl(rawUrl, options);
+  if (options.expectedBrand) {
+    const actualBrand = registryForUrl(url, options.registry)?.brand;
+    if (!actualBrand || actualBrand.toLocaleLowerCase() !== String(options.expectedBrand).toLocaleLowerCase()) {
+      throw new Error("official redirect crossed the expected manufacturer brand");
+    }
+  }
+  const addresses = await resolvePublicAddresses(url.hostname, options);
+  return { url, addresses };
+}
+
 export async function fetchOfficial(rawUrl, options = {}) {
   const limits = { ...DEFAULT_FETCH_LIMITS, ...options };
-  let current = await validateOfficialUrlResolved(rawUrl, limits);
+  const fetchImpl = options.fetchImpl;
+  const requestHeaders = conditionalRequestHeaders(options.requestHeaders);
+  let target = await resolveOfficialTarget(rawUrl, limits);
+  let current = target.url;
   const redirects = [];
   const retrievedAt = new Date().toISOString();
   let response;
+  let responseTimer;
+  let responseController;
   for (let attempt = 0; attempt <= limits.maxRedirects; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), limits.timeoutMs);
     try {
-      response = await fetch(current, {
+      const init = {
         redirect: "manual",
         signal: controller.signal,
-        headers: { "user-agent": "Build-Sim catalog verifier/1.0", accept: "text/html,application/xhtml+xml,application/pdf;q=0.9" },
-      });
+        headers: {
+          "user-agent": "Build-Sim catalog verifier/1.0",
+          accept: "text/html,application/xhtml+xml,application/pdf;q=0.9",
+          ...requestHeaders,
+        },
+      };
+      response = fetchImpl ? await fetchImpl(current, init) : await pinnedHttpsFetch(current, init, target.addresses);
     } catch (error) {
-      throw new Error(error?.name === "AbortError" ? "official fetch timeout" : `official fetch failed: ${error?.message ?? error}`);
-    } finally {
       clearTimeout(timer);
+      throw new Error(error?.name === "AbortError" ? "official fetch timeout" : `official fetch failed: ${error?.message ?? error}`);
     }
-    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      responseTimer = timer;
+      responseController = controller;
+      break;
+    }
+    clearTimeout(timer);
+    await response.body?.cancel().catch(() => undefined);
     const location = response.headers.get("location");
     if (!location) throw new Error("redirect without location");
-    const next = await validateOfficialUrlResolved(new URL(location, current).toString(), limits);
-    redirects.push(next.toString());
-    current = next;
+    target = await resolveOfficialTarget(new URL(location, current).toString(), limits);
+    redirects.push(target.url.toString());
+    current = target.url;
   }
   if (!response) throw new Error("official fetch returned no response");
   if ([301, 302, 303, 307, 308].includes(response.status)) throw new Error("too many redirects");
-  const rawBody = await readLimited(response, limits.maxBytes);
+  let rawBody;
+  try {
+    rawBody = await readLimited(response, limits.maxBytes);
+  } catch (error) {
+    if (responseController?.signal.aborted || error?.name === "AbortError") throw new Error("official fetch timeout");
+    throw error;
+  } finally {
+    clearTimeout(responseTimer);
+  }
   const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
-  const pdf = contentType.includes("pdf")
+  const pdf = options.extractContent !== false && response.status !== 304 && contentType.includes("pdf")
     ? await extractPdfContent(rawBody, {
       maxBytes: limits.maxBytes,
       ocrEnabled: options.pdfOcrEnabled ?? process.env.CATALOG_PDF_OCR_ENABLED === "1",
@@ -118,6 +202,7 @@ export async function fetchOfficial(rawUrl, options = {}) {
     retrievedAt,
     body,
     contentHash: crypto.createHash("sha256").update(rawBody).digest("hex"),
+    ...(options.includeBody === true ? { rawBody } : {}),
     ...(pdf ? { pdfExtraction: pdf.extraction } : {}),
     ...(response.headers.get("etag") ? { etag: response.headers.get("etag") } : {}),
     ...(response.headers.get("last-modified") ? { lastModified: response.headers.get("last-modified") } : {}),

@@ -1,5 +1,6 @@
-import { loadBundledCatalog, requireSku, bundledPriceSummary } from "../sku/catalog";
-import { derivePower, evaluateBuild, type BuildEvaluation, type PowerEvaluation, type ThermalEnv } from "../core/evaluate";
+import { loadBundledCatalog, loadBundledPriceSnapshot, loadRawCatalog, requireSku, bundledPriceSummary } from "../sku/catalog";
+import type { SkuCatalog, SkuRecord } from "../sku/types";
+import { configuredFanGroups, derivePower, evaluateBuild, type BuildEvaluation, type PowerEvaluation, type ThermalEnv } from "../core/evaluate";
 import { EVIDENCE_LABELS } from "../core/evidence";
 import { sampleSlice, type FieldBounds, type SlicePlane } from "../core/thermal-field";
 import { N6_DECK_Y, N6_ENVELOPE_BOX, N6_INTERIOR_BOX } from "../adapters/jonsbo-n6/geometry";
@@ -10,12 +11,17 @@ import {
   serializeConfig,
 } from "../config/io";
 import type { BuildConfig, BootMode, HbaMode, PsuTopology } from "../config/types";
+import { buildReadiness } from "../config/validate";
 import type { FanMode, FanGroupInput } from "../core/thermal";
 import { buildLabCatalogs } from "./view-models";
-import { formatSnapshotStamp } from "../price/types";
 import { applyPriceSnapshot, snapshotSummary } from "../price/merge";
-import { buildSkuSearchLinks, pickOfficialUrl } from "../price/search";
 import { getLocalSnapshot, initPricePanel, updatePriceCatalog } from "./price-panel";
+import {
+  escapeRuntimeHtml,
+  renderBackplaneHarnessSummary,
+  renderRuntimeProductGallery,
+  type RuntimeProductCard,
+} from "./runtime-dom";
 import { planPanelWiring } from "../wiring/panel";
 import { boardSataPorts, boardStorage, nativeSataCeiling } from "../core/policy";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
@@ -26,6 +32,8 @@ import { initAgentPanel, type AgentPanelController } from "./agent-panel";
 import { buildAdviceInput } from "../advice/validate";
 import { initBuildProgress, type BuildProgressController } from "./build-progress";
 import { initTransactionImport, type TransactionImportController, type TransactionImportPlanContext } from "./transaction-import";
+import { applyArchivedPurchasesAsDefaults } from "./transaction-plan-default";
+import { applyAcceptedCatalogSkuToPlan, syncCatalogCategoryOptions, upsertCatalogSku } from "./catalog-runtime";
 import { WorkspaceApiClient } from "../plans/client";
 import { PlanStore } from "../plans/client-store";
 import { canonicalJson, sha256Hex } from "../plans/canonical";
@@ -36,12 +44,17 @@ import { WorkspaceRouter } from "./workspace-router";
 import { mountWorkspacePages, type WorkspacePagesController } from "./workspace-pages";
 import { EvaluationCoordinator } from "../plans/evaluation";
 import { mountSpatialView, type SpatialViewController } from "./spatial-view";
+import { clearPartialResolvedSurfaces, markResolvedSurfacesReady } from "./partial-surfaces";
 import { createPlanAgentContext } from "../agent/plan-context";
 import type { PlanAgentContext } from "../plans/contracts";
 import "./design-system.css";
 
+// Keep identity/spec facts separate from the active price overlay. Otherwise a
+// later price refresh would rebuild from the bundled JSON and silently discard
+// SKUs that were accepted during this browser session.
+let catalogFacts = structuredClone(loadRawCatalog());
 let catalog = loadBundledCatalog();
-const views = buildLabCatalogs(catalog);
+let views = buildLabCatalogs(catalog);
 let priceStamp = bundledPriceSummary();
 let latestEvaluation: BuildEvaluation | null = null;
 let buildProgress: BuildProgressController | null = null;
@@ -72,13 +85,82 @@ function $(id: string): HTMLElement | null {
 }
 
 function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[char] ?? char);
+  return escapeRuntimeHtml(value);
+}
+
+function replaceRecord<T>(target: Record<string, T>, source: Record<string, T>): void {
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target, source);
+}
+
+function syncCatalogSelectors(): void {
+  const selectors = [
+    ["psu-select", "psu"],
+    ["secondary-psu-select", "psu"],
+    ["cooler-select", "cooler"],
+    ["gpu-select", "gpu"],
+    ["ram-select", "memory"],
+  ] as const;
+  for (const [id, category] of selectors) {
+    const select = $(id) as HTMLSelectElement | null;
+    if (select) syncCatalogCategoryOptions(select, catalog, category);
+  }
+}
+
+function installCatalog(next: SkuCatalog): void {
+  catalogFacts = structuredClone(next);
+  catalog = applyPriceSnapshot(catalogFacts, getLocalSnapshot() ?? loadBundledPriceSnapshot());
+  updatePriceCatalog(catalog);
+  const nextViews = buildLabCatalogs(catalog);
+  views = nextViews;
+  syncCatalogSelectors();
+  if (window.__N6_LAB__) {
+    replaceRecord(window.__N6_LAB__.psus, nextViews.psus);
+    replaceRecord(window.__N6_LAB__.coolers, nextViews.coolers);
+    replaceRecord(window.__N6_LAB__.gpus, nextViews.gpus);
+    replaceRecord(window.__N6_LAB__.rams, nextViews.rams);
+    replaceRecord(window.__N6_LAB__.officialProducts, nextViews.officialProducts);
+  }
+}
+
+function installAcceptedSku(sku: SkuRecord): void {
+  installCatalog(upsertCatalogSku(catalogFacts, sku));
+  refreshCatalogConsumers();
+}
+
+function refreshCatalogConsumers(): void {
+  evaluationCoordinator.clear();
+  workspacePages?.refreshCatalog();
+  // A supplemented record can change the evaluation even when the selected
+  // SKU id stays the same. Re-render without manufacturing a plan revision.
+  window.__N6_LAB_API__?.render();
+}
+
+async function loadRuntimeCatalog(requiredSkuId?: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await fetch("/api/price/catalog", { headers: { Accept: "application/json" }, signal: controller.signal });
+    if (!response.ok) return false;
+    const payload = await response.json() as SkuCatalog | { catalog?: SkuCatalog };
+    const next = (payload as { catalog?: SkuCatalog }).catalog ?? payload as SkuCatalog;
+    if (!next || !Array.isArray(next.skus)) return false;
+    if (requiredSkuId && !next.skus.some((sku) => sku.id === requiredSkuId)) return false;
+    installCatalog(next);
+    return true;
+  } catch {
+    // The bundled catalog remains a complete offline fallback.
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function reconcileAcceptedSku(sku: SkuRecord): Promise<void> {
+  // Make the reviewed row usable immediately, then reconcile the whole merged
+  // catalog so concurrent acceptances and the authoritative version arrive too.
+  installAcceptedSku(sku);
+  if (await loadRuntimeCatalog(sku.id)) refreshCatalogConsumers();
 }
 
 function findingTitle(message: string): string {
@@ -115,6 +197,13 @@ function configFromDomLegacy(): BuildConfig {
       boot,
       hbaMode,
       hbaSkuId: hbaMode === "always" ? n6Profile.hba.defaultSkuId : null,
+      fanMode: (val("fan-select") || "balanced") as FanMode,
+      fanGroups: [
+        (document.getElementById("front-fans") as HTMLInputElement | null)?.checked ? { mountId: "front", sizeMm: 140 as const, count: 2 } : null,
+        (document.getElementById("rear-fan") as HTMLInputElement | null)?.checked ? { mountId: "rear", sizeMm: 120 as const, count: 1 } : null,
+        (document.getElementById("drive-fans") as HTMLInputElement | null)?.checked ? { mountId: "left", sizeMm: 120 as const, count: 2 } : null,
+        (document.getElementById("side-fans") as HTMLInputElement | null)?.checked ? { mountId: "right", sizeMm: 120 as const, count: 2 } : null,
+      ].filter((group): group is NonNullable<typeof group> => group !== null),
     },
     bom: [],
   };
@@ -204,11 +293,21 @@ function applyConfigToDom(config: BuildConfig): void {
   set("gpu-select", config.selection.gpuId);
   set("ram-select", config.selection.memoryId);
   set("disk-range", String(config.selection.diskCount));
-  if (config.selection.nvmeCount) set("nvme-select", String(config.selection.nvmeCount));
+  if (config.selection.nvmeCount !== undefined) set("nvme-select", String(config.selection.nvmeCount));
   set("boot-select", config.selection.boot);
   set("hba-select", config.selection.hbaMode);
   if (config.selection.secondaryPsuId) set("secondary-psu-select", config.selection.secondaryPsuId);
   if (config.selection.dualStart) set("dual-start-select", config.selection.dualStart);
+  set("fan-select", config.selection.fanMode ?? "balanced");
+  const groups = configuredFanGroups(config);
+  const checked = (id: string, value: boolean) => {
+    const input = $(id) as HTMLInputElement | null;
+    if (input) input.checked = value;
+  };
+  checked("front-fans", Boolean(groups.front?.count));
+  checked("rear-fan", Boolean(groups.rear?.count));
+  checked("drive-fans", Boolean(groups.left?.count));
+  checked("side-fans", Boolean(groups.right?.count));
 }
 
 function evidenceLabel(level: keyof typeof EVIDENCE_LABELS): string {
@@ -270,7 +369,7 @@ function updateWiringFromEngine(result: ReturnType<typeof evaluateBuild>): void 
           : b.target === "none"
             ? b.portLabel
             : `${targetZh[b.target] ?? b.target} · ${b.portLabel}`;
-        return `<div class="port-card" data-target="${empty ? "empty" : b.target}"><b>Bay ${b.bayIndex}</b><span>${label}</span><small>${evidenceLabel(b.evidence)}${b.note ? " — " + b.note : ""}</small></div>`;
+        return `<div class="port-card" data-target="${escapeHtml(empty ? "empty" : b.target)}"><b>Bay ${b.bayIndex}</b><span>${escapeHtml(label)}</span><small>${escapeHtml(evidenceLabel(b.evidence))}${b.note ? " — " + escapeHtml(b.note) : ""}</small></div>`;
       })
       .join("");
   }
@@ -301,7 +400,7 @@ function updateBackplaneHarness(wiring: ReturnType<typeof evaluateBuild>["wiring
       check.verdict === "unknown"
         ? "线数未锁定"
         : `独立外围线 ${check.uniquePeripheralLeads ?? "unknown"}/${check.inlets} · SATA ${check.confirmed.sata}/${check.required.sata} · Molex ${check.confirmed.molex}/${check.required.molex}`;
-    count.innerHTML = `${role}<br><b>${psuName}</b><br>${leads}`;
+    renderBackplaneHarnessSummary(count, role, psuName, leads);
   }
 
   const callout = $("harness-warning");
@@ -447,7 +546,7 @@ const WAYPOINTS = new Map(
   ),
 );
 
-const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const esc = (s: string): string => escapeRuntimeHtml(s);
 
 /**
  * Routing table: one row per solved cable run.
@@ -632,7 +731,7 @@ function updateAssembly(result: BuildEvaluation): void {
       // heading of seven plugs would describe the group wrongly.
       const head = row.count > 1 ? `${row.family}线束` : row.label;
       return (
-        `<li data-kind="${row.kind}"${row.deadlocked ? ' data-deadlocked="true"' : ""}>` +
+        `<li data-kind="${esc(row.kind)}"${row.deadlocked ? ' data-deadlocked="true"' : ""}>` +
         `<b>${STEP_VERB[row.kind] ?? ""}${esc(head)}</b>` +
         (row.count > 1 ? `<span class="as-count">${row.count} 个接头</span>` : "") +
         (reason ? `<span class="as-why">${esc(reason)}</span>` : "") +
@@ -697,7 +796,7 @@ function updateAirBalance(result: ReturnType<typeof evaluateBuild>): void {
     // A chamber with no fan is running on leakage alone; that is the headline, not the ΔT.
     const level = !ch.fanned ? "bad" : ch.riseK.hi > 12 ? "warn" : "ok";
     cells.push(
-      `<div class="air-cell" data-level="${level}"><h4>${ch.label}${ch.fanned ? "" : " · 无风扇"}</h4><dl>` +
+      `<div class="air-cell" data-level="${level}"><h4>${escapeHtml(ch.label)}${ch.fanned ? "" : " · 无风扇"}</h4><dl>` +
         `<dt>热负荷</dt><dd>${range(ch.loadW.lo, ch.loadW.hi, "W")}</dd>` +
         `<dt>估算风量</dt><dd>${range(ch.cfm.lo, ch.cfm.hi, " CFM")}</dd>` +
         `<dt>空气温升</dt><dd>${range(ch.riseK.lo, ch.riseK.hi, "K")}</dd>` +
@@ -741,7 +840,7 @@ function updateAirBalance(result: ReturnType<typeof evaluateBuild>): void {
     assume.innerHTML = thermal.assumptions
       .map(
         (a) =>
-          `<div class="air-assume-row"><b>${a.label}</b><span>${a.value}</span><em>${evidenceLabel(a.evidence)}</em><small>${a.note}</small></div>`,
+          `<div class="air-assume-row"><b>${escapeHtml(a.label)}</b><span>${escapeHtml(a.value)}</span><em>${escapeHtml(evidenceLabel(a.evidence))}</em><small>${escapeHtml(a.note)}</small></div>`,
       )
       .join("");
   }
@@ -760,70 +859,31 @@ function updateCalibration(result: BuildEvaluation): void {
 function updateGalleryFromSkus(config: BuildConfig): void {
   const gallery = $("product-gallery");
   if (!gallery) return;
+  const cards: RuntimeProductCard[] = [];
+  const add = (skuId: string | null | undefined, status: string, qty = 1): void => {
+    if (!skuId) return;
+    const sku = catalog.skus.find((entry) => entry.id === skuId);
+    if (!sku) return;
+    cards.push({ name: `${sku.name}${qty > 1 ? ` ×${qty}` : ""}`, status, skuId });
+  };
+  add(config.caseId, "已选择");
+  add(config.boardId, "已选择");
+  add(config.cpuId, "已选择");
+  add(config.selection.memoryId, "待购");
+  if ((config.selection.nvmeCount ?? 0) > 0) add(n6Profile.defaults.ownedNvmeSkuId, "已有", config.selection.nvmeCount);
+  add(config.selection.psuId, "待购");
+  add(config.selection.coolerId, "待购");
+  if (config.selection.diskCount > 0) add(config.selection.diskSkuId, "待购", config.selection.diskCount);
+  add(config.selection.gpuId, config.selection.gpuId === "gpu.none" ? "暂不安装" : "未来");
 
-  const cards: { name: string; status: string; skuId: string; note?: string }[] = [
-    { name: requireSku(catalog, config.caseId).name, status: "已购", skuId: config.caseId },
-    { name: requireSku(catalog, config.boardId).name, status: "已购", skuId: config.boardId },
-    { name: requireSku(catalog, config.cpuId).name, status: "已购", skuId: config.cpuId },
-    { name: requireSku(catalog, config.selection.memoryId).name, status: "待购", skuId: config.selection.memoryId },
-    { name: `${requireSku(catalog, n6Profile.defaults.ownedNvmeSkuId).name} ×${n6Profile.defaults.ownedNvmeQty}`, status: "已有", skuId: n6Profile.defaults.ownedNvmeSkuId },
-    { name: requireSku(catalog, config.selection.psuId).name, status: "待购", skuId: config.selection.psuId },
-    { name: requireSku(catalog, config.selection.coolerId).name, status: "待购", skuId: config.selection.coolerId },
-    {
-      name: `${requireSku(catalog, config.selection.diskSkuId ?? n6Profile.defaults.diskSkuId).name} ×${config.selection.diskCount}`,
-      status: "待购",
-      skuId: config.selection.diskSkuId ?? n6Profile.defaults.diskSkuId,
-    },
-    {
-      name: requireSku(catalog, config.selection.gpuId).name,
-      status: config.selection.gpuId === "gpu.none" ? "暂不安装" : "未来",
-      skuId: config.selection.gpuId,
-    },
-  ];
-
-  gallery.innerHTML = cards
-    .map((card) => {
-      const sku = catalog.skus.find((s) => s.id === card.skuId);
-      const ref = sku?.appearance;
-      const snap = sku?.price.snapshot;
-      const priceBit = snap
-        ? ` · ¥${sku?.price.current} (${formatSnapshotStamp(snap)}${snap.variantLabel ? ` · 规格 ${snap.variantLabel}` : ""}${snap.provenanceId ? ` · prov ${snap.provenanceId.slice(0, 12)}` : ""})`
-        : typeof sku?.price.current === "number"
-          ? ` · ¥${sku.price.current}`
-          : typeof sku?.price.paid === "number"
-            ? ` · 成交 ¥${sku.price.paid}`
-            : " · 价 unknown";
-      const searchLinks = sku
-        ? buildSkuSearchLinks(sku, pickOfficialUrl(sku))
-            .map(
-              (l) =>
-                `<a href="${l.url}" target="_blank" rel="noreferrer" title="搜索词：${l.query}">${l.label}</a>`,
-            )
-            .join(" · ")
-        : "";
-      const visual =
-        ref?.image
-          ? `<img src="${ref.image}" alt="${card.name} 厂商官方产品图" loading="lazy"><div class="product-placeholder">图片未加载；可打开官方页</div>`
-          : `<div class="product-placeholder">${ref?.note ?? "尚无对应官方缓存图"}</div>`;
-      const missing = ref?.image ? "false" : "true";
-      const link = ref?.page
-        ? `<a href="${ref.page}" target="_blank" rel="noreferrer">查看厂商官方页</a>`
-        : "";
-      const searchRow = searchLinks
-        ? `<small class="price-search-links">搜料号：${searchLinks}</small>`
-        : "";
-      return `<article class="product-card"><div class="product-visual" data-missing="${missing}">${visual}</div><div class="product-card-body"><b>${card.name}</b><span>${card.status}${priceBit}</span><small>${ref?.note ?? card.note ?? "精确 SKU 外观卡"}</small>${link}${searchRow}</div></article>`;
-    })
-    .join("");
-
-  gallery.querySelectorAll(".product-visual img").forEach((img) => {
-    img.addEventListener("error", () => {
-      (img.parentElement as HTMLElement).dataset.missing = "true";
-    });
-  });
+  renderRuntimeProductGallery(gallery, cards, catalog);
 }
 
 function updatePriceStamp(): void {
+  if (latestEvaluation?.readiness.status === "incomplete") {
+    clearPartialResolvedSurfaces(document, `方案还缺 ${latestEvaluation.readiness.missing.length} 项核心选择；先在“选择硬件”里逐件加入。`);
+    return;
+  }
   const pricing = buildProgress?.pricing();
   const formatKnown = (knownCny: number, unknownItems: number): string =>
     `¥${Math.round(knownCny).toLocaleString("zh-CN")}${unknownItems ? ` + ${unknownItems} 项待补` : ""}`;
@@ -868,8 +928,7 @@ function updatePriceStamp(): void {
  */
 function reapplyLocalPrices(): void {
   const overlay = getLocalSnapshot();
-  const base = loadBundledCatalog();
-  catalog = overlay ? applyPriceSnapshot(base, overlay) : base;
+  catalog = applyPriceSnapshot(catalogFacts, overlay ?? loadBundledPriceSnapshot());
   priceStamp = overlay ? snapshotSummary(overlay) : bundledPriceSummary();
 
   const next = buildLabCatalogs(catalog);
@@ -891,13 +950,14 @@ function reapplyLocalPrices(): void {
 function evaluate(options?: LabEvaluationOptions): BuildEvaluation {
   const config = configFromDom();
   if (!options) return evaluateBuild(config, catalog);
-  const power: PowerEvaluation = derivePower(config, catalog, options);
+  const persistedOptions = { ...options, fanMode: config.selection.fanMode ?? "balanced", fans: configuredFanGroups(config, catalog) };
+  const power: PowerEvaluation = derivePower(config, catalog, persistedOptions);
   const lower = config.selection.psuTopology === "bottom" || config.selection.psuTopology === "dual";
   if (power.upperDcW === null || (lower && power.lowerDcW === null)) {
     return evaluateBuild(config, catalog);
   }
   const thermal: ThermalEnv = {
-    ...options,
+    ...persistedOptions,
     upperWatts: power.upperDcW,
     psuDcWatts: lower ? power.lowerDcW! : 0,
     loads: power.loads,
@@ -910,6 +970,14 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   const evaluation = result ?? evaluate(env);
   latestEvaluation = evaluation;
   updateFitFromEngine(evaluation);
+  if (evaluation.readiness.status === "incomplete") {
+    const message = `方案还缺 ${evaluation.readiness.missing.length} 项核心选择；先在“选择硬件”里逐件加入。`;
+    clearPartialResolvedSurfaces(document, message);
+    updateGalleryFromSkus(evaluation.config);
+    publishEvaluation(evaluation);
+    return;
+  }
+  markResolvedSurfacesReady(document);
   updateWiringFromEngine(evaluation);
   updateBackplaneHarness(evaluation.wiring);
   updatePanelWiring(evaluation.config);
@@ -919,6 +987,10 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
   updateCalibration(evaluation);
   updateGalleryFromSkus(evaluation.config);
   updatePriceStamp();
+  publishEvaluation(evaluation);
+}
+
+function publishEvaluation(evaluation: BuildEvaluation): void {
   buildProgress?.syncEvaluation(evaluation);
   planStore?.setEvaluation(evaluation);
   const state = planStore?.getState();
@@ -988,6 +1060,7 @@ function bindConfigChrome(): void {
 const PLAN_CONFIG_INPUT_IDS = new Set([
   "psu-select", "psu-position", "secondary-psu-select", "dual-start-select", "cooler-select",
   "gpu-select", "ram-select", "disk-range", "boot-select", "nvme-select", "hba-select",
+  "fan-select", "front-fans", "rear-fan", "drive-fans", "side-fans",
 ]);
 
 function bindPlanStoreToDom(): void {
@@ -1022,6 +1095,8 @@ declare global {
       rams: typeof views.rams;
       officialProducts: typeof views.officialProducts;
       skuName: (id: string) => string;
+      escapeText: (value: unknown) => string;
+      renderProductGallery: (config: BuildConfig) => void;
       ids: { caseId: string; boardId: string; cpuId: string; nvmeId: string; hbaId: string; diskId: string };
       profile: typeof n6Profile;
       /** Board storage facts, so the runtime never restates a count the SKU owns. */
@@ -1031,6 +1106,7 @@ declare global {
       priceSnapshot: ReturnType<typeof bundledPriceSummary>;
       /** Runs the V2 engine for the current DOM config. Pure and synchronous. */
       evaluate: (options?: LabEvaluationOptions) => BuildEvaluation;
+      isConfigReady: () => boolean;
       /** Millimetre-registered slice of the heat field, for the 2D canvas. */
       thermalSlice: (
         field: FieldBounds,
@@ -1059,6 +1135,7 @@ declare global {
 }
 
 async function boot(): Promise<void> {
+  await loadRuntimeCatalog();
   planStore = new PlanStore({ api: new WorkspaceApiClient(), storage: window.localStorage });
   await planStore.initialize();
   buildTaskStore = new BuildTaskStore(window.localStorage);
@@ -1074,6 +1151,8 @@ async function boot(): Promise<void> {
   window.__N6_LAB__ = {
     ...views,
     skuName: (id: string) => requireSku(catalog, id).name,
+    escapeText: escapeRuntimeHtml,
+    renderProductGallery: updateGalleryFromSkus,
     ids: {
       caseId: "case.jonsbo-n6",
       boardId: BOARD_ID,
@@ -1088,6 +1167,7 @@ async function boot(): Promise<void> {
       nativeSataCeiling(boardSataPorts(catalog, BOARD_ID, nvmeCount)),
     priceSnapshot: bundledPriceSummary(),
     evaluate,
+    isConfigReady: () => buildReadiness(configFromDom(), catalog).status === "ready",
     thermalSlice: sampleSlice,
     caseGeometry: {
       envelope: { w: N6_ENVELOPE_BOX.w, h: N6_ENVELOPE_BOX.h, d: N6_ENVELOPE_BOX.d },
@@ -1124,6 +1204,20 @@ async function boot(): Promise<void> {
   buildProgress = initBuildProgress({
     getCatalog: () => catalog,
     baseSkuIds: ["case.jonsbo-n6", BOARD_ID, "cpu.i5-14500"],
+    onTransactionsArchived: (items) => {
+      const state = planStore?.getState();
+      if (!state?.activePlan) return [];
+      const activePlan = state.activePlan;
+      const eligible = items.filter((item) => {
+        const link = item.planLink;
+        return link?.planId === activePlan.id && link.planVersionIdAtCapture === activePlan.activeVersionId;
+      });
+      if (!eligible.length) return [];
+      const next = structuredClone(activePlan.draft.config);
+      const changed = applyArchivedPurchasesAsDefaults(next, eligible, activePlan.id, catalog);
+      if (changed.length) planStore?.replaceDraft(next);
+      return changed;
+    },
     getPlanContext: () => {
       const state = planStore?.getState();
       return state?.activePlan && state.evaluation ? { planId: state.activePlan.id, planVersionId: state.activePlan.activeVersionId, planName: state.activePlan.name, evaluation: state.evaluation } : null;
@@ -1131,7 +1225,7 @@ async function boot(): Promise<void> {
     getPlans: () => planStore?.getState().plans.map((plan) => ({ id: plan.id, name: plan.name })) ?? [],
   });
   if (labRoot && router && planStore) {
-    workspacePages = mountWorkspacePages(labRoot, planStore, router, buildTaskStore ?? undefined, buildProgress ?? undefined);
+    workspacePages = mountWorkspacePages(labRoot, planStore, router, buildTaskStore ?? undefined, buildProgress ?? undefined, () => catalog);
     // The purchase editor is now a real route surface rather than a modal.
     // Populate its current-plan projection immediately, before the user visits it.
     $("build-base-edit")?.click();
@@ -1150,6 +1244,26 @@ async function boot(): Promise<void> {
   buildProgress.subscribe(syncBuildTasks);
   transactionImport = initTransactionImport({
     onImport: (record, screenshot) => buildProgress?.stageTransaction(record, screenshot),
+    onCatalogSkuAccepted: ({ sku, planId, planVersionIdAtReview, localRevisionAtReview, planItemId }) => {
+      installAcceptedSku(sku);
+      const state = planStore?.getState();
+      if (!state?.activePlan || state.activePlan.id !== planId) {
+        return { appliedToPlan: false, message: `SKU ${sku.name} 已进入正式目录；审核期间活动方案已切换，未自动修改方案。` };
+      }
+      if (localRevisionAtReview !== null && state.localRevision !== localRevisionAtReview) {
+        return { appliedToPlan: false, message: `SKU ${sku.name} 已进入正式目录；审核期间方案发生变化，未覆盖你的新修改。` };
+      }
+      if (state.activePlan.activeVersionId !== planVersionIdAtReview) {
+        return { appliedToPlan: false, message: `SKU ${sku.name} 已进入正式目录；审核期间方案版本发生变化，未自动修改方案。` };
+      }
+      const next = structuredClone(state.activePlan.draft.config);
+      const appliedPart = applyAcceptedCatalogSkuToPlan(next, sku, planItemId);
+      if (!appliedPart) {
+        return { appliedToPlan: false, message: `SKU ${sku.name} 已进入正式目录；本次没有替换未明确关联的方案部件。` };
+      }
+      planStore?.replaceDraft(next);
+      return { appliedToPlan: true, message: `已将 ${sku.name} 加入正式目录，并设为当前方案${appliedPart}。` };
+    },
     getCatalogSku: (skuId) => catalog.skus.find((entry) => entry.id === skuId) ?? null,
     getPlanContext: () => {
       const state = planStore?.getState();
@@ -1158,12 +1272,13 @@ async function boot(): Promise<void> {
         const sku = catalog.skus.find((entry) => entry.id === line.skuId);
         return { id: line.skuId, skuId: line.skuId, name: sku?.name ?? line.skuId, category: sku?.category ?? "其他" };
       });
-      if (state.activePlan.draft.config.selection.gpuId === "gpu.none") {
+      if (!state.activePlan.draft.config.selection.gpuId || state.activePlan.draft.config.selection.gpuId === "gpu.none") {
         items.push({ id: "gpu.primary", skuId: "gpu.none", name: "显卡未配置（可关联本次购买）", category: "gpu", placeholder: true });
       }
       return {
         planId: state.activePlan.id,
         planVersionId: state.activePlan.activeVersionId,
+        localRevision: state.localRevision,
         planName: state.activePlan.name,
         items,
       };
@@ -1188,6 +1303,10 @@ async function boot(): Promise<void> {
     getPlanContext: currentPlanAgentContext,
     subscribePlanContext: (listener) => planStore?.subscribe(() => listener()) ?? (() => undefined),
     acceptServerPlan: (plan) => planStore?.acceptServerPlan(plan),
+    // Catalog acceptance and plan mutation deliberately stay separate. Chat
+    // installs the server-confirmed SKU as an option; applying it still goes
+    // through the existing plan-change review card in a later Agent turn.
+    onCatalogSkuAccepted: (sku) => reconcileAcceptedSku(sku),
   });
   window.addEventListener("pagehide", (event) => {
     if ((event as PageTransitionEvent).persisted) return;

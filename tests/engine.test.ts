@@ -143,9 +143,26 @@ describe("wiring + config", () => {
     expect(result.power.psus[0]?.dcLoadW).toBeGreaterThan(0);
     expect(result.power.psus[1]?.dcLoadW).toBeGreaterThan(0);
     expect(result.power.psus[1]?.chamber).toBe("lower");
+    expect(result.thermal?.coupling.psuWasteW).toBeCloseTo(result.power.psus[1]?.wasteHeatW ?? -1, 6);
     expect(result.power.dcW).toBeCloseTo((result.power.mainDcW ?? 0) + (result.power.driveDcW ?? 0));
     expect(result.power).toBe(result.power);
     expect(result.price.items).toEqual(result.bom.map((line) => expect.objectContaining({ skuId: line.skuId, qty: line.qty })));
+  });
+
+  it("attributes a bottom primary PSU load and waste heat to the lower chamber", () => {
+    const cfg = structuredClone(baseline) as BuildConfig;
+    cfg.selection.psuTopology = "bottom";
+    cfg.selection.psuId = "psu.corsair-sf750-atx31";
+    cfg.selection.fanGroups = [];
+    const power = derivePower(cfg, catalog, { workload: "idle", fans: {} });
+    const result = evaluateBuild(cfg, catalog, {
+      workload: "idle", ambientC: 25, fanMode: "balanced", fans: {},
+      upperWatts: power.upperDcW ?? 0, psuDcWatts: power.lowerDcW ?? 0,
+      power, loads: power.loads,
+    });
+    expect(power.psus[0]).toMatchObject({ role: "primary", chamber: "lower", dcLoadW: power.mainDcW });
+    expect(power.lowerDcW).toBe(power.mainDcW);
+    expect(result.thermal?.coupling.psuWasteW).toBeCloseTo(power.psus[0]?.wasteHeatW ?? -1, 6);
   });
 
   it("keeps unknown power facts structured instead of inventing a wall number", () => {

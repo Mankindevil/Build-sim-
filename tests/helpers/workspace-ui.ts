@@ -37,6 +37,9 @@ export function makeWorkspaceApi(initialPlans: BuildPlan[], initialVersions: Pla
     async get(id: string) { return structuredClone(this.plans.find((plan) => plan.id === id)!); },
     async create(input: { name: string; config: BuildConfig; metadata?: BuildPlan["metadata"] }) {
       const created = makePlan(`plan-${String(this.plans.length + 10).padStart(8, "0")}`, input.name, input.config.selection.diskCount);
+      created.draft.config = structuredClone(input.config);
+      created.draft.config.id = created.id;
+      created.draft.config.name = input.name;
       created.activeVersionId = null;
       created.draft.baseVersionId = null;
       created.draft.dirty = true;

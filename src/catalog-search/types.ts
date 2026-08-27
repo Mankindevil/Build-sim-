@@ -29,6 +29,8 @@ export interface FieldProvenance {
   snippet?: string;
   confidence?: number;
   note?: string;
+  /** Provenance edge for a conservative derived field such as GPU slots from official thickness. */
+  derivedFromProvenanceId?: string;
 }
 
 export interface CandidateExtraction {
@@ -91,6 +93,8 @@ export interface ModelCandidate {
   fields?: FieldProvenance[];
   conflicts?: { field: string; values: unknown[]; reason: string }[];
   priceCandidates?: PriceQuote[];
+  /** Hash of the immutable inspection payload used when requesting enrichment. */
+  expectedHash?: string;
 }
 
 export interface OfficialFetchResult {
@@ -127,14 +131,44 @@ export interface ExtractedOfficialData {
 export interface SkuDraft {
   schemaVersion: "1.0.0";
   draftId: string;
+  operation: "create" | "update";
   baseSkuId?: string;
+  baseSkuHash?: string;
+  baseCatalogVersion?: string;
   candidateId: string;
   /** Immutable candidate snapshot used to revalidate a confirmation after a job reload. */
-  candidateSnapshot?: ModelCandidate;
+  candidateSnapshot: ModelCandidate;
+  candidateInputHash: string;
   proposed: Record<string, unknown>;
   fields: FieldProvenance[];
   conflicts: { field: string; existing?: unknown; proposed?: unknown; reason: string }[];
-  status: "draft" | "confirmed" | "rejected";
+  missing: string[];
+  changedFields: string[];
+  /** Immutable review input hash required by confirm/reject. */
+  inputHash: string;
+  expectedHash: string;
+  registryVersion?: string;
+  extractorVersion?: string;
+  contentHash?: string;
+  status: "preview" | "draft" | "confirming" | "confirmed" | "rejected";
   createdAt: string;
   updatedAt: string;
+  confirmation?: {
+    status: "confirmed";
+    draftId: string;
+    skuId: string;
+    sku: Record<string, unknown>;
+    catalogChanged: boolean;
+    created: boolean;
+    inputHash: string;
+    expectedHash: string;
+  };
+  /** Durable two-phase confirmation journal; present only while recovery is pending. */
+  confirmationIntent?: Record<string, unknown>;
+}
+
+export interface GovernedDraftResult extends SkuDraft {
+  writeEnabled: boolean;
+  changedFields: string[];
+  reasons: string[];
 }

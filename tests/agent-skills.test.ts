@@ -15,11 +15,11 @@ function registry(): AgentToolRegistry {
 }
 
 describe("A4 Agent Skill loader", () => {
-  it("discovers five metadata-only catalog entries and loads instructions on activation", async () => {
+  it("discovers six metadata-only catalog entries and loads instructions on activation", async () => {
     const loader = new AgentSkillLoader(path.resolve("skills"), registry());
     const catalog = await loader.catalog();
     expect(catalog.map((entry) => entry.manifest.id)).toEqual([
-      "assembly-and-wiring", "build-diagnosis", "plan-initializer", "shopping-research", "upgrade-advisor",
+      "assembly-and-wiring", "build-diagnosis", "geometry-evidence-audit", "plan-initializer", "shopping-research", "upgrade-advisor",
     ]);
     expect(catalog.every((entry) => /^[a-f0-9]{64}$/.test(entry.definitionHash))).toBe(true);
     expect(JSON.stringify(catalog)).not.toContain("装机诊断工作流");
@@ -27,6 +27,19 @@ describe("A4 Agent Skill loader", () => {
     const loaded = await loader.load("build-diagnosis");
     expect(loaded.instructions).toContain("装机诊断工作流");
     expect(loaded.definitionHash).toBe(catalog.find((entry) => entry.manifest.id === "build-diagnosis")?.definitionHash);
+    const shopping = await loader.load("shopping-research");
+    expect(shopping.manifest).toMatchObject({ version: "1.3.0", readOnly: true });
+    expect(shopping.manifest.allowedTools).toEqual(expect.arrayContaining(["search_catalog_skus", "propose_catalog_review", "propose_plan_change"]));
+    expect(shopping.manifest.allowedTools).not.toContain("enrich_official_catalog");
+    const initializer = await loader.load("plan-initializer");
+    expect(initializer.manifest).toMatchObject({ version: "1.1.0", readOnly: true });
+    expect(initializer.manifest.allowedTools).toContain("propose_catalog_review");
+    const audit = await loader.load("geometry-evidence-audit");
+    expect(audit.manifest).toMatchObject({ version: "1.3.0", readOnly: true });
+    expect(audit.manifest.allowedTools).toEqual(["get_build_evaluation", "get_sku_facts", "get_evidence_document", "get_evidence_excerpt", "discover_official_documents", "search_official_catalog"]);
+    expect(audit.instructions).toContain("c.z + d/2");
+    expect(audit.instructions).toContain("contentTrust=untrusted-evidence-text");
+    expect(audit.instructions).toContain("发现结果还不是已归档证据");
   });
 
   it("rejects unknown Tools before a Skill can enter the catalog", async () => {

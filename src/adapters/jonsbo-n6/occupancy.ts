@@ -350,7 +350,7 @@ export function buildN6Occupancy(
   env: GeometryEnv = {},
 ): OccupancyModel {
   return {
-    caseId: config.caseId || "case.jonsbo-n6",
+    caseId: config.caseId,
     slots: buildN6Slots(),
     occupants: occupantsFromConfig(config, catalog, env),
   };

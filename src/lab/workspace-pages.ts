@@ -1,7 +1,10 @@
 import { parseConfig, type BuildConfig } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
+import { caseCapabilities, orderedFanMounts } from "../core/capabilities";
 import type { PlanStore, PlanStoreState } from "../plans/client-store";
-import { createDefaultN6Config } from "../plans/default-plan";
+import { createDefaultN6Config, createEmptyBuildConfig } from "../plans/default-plan";
+import { loadBundledCatalog } from "../sku/catalog";
+import type { SkuCatalog, SkuCategory } from "../sku/types";
 import { diffBuildConfigs } from "../plans/diff";
 import { targetForFinding } from "../plans/finding-targets";
 import type { BuildTask, PlanVersion } from "../plans/contracts";
@@ -9,6 +12,7 @@ import type { BuildTaskStore, BuildTaskStoreState } from "../plans/build-task-st
 import { summarizeBuildTasks } from "../plans/build-tasks";
 import type { BuildProgressController, BuildProgressItem, BuildProgressSummary } from "./build-progress";
 import { BUILD_STAGE_LABELS } from "./build-progress";
+import { mountEvidencePanel, type EvidencePanelServices } from "./evidence-panel";
 import { WorkspaceRouter, type WorkspaceRoute } from "./workspace-router";
 import "./workspace-pages.css";
 
@@ -32,13 +36,14 @@ function componentCategoryLabel(category: string): string {
   } as Record<string, string>)[category] ?? category;
 }
 
-function evaluationSummary(evaluation: BuildEvaluation | null): { bad: number; warn: number; budget: number | null; unknown: number } {
-  if (!evaluation) return { bad: 0, warn: 0, budget: null, unknown: 0 };
+function evaluationSummary(evaluation: BuildEvaluation | null): { bad: number; warn: number; budget: number | null; unknown: number; priceComplete: boolean } {
+  if (!evaluation) return { bad: 0, warn: 0, budget: null, unknown: 0, priceComplete: false };
   return {
     bad: evaluation.findings.filter((finding) => finding.verdict === "bad").length,
     warn: evaluation.findings.filter((finding) => finding.verdict === "warn").length,
     budget: evaluation.price.knownCny,
-    unknown: evaluation.price.unknownSkuIds.length,
+    unknown: evaluation.price.unknownSkuIds.length + (evaluation.price.unresolvedRequirements?.length ?? 0),
+    priceComplete: evaluation.price.complete !== false,
   };
 }
 
@@ -51,62 +56,118 @@ function optionMarkup(sourceId: string, selected: string): string {
     .join("");
 }
 
+function catalogOptionMarkup(catalog: SkuCatalog, category: SkuCategory, selected: string, blankLabel: string): string {
+  const records = catalog.skus.filter((sku) => sku.category === category);
+  const known = records.some((sku) => sku.id === selected);
+  const blank = `<option value=""${selected ? "" : " selected"}>${escapeHtml(blankLabel)}</option>`;
+  const unknown = selected && !known ? `<option value="${escapeHtml(selected)}" selected>${escapeHtml(`${selected}（目录中不可用）`)}</option>` : "";
+  return blank + unknown + records.map((sku) => {
+    const watts = sku.category === "gpu" ? sku.power.tgpW : sku.category === "psu" ? sku.power.ratedW : null;
+    const suffix = typeof watts === "number" ? ` · ${watts}W` : "";
+    return `<option value="${escapeHtml(sku.id)}"${sku.id === selected ? " selected" : ""}>${escapeHtml(`${sku.name}${suffix}`)}</option>`;
+  }).join("");
+}
+
 function field(label: string, path: string, control: string, help: string, source = "目录事实；由评估引擎核对"): string {
   return `<article class="workspace-editor-field" data-editor-field="${escapeHtml(path)}"><label><span>${escapeHtml(label)}</span>${control}</label><p>${escapeHtml(help)}</p><details><summary>技术来源</summary><small>${escapeHtml(source)}</small></details></article>`;
 }
 
-function editorMarkup(config: BuildConfig, planName: string): string {
+function fanFieldsMarkup(config: BuildConfig): string {
+  if (!config.caseId) return `<div class="workspace-empty" data-fan-mounts-empty><strong>先选择机箱</strong><p>选择后，这里只会显示该机箱已经审核过的风扇安装位。</p></div>`;
+  const capabilities = caseCapabilities(config.caseId);
+  if (!capabilities) return `<div class="workspace-empty" data-fan-mounts-unavailable><strong>该机箱还没有风扇位资料</strong><p>不会套用 N6 或其他机箱的位置；可让 Agent 联网补充后再 review。</p></div>`;
+  const groups = config.selection.fanGroups ?? [];
+  const mountRows = orderedFanMounts(capabilities).map((mount) => {
+    const selected = groups.find((group) => group.mountId === mount.id);
+    const size = selected?.sizeMm ?? mount.size;
+    const max = mount.maxCountBySize[size] ?? mount.count;
+    const count = selected?.count ?? 0;
+    const blocked = mount.id === "left" && (config.selection.psuTopology === "bottom" || config.selection.psuTopology === "dual")
+      ? "当前下置/双电源会拆掉这个风扇架；保留该选择会形成阻断，系统不会静默删除。"
+      : "";
+    return field(
+      mount.label,
+      `selection.fanGroups.${mount.id}`,
+      `<div class="workspace-fan-mount" data-fan-mount="${mount.id}"><label><span>尺寸</span><select data-fan-size>${mount.supportedSizes.map((value) => `<option value="${value}"${value === size ? " selected" : ""}>${value}mm</option>`).join("")}</select></label><label><span>数量</span><select data-fan-count>${Array.from({ length: max + 1 }, (_, value) => `<option value="${value}"${value === count ? " selected" : ""}>${value === 0 ? "不安装" : `${value} 个`}</option>`).join("")}</select></label></div>`,
+      blocked || `当前机箱最多 ${max} 个 ${size}mm；风向按已审核机箱资料为${mount.direction === "intake" ? "进风" : "排风"}。`,
+      `${mount.evidence} · ${mount.source}`,
+    );
+  }).join("");
+  return `${field("风扇策略", "selection.fanMode", `<select data-config-field="selection.fanMode"><option value="quiet"${(config.selection.fanMode ?? "balanced") === "quiet" ? " selected" : ""}>安静 · 低转速</option><option value="balanced"${(config.selection.fanMode ?? "balanced") === "balanced" ? " selected" : ""}>均衡</option><option value="performance"${(config.selection.fanMode ?? "balanced") === "performance" ? " selected" : ""}>散热优先</option></select>`, "只改变风扇曲线包络；没有风扇 SKU 或实测时，整机噪音仍保持未知。")}${mountRows}`;
+}
+
+function editorMarkup(config: BuildConfig, planName: string, catalog: SkuCatalog): string {
   return `
     <section class="workspace-editor-group" id="editor-platform"><header><span>01</span><div><h3>先确定基础平台</h3><p>机箱、主板和处理器决定了后面能选什么。</p></div></header>
       <div class="workspace-field-grid">
         ${field("给方案起个名字", "plan.name", `<input data-plan-name-input value="${escapeHtml(planName)}" maxlength="120">`, "用用途或房间命名，之后更容易找到。", "方案名称；重命名会生成新的草稿修订")}
-        ${field("机箱", "caseId", `<div class="workspace-readonly-value">JONSBO N6</div>`, "决定主板尺寸、盘位和散热空间。", `正式目录 SKU · ${config.caseId}`)}
-        ${field("主板", "boardId", `<div class="workspace-readonly-value">ASUS Pro WS W680M-ACE SE</div>`, "提供接口、内存规格和扩展槽。", `正式目录 SKU · ${config.boardId}`)}
-        ${field("处理器", "cpuId", `<div class="workspace-readonly-value">Intel Core i5-14500</div>`, "决定主要性能、功耗和散热需求。", `正式目录 SKU · ${config.cpuId}`)}
+        ${field("机箱", "caseId", `<select data-config-field="caseId">${catalogOptionMarkup(catalog, "case", config.caseId, "未选择机箱")}</select>`, "决定主板尺寸、盘位和可用风扇安装位。", "正式目录 SKU；机箱能力由审核 profile 提供")}
+        ${field("主板", "boardId", `<select data-config-field="boardId">${catalogOptionMarkup(catalog, "motherboard", config.boardId, "未选择主板")}</select>`, "提供接口、内存规格和扩展槽。")}
+        ${field("处理器", "cpuId", `<select data-config-field="cpuId">${catalogOptionMarkup(catalog, "cpu", config.cpuId, "未选择处理器")}</select>`, "决定主要性能、功耗和散热需求。")}
       </div><button type="button" data-rename-plan>保存方案名称</button></section>
     <section class="workspace-editor-group" id="editor-power"><header><span>02</span><div><h3>供电与散热</h3><p>先保证装得下、带得动，再考虑静音与性能。</p></div></header><div class="workspace-field-grid">
-      ${field("电源", "selection.psuId", `<select data-config-field="selection.psuId">${optionMarkup("psu-select", config.selection.psuId)}</select>`, "功率并非越大越好，还要检查尺寸和原装线束。")}
+      ${field("电源", "selection.psuId", `<select data-config-field="selection.psuId">${catalogOptionMarkup(catalog, "psu", config.selection.psuId, "未选择电源")}</select>`, "功率并非越大越好，还要检查尺寸和原装线束。")}
       ${field("电源安装方式", "selection.psuTopology", `<select data-config-field="selection.psuTopology">${optionMarkup("psu-position", config.selection.psuTopology)}</select>`, "不了解时保留默认，系统会按机箱空间判断。")}
-      ${field("第二颗电源", "selection.secondaryPsuId", `<select data-config-field="selection.secondaryPsuId">${optionMarkup("secondary-psu-select", config.selection.secondaryPsuId ?? "psu.corsair-sf750-atx31")}</select>`, "仅双电源方案需要；普通用户通常不需要。", "仅双电源拓扑生效")}
+      ${field("第二颗电源", "selection.secondaryPsuId", `<select data-config-field="selection.secondaryPsuId">${catalogOptionMarkup(catalog, "psu", config.selection.secondaryPsuId ?? "", "未选择第二颗电源")}</select>`, "仅双电源方案需要；普通用户通常不需要。", "仅双电源拓扑生效")}
       ${field("双电源启动", "selection.dualStart", `<select data-config-field="selection.dualStart">${optionMarkup("dual-start-select", config.selection.dualStart ?? "sync")}</select>`, "双电源必须同步启动，未确认时不要购买。", "仅双电源拓扑生效")}
-      ${field("CPU 散热器", "selection.coolerId", `<select data-config-field="selection.coolerId">${optionMarkup("cooler-select", config.selection.coolerId)}</select>`, "系统会同时检查高度、热量和噪音。")}
+      ${field("CPU 散热器", "selection.coolerId", `<select data-config-field="selection.coolerId">${catalogOptionMarkup(catalog, "cooler", config.selection.coolerId, "未选择 CPU 散热器")}</select>`, "系统会同时检查高度、热量和噪音。")}
     </div></section>
-    <section class="workspace-editor-group" id="editor-storage"><header><span>03</span><div><h3>规划存储</h3><p>先想清楚需要多少容量、是否容错，再决定买几块盘。</p></div></header><div class="workspace-field-grid">
+    <section class="workspace-editor-group" id="editor-airflow"><header><span>03</span><div><h3>按当前机箱配置风扇</h3><p>安装位和数量随机箱变化；这里不会要求你手填位置名称。</p></div></header><div class="workspace-field-grid">${fanFieldsMarkup(config)}</div></section>
+    <section class="workspace-editor-group" id="editor-storage"><header><span>04</span><div><h3>规划存储</h3><p>先想清楚需要多少容量、是否容错，再决定买几块盘。</p></div></header><div class="workspace-field-grid">
+      ${field("数据硬盘型号", "selection.diskSkuId", `<select data-config-field="selection.diskSkuId">${catalogOptionMarkup(catalog, "storage", config.selection.diskSkuId ?? "", "未选择数据硬盘")}</select>`, "数量大于 0 时需要明确硬盘型号，功耗和噪音才有依据。")}
       ${field("数据硬盘数量", "selection.diskCount", `<input type="number" min="0" max="9" data-config-field="selection.diskCount" value="${config.selection.diskCount}">`, "硬盘越多，耗电、噪音和启动峰值都会增加。")}
       ${field("启动盘位置", "selection.boot", `<select data-config-field="selection.boot">${optionMarkup("boot-select", config.selection.boot)}</select>`, "启动盘可能占用盘位或 M.2 接口。")}
       ${field("NVMe 数量", "selection.nvmeCount", `<select data-config-field="selection.nvmeCount">${optionMarkup("nvme-select", String(config.selection.nvmeCount ?? 0))}</select>`, "部分接口会和 SATA 通道共享，系统会自动检查。")}
       ${field("硬盘控制方式", "selection.hbaMode", `<select data-config-field="selection.hbaMode">${optionMarkup("hba-select", config.selection.hbaMode)}</select>`, "主板接口够用时无需额外购买 HBA 卡。")}
+      ${field("HBA 扩展卡", "selection.hbaSkuId", `<select data-config-field="selection.hbaSkuId">${catalogOptionMarkup(catalog, "hba", config.selection.hbaSkuId ?? "", "未选择 HBA")}</select>`, "只有接口不足或明确常驻 HBA 时需要；不会因选择模式而自动填入型号。")}
     </div></section>
-    <section class="workspace-editor-group" id="editor-expansion"><header><span>04</span><div><h3>显卡与内存</h3><p>按真实用途选择，避免为用不到的性能付费。</p></div></header><div class="workspace-field-grid">
-      ${field("显卡", "selection.gpuId", `<select data-config-field="selection.gpuId">${optionMarkup("gpu-select", config.selection.gpuId)}</select>`, "纯 NAS 通常不需要独立显卡；AI、渲染或转码再考虑。")}
-      ${field("内存", "selection.memoryId", `<select data-config-field="selection.memoryId">${optionMarkup("ram-select", config.selection.memoryId)}</select>`, "系统会核对代际、ECC 类型、容量与主板支持。")}
+    <section class="workspace-editor-group" id="editor-expansion"><header><span>05</span><div><h3>显卡与内存</h3><p>按真实用途选择，避免为用不到的性能付费。</p></div></header><div class="workspace-field-grid">
+      ${field("显卡", "selection.gpuId", `<select data-config-field="selection.gpuId">${catalogOptionMarkup(catalog, "gpu", config.selection.gpuId, "未选择显卡")}</select>`, "纯 NAS 可明确选择“暂不安装 GPU”；空白表示还没决定。")}
+      ${field("内存", "selection.memoryId", `<select data-config-field="selection.memoryId">${catalogOptionMarkup(catalog, "memory", config.selection.memoryId, "未选择内存")}</select>`, "系统会核对代际、ECC 类型、容量与主板支持。")}
     </div></section>`;
 }
 
 function updateConfigField(config: BuildConfig, path: string, value: string): void {
-  if (path === "selection.diskCount") config.selection.diskCount = Math.max(0, Math.min(9, Number(value)));
+  if (path === "caseId") config.caseId = value;
+  else if (path === "boardId") config.boardId = value;
+  else if (path === "cpuId") config.cpuId = value;
+  else if (path === "selection.diskCount") config.selection.diskCount = Math.max(0, Math.min(9, Number(value)));
   else if (path === "selection.nvmeCount") config.selection.nvmeCount = Number(value);
+  else if (path === "selection.diskSkuId") {
+    if (value) config.selection.diskSkuId = value;
+    else delete config.selection.diskSkuId;
+  }
   else if (path === "selection.psuId") config.selection.psuId = value;
   else if (path === "selection.psuTopology") {
     config.selection.psuTopology = value as BuildConfig["selection"]["psuTopology"];
     if (value === "dual") {
-      config.selection.secondaryPsuId ??= "psu.corsair-sf750-atx31";
       config.selection.dualStart ??= "sync";
     } else {
       delete config.selection.secondaryPsuId;
       delete config.selection.dualStart;
     }
   }
-  else if (path === "selection.secondaryPsuId") config.selection.secondaryPsuId = value;
+  else if (path === "selection.secondaryPsuId") {
+    if (value) config.selection.secondaryPsuId = value;
+    else delete config.selection.secondaryPsuId;
+  }
   else if (path === "selection.dualStart") config.selection.dualStart = value as NonNullable<BuildConfig["selection"]["dualStart"]>;
   else if (path === "selection.coolerId") config.selection.coolerId = value;
   else if (path === "selection.boot") config.selection.boot = value as BuildConfig["selection"]["boot"];
   else if (path === "selection.hbaMode") {
     config.selection.hbaMode = value as BuildConfig["selection"]["hbaMode"];
-    config.selection.hbaSkuId = value === "always" ? "hba.lsi-9300-8i-it" : null;
+    if (value !== "always") config.selection.hbaSkuId = null;
   }
+  else if (path === "selection.hbaSkuId") config.selection.hbaSkuId = value || null;
   else if (path === "selection.gpuId") config.selection.gpuId = value;
   else if (path === "selection.memoryId") config.selection.memoryId = value;
+  else if (path === "selection.fanMode") config.selection.fanMode = value as NonNullable<BuildConfig["selection"]["fanMode"]>;
+}
+
+function updateFanGroup(config: BuildConfig, mountId: string, sizeMm: number, count: number): void {
+  const groups = [...(config.selection.fanGroups ?? [])].filter((group) => group.mountId !== mountId);
+  if (count > 0) groups.push({ mountId, sizeMm: sizeMm === 140 ? 140 : 120, count });
+  config.selection.fanGroups = groups;
 }
 
 function taskStatusLabel(status: BuildTask["status"]): string {
@@ -236,7 +297,7 @@ function evaluationGuideMarkup(evaluation: BuildEvaluation | null): string {
       : `<button type="button" data-open-evaluation-technical>查看判断依据</button>`;
   return `<article class="workspace-evaluation-decision" data-level="${blocking.length ? "bad" : warnings.length ? "warn" : "ok"}">
     <header><div><small>购买结论</small><h2>${blocking.length ? "现在不建议整套下单" : warnings.length ? "可以继续，但还有信息要确认" : "基础检查已通过"}</h2><p>${blocking.length ? `${blocking.length} 个问题可能导致部件不兼容、装不下或无法接线。` : warnings.length ? `${warnings.length} 个提醒涉及证据、温度、噪音或采购信息。` : "当前没有发现硬性阻断，仍建议逐项确认价格与实物规格。"}</p></div>${decisionAction}</header>
-    <dl><div><dt>必须先解决</dt><dd>${blocking.length} 项</dd></div><div><dt>需要再确认</dt><dd>${warnings.length} 项</dd></div><div><dt>当前功耗</dt><dd>${wall}</dd></div><div><dt>噪音判断</dt><dd>${noise}</dd></div><div><dt>已知预算</dt><dd>${formatCny(evaluation.price.knownCny)}</dd></div><div><dt>价格待补</dt><dd>${evaluation.price.unknownSkuIds.length} 项</dd></div></dl>
+    <dl><div><dt>必须先解决</dt><dd>${blocking.length} 项</dd></div><div><dt>需要再确认</dt><dd>${warnings.length} 项</dd></div><div><dt>当前功耗</dt><dd>${wall}</dd></div><div><dt>噪音判断</dt><dd>${noise}</dd></div><div><dt>已知预算</dt><dd>${formatCny(evaluation.price.knownCny)}</dd></div><div><dt>价格待补</dt><dd>${evaluation.price.unknownSkuIds.length + (evaluation.price.unresolvedRequirements?.length ?? 0)} 项</dd></div></dl>
     <section><div><small>按优先级处理</small><h3>${prioritized.length ? "先看这些问题" : "没有待处理风险"}</h3></div><ol>${prioritized.map((finding, index) => `<li data-level="${finding.verdict}"><b>${index + 1}</b><span><small>${finding.verdict === "bad" ? "必须解决" : "建议确认"}</small><strong>${escapeHtml(finding.title)}</strong><p>${escapeHtml(finding.description)}</p></span>${guideActionMarkup(evaluation, finding)}</li>`).join("") || `<li class="workspace-all-clear"><span><strong>没有发现会阻止装机的问题</strong><small>价格与实物证据仍需在采购时确认。</small></span></li>`}</ol></section>
   </article>`;
 }
@@ -276,9 +337,13 @@ function adoptLegacyContent(root: HTMLElement, host: HTMLElement): void {
   if (legacyMain && !legacyMain.childElementCount) legacyMain.remove();
 }
 
-export interface WorkspacePagesController { dispose(): void; }
+export interface WorkspacePagesController {
+  /** Rebuild selector markup after the governed runtime catalog changes. */
+  refreshCatalog(): void;
+  dispose(): void;
+}
 
-export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router: WorkspaceRouter, taskStore?: BuildTaskStore, progress?: BuildProgressController): WorkspacePagesController {
+export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router: WorkspaceRouter, taskStore?: BuildTaskStore, progress?: BuildProgressController, getCatalog: () => SkuCatalog = loadBundledCatalog, evidenceServices?: EvidencePanelServices): WorkspacePagesController {
   const host = document.createElement("main");
   host.className = "workspace-pages";
   host.innerHTML = `
@@ -292,7 +357,8 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
       <header class="workspace-page-head"><div><p>第 2 步 · 选择硬件</p><h1 id="workspace-editor-title">先说需求，再选配置</h1><span>每个选择都说明影响；修改后会立即重新检查兼容、功耗、散热和预算。</span></div><div><button type="button" data-undo>撤销</button><button type="button" data-redo>恢复</button><button type="button" data-open-history>版本记录</button><button type="button" data-open-save>保存这一版</button></div></header>
       <div class="workspace-guide-callout"><strong>不确定怎么选？</strong><span>保持推荐值，或打开“问问助手”描述预算、用途和安静程度。</span><button type="button" data-route-action="agent">请助手帮我选</button></div>
       <div class="workspace-impact" data-impact aria-live="polite"></div>
-      <div class="workspace-editor-layout"><aside><label>快速查找<input type="search" data-editor-search placeholder="例如：电源、硬盘、显卡"></label><nav class="workspace-editor-toc" aria-label="配置步骤"><a href="#editor-platform">1. 基础平台</a><a href="#editor-power">2. 供电散热</a><a href="#editor-storage">3. 存储</a><a href="#editor-expansion">4. 显卡内存</a></nav></aside><div data-editor-fields></div></div>
+      <div class="workspace-editor-layout"><aside><label>快速查找<input type="search" data-editor-search placeholder="例如：电源、风扇、硬盘"></label><nav class="workspace-editor-toc" aria-label="配置步骤"><a href="#editor-platform">1. 基础平台</a><a href="#editor-power">2. 供电散热</a><a href="#editor-airflow">3. 机箱风扇</a><a href="#editor-storage">4. 存储</a><a href="#editor-expansion">5. 显卡内存</a><a href="#editor-evidence">官方证据</a></nav></aside><div data-editor-fields></div></div>
+      <section class="workspace-plan-evidence" id="editor-evidence" data-plan-evidence-panel aria-label="方案官方证据"></section>
     </section>
     <section id="workspace-page-evaluation" data-workspace-page="evaluation" hidden aria-labelledby="workspace-evaluation-title">
       <header class="workspace-page-head"><div><p>第 3 步 · 安全检查</p><h1 id="workspace-evaluation-title">买之前，把风险查清楚</h1><span>先看必须解决的问题，再按需了解散热、噪音、耗电、接线和显卡空间。</span></div><button type="button" data-route-action="editor">返回修改配置</button></header>
@@ -324,7 +390,7 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
       <div class="workspace-agent-guide"><strong>可以这样问</strong><button type="button" data-agent-prompt="我希望整机尽量安静，当前配置最需要调整什么？">怎样更安静？</button><button type="button" data-agent-prompt="请用小白能理解的话解释当前所有阻断项，并告诉我先改哪一个。">阻断是什么意思？</button><button type="button" data-agent-prompt="根据当前方案，哪些部件现在可以放心购买，哪些还不能买？">现在能买什么？</button></div>
       <section data-agent-content></section>
     </section>
-    <dialog data-create-dialog aria-labelledby="create-plan-title"><form method="dialog" class="workspace-dialog-card workspace-onboarding-card"><header><div><p>从 0 开始</p><h2 id="create-plan-title">先说你想装一台怎样的电脑</h2><span>这些答案会变成后续选件、预算与噪音提醒的判断依据。</span></div><button value="cancel" aria-label="关闭">×</button></header><label>方案名称<input data-create-name required maxlength="120" value="我的 N6 装机方案"></label><div class="workspace-intent-grid"><label>主要用途<select data-create-use-case><option value="家庭存储 / NAS">家庭存储 / NAS</option><option value="安静办公">安静办公</option><option value="游戏与直播">游戏与直播</option><option value="AI / 创作">AI / 创作</option><option value="混合用途">混合用途</option></select></label><label>整机预算（元）<input data-create-budget type="number" min="0" step="500" placeholder="例如 8000"></label><label>放在哪里<select data-create-location><option value="卧室或安静房间">卧室或安静房间</option><option value="书房 / 办公室">书房 / 办公室</option><option value="客厅">客厅</option><option value="机房或储物间">机房或储物间</option></select></label><label>更在意什么<select data-create-priority><option value="低噪音">尽量安静</option><option value="预算优先">控制预算</option><option value="性能优先">性能优先</option><option value="低功耗">省电低功耗</option><option value="容易安装">容易安装与维护</option></select></label></div><label>你已经有的硬件（可不填）<input data-create-owned placeholder="例如：两块 980 PRO、显示器、旧硬盘"></label><details><summary>高级：选择起点或导入</summary><label>从哪里开始<select data-create-mode><option value="template">使用推荐 N6 起点</option><option value="blank">从空白清单开始</option><option value="duplicate">复制当前方案再调整</option><option value="import">导入已有 JSON</option></select></label><label data-import-field hidden>JSON 文件<input type="file" data-import-file accept="application/json,.json"></label></details><p data-create-error role="alert"></p><footer><button value="cancel">暂不创建</button><button type="button" data-create-submit>创建并开始选择</button></footer></form></dialog>
+    <dialog data-create-dialog aria-labelledby="create-plan-title"><form method="dialog" class="workspace-dialog-card workspace-onboarding-card"><header><div><p>从 0 开始</p><h2 id="create-plan-title">先说你想装一台怎样的电脑</h2><span>新方案默认不带任何部件；之后可以自己或让 Agent 一件一件建议，再由你 review。</span></div><button value="cancel" aria-label="关闭">×</button></header><label>方案名称<input data-create-name required maxlength="120" value="我的装机方案"></label><div class="workspace-intent-grid"><label>主要用途<select data-create-use-case><option value="家庭存储 / NAS">家庭存储 / NAS</option><option value="安静办公">安静办公</option><option value="游戏与直播">游戏与直播</option><option value="AI / 创作">AI / 创作</option><option value="混合用途">混合用途</option></select></label><label>整机预算（元）<input data-create-budget type="number" min="0" step="500" placeholder="例如 8000"></label><label>放在哪里<select data-create-location><option value="卧室或安静房间">卧室或安静房间</option><option value="书房 / 办公室">书房 / 办公室</option><option value="客厅">客厅</option><option value="机房或储物间">机房或储物间</option></select></label><label>更在意什么<select data-create-priority><option value="低噪音">尽量安静</option><option value="预算优先">控制预算</option><option value="性能优先">性能优先</option><option value="低功耗">省电低功耗</option><option value="容易安装">容易安装与维护</option></select></label></div><label>你已经有的硬件（可不填）<input data-create-owned placeholder="例如：两块 980 PRO、显示器、旧硬盘"></label><details><summary>高级：选择其他起点或导入</summary><label>从哪里开始<select data-create-mode><option value="blank">空白方案 · 逐件加入</option><option value="template">使用推荐 N6 起点</option><option value="duplicate">复制当前方案再调整</option><option value="import">导入已有 JSON</option></select></label><label data-import-field hidden>JSON 文件<input type="file" data-import-file accept="application/json,.json"></label></details><p data-create-error role="alert"></p><footer><button value="cancel">暂不创建</button><button type="button" data-create-submit>创建并开始选择</button></footer></form></dialog>
     <dialog data-version-dialog aria-labelledby="save-version-title"><form method="dialog" class="workspace-dialog-card"><header><div><p>保存检查点</p><h2 id="save-version-title">保存当前方案版本</h2></div><button value="cancel" aria-label="关闭">×</button></header><p data-version-parent></p><label>这次改了什么<textarea data-version-summary maxlength="500" rows="3" placeholder="例如：换成更安静的散热器，并减少一块硬盘"></textarea></label><p data-version-error role="alert"></p><footer><button value="cancel">取消</button><button type="button" data-version-submit>确认保存</button></footer></form></dialog>
     <dialog data-history-dialog aria-labelledby="version-history-title"><section class="workspace-dialog-card workspace-history-card"><header><div><p>方案检查点</p><h2 id="version-history-title">版本记录</h2></div><button type="button" data-close-history aria-label="关闭">×</button></header><div data-version-list></div><div data-version-diff aria-live="polite"></div></section></dialog>`;
   root.querySelector(".workspace-global-shell")?.insertAdjacentElement("afterend", host);
@@ -346,6 +412,10 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   const historyDialog = host.querySelector<HTMLDialogElement>("[data-history-dialog]")!;
   const taskSummaryHost = host.querySelector<HTMLElement>("[data-task-summary]")!;
   const taskBoard = host.querySelector<HTMLElement>("[data-task-board]")!;
+  const evidenceHost = host.querySelector<HTMLElement>("[data-plan-evidence-panel]")!;
+  const evidencePanel = evidenceServices
+    ? mountEvidencePanel(evidenceHost, store, getCatalog, evidenceServices)
+    : mountEvidencePanel(evidenceHost, store, getCatalog);
   const currentTasks = () => taskState.planId === state.activePlan?.id ? taskState.tasks : [];
   const currentTaskSummary = () => summarizeBuildTasks(currentTasks());
 
@@ -369,13 +439,18 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     const before = evaluationSummary(baselineEvaluation);
     const badDelta = baselineEvaluation ? current.bad - before.bad : 0;
     const warnDelta = baselineEvaluation ? current.warn - before.warn : 0;
-    const budgetDelta = baselineEvaluation && current.budget !== null && before.budget !== null ? current.budget - before.budget : null;
+    const budgetDelta = baselineEvaluation && current.priceComplete && before.priceComplete && current.budget !== null && before.budget !== null ? current.budget - before.budget : null;
     impact.innerHTML = `<article data-level="${current.bad ? "bad" : "ok"}"><small>必须先解决</small><strong>${current.bad} 项</strong></article><article><small>建议再确认</small><strong>${current.warn} 项</strong></article><article><small>这次修改的预算影响</small><strong>${budgetDelta === null ? "待价格补齐" : `${budgetDelta >= 0 ? "+" : "−"}${formatCny(Math.abs(budgetDelta))}`}</strong></article><article><small>风险变化</small><strong>${badDelta > 0 ? `新增 ${badDelta} 个阻断` : badDelta < 0 ? `解决 ${Math.abs(badDelta)} 个阻断` : warnDelta ? `${warnDelta > 0 ? "+" : ""}${warnDelta} 个提醒` : "没有新增风险"}</strong></article>`;
   };
 
   const renderPurchaseGate = () => {
     const summary = evaluationSummary(state.evaluation);
     const gate = host.querySelector<HTMLElement>("[data-purchase-gate]")!;
+    if (state.evaluation?.readiness.status === "incomplete") {
+      gate.dataset.level = "bad";
+      gate.innerHTML = `<div><small>方案尚未完整</small><strong>还缺 ${state.evaluation.readiness.missing.length} 项核心选择</strong><p>可以继续逐件加入；完整配置前不生成采购、接线或空间结论。</p></div><button type="button" data-route-action="editor">继续选择硬件</button>`;
+      return;
+    }
     gate.dataset.level = summary.bad ? "bad" : summary.warn ? "warn" : "ok";
     gate.innerHTML = summary.bad
       ? `<div><small>采购安全门槛</small><strong>还有 ${summary.bad} 个阻断，暂时不要按整套方案下单</strong><p>可以先记录已有订单，但请先修正不兼容、装不下或接线不可行的问题。</p></div><button type="button" data-route-action="evaluation">查看必须解决的问题</button>`
@@ -388,18 +463,21 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     state = next;
     const active = state.activePlan;
     const evalSummary = evaluationSummary(state.evaluation);
+    const incomplete = state.evaluation?.readiness.status === "incomplete";
     const findings = state.evaluation ? evaluationGuideItems(state.evaluation).slice(0, 3) : [];
     const taskSummary = currentTaskSummary();
-    const nextRoute: WorkspaceRoute = evalSummary.bad ? "evaluation" : (progress?.summary().candidate ?? 1) > 0 ? "editor" : (progress?.summary().purchased ?? 0) + (progress?.summary().installed ?? 0) < (progress?.summary().total ?? 0) ? "purchases" : "build";
-    const nextTitle = evalSummary.bad ? `先解决 ${evalSummary.bad} 个购买前阻断` : nextRoute === "editor" ? "继续确认还没定下的部件" : nextRoute === "purchases" ? "开始按已确认清单采购" : "继续完成装机任务";
+    const nextRoute: WorkspaceRoute = incomplete ? "editor" : evalSummary.bad ? "evaluation" : (progress?.summary().candidate ?? 1) > 0 ? "editor" : (progress?.summary().purchased ?? 0) + (progress?.summary().installed ?? 0) < (progress?.summary().total ?? 0) ? "purchases" : "build";
+    const nextTitle = incomplete ? "继续逐件加入硬件" : evalSummary.bad ? `先解决 ${evalSummary.bad} 个购买前阻断` : nextRoute === "editor" ? "继续确认还没定下的部件" : nextRoute === "purchases" ? "开始按已确认清单采购" : "继续完成装机任务";
+    const nextDescription = incomplete ? "空白方案不会预填部件；你已经做出的每个选择都会保留。" : evalSummary.bad ? "这些问题可能导致买错、装不下或无法接线。" : "系统会一直保留你已经完成的进度。";
+    const nextAction = incomplete ? "继续添加" : evalSummary.bad ? "查看并解决" : nextRoute === "editor" ? "继续编辑" : nextRoute === "purchases" ? "打开采购清单" : "继续装机";
     const intent = active?.metadata.initialization?.intent;
     const preferences = intent?.preferences ?? [];
     const goalCopy = active ? [intent?.useCase ?? active.metadata.useCase ?? "用途待补充", intent?.budgetCny ?? active.metadata.budgetCny ? `预算 ${formatCny(intent?.budgetCny ?? active.metadata.budgetCny)}` : "预算待补充", ...preferences.slice(0, 2)].map(escapeHtml).join(" · ") : "";
-    currentHost.innerHTML = active ? `<article class="workspace-next-card"><div class="workspace-next-copy"><p>建议下一步</p><h2>${escapeHtml(nextTitle)}</h2><span>${evalSummary.bad ? "这些问题可能导致买错、装不下或无法接线。" : "系统会一直保留你已经完成的进度。"}</span><button data-route-action="${nextRoute}">${evalSummary.bad ? "查看并解决" : nextRoute === "editor" ? "继续编辑" : nextRoute === "purchases" ? "打开采购清单" : "继续装机"} →</button></div><div class="workspace-plan-health"><div><small>当前方案</small><strong>${escapeHtml(active.name)}</strong><span>${active.activeVersionId ? "已有保存检查点" : "还没有保存检查点"}</span><p>${goalCopy}</p></div><dl><div><dt>必须解决</dt><dd data-level="${evalSummary.bad ? "bad" : "ok"}">${evalSummary.bad}</dd></div><div><dt>建议确认</dt><dd>${evalSummary.warn}</dd></div><div><dt>预算参考</dt><dd>${formatCny(active.metadata.budgetCny ?? evalSummary.budget)}</dd></div><div><dt>下一步任务</dt><dd>${taskSummary.next.length}</dd></div></dl></div><div class="workspace-next-details"><div><h3>最先关注</h3><ul>${findings.map((finding) => `<li data-level="${finding.verdict}"><span>${finding.verdict === "bad" ? "必须" : "提醒"}</span><p>${escapeHtml(finding.title)}</p>${state.evaluation ? guideActionMarkup(state.evaluation, finding) : ""}</li>`).join("") || "<li class=workspace-all-clear><p>目前没有阻断或警告，可以继续下一步。</p></li>"}</ul></div><div class="workspace-quick-actions"><button data-route-action="editor">继续编辑</button><button data-route-action="evaluation">查看完整检查</button><button data-route-action="spatial">打开 3D</button><button data-route-action="purchases">记录一笔购买</button><button data-route-action="agent">问问助手</button></div></div></article>` : `<article class="workspace-empty"><h2>从第一套方案开始</h2><p>告诉我们用途、预算和对噪音的要求，再一步步完成装机。</p><button data-open-create>新建装机方案</button></article>`;
+    currentHost.innerHTML = active ? `<article class="workspace-next-card"><div class="workspace-next-copy"><p>建议下一步</p><h2>${escapeHtml(nextTitle)}</h2><span>${escapeHtml(nextDescription)}</span><button data-route-action="${nextRoute}">${escapeHtml(nextAction)} →</button></div><div class="workspace-plan-health"><div><small>当前方案</small><strong>${escapeHtml(active.name)}</strong><span>${active.activeVersionId ? "已有保存检查点" : "还没有保存检查点"}</span><p>${goalCopy}</p></div><dl><div><dt>必须解决</dt><dd data-level="${evalSummary.bad ? "bad" : "ok"}">${evalSummary.bad}</dd></div><div><dt>建议确认</dt><dd>${evalSummary.warn}</dd></div><div><dt>预算参考</dt><dd>${formatCny(active.metadata.budgetCny ?? evalSummary.budget)}</dd></div><div><dt>下一步任务</dt><dd>${taskSummary.next.length}</dd></div></dl></div><div class="workspace-next-details"><div><h3>最先关注</h3><ul>${findings.map((finding) => `<li data-level="${finding.verdict}"><span>${finding.verdict === "bad" ? "必须" : "提醒"}</span><p>${escapeHtml(finding.title)}</p>${state.evaluation ? guideActionMarkup(state.evaluation, finding) : ""}</li>`).join("") || "<li class=workspace-all-clear><p>目前没有阻断或警告，可以继续下一步。</p></li>"}</ul></div><div class="workspace-quick-actions"><button data-route-action="editor">继续编辑</button><button data-route-action="evaluation">查看完整检查</button><button data-route-action="spatial">打开 3D</button><button data-route-action="purchases">记录一笔购买</button><button data-route-action="agent">问问助手</button></div></div></article>` : `<article class="workspace-empty"><h2>从第一套方案开始</h2><p>告诉我们用途、预算和对噪音的要求，再一步步完成装机。</p><button data-open-create>新建装机方案</button></article>`;
     grid.innerHTML = state.plans.filter((plan) => plan.name.toLowerCase().includes(search.toLowerCase())).map((plan) => `<article data-plan-card="${escapeHtml(plan.id)}"${plan.id === active?.id ? " data-active=true" : ""}><div><small>${plan.status === "archived" ? "已归档" : plan.id === active?.id ? "正在进行" : "其他方案"}</small><h3>${escapeHtml(plan.name)}</h3><p>${plan.activeVersionId ? "已有保存检查点" : "还没有保存检查点"}</p><span>${formatDate(plan.updatedAt)} · ${plan.dirty ? "有新修改" : "已保存"}</span></div><footer>${plan.status === "archived" ? `<button data-restore-plan="${escapeHtml(plan.id)}">恢复方案</button>` : `<button data-activate-plan="${escapeHtml(plan.id)}">打开方案</button>`}<button data-delete-plan="${escapeHtml(plan.id)}">移入回收区</button></footer></article>`).join("") || `<div class="workspace-empty"><p>没有匹配的方案。</p></div>`;
     if (active) {
       const signature = `${active.id}:${active.draftRevision}:${state.localRevision}`;
-      if (signature !== editorPlanSignature) { editorPlanSignature = signature; fields.innerHTML = editorMarkup(active.draft.config, active.name); }
+      if (signature !== editorPlanSignature) { editorPlanSignature = signature; fields.innerHTML = editorMarkup(active.draft.config, active.name, getCatalog()); }
     } else fields.innerHTML = `<div class="workspace-empty">请选择或创建方案。</div>`;
     host.querySelector<HTMLButtonElement>("[data-undo]")!.disabled = !state.canUndo;
     host.querySelector<HTMLButtonElement>("[data-redo]")!.disabled = !state.canRedo;
@@ -540,8 +618,8 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
         if (!file) throw new Error("请选择 JSON 文件");
         await store.create(name, parseConfig(await file.text()));
       } else {
-        const config = createDefaultN6Config("new-plan", new Date().toISOString());
-        if (mode === "blank") config.bom = [];
+        const timestamp = new Date().toISOString();
+        const config = mode === "template" ? createDefaultN6Config("new-plan", timestamp) : createEmptyBuildConfig("new-plan", timestamp);
         const useCase = host.querySelector<HTMLSelectElement>("[data-create-use-case]")!.value;
         const rawBudget = host.querySelector<HTMLInputElement>("[data-create-budget]")!.value.trim();
         const budgetCny = rawBudget ? Math.max(0, Number(rawBudget) || 0) : null;
@@ -554,7 +632,7 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
           tags: [priority, location],
           initialization: {
             status: "initialized",
-            source: "template",
+            source: mode === "template" ? "template" : "manual",
             initializedAt: new Date().toISOString(),
             intent: { useCase, budgetCny, preferences: [priority, location, ...(owned ? [`已有硬件：${owned}`] : [])] },
           },
@@ -569,8 +647,33 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     for (const item of fields.querySelectorAll<HTMLElement>("[data-editor-field]")) item.hidden = Boolean(query) && !item.textContent?.toLowerCase().includes(query) && !item.dataset.editorField?.toLowerCase().includes(query);
   });
   fields.addEventListener("change", (event) => {
+    const fanMount = (event.target as HTMLElement).closest<HTMLElement>("[data-fan-mount]");
+    if (fanMount) {
+      const size = Number(fanMount.querySelector<HTMLSelectElement>("[data-fan-size]")?.value ?? 120);
+      const count = Number(fanMount.querySelector<HTMLSelectElement>("[data-fan-count]")?.value ?? 0);
+      baselineEvaluation = state.evaluation;
+      store.patchDraft((config) => updateFanGroup(config, fanMount.dataset.fanMount!, size, count));
+      return;
+    }
     const control = (event.target as HTMLElement).closest<HTMLInputElement | HTMLSelectElement>("[data-config-field]");
     if (!control) return;
+    if (control.dataset.configField === "caseId") {
+      const current = state.activePlan?.draft.config;
+      const nextCaseId = control.value;
+      if (current && nextCaseId !== current.caseId && (current.selection.fanGroups?.length ?? 0) > 0) {
+        const approved = window.confirm("风扇安装位属于当前机箱。更换机箱会清空旧机箱的风扇位置，之后按新机箱的安装位重新 review。是否继续？");
+        if (!approved) {
+          control.value = current.caseId;
+          return;
+        }
+        baselineEvaluation = state.evaluation;
+        store.patchDraft((config) => {
+          config.caseId = nextCaseId;
+          config.selection.fanGroups = [];
+        });
+        return;
+      }
+    }
     baselineEvaluation = state.evaluation;
     store.patchDraft((config) => updateConfigField(config, control.dataset.configField!, control.value));
   });
@@ -584,5 +687,12 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     if (note) taskStore.setNote(id, note.value);
   });
 
-  return { dispose() { unsubscribeStore(); unsubscribeTasks(); unsubscribeProgress(); unsubscribeRoute(); host.remove(); } };
+  return {
+    refreshCatalog() {
+      editorPlanSignature = "";
+      render(state);
+      evidencePanel.refreshCatalog();
+    },
+    dispose() { unsubscribeStore(); unsubscribeTasks(); unsubscribeProgress(); unsubscribeRoute(); evidencePanel.dispose(); host.remove(); },
+  };
 }
