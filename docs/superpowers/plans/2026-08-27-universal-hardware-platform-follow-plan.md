@@ -1413,7 +1413,7 @@ npm test
 ### U0 执行记录（2026-08-27）
 
 - 状态：已完成（U0 契约、fixture、false-green 复审和跨 runtime 门禁通过）
-- 提交：未提交；工作分支 `codex/complete-universal-hardware-platform`
+- 提交：基础集成 `c8aa2ab`，U0 契约/fixture `c6fea37`；已推送 `origin/codex/complete-universal-hardware-platform`
 - 主要变更：
   - 已新增 U0 架构文档、正式契约、冻结 registries、HashSpec、通用/故障 fixtures、N6 债务 ratchet 与默认关闭的 rollout flags。
   - 已消除 fixture 自证、调用方自证和契约/registry 漂移；正式 server-facing gate 只接受服务器签发的 resolver/ref，raw JSON context 不能冒充可信状态。
