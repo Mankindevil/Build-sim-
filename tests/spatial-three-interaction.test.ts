@@ -12,6 +12,9 @@ import { evaluateBuild } from "../src/core/evaluate";
 import { loadBundledCatalog } from "../src/sku/catalog";
 import { initializedStore } from "./helpers/workspace-ui";
 import { createEmptyBuildConfig } from "../src/plans/default-plan";
+import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
+import type { BuildConfigDocument } from "../src/config/types";
+import type { BuildPlan } from "../src/plans/contracts";
 
 describe("Three spatial interaction policy", () => {
   it("does not treat a click or an exact five-pixel move as a drag", () => {
@@ -87,6 +90,34 @@ describe("Three spatial interaction policy", () => {
     store.replaceDraft(ready);
     expect(controller.getModel()?.nodes.some((node) => node.partId === "board")).toBe(true);
     expect(document.querySelector("[data-three-spatial-root]")?.classList.contains("is-partial")).toBe(false);
+
+    controller.dispose();
+    context.mockRestore();
+    store.dispose();
+  });
+
+  it("clears a V2 Three scene and selection when acceptServerPlan installs a V3 partial draft", async () => {
+    document.body.innerHTML = `<main id="n6-lab"><div class="case-view-toolbar"></div><div class="spatial-stage" id="spatial-stage"><svg id="iso-svg" class="case-view" data-case-view="iso"></svg></div></main>`;
+    const context = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+    const { store } = await initializedStore();
+    const catalog = loadBundledCatalog();
+    store.setEvaluation(evaluateBuild(store.getState().activePlan!.draft.config, catalog));
+    const controller = mountSpatialView(document.getElementById("spatial-stage")!, store, () => catalog);
+    expect(controller.getModel()?.nodes.length).toBeGreaterThan(0);
+    store.setSelection({ partId: "board", view: "spatial" });
+
+    const v3 = createEmptyBuildConfigV3("plan-12345678", "V3 partial", "2026-08-27T13:00:00.000Z");
+    const accepted = structuredClone(store.getState().activePlan!) as BuildPlan<BuildConfigDocument>;
+    accepted.draft.config = v3;
+    accepted.draftRevision += 1;
+    store.acceptServerPlan(accepted);
+    await Promise.resolve();
+
+    expect(controller.getModel()).toBeNull();
+    expect(controller.getOverlays()).toBeNull();
+    expect(document.querySelector("[data-three-spatial-root]")?.classList.contains("is-partial")).toBe(true);
+    expect(document.querySelector("[data-three-status]")?.textContent).toContain("V3 部分拓扑");
+    expect(store.getState().selection).toBeNull();
 
     controller.dispose();
     context.mockRestore();

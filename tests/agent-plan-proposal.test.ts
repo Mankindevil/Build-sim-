@@ -1,22 +1,26 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FilePlanRepository } from "../src/plans/file-repository";
-import { createDefaultN6Config, createEmptyBuildConfig } from "../src/plans/default-plan";
-import { sha256Hex } from "../src/plans/canonical";
+import { createAgentInitializationScaffold, createDefaultN6Config, createEmptyBuildConfig } from "../src/plans/default-plan";
+import { canonicalJson, sha256Hex } from "../src/plans/canonical";
 import { PlanProposalService, previewPlanProposal } from "../src/plans/proposals";
 import type { PlanChangeProposal } from "../src/plans/contracts";
+import { RuntimeCoordinator } from "../src/runtime/coordinator.mjs";
+import { createProductionReferenceGraph } from "../src/runtime/production-reference-graph.mjs";
 import { handleWorkspaceRoute } from "../src/server/workspace-routes";
 
 const roots: string[] = [];
+const checksum = (value: unknown) => createHash("sha256").update(canonicalJson(value)).digest("hex");
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "build-sim-r7-")); roots.push(root);
   const repository = new FilePlanRepository({ root, now: () => "2026-08-25T00:00:00.000Z" });
   const plan = await repository.create({ name: "Proposal", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
   const hash = await sha256Hex(plan.draft.config);
   const preview = await previewPlanProposal(plan.draft.config, { id: "proposal-fixture", planId: plan.id, expectedDraftRevision: plan.draftRevision, expectedConfigHash: hash, summary: "改为 2 块盘", rationale: ["用户要求"], operations: [{ op: "replace", path: "/selection/diskCount", value: 2 }], createdAt: "2026-08-25T00:00:00.000Z" });
-  return { repository, plan, proposal: preview.proposal };
+  return { root, repository, plan, proposal: preview.proposal };
 }
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))); });
 
@@ -39,6 +43,142 @@ describe("R7 human-approved plan proposals", () => {
     const replay = await service.apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" });
     expect(replay).toEqual(first);
     expect((await repository.get(plan.id)).draftRevision).toBe(plan.draftRevision + 1);
+  });
+
+  it("replays from the file authority after service/repository restart and fences request mismatches before stale CAS", async () => {
+    const { root, repository, plan, proposal } = await fixture();
+    const first = await new PlanProposalService(repository, () => "2026-08-25T01:00:00.000Z")
+      .apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" });
+    const restartedRepository = new FilePlanRepository({ root });
+    const restarted = new PlanProposalService(restartedRepository, () => "2026-08-25T02:00:00.000Z");
+
+    await expect(restarted.apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" })).resolves.toEqual(first);
+    await expect(restarted.apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "another-human" }))
+      .rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
+    await expect(restarted.apply(plan.id, { ...proposal, operations: [{ op: "replace", path: "/selection/diskCount", value: 3 }] }, [0], { confirmed: true, approvedBy: "human-test" }))
+      .rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
+    expect((await restartedRepository.get(plan.id)).draftRevision).toBe(plan.draftRevision + 1);
+  });
+
+  it("fails closed instead of drifting a durable approval replay after a later legitimate Plan write", async () => {
+    const { root, repository, plan, proposal } = await fixture();
+    const first = await new PlanProposalService(repository, () => "2026-08-25T01:00:00.000Z")
+      .apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" });
+    await repository.updateInfo(plan.id, {
+      expectedRevision: first.plan.draftRevision,
+      name: "Legitimate later rename",
+      description: "This write must not be returned as the original approval result",
+    });
+
+    const restartedRepository = new FilePlanRepository({ root });
+    await expect(new PlanProposalService(restartedRepository, () => "2026-08-25T02:00:00.000Z")
+      .apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" }))
+      .rejects.toMatchObject({ code: "idempotency_conflict", status: 409, message: expect.stringMatching(/superseded/) });
+    await expect(restartedRepository.get(plan.id)).resolves.toMatchObject({
+      name: "Legitimate later rename",
+      draftRevision: first.plan.draftRevision + 1,
+    });
+  });
+
+  it("fails closed on legacy proposal receipts that cannot prove the immutable applied boundary", async () => {
+    const { root, repository, plan, proposal } = await fixture();
+    await new PlanProposalService(repository).apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" });
+    const [recordName] = await fs.readdir(path.join(root, ".idempotency"));
+    const recordFile = path.join(root, ".idempotency", recordName!);
+    const envelope = JSON.parse(await fs.readFile(recordFile, "utf8"));
+    delete envelope.payload.result.writeReceipt;
+    const { resultHash: _oldResultHash, ...resultMaterial } = envelope.payload.result;
+    envelope.payload.result.resultHash = checksum(resultMaterial);
+    envelope.checksum = checksum(envelope.payload);
+    await fs.writeFile(recordFile, JSON.stringify(envelope));
+
+    await expect(new PlanProposalService(new FilePlanRepository({ root }))
+      .apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" }))
+      .rejects.toMatchObject({ code: "idempotency_conflict", status: 409, message: expect.stringMatching(/Legacy/) });
+  });
+
+  it("rejects checksum-valid unknown immutable Plan receipt schemas after restart", async () => {
+    const { root, repository, plan, proposal } = await fixture();
+    await new PlanProposalService(repository).apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" });
+    const [recordName] = await fs.readdir(path.join(root, ".idempotency"));
+    const recordFile = path.join(root, ".idempotency", recordName!);
+    const envelope = JSON.parse(await fs.readFile(recordFile, "utf8"));
+    envelope.payload.result.writeReceipt.schemaVersion = "plan-write-receipt-unknown";
+    const { resultHash: _oldResultHash, ...resultMaterial } = envelope.payload.result;
+    envelope.payload.result.resultHash = checksum(resultMaterial);
+    envelope.checksum = checksum(envelope.payload);
+    await fs.writeFile(recordFile, JSON.stringify(envelope));
+
+    await expect(new PlanProposalService(new FilePlanRepository({ root }))
+      .apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" }))
+      .rejects.toMatchObject({ code: "corrupt_data", status: 500 });
+  });
+
+  it("keeps superseded receipts production-readable but rejects unknown receipt authority", async () => {
+    const runtimeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "build-sim-plan-receipt-production-")); roots.push(runtimeRoot);
+    const coordinator = new RuntimeCoordinator({ root: runtimeRoot });
+    const state = await coordinator.initialize("test");
+    const repository = new FilePlanRepository({ coordinator, now: () => "2026-08-25T00:00:00.000Z" });
+    const plan = await repository.create({ name: "Receipt graph", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
+    const proposal = (await previewPlanProposal(plan.draft.config, {
+      id: "proposal-production-receipt", planId: plan.id, expectedDraftRevision: plan.draftRevision,
+      expectedConfigHash: await sha256Hex(plan.draft.config), summary: "receipt", rationale: ["fixture"],
+      operations: [{ op: "replace", path: "/selection/diskCount", value: 2 }], createdAt: "2026-08-25T00:00:00.000Z",
+    })).proposal;
+    const applied = await new PlanProposalService(repository).apply(plan.id, proposal, undefined, { confirmed: true, approvedBy: "human-test" });
+    await repository.updateInfo(plan.id, { expectedRevision: applied.plan.draftRevision, name: "Later authority" });
+    await expect(createProductionReferenceGraph({ coordinator, now: () => "2026-08-25T00:00:01.000Z" })).resolves.toMatchObject({ graphHash: expect.stringMatching(/^[a-f0-9]{64}$/) });
+
+    const idempotencyRoot = path.join(coordinator.activeRoot(state), "plans", ".idempotency");
+    const [recordName] = await fs.readdir(idempotencyRoot);
+    const recordFile = path.join(idempotencyRoot, recordName!);
+    const envelope = JSON.parse(await fs.readFile(recordFile, "utf8"));
+    envelope.payload.result.writeReceipt.schemaVersion = "plan-write-receipt-unknown";
+    const { resultHash: _oldResultHash, ...resultMaterial } = envelope.payload.result;
+    envelope.payload.result.resultHash = checksum(resultMaterial);
+    envelope.checksum = checksum(envelope.payload);
+    await fs.writeFile(recordFile, JSON.stringify(envelope));
+    await expect(createProductionReferenceGraph({ coordinator, now: () => "2026-08-25T00:00:02.000Z" })).rejects.toThrow(/plan idempotency record is invalid/);
+  });
+
+  it("rejects replay of the same proposal ID with changed content or base", async () => {
+    const { repository, plan, proposal } = await fixture();
+    const service = new PlanProposalService(repository);
+    await service.apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" });
+    const changedOperation = {
+      ...proposal,
+      operations: [{ op: "replace" as const, path: "/selection/diskCount" as const, value: 3 }],
+    };
+    await expect(service.apply(plan.id, changedOperation, [0], { confirmed: true, approvedBy: "human-test" }))
+      .rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
+    await expect(service.apply(plan.id, { ...proposal, expectedConfigHash: "f".repeat(64) }, [0], { confirmed: true, approvedBy: "human-test" }))
+      .rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
+    await expect(service.apply(plan.id, { ...proposal, expectedDraftRevision: proposal.expectedDraftRevision + 1 }, [0], { confirmed: true, approvedBy: "human-test" }))
+      .rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
+  });
+
+  it("rejects replay of the same proposal ID with a different partial approval scope", async () => {
+    const { root, repository, plan, proposal } = await fixture();
+    const multi = (await previewPlanProposal(plan.draft.config, {
+      ...proposal,
+      operations: [
+        { op: "replace", path: "/selection/diskCount", value: 4 },
+        { op: "replace", path: "/selection/boot", value: "m2" },
+      ],
+    })).proposal;
+    const service = new PlanProposalService(repository);
+    await service.apply(plan.id, multi, [0], { confirmed: true, approvedBy: "human-test" });
+    const restarted = new PlanProposalService(new FilePlanRepository({ root }));
+    await expect(restarted.apply(plan.id, multi, [1], { confirmed: true, approvedBy: "human-test" }))
+      .rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
+  });
+
+  it("rejects replay of the same proposal ID by a different approving actor", async () => {
+    const { repository, plan, proposal } = await fixture();
+    const service = new PlanProposalService(repository);
+    await service.apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "human-test" });
+    await expect(service.apply(plan.id, proposal, [0], { confirmed: true, approvedBy: "another-human" }))
+      .rejects.toMatchObject({ code: "idempotency_conflict", status: 409 });
   });
 
   it("rejects stale, non-allowlisted and nonexistent SKU proposals", async () => {
@@ -110,11 +250,15 @@ describe("R7 human-approved plan proposals", () => {
     const proposalService = new PlanProposalService(repository);
     await expect(handleWorkspaceRoute("POST", `/api/workspace/plans/${plan.id}/proposals/validate`, { proposal }, repository, { proposalService })).resolves.toMatchObject({ status: 200, payload: { proposal: { status: "proposed" } } });
     await expect(handleWorkspaceRoute("POST", `/api/workspace/plans/${plan.id}/proposals/apply`, { proposal, approvalConfirmed: false }, repository, { proposalService })).resolves.toMatchObject({ status: 403, payload: { error: "human_approval_required" } });
+    await expect(handleWorkspaceRoute("POST", `/api/workspace/plans/${plan.id}/proposals/apply`, { proposal, approvalConfirmed: true, approvedBy: "api-human", confirmedRequirementFieldIds: "not-an-array" }, repository, { proposalService }))
+      .resolves.toMatchObject({ status: 400, payload: { error: "invalid_request" } });
+    await expect(handleWorkspaceRoute("POST", `/api/workspace/plans/${plan.id}/proposals/validate`, { proposal, approvalConfirmed: true }, repository, { proposalService }))
+      .resolves.toMatchObject({ status: 400, payload: { error: "invalid_request" } });
     expect((await repository.get(plan.id)).draft.config.selection.diskCount).toBe(1);
     await expect(handleWorkspaceRoute("POST", `/api/workspace/plans/${plan.id}/proposals/apply`, { proposal, approvalConfirmed: true, approvedBy: "api-human" }, repository, { proposalService })).resolves.toMatchObject({ status: 200, payload: { proposal: { status: "applied" }, audit: { approvedBy: "api-human" } } });
   });
 
-  it("applies a pending Agent initialization atomically and records its structured intent", async () => {
+  it("treats legacy pending Agent metadata as incrementally editable and versionable", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "build-sim-init-")); roots.push(root);
     const repository = new FilePlanRepository({ root, now: () => "2026-08-25T03:00:00.000Z" });
     const created = await repository.create({
@@ -123,6 +267,8 @@ describe("R7 human-approved plan proposals", () => {
       metadata: { initialization: { status: "pending", source: "agent" } },
     });
     const hash = await sha256Hex(created.draft.config);
+    await expect(repository.saveVersion(created.id, { expectedRevision: created.draftRevision, expectedConfigHash: hash, reason: "manual-save" }))
+      .resolves.toMatchObject({ versionNumber: 1 });
     const proposal = (await previewPlanProposal(created.draft.config, {
       id: "proposal-initialize",
       planId: created.id,
@@ -139,82 +285,55 @@ describe("R7 human-approved plan proposals", () => {
       createdAt: "2026-08-25T02:00:00.000Z",
     })).proposal;
     const service = new PlanProposalService(repository, () => "2026-08-25T03:00:00.000Z");
-    await expect(repository.saveVersion(created.id, { expectedRevision: created.draftRevision, expectedConfigHash: hash, reason: "manual-save" })).rejects.toMatchObject({ code: "initialization_pending" });
-    await expect(repository.duplicate(created.id, { name: "待初始化副本" })).resolves.toMatchObject({ activeVersionId: null, metadata: { initialization: { status: "pending" } } });
-    await expect(service.apply(created.id, proposal, [0], { confirmed: true, approvedBy: "human-test" })).rejects.toMatchObject({ code: "initialization_atomic_required" });
-    expect((await repository.get(created.id)).metadata.initialization?.status).toBe("pending");
-    const applied = await service.apply(created.id, proposal, undefined, { confirmed: true, approvedBy: "human-test" });
-    expect(applied.plan).toMatchObject({
+    const partial = await service.apply(created.id, proposal, [0], { confirmed: true, approvedBy: "human-test" });
+    expect(partial.plan).toMatchObject({
       name: "2K 游戏方案",
-      draft: { config: { name: "2K 游戏方案", selection: { gpuId: "gpu.rtx-a2000-12gb" } } },
-      metadata: { useCase: "游戏", budgetCny: 8000, initialization: { status: "initialized", source: "agent", proposalId: proposal.id, intent: { targetResolution: "1440p" } } },
+      draft: { config: { name: "2K 游戏方案", selection: { gpuId: "gpu.none" } } },
+      metadata: { useCase: "游戏", budgetCny: 8000, initialization: { status: "initialized", source: "agent", proposalId: proposal.id } },
     });
-    expect(applied.audit.afterConfigHash).toBe(await sha256Hex(applied.plan.draft.config));
-    await expect(repository.saveVersion(applied.plan.id, { expectedRevision: applied.plan.draftRevision, expectedConfigHash: applied.audit.afterConfigHash, reason: "agent-proposal" })).resolves.toMatchObject({ versionNumber: 1 });
-    await expect(service.validate(created.id, proposal)).rejects.toMatchObject({ code: "initialization_status_invalid" });
+    const second = (await previewPlanProposal(partial.plan.draft.config, {
+      id: "proposal-second-round", planId: created.id, expectedDraftRevision: partial.plan.draftRevision,
+      expectedConfigHash: await sha256Hex(partial.plan.draft.config), summary: "第二轮加入 GPU", rationale: ["逐项 review"],
+      operations: [{ op: "replace", path: "/selection/gpuId", value: "gpu.rtx-a2000-12gb" }],
+    })).proposal;
+    const applied = await service.apply(created.id, second, undefined, { confirmed: true, approvedBy: "human-test" });
+    expect(applied.plan.draft.config).toMatchObject({ name: "2K 游戏方案", selection: { gpuId: "gpu.rtx-a2000-12gb" } });
+    await expect(repository.saveVersion(applied.plan.id, { expectedRevision: applied.plan.draftRevision, expectedConfigHash: applied.audit.afterConfigHash, reason: "agent-proposal" }))
+      .resolves.toMatchObject({ versionNumber: 2 });
   });
 
-  it("allows only initialization proposals while Agent initialization is pending", async () => {
+  it("creates the same honest blank scaffold for Agent and ordinary plans", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "build-sim-pending-kind-")); roots.push(root);
     const repository = new FilePlanRepository({ root, now: () => "2026-08-27T04:00:00.000Z" });
-    const created = await repository.create({
-      name: "待 Agent 初始化方案",
-      config: createEmptyBuildConfig("scaffold", "2026-08-27T04:00:00.000Z"),
-      metadata: { initialization: { status: "pending", source: "agent" } },
-    });
-    const beforeHash = await sha256Hex(created.draft.config);
-    const change = (await previewPlanProposal(created.draft.config, {
-      id: "proposal-wrong-kind",
-      planId: created.id,
-      expectedDraftRevision: created.draftRevision,
-      expectedConfigHash: beforeHash,
-      summary: "先改一项",
-      rationale: ["不应绕过原子初始化"],
-      operations: [{ op: "replace", path: "/caseId", value: "case.jonsbo-n6" }],
-      createdAt: "2026-08-27T04:00:00.000Z",
-    })).proposal;
-
-    await expect(new PlanProposalService(repository).apply(created.id, change, undefined, { confirmed: true, approvedBy: "human-test" }))
-      .rejects.toMatchObject({ code: "initialization_kind_required" });
-    const after = await repository.get(created.id);
-    expect(after.draftRevision).toBe(created.draftRevision);
-    expect(after.metadata.initialization?.status).toBe("pending");
-    expect(await sha256Hex(after.draft.config)).toBe(beforeHash);
+    const scaffold = createAgentInitializationScaffold("scaffold", "2026-08-27T04:00:00.000Z");
+    expect(scaffold).toEqual({ config: createEmptyBuildConfig("scaffold", "2026-08-27T04:00:00.000Z"), metadata: {} });
+    const created = await repository.create({ name: scaffold.config.name, config: scaffold.config, metadata: scaffold.metadata });
+    await expect(repository.saveVersion(created.id, {
+      expectedRevision: created.draftRevision, expectedConfigHash: await sha256Hex(created.draft.config), reason: "initial",
+    })).resolves.toMatchObject({ config: { caseId: "", boardId: "", cpuId: "", selection: { diskCount: 0 } } });
   });
 
-  it("keeps initialization pending when the post-proposal build is incomplete", async () => {
+  it("persists an incomplete incremental Agent proposal without fabricating unmentioned parts", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "build-sim-incomplete-init-")); roots.push(root);
     const repository = new FilePlanRepository({ root, now: () => "2026-08-27T05:00:00.000Z" });
     const created = await repository.create({
       name: "待 Agent 初始化方案",
       config: createDefaultN6Config("scaffold", "2026-08-27T05:00:00.000Z"),
-      metadata: { initialization: { status: "pending", source: "agent" } },
     });
     const beforeHash = await sha256Hex(created.draft.config);
-    const incomplete: PlanChangeProposal = {
-      schemaVersion: "1.0.0",
-      id: "proposal-incomplete-init",
-      planId: created.id,
-      expectedDraftRevision: created.draftRevision,
-      expectedConfigHash: beforeHash,
-      createdAt: "2026-08-27T05:00:00.000Z",
-      summary: "缺少必要选择的初始化",
-      rationale: ["验证完整性边界"],
-      operations: [
+    const incomplete = (await previewPlanProposal(created.draft.config, {
+      id: "proposal-incomplete-init", planId: created.id, expectedDraftRevision: created.draftRevision,
+      expectedConfigHash: beforeHash, createdAt: "2026-08-27T05:00:00.000Z",
+      summary: "保留未完成状态", rationale: ["逐项 review"], operations: [
         { op: "replace", path: "/cpuId", value: "" },
         { op: "remove", path: "/selection/diskSkuId" },
       ],
-      predictedImpact: { resolvedFindingIds: [], introducedFindingIds: [], budgetDeltaCny: null },
-      status: "proposed",
-      kind: "initialization",
-      intent: { useCase: "游戏" },
-    };
-
-    await expect(new PlanProposalService(repository).apply(created.id, incomplete, undefined, { confirmed: true, approvedBy: "human-test" }))
-      .rejects.toMatchObject({ code: "initialization_incomplete", message: expect.stringContaining("selection.diskSkuId") });
-    const after = await repository.get(created.id);
-    expect(after.draftRevision).toBe(created.draftRevision);
-    expect(after.metadata.initialization?.status).toBe("pending");
-    expect(await sha256Hex(after.draft.config)).toBe(beforeHash);
+    })).proposal;
+    const applied = await new PlanProposalService(repository).apply(created.id, incomplete, undefined, { confirmed: true, approvedBy: "human-test" });
+    expect(applied.plan.draft.config).toMatchObject({ cpuId: "", selection: { diskCount: 1 } });
+    expect("diskSkuId" in applied.plan.draft.config.selection).toBe(false);
+    await expect(repository.saveVersion(created.id, {
+      expectedRevision: applied.plan.draftRevision, expectedConfigHash: applied.audit.afterConfigHash, reason: "agent-proposal",
+    })).resolves.toMatchObject({ config: { cpuId: "" } });
   });
 });

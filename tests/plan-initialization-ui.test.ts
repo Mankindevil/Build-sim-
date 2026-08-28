@@ -27,23 +27,23 @@ describe("Agent plan initialization entry", () => {
     store.dispose();
   });
 
-  it("creates a pending blank plan and routes the user to Agent without saving the scaffold as a version", async () => {
+  it("creates the same saveable blank plan and routes the user to progressive Agent help", async () => {
     const { store } = await initializedStore();
     const root = document.getElementById("n6-lab")!;
     const controller = mountPlanShell(root, store, new WorkspaceRouter());
     document.querySelector<HTMLButtonElement>("[data-new-plan]")!.click();
     expect(document.querySelector<HTMLDialogElement>("[data-new-plan-dialog]")?.hasAttribute("open")).toBe(true);
     document.querySelector<HTMLButtonElement>("[data-new-agent-plan]")!.click();
-    await vi.waitFor(() => expect(store.getState().activePlan?.metadata.initialization?.status).toBe("pending"));
+    await vi.waitFor(() => expect(store.getState().activePlan?.name).toBe("Agent 渐进方案"));
     expect(store.getState().activePlan).toMatchObject({
-      name: "待 Agent 初始化方案",
+      name: "Agent 渐进方案",
       activeVersionId: null,
       draft: { dirty: true, config: { caseId: "", boardId: "", cpuId: "", selection: { psuId: "", fanGroups: [] } } },
-      metadata: { initialization: { status: "pending", source: "agent" } },
+      metadata: {},
     });
     expect(window.location.hash).toBe("#/agent");
-    expect(document.querySelector<HTMLButtonElement>("[data-save-version]")?.disabled).toBe(true);
-    expect(document.querySelector("[data-save-status]")?.textContent).toContain("先告诉助手");
+    expect(document.querySelector<HTMLButtonElement>("[data-save-version]")?.disabled).toBe(false);
+    expect(document.querySelector("[data-save-status]")?.textContent).not.toContain("初始化");
     controller.dispose();
     store.dispose();
   });

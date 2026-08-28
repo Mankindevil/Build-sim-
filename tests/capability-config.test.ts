@@ -8,6 +8,8 @@ import { loadBundledCatalog, loadRawCatalog } from "../src/sku/catalog";
 import baseline from "../data/configs/baseline-atx-1hdd.json";
 import type { BuildConfig } from "../src/config/types";
 import type { SkuCatalog } from "../src/sku/types";
+import { COMPONENT_KIND_REGISTRY, type ComponentKindId } from "../src/contracts/registries";
+import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
 
 const rawCatalog = loadRawCatalog();
 const catalog = loadBundledCatalog();
@@ -131,5 +133,20 @@ describe("G2 capability and configuration facts", () => {
     expect(result.price.catalogUpdatedAt).toBe(catalog.updatedAt);
     expect(result.price.items[0]).toHaveProperty("priceKind");
     expect(result.price.items[0]).toHaveProperty("historicalLowCny");
+  });
+
+  it("fails closed when a resolved V3 instance uses a SKU that cannot prove its governed kind", () => {
+    for (const kind of Object.keys(COMPONENT_KIND_REGISTRY) as ComponentKindId[]) {
+      const config = createEmptyBuildConfigV3(`kind-${kind}`, `Kind ${kind}`, "2026-08-27T00:00:00.000Z");
+      const wrongSkuId = kind === "case" ? "cpu.i5-14500" : "case.jonsbo-n6";
+      config.components = [{
+        instanceId: `instance-${kind}`, kind, role: `role-${kind}`, state: "planned", source: "user",
+        identity: { status: "resolved", skuId: wrongSkuId, identityClaimIds: [`claim-${kind}`] },
+      }];
+      expect(validateConfig(config, catalog, { topologyV3Enabled: true })).toContainEqual(expect.objectContaining({
+        path: "components.0.kind",
+        verdict: "bad",
+      }));
+    }
   });
 });

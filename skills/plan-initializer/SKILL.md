@@ -1,9 +1,9 @@
 ---
 contractVersion: "1.0.0"
 id: plan-initializer
-name: 方案初始化
-version: "1.1.0"
-description: 通过对话收集装机目标，在受治理的本地 SKU 目录内研究候选，并生成需要人工整体批准的完整初始化提案。
+name: 渐进式装机档案
+version: "2.0.0"
+description: 从真空白档案开始，每轮只记录用户明确表达的需求、角色或硬件节点，并生成可逐项人工批准的增量提案。
 allowedTools:
   - search_catalog_skus
   - get_sku_facts
@@ -15,7 +15,7 @@ allowedTools:
   - inspect_catalog_candidate
   - propose_catalog_review
   - search_price_candidates
-  - propose_plan_initialization
+  - propose_plan_change
 readOnly: true
 contextBudget: 10000
 triggers:
@@ -25,15 +25,15 @@ triggers:
   - 游戏主机
 ---
 
-# 方案初始化工作流
+# 渐进式装机档案工作流
 
-1. 当前 `BuildConfig` 是诚实的空白草稿，不含隐藏的 N6 或部件选择。不得把空字段当作默认推荐，也不得以界面占位内容跳过需求收集。
-2. 先从用户原话提取需求。至少确认用途和预算；游戏用途还应确认目标分辨率/帧率、代表游戏、购买地区。噪音、体积、外观、网络、已有零件和升级偏好只在相关时追问。每轮最多提出三个高价值问题。
-3. 用户尚未给出足够需求时，只能继续提问或总结已知/未知项，不得调用 `propose_plan_initialization`。
-4. 用 `search_catalog_skus` 发现本地可选的精确 SKU id，再用 `get_sku_facts` 核对关键规格。不得把模型记忆、网页标题或搜索 snippet 写成 SKU id。
-5. 当前目录覆盖有限。如果目录不能满足用户目标，明确说明覆盖缺口，给出“当前目录内可验证候选”和“目录外待补齐方向”，不得伪造通用游戏性能结论。
-6. 价格优先使用 `get_price_snapshot`。`search_price_candidates` 返回的都是未审计候选，必须说明日期、渠道与核验状态；不能把候选价当成确定预算。
-7. 官网搜索用于核对现有候选身份和缺失字段。`same-family`、`conflict`、`insufficient-evidence` 或未治理域名都不能成为初始化配置中的新 SKU。目录外候选只有达到 exact 且参数抽取成功时，才能调用 `propose_catalog_review` 生成独立的人审卡；用户接纳后必须在下一轮重新用 `search_catalog_skus` 读取正式 id，不能把候选 id 直接写进初始化方案。
-8. 确定候选后先用 `compare_builds` 或 `get_build_evaluation` 检查影响。任何 `bad`、关键 `unknown` 或预算未知都要向用户披露，不能被自然语言弱化。
-9. 只有用户明确表示接受某一完整候选，且机箱、主板、CPU、电源、散热器、显卡、内存和存储选择都使用本地目录精确 id 时，才能调用 `propose_plan_initialization`。
-10. 初始化提案必须包含结构化 `intent`、完整 `configuration`、理由与仍未解决的未知项。该 Tool 只生成提案；必须由用户在 UI 中整体审阅并批准，Agent 不得声称已经写入或保存版本。
+1. 当前档案可能完全空白，也可能只有需求或少量部件。空白不是错误，不含隐藏 N6、Windows、GPU none、980 PRO、HBA、线材、pool、BIOS 或附件默认值。
+2. 每轮只提取用户本轮明确表达的内容。可以只记录用途、预算、噪音、体积、容量、吞吐或周期，也可以只加入一个 unresolved 硬件节点；不得为了“完整”补造其余部件。
+3. 未回答的信息保持缺失，用户明确暂不回答时记录 deferred，明确不需要某个角色时才提议 `RoleDecision(not_needed)`。Agent 不能自行写入 `source:user`、`confirmedByUser:true`、`confirmedAt` 或 `lockedByUser:true`。
+4. 每轮最多提出三个会实质改变方案的高价值问题。已经保存的前轮节点和需求必须保留；只能通过 stable selector 增量 add/replace/remove，不能提交数组索引，也不能整份覆盖未在本轮讨论的集合。
+5. 型号未确认时保存 unresolved identity，保留用户原话和候选 ID。只有 `search_catalog_skus` 返回的正式精确 SKU ID 才可作为 resolved identity；模型记忆、网页标题、搜索 snippet 或 catalog candidate ID 均不可直接写入。
+6. 官网搜索只用于核验候选身份和缺失字段。`same-family`、`conflict`、`insufficient-evidence` 或未治理域名继续保持 unresolved；目录补充必须走独立人审流程。
+7. `get_build_evaluation` 对 V3 可能只返回 topology projection 和明确 unknown。不得把缺少通用 evaluator 的 partial 状态描述成兼容、安全、供电、空间、散热或采购 pass；也不得调用 V2/N6 比较来代替。
+8. 价格优先使用带日期与审计状态的 `get_price_snapshot`。价格候选不是确认价格，未知预算不得被自然语言弱化。
+9. 调用 `propose_plan_change` 时，V3 必须使用 `{collection,id,parentId?,field?}` stable selector。提案只包含本轮明确识别的操作，并逐项给出理由；用户可以只批准其中一部分。
+10. Tool 只生成非写入提案。只有 UI 中的明确人工批准才可修改草稿；需求确认必须列出本次审核的稳定字段 ID，普通提案批准不能顺带把既有 Agent/defaulted 需求升级为用户权威。

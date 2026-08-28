@@ -1,10 +1,10 @@
-import type { BuildConfig } from "../config/types";
+import type { BuildConfigDocument } from "../config/types";
 import type { PlanEvidenceBinding } from "../evidence/contracts";
-import { deepReadonly, sha256Hex } from "./canonical";
+import { deepReadonly, hashPlanConfig, sha256Hex } from "./canonical";
 import { PLAN_SCHEMA_VERSION, type PlanVersion, type PlanVersionReason } from "./contracts";
 import { assertValidPlanVersion } from "./validation";
 
-export interface CreatePlanVersionInput {
+export interface CreatePlanVersionInput<TConfig extends BuildConfigDocument = BuildConfigDocument> {
   id: string;
   planId: string;
   versionNumber: number;
@@ -13,19 +13,19 @@ export interface CreatePlanVersionInput {
   summary?: string;
   evaluationHash?: string;
   evaluatedAt?: string;
-  config: BuildConfig;
+  config: TConfig;
   evidenceBindings?: readonly PlanEvidenceBinding[];
   parentVersionId: string | null;
 }
 
-export async function createImmutablePlanVersion(input: CreatePlanVersionInput): Promise<PlanVersion> {
+export async function createImmutablePlanVersion<TConfig extends BuildConfigDocument>(input: CreatePlanVersionInput<TConfig>): Promise<PlanVersion<TConfig>> {
   const config = structuredClone(input.config);
   const evidenceBindings = structuredClone(input.evidenceBindings ?? []).map((binding) => ({
     ...binding,
     planId: input.planId,
     planVersionId: input.id,
   }));
-  const version: PlanVersion = {
+  const version: PlanVersion<TConfig> = {
     schemaVersion: PLAN_SCHEMA_VERSION,
     id: input.id,
     planId: input.planId,
@@ -34,7 +34,7 @@ export async function createImmutablePlanVersion(input: CreatePlanVersionInput):
     reason: input.reason,
     ...(input.summary?.trim() ? { summary: input.summary.trim() } : {}),
     config,
-    configHash: await sha256Hex(config),
+    configHash: await hashPlanConfig(config),
     evidenceBindings,
     evidenceHash: await sha256Hex(evidenceBindings),
     ...(input.evaluationHash ? { evaluationHash: input.evaluationHash } : {}),
@@ -42,5 +42,5 @@ export async function createImmutablePlanVersion(input: CreatePlanVersionInput):
     parentVersionId: input.parentVersionId,
   };
   assertValidPlanVersion(version);
-  return deepReadonly(version) as PlanVersion;
+  return deepReadonly(version) as PlanVersion<TConfig>;
 }

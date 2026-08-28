@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatCatalogToolResult, initAgentPanel } from "../src/lab/agent-panel";
 import type { PlanAgentContext, PlanChangeProposal } from "../src/plans/contracts";
+import { hashPlanConfig } from "../src/plans/canonical";
 import { makePlan } from "./helpers/workspace-ui";
 
 class FakeEventSource {
@@ -33,7 +34,7 @@ function payload(value: unknown, status = 200): Response {
 
 const model = { provider: "deepseek", id: "deepseek-v4-flash", label: "DeepSeek V4 Flash", capabilities: { streaming: true, tools: true, parallelTools: true, structuredOutput: true, thinking: true } };
 const skill = { manifest: { id: "build-diagnosis", name: "装机诊断", description: "fixture", version: "1.0.0", allowedTools: ["get_build_evaluation", "get_sku_facts"], readOnly: true }, definitionHash: "a".repeat(64) };
-const initializerSkill = { manifest: { id: "plan-initializer", name: "方案初始化", description: "fixture", version: "1.0.0", allowedTools: ["search_catalog_skus", "propose_plan_initialization"], readOnly: true }, definitionHash: "b".repeat(64) };
+const initializerSkill = { manifest: { id: "plan-initializer", name: "渐进式装机档案", description: "fixture", version: "2.0.0", allowedTools: ["search_catalog_skus", "propose_plan_change"], readOnly: true }, definitionHash: "b".repeat(64) };
 const session = { contractVersion: "1.0.0", id: "session-fixture", provider: "deepseek", model: model.id, buildConfig: null, messages: [], createdAt: "2026-08-24T00:00:00.000Z", updatedAt: "2026-08-24T00:00:00.000Z" };
 
 describe("A5 Agent panel", () => {
@@ -58,10 +59,10 @@ describe("A5 Agent panel", () => {
     expect(document.body.textContent).not.toContain("装机诊断工作流");
   });
 
-  it("automatically selects the initializer Skill for a pending blank plan", async () => {
+  it("treats legacy pending metadata as an ordinary progressively editable plan", async () => {
     const active = makePlan("plan-agent-init-12345678", "待 Agent 初始化方案");
     active.metadata.initialization = { status: "pending", source: "agent" };
-    const context = {
+    let context = {
       schemaVersion: "1.0.0", planId: active.id, planVersionId: null, draftRevision: 0,
       configHash: "1".repeat(64), evaluationHash: "2".repeat(64), buildConfig: active.draft.config,
       evaluation: { config: active.draft.config }, purchaseSummary: {}, buildTaskSummary: {},
@@ -69,9 +70,10 @@ describe("A5 Agent panel", () => {
     } as unknown as PlanAgentContext;
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/models") ? payload({ models: [model] }) : payload({ skills: [skill, initializerSkill] }));
     await initAgentPanel({ getBuildConfig: () => active.draft.config, getPlanContext: () => context, fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => new FakeEventSource() });
-    expect((document.querySelector("#agent-skill") as HTMLSelectElement).value).toBe("plan-initializer");
-    expect(document.querySelector("[data-agent-plan-context]")?.textContent).toContain("空白方案待初始化");
-    expect((document.querySelector("#agent-input") as HTMLTextAreaElement).placeholder).toContain("预算 8000 元");
+    expect((document.querySelector("#agent-skill") as HTMLSelectElement).value).toBe("");
+    expect(document.querySelector("[data-agent-plan-context]")?.textContent).toContain("已同步当前装机方案");
+    expect(document.querySelector("[data-agent-plan-context]")?.textContent).not.toContain("初始化脚手架");
+    expect((document.querySelector("#agent-input") as HTMLTextAreaElement).placeholder).toContain("逐项问我");
   });
 
   it("refreshes a stale model catalog and retries session creation once", async () => {
@@ -355,7 +357,7 @@ describe("A5 Agent panel", () => {
     const active = makePlan("plan-agent-12345678", "Agent plan");
     const configHash = "1".repeat(64);
     const evaluationHash = "2".repeat(64);
-    const context = {
+    let context = {
       schemaVersion: "1.0.0",
       planId: active.id,
       planVersionId: active.activeVersionId,
@@ -378,8 +380,11 @@ describe("A5 Agent panel", () => {
     const appliedPlan = structuredClone(active);
     appliedPlan.draftRevision += 1;
     appliedPlan.draft.config.selection.diskCount = 2;
+    const appliedConfigHash = await hashPlanConfig(appliedPlan.draft.config);
     const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
-    const acceptServerPlan = vi.fn();
+    const acceptServerPlan = vi.fn(async () => {
+      context = { ...context, draftRevision: appliedPlan.draftRevision, configHash: appliedConfigHash, buildConfig: structuredClone(appliedPlan.draft.config) };
+    });
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
@@ -403,7 +408,11 @@ describe("A5 Agent panel", () => {
     expect(messageBody?.content).toContain(evaluationHash);
     expect(messageBody?.content).toContain("psu.primary");
     expect(messageBody?.content).not.toContain("approvalToken");
-    expect(requests.find((entry) => entry.url.endsWith("/agent-context"))?.body).toMatchObject({ sessionId: session.id, runId: "run-plan", context: { planId: active.id, evaluationHash } });
+    const contextRequest = requests.find((entry) => entry.url.endsWith("/agent-context"))!;
+    expect(contextRequest.body).toMatchObject({ sessionId: session.id, idempotencyKey: expect.stringMatching(/^context-/), context: { planId: active.id, evaluationHash } });
+    const messageRequest = requests.find((entry) => entry.url.endsWith("/messages"))!;
+    expect(messageRequest.body?.idempotencyKey).toBe(contextRequest.body?.idempotencyKey);
+    expect(requests.indexOf(contextRequest)).toBeLessThan(requests.indexOf(messageRequest));
 
     stream.emit("text_delta", { type: "text_delta", runId: "run-plan", text: "我已经修复。", at: "now" });
     expect(acceptServerPlan).not.toHaveBeenCalled();
@@ -418,6 +427,99 @@ describe("A5 Agent panel", () => {
     apply.click();
     await vi.waitFor(() => expect(acceptServerPlan).toHaveBeenCalledWith(expect.objectContaining({ draftRevision: active.draftRevision + 1 })));
     expect(requests.find((entry) => entry.url.endsWith("/proposals/apply"))?.body).toMatchObject({ operationIndexes: [0], approvalConfirmed: true, approvedBy: "local-human" });
+  });
+
+  it("shows unchecked requirement confirmations only for selected operations and sends only explicit choices", async () => {
+    const active = makePlan("plan-agent-confirm-12345678", "Agent confirmations");
+    const configHash = "4".repeat(64);
+    const evaluationHash = "5".repeat(64);
+    let context = {
+      schemaVersion: "1.0.0", planId: active.id, planVersionId: active.activeVersionId, draftRevision: active.draftRevision,
+      configHash, evaluationHash, buildConfig: active.draft.config,
+      evaluation: { config: active.draft.config }, purchaseSummary: {}, buildTaskSummary: {},
+    } as unknown as PlanAgentContext;
+    const budgetId = "requirement:budget";
+    const horizonId = "requirement:horizonYears";
+    const proposal = {
+      schemaVersion: "1.0.0", id: "proposal-panel-requirements", planId: active.id,
+      expectedDraftRevision: active.draftRevision, expectedConfigHash: configHash, configSchemaVersion: "3.0.0",
+      createdAt: "2026-08-27T00:00:00.000Z", summary: "补充需求", rationale: ["待用户逐项确认"],
+      operations: [
+        { op: "replace", selector: { collection: "config", field: "requirementBudget" }, value: { state: "answered", value: { hardCapCny: 9000 }, source: "agent_proposed", confirmedByUser: false } },
+        { op: "replace", selector: { collection: "config", field: "requirementHorizonYears" }, value: { state: "answered", value: 5, source: "agent_proposed", confirmedByUser: false } },
+      ],
+      confirmableRequirementFieldIds: [budgetId, horizonId],
+      predictedImpact: { resolvedFindingIds: [], introducedFindingIds: [], budgetDeltaCny: null }, status: "proposed",
+    } as unknown as PlanChangeProposal;
+    const appliedPlan = structuredClone(active);
+    appliedPlan.draftRevision += 1;
+    const appliedConfigHash = await hashPlanConfig(appliedPlan.draft.config);
+    const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+      requests.push({ url, body });
+      if (url.endsWith("/models")) return payload({ models: [model] });
+      if (url.endsWith("/skills")) return payload({ skills: [skill] });
+      if (url.endsWith("/proposals/validate")) return payload({ proposal });
+      if (url.endsWith("/proposals/apply")) return payload({ proposal: { ...proposal, status: "applied" }, plan: appliedPlan, audit: { approvalId: "approval-confirm" } });
+      throw new Error(`unexpected ${url}`);
+    });
+    await initAgentPanel({
+      getBuildConfig: () => active.draft.config,
+      getPlanContext: () => context,
+      acceptServerPlan: async () => {
+        context = { ...context, draftRevision: appliedPlan.draftRevision, configHash: appliedConfigHash, buildConfig: appliedPlan.draft.config };
+      },
+      fetchImpl: fetchImpl as typeof fetch,
+      eventSourceFactory: () => new FakeEventSource(),
+    });
+    document.querySelector("[data-agent-plan-proposals]")?.dispatchEvent(new CustomEvent("build-sim:agent-plan-proposal", { detail: { proposal } }));
+    await vi.waitFor(() => expect(document.querySelectorAll("[data-proposal-requirement-confirmation]")).toHaveLength(2));
+    const budget = document.querySelector<HTMLInputElement>(`[data-proposal-requirement-confirmation='${budgetId}']`)!;
+    const horizon = document.querySelector<HTMLInputElement>(`[data-proposal-requirement-confirmation='${horizonId}']`)!;
+    expect([budget.checked, horizon.checked]).toEqual([false, false]);
+
+    const horizonOperation = document.querySelector<HTMLInputElement>("[data-proposal-operation='1']")!;
+    horizonOperation.checked = false;
+    horizonOperation.dispatchEvent(new Event("change"));
+    expect(horizon.disabled).toBe(true);
+    expect(horizon.parentElement?.hidden).toBe(true);
+    budget.checked = true;
+    budget.dispatchEvent(new Event("change"));
+    const approval = document.querySelector<HTMLInputElement>("[data-proposal-approval]")!;
+    approval.checked = true;
+    approval.dispatchEvent(new Event("change"));
+    document.querySelector<HTMLButtonElement>("[data-apply-proposal]")!.click();
+
+    await vi.waitFor(() => expect(requests.some((entry) => entry.url.endsWith("/proposals/apply"))).toBe(true));
+    expect(requests.find((entry) => entry.url.endsWith("/proposals/apply"))?.body).toMatchObject({
+      operationIndexes: [0], confirmedRequirementFieldIds: [budgetId], approvalConfirmed: true,
+    });
+  });
+
+  it("does not start an Agent run when plan-context preflight fails", async () => {
+    const active = makePlan("plan-agent-audit-fail-12345678", "Agent audit failure");
+    const context = {
+      schemaVersion: "1.0.0", planId: active.id, planVersionId: active.activeVersionId, draftRevision: active.draftRevision,
+      configHash: "1".repeat(64), evaluationHash: "2".repeat(64), buildConfig: active.draft.config,
+      evaluation: { config: active.draft.config }, purchaseSummary: {}, buildTaskSummary: {},
+    } as unknown as PlanAgentContext;
+    const requests: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input); requests.push(url);
+      if (url.endsWith("/models")) return payload({ models: [model] });
+      if (url.endsWith("/skills")) return payload({ skills: [skill] });
+      if (url.endsWith("/sessions") && init?.method === "POST") return payload(session, 201);
+      if (url.endsWith("/agent-context")) return payload({ error: "stale_revision", message: "stale" }, 409);
+      if (url.endsWith("/messages")) throw new Error("run must not start after failed context preflight");
+      throw new Error(`unexpected ${url}`);
+    });
+    await initAgentPanel({ getBuildConfig: () => active.draft.config, getPlanContext: () => context, requirePlanContext: () => true, fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => new FakeEventSource() });
+    (document.querySelector("#agent-input") as HTMLTextAreaElement).value = "不要绕过审计";
+    document.querySelector("#agent-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(document.querySelector("#agent-status")?.textContent).toContain("发送失败"));
+    expect(requests.filter((url) => url.endsWith("/messages"))).toEqual([]);
   });
 
   it.each([

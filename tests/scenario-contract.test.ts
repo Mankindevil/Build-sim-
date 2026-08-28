@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   compareWhatIfSnapshots,
+  SCENARIO_SCHEMA_VERSION,
+  validateScenarioFamily,
   validateScenarioBranch,
+  validateWhatIfResult,
   type ScenarioBranch,
 } from "../src/scenarios/contracts";
 import type { SnapshotHashes } from "../src/hash";
@@ -110,5 +113,43 @@ describe("U0 scenario branch contracts", () => {
       attribution: "refreshed",
       changedSnapshotFields: ["priceSnapshotHash"],
     });
+  });
+
+  it("validates immutable scenario family bindings and what-if result records", () => {
+    const family = {
+      schemaVersion: SCENARIO_SCHEMA_VERSION,
+      familyId: "family-upgrade",
+      planId: "plan-1",
+      name: "GPU upgrade",
+      basePlanVersionId: "version-1",
+      baseConfigHash: digest("a"),
+      baseSnapshotHashes: snapshotHashes(),
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    };
+    expect(validateScenarioFamily(family)).toEqual([]);
+    expect(validateScenarioFamily({ ...family, baseConfigHash: digest("9") })).toContain("baseConfigHash must match baseSnapshotHashes.configHash");
+    expect(validateWhatIfResult({
+      scenarioId: "scenario-gpu",
+      beforeEvaluationHash: digest("1"),
+      afterEvaluationHash: digest("2"),
+      decisionDiffRef: `sha256:${digest("6")}`,
+      domainDiffRefs: [`sha256:${digest("7")}`],
+      snapshotAttribution: "same_snapshots",
+    })).toEqual([]);
+    expect(validateWhatIfResult({
+      scenarioId: "scenario-gpu",
+      beforeEvaluationHash: "not-a-hash",
+      afterEvaluationHash: digest("2"),
+      decisionDiffRef: `sha256:${digest("6")}`,
+      domainDiffRefs: ["duplicate", "duplicate"],
+      snapshotAttribution: "invented",
+      config: {},
+    })).toEqual(expect.arrayContaining([
+      "what-if result contains topology, mutable plan data or unknown fields",
+      "what-if evaluation hashes invalid",
+      "what-if domain diff refs invalid",
+      "what-if snapshot attribution invalid",
+    ]));
   });
 });

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { parseConfig, type BuildConfig } from "../config/types";
+import { parseConfig, type BuildConfig, type BuildConfigDocument } from "../config/types";
 import { assertValidConfig } from "../config/validate";
 import { evaluateBuild, type BuildEvaluation } from "../core/evaluate";
 import { authoritativeEvaluationPayload, stableAgentJson, AGENT_EVALUATION_SCHEMA_VERSION } from "../agent/evaluation-contract";
@@ -9,8 +9,11 @@ import type { PriceSnapshotFile } from "../price/types";
 import { applyPriceSnapshot } from "../price/merge";
 import { loadMergedCatalogSync } from "../../scripts/price-server/catalog/repository.mjs";
 import { loadRuntimePriceSnapshot, resolveActiveGenerationRoot } from "./runtime-price-snapshot";
+import { hashPlanConfigRuntime } from "../plans/canonical-runtime.mjs";
+import { createPlanPartialEvaluationV3 } from "../plans/evaluation";
+import type { PlanEvaluation, PlanPartialEvaluationV3 } from "../plans/contracts";
 
-export interface AuthoritativeEvaluationResponse {
+export interface AuthoritativeEvaluationResponseV2 {
   schemaVersion: typeof AGENT_EVALUATION_SCHEMA_VERSION;
   configHash: string;
   evaluationHash: string;
@@ -18,6 +21,16 @@ export interface AuthoritativeEvaluationResponse {
   priceSnapshotVersion: string;
   evaluation: BuildEvaluation;
 }
+export interface AuthoritativeEvaluationResponseV3 {
+  schemaVersion: typeof AGENT_EVALUATION_SCHEMA_VERSION;
+  configHash: string;
+  evaluationHash: string;
+  catalogVersion: string;
+  /** V3 partial evaluation makes no price-snapshot or total-price claim. */
+  priceSnapshotVersion: null;
+  evaluation: PlanPartialEvaluationV3;
+}
+export type AuthoritativeEvaluationResponse = AuthoritativeEvaluationResponseV2 | AuthoritativeEvaluationResponseV3;
 interface AuthoritativeCatalogRepositoryOptions {
   persistRoot?: string;
   runtimeRoot?: string;
@@ -56,6 +69,15 @@ function consistentRuntimeSnapshot(): { runtimeRoot: string; activeRoot: string;
   };
 }
 
+function loadAuthoritativeCatalogWithoutPrices(): SkuCatalog {
+  const runtimeRoot = configuredRuntimeRoot();
+  if (runtimeRoot) {
+    const activeRoot = resolveActiveGenerationRoot(runtimeRoot);
+    return loadMergedCatalogSync({ ...catalogRepositoryOptions, activeRoot, generationAware: true }) as SkuCatalog;
+  }
+  return loadMergedCatalogSync(catalogReadOptions()) as SkuCatalog;
+}
+
 function catalogReadOptions(): AuthoritativeCatalogRepositoryOptions & { direct?: boolean } {
   if (configuredRuntimeRoot() || catalogRepositoryOptions.generationAware === true) return catalogRepositoryOptions;
   // Unit/offline callers without a runtime root consume the immutable seed (and
@@ -91,14 +113,50 @@ export function loadAuthoritativePriceSnapshot() {
   });
 }
 
-export function parseAuthoritativeBuildConfig(value: unknown, catalog: SkuCatalog = loadAuthoritativeCatalog()): BuildConfig {
+export function parseAuthoritativeBuildConfigDocument(
+  value: unknown,
+  catalog: SkuCatalog = loadAuthoritativeCatalog(),
+  options: { topologyV3Enabled?: boolean } = {},
+): BuildConfigDocument {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("buildConfig must be an object");
-  const config = parseConfig(JSON.stringify(value));
-  assertValidConfig(config, catalog);
+  const config = parseConfig(JSON.stringify(value), { topologyV3Enabled: options.topologyV3Enabled === true });
+  assertValidConfig(config, catalog, { topologyV3Enabled: options.topologyV3Enabled === true });
   return config;
 }
 
-export function evaluateBuildAuthoritatively(value: unknown, catalog?: SkuCatalog): AuthoritativeEvaluationResponse {
+export function parseAuthoritativeBuildConfig(value: unknown, catalog: SkuCatalog = loadAuthoritativeCatalog()): BuildConfig {
+  const config = parseAuthoritativeBuildConfigDocument(value, catalog, { topologyV3Enabled: false });
+  if (config.schemaVersion !== "2.0.0") throw new Error("Authoritative BuildEvaluation currently requires BuildConfig V2");
+  return config;
+}
+
+export function evaluateBuildDocumentAuthoritatively(
+  value: unknown,
+  catalog?: SkuCatalog,
+  options: { topologyV3Enabled?: boolean } = {},
+): AuthoritativeEvaluationResponse {
+  if (value && typeof value === "object" && !Array.isArray(value) && (value as { schemaVersion?: unknown }).schemaVersion === "3.0.0") {
+    // A V3 partial evaluation deliberately makes no price claim. Resolve the
+    // governed catalog from the active generation without requiring prices/latest.json;
+    // price availability must not block progressive topology capture.
+    const resolvedCatalog = catalog ?? loadAuthoritativeCatalogWithoutPrices();
+    const config = parseAuthoritativeBuildConfigDocument(value, resolvedCatalog, { topologyV3Enabled: options.topologyV3Enabled === true });
+    if (config.schemaVersion !== "3.0.0") throw new Error("BuildConfig V3 evaluation schema mismatch");
+    const evaluation: PlanEvaluation = createPlanPartialEvaluationV3(config);
+    const payload = authoritativeEvaluationPayload(evaluation);
+    return {
+      schemaVersion: AGENT_EVALUATION_SCHEMA_VERSION,
+      configHash: hashPlanConfigRuntime(config),
+      evaluationHash: sha256AgentValue(payload),
+      catalogVersion: resolvedCatalog.catalogVersion ?? `${resolvedCatalog.schemaVersion}:${resolvedCatalog.updatedAt}`,
+      priceSnapshotVersion: null,
+      evaluation,
+    };
+  }
+  return evaluateBuildAuthoritatively(value, catalog);
+}
+
+export function evaluateBuildAuthoritatively(value: unknown, catalog?: SkuCatalog): AuthoritativeEvaluationResponseV2 {
   const consistent = catalog ? null : consistentRuntimeSnapshot();
   const snapshot = consistent?.priceSnapshot ?? loadAuthoritativePriceSnapshot();
   // When the caller did not supply a pre-resolved catalog, merge the exact

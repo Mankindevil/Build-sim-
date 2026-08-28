@@ -1,11 +1,12 @@
-import type { BuildConfig } from "../config/types";
+import type { BuildConfig, BuildConfigDocument } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
-import { sha256Hex } from "./canonical";
+import { hashPlanConfig } from "./canonical";
 import type { BuildPlan, BuildPlanSummary, PlanEvaluationSnapshot, PlanSaveStatus, PlanVersion, PlanVersionReason } from "./contracts";
 import type { WorkspacePlanApi } from "./client";
 import { WorkspaceApiError } from "./client";
 import { migrateLegacyProgress, type KeyValueStorage } from "./migration";
 import { validateBuildPlan } from "./validation";
+import { isPlanPartialEvaluationV3 } from "./evaluation";
 
 export const ACTIVE_PLAN_KEY = "build-sim.workspace.active-plan.v1";
 const CACHE_PREFIX = "build-sim.workspace.plan-cache.v1:";
@@ -162,6 +163,8 @@ export class PlanStore {
     if (this.state.activePlan?.id === planId) return;
     if (!force && this.shouldWarnBeforeUnload()) throw new Error("active_plan_has_unsaved_changes");
     this.cancelAutosave();
+    this.state.evaluationSnapshot = null;
+    this.state.evaluation = null;
     try {
       const plan = await this.options.api.get(planId);
       this.state.activePlan = plan;
@@ -275,7 +278,7 @@ export class PlanStore {
         this.state.activePlan = saved;
         this.state.saveStatus = "saved";
         const snapshot = this.state.evaluationSnapshot;
-        if (snapshot?.planId === saved.id && snapshot.configHash === await sha256Hex(saved.draft.config)) {
+        if (snapshot?.planId === saved.id && snapshot.configHash === await hashPlanConfig(saved.draft.config)) {
           this.state.evaluationSnapshot = {
             ...snapshot,
             planVersionId: saved.activeVersionId,
@@ -312,17 +315,16 @@ export class PlanStore {
     await this.saveDraftNow();
     const plan = this.state.activePlan;
     if (!plan || this.state.saveStatus === "failed" || this.state.saveStatus === "conflict" || this.state.saveStatus === "offline") throw new Error("Draft must be persisted before saving a version");
-    if (plan.metadata.initialization?.status === "pending") throw new Error("Pending Agent initialization scaffolds cannot be saved as versions");
     const version = await this.options.api.saveVersion(plan.id, {
       expectedRevision: plan.draftRevision,
-      expectedConfigHash: await sha256Hex(plan.draft.config),
+      expectedConfigHash: await hashPlanConfig(plan.draft.config),
       reason,
       ...(summary?.trim() ? { summary: summary.trim() } : {}),
-      ...(this.state.evaluationSnapshot?.configHash === await sha256Hex(plan.draft.config) ? {
+      ...(this.state.evaluationSnapshot?.configHash === await hashPlanConfig(plan.draft.config) ? {
         evaluationHash: this.state.evaluationSnapshot.evaluationHash,
         evaluatedAt: this.state.evaluationSnapshot.evaluatedAt,
       } : {}),
-      idempotencyKey: `version-${plan.id}-${plan.draftRevision}-${await sha256Hex(plan.draft.config)}`,
+      idempotencyKey: `version-${plan.id}-${plan.draftRevision}-${await hashPlanConfig(plan.draft.config)}`,
     });
     plan.activeVersionId = version.id;
     plan.draft.baseVersionId = version.id;
@@ -389,6 +391,8 @@ export class PlanStore {
     if (this.state.activePlan?.id === planId) {
       const next = this.state.plans.find((plan) => plan.status === "active") ?? this.state.plans[0];
       this.state.activePlan = next ? await this.options.api.get(next.id) : null;
+      this.state.evaluationSnapshot = null;
+      this.state.evaluation = null;
       if (this.state.activePlan) this.cache(this.state.activePlan);
     }
     this.emit();
@@ -415,9 +419,9 @@ export class PlanStore {
   }
 
   setEvaluationSnapshot(snapshot: PlanEvaluationSnapshot): void {
-    if (snapshot.planId !== this.state.activePlan?.id) return;
+    if (snapshot.planId !== this.state.activePlan?.id || snapshot.draftRevision !== this.state.activePlan.draftRevision) return;
     this.state.evaluationSnapshot = snapshot;
-    this.state.evaluation = snapshot.evaluation;
+    this.state.evaluation = isPlanPartialEvaluationV3(snapshot.evaluation) ? null : snapshot.evaluation;
     this.emit();
   }
 
@@ -427,17 +431,19 @@ export class PlanStore {
   }
 
   /** Accept a server-authoritative draft returned by an explicitly approved proposal. */
-  acceptServerPlan(plan: BuildPlan): void {
+  acceptServerPlan(plan: BuildPlan<BuildConfigDocument>): void {
     if (plan.id !== this.state.activePlan?.id) throw new Error("Approved proposal returned another plan");
     this.cancelAutosave();
-    this.state.activePlan = clone(plan);
+    this.state.evaluationSnapshot = null;
+    this.state.evaluation = null;
+    this.state.activePlan = clone(plan) as BuildPlan;
     this.state.saveStatus = "saved";
     this.state.offline = false;
     this.state.error = null;
     this.state.localRevision = 0;
     this.changeToken += 1;
-    this.replaceSummary(plan);
-    this.cache(plan);
+    this.replaceSummary(plan as BuildPlan);
+    this.cache(plan as BuildPlan);
     this.emit();
   }
 

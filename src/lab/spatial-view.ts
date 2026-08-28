@@ -6,6 +6,7 @@ import { SpatialSelectionController } from "../spatial/selection";
 import { buildSpatialOverlayModel, configFieldPartIds, primaryPartForFinding, type SpatialOverlayModel } from "../spatial/overlays";
 import type { WorkspaceRouter } from "./workspace-router";
 import { buildReadiness } from "../config/validate";
+import type { BuildConfigV3 } from "../topology/contracts";
 import "./spatial-view.css";
 
 export interface SpatialViewController {
@@ -116,6 +117,10 @@ function emptySpatialModel(): SpatialSceneModel {
     nodes: [],
     evaluationFindingIds: [],
   };
+}
+
+function isBuildConfigV3(config: unknown): config is BuildConfigV3 {
+  return Boolean(config && typeof config === "object" && (config as { schemaVersion?: unknown }).schemaVersion === "3.0.0");
 }
 
 /** Store emissions are frequent; only a changed evaluation identity may rebuild WebGL resources. */
@@ -274,41 +279,72 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
     });
   };
 
+  /** Clear a previous V2 scene before showing any state without a V2 evaluation. */
+  const clearScene = (copy: { status: string; workflow: string; findingLabel: string; assemblyLabel: string }) => {
+    sceneGeneration += 1;
+    renderer?.dispose();
+    renderer = null;
+    model = null;
+    overlays = null;
+    evaluationIdentity = null;
+    evaluationHash = null;
+    syncedPartId = null;
+    syncedFindingId = null;
+    selection.select(null, false);
+    selection.setModel(emptySpatialModel());
+    canvasHost.replaceChildren();
+    findingSelect.replaceChildren(option(copy.findingLabel, ""));
+    assemblySelect.replaceChildren(option(copy.assemblyLabel, ""));
+    findingSelect.disabled = true;
+    assemblySelect.disabled = true;
+    assemblyPrev.disabled = true;
+    assemblyNext.disabled = true;
+    renderInspector(inspector, null, null);
+    workflowNote.textContent = copy.workflow;
+    status.textContent = copy.status;
+    root.classList.remove("is-hidden");
+    root.classList.add("is-partial");
+    fallback.classList.add("is-hidden");
+    stage.classList.remove("spatial-three-active");
+    stage.classList.add("spatial-three-pending");
+    mode = "pending";
+    hideLegacyToolbar();
+  };
+
   const onState = (state: PlanStoreState) => {
-    if (!state.evaluation) return;
+    const config = state.activePlan?.draft.config;
+    if (isBuildConfigV3(config)) {
+      clearScene({
+        status: "当前为 V3 部分拓扑；尚未生成空间、走线或热场结论。",
+        workflow: "V3 部分拓扑不会复用旧版空间场景；物理布局、接线与尺寸仍未知。",
+        findingLabel: "V3 拓扑待物理评估",
+        assemblyLabel: "等待 V3 物理评估",
+      });
+      if (state.selection) queueMicrotask(() => { if (!disposed && isBuildConfigV3(store.getState().activePlan?.draft.config)) publishSelection(null); });
+      return;
+    }
+    if (!state.evaluation) {
+      clearScene({
+        status: "尚未生成当前方案的空间评估；不会保留上一版场景。",
+        workflow: "等待当前 BuildEvaluation 后再生成空间、走线或热场结论。",
+        findingLabel: "等待当前评估",
+        assemblyLabel: "等待当前评估",
+      });
+      if (state.selection) queueMicrotask(() => { if (!disposed && !store.getState().evaluation) publishSelection(null); });
+      return;
+    }
     const readiness = state.activePlan ? buildReadiness(state.activePlan.draft.config, getCatalog()) : state.evaluation.readiness;
     if (readiness.status === "incomplete") {
-      sceneGeneration += 1;
-      renderer?.dispose();
-      renderer = null;
-      model = null;
-      overlays = null;
-      evaluationIdentity = null;
-      evaluationHash = null;
-      syncedPartId = null;
-      syncedFindingId = null;
-      selection.select(null, false);
-      selection.setModel(emptySpatialModel());
-      canvasHost.replaceChildren();
-      findingSelect.replaceChildren(option("方案未完整", ""));
-      assemblySelect.replaceChildren(option("等待核心选择", ""));
-      findingSelect.disabled = true;
-      assemblySelect.disabled = true;
-      assemblyPrev.disabled = true;
-      assemblyNext.disabled = true;
-      renderInspector(inspector, null, null);
-      workflowNote.textContent = "完整配置前不生成空间、走线或热场结论。";
-      status.textContent = `方案还缺 ${readiness.missing.length} 项核心选择；完成后再生成 3D 场景。`;
-      root.classList.remove("is-hidden");
-      root.classList.add("is-partial");
-      fallback.classList.add("is-hidden");
-      stage.classList.remove("spatial-three-active");
-      stage.classList.add("spatial-three-pending");
-      mode = "pending";
-      hideLegacyToolbar();
+      clearScene({
+        status: `方案还缺 ${readiness.missing.length} 项核心选择；完成后再生成 3D 场景。`,
+        workflow: "完整配置前不生成空间、走线或热场结论。",
+        findingLabel: "方案未完整",
+        assemblyLabel: "等待核心选择",
+      });
       if (state.selection) queueMicrotask(() => {
         const current = store.getState();
-        if (!disposed && current.activePlan && buildReadiness(current.activePlan.draft.config, getCatalog()).status === "incomplete") publishSelection(null);
+        if (!disposed && current.activePlan && !isBuildConfigV3(current.activePlan.draft.config)
+          && buildReadiness(current.activePlan.draft.config, getCatalog()).status === "incomplete") publishSelection(null);
       });
       return;
     }

@@ -1,4 +1,6 @@
 import type { PurchaseBucket } from "../sku/types";
+import type { BuildConfigV3 } from "../topology/contracts";
+import { validateBuildConfigV3 } from "../topology/validation";
 
 export type BootMode = "bay" | "m2" | "usbssd";
 export type HbaMode = "auto" | "always";
@@ -57,13 +59,30 @@ export interface BuildConfig {
   };
 }
 
-export function serializeConfig(config: BuildConfig): string {
+export type ConfigV2 = BuildConfig;
+export type BuildConfigDocument = ConfigV2 | BuildConfigV3;
+export const TOPOLOGY_V3_FEATURE_FLAG = "BUILD_SIM_TOPOLOGY_V3_ENABLED" as const;
+
+export interface ParseConfigOptions {
+  topologyV3Enabled?: boolean;
+  /** Exact immutable V2 bytes to read while V3 remains disabled. */
+  v2FallbackRaw?: string;
+}
+
+function configRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function exactConfigFields(value: unknown, allowed: readonly string[], required: readonly string[] = []): value is Record<string, unknown> {
+  return configRecord(value) && Object.keys(value).every((key) => allowed.includes(key))
+    && required.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+export function serializeConfig(config: BuildConfigDocument): string {
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
-export function parseConfig(raw: string): BuildConfig {
-  const input = JSON.parse(raw) as Record<string, unknown>;
-  const version = String(input.schemaVersion ?? "");
+function parseConfigV2Input(input: Record<string, unknown>, version: string): BuildConfig {
   let data: BuildConfig;
   if (version === "2.0.0") {
     data = input as unknown as BuildConfig;
@@ -102,24 +121,73 @@ export function parseConfig(raw: string): BuildConfig {
   } else {
     throw new Error(`Unsupported config schema: ${version || "missing"}`);
   }
-  if (!data.id || !data.name || !data.updatedAt || !data.selection || !Array.isArray(data.bom)) throw new Error("Malformed BuildConfig: missing required fields");
-  if (!Number.isInteger(data.selection.diskCount) || data.selection.diskCount < 0) throw new Error("Malformed BuildConfig: diskCount must be a non-negative integer");
-  if (!["auto", "bottom", "dual"].includes(data.selection.psuTopology)) throw new Error("Malformed BuildConfig: invalid PSU topology");
-  if (!["bay", "m2", "usbssd"].includes(data.selection.boot)) throw new Error("Malformed BuildConfig: invalid boot mode");
-  if (!["auto", "always"].includes(data.selection.hbaMode)) throw new Error("Malformed BuildConfig: invalid HBA mode");
-  if (data.selection.fanMode !== undefined && !["quiet", "balanced", "performance"].includes(data.selection.fanMode)) throw new Error("Malformed BuildConfig: invalid fan mode");
-  if (data.selection.fanGroups !== undefined) {
-    if (!Array.isArray(data.selection.fanGroups) || data.selection.fanGroups.length > 16) throw new Error("Malformed BuildConfig: invalid fan groups");
+  const record = data as unknown as Record<string, unknown>;
+  const topFields = ["schemaVersion", "id", "name", "updatedAt", "caseId", "boardId", "cpuId", "selection", "bom", "notes", "migration"];
+  const topRequired = ["schemaVersion", "id", "name", "updatedAt", "caseId", "boardId", "cpuId", "selection", "bom"];
+  if (!exactConfigFields(record, topFields, topRequired)) throw new Error("Malformed BuildConfig: unknown or missing fields");
+  if (record.schemaVersion !== "2.0.0" || typeof record.id !== "string" || !record.id || typeof record.name !== "string" || !record.name
+    || typeof record.updatedAt !== "string" || !record.updatedAt || typeof record.caseId !== "string" || typeof record.boardId !== "string" || typeof record.cpuId !== "string"
+    || !configRecord(record.selection) || !Array.isArray(record.bom)) throw new Error("Malformed BuildConfig: missing required fields");
+  const selection = record.selection;
+  const selectionFields = ["psuId", "psuTopology", "secondaryPsuId", "dualStart", "coolerId", "gpuId", "memoryId", "diskCount", "diskSkuId", "nvmeCount", "boot", "hbaMode", "hbaSkuId", "fanMode", "fanGroups"];
+  const selectionRequired = ["psuId", "psuTopology", "coolerId", "gpuId", "memoryId", "diskCount", "boot", "hbaMode"];
+  if (!exactConfigFields(selection, selectionFields, selectionRequired)
+    || [selection.psuId, selection.coolerId, selection.gpuId, selection.memoryId].some((value) => typeof value !== "string")
+    || (selection.secondaryPsuId !== undefined && selection.secondaryPsuId !== null && typeof selection.secondaryPsuId !== "string")
+    || (selection.diskSkuId !== undefined && typeof selection.diskSkuId !== "string")
+    || (selection.hbaSkuId !== undefined && selection.hbaSkuId !== null && typeof selection.hbaSkuId !== "string")) throw new Error("Malformed BuildConfig: invalid selection shape");
+  if (!Number.isSafeInteger(selection.diskCount) || Number(selection.diskCount) < 0) throw new Error("Malformed BuildConfig: diskCount must be a non-negative integer");
+  if (selection.nvmeCount !== undefined && (!Number.isSafeInteger(selection.nvmeCount) || Number(selection.nvmeCount) < 0)) throw new Error("Malformed BuildConfig: nvmeCount must be a non-negative integer");
+  if (!["auto", "bottom", "dual"].includes(String(selection.psuTopology))) throw new Error("Malformed BuildConfig: invalid PSU topology");
+  if (!["bay", "m2", "usbssd"].includes(String(selection.boot))) throw new Error("Malformed BuildConfig: invalid boot mode");
+  if (!["auto", "always"].includes(String(selection.hbaMode))) throw new Error("Malformed BuildConfig: invalid HBA mode");
+  if (selection.dualStart !== undefined && selection.dualStart !== null && !["sync", "none"].includes(String(selection.dualStart))) throw new Error("Malformed BuildConfig: invalid dual start mode");
+  if (selection.fanMode !== undefined && !["quiet", "balanced", "performance"].includes(String(selection.fanMode))) throw new Error("Malformed BuildConfig: invalid fan mode");
+  if (selection.fanGroups !== undefined) {
+    if (!Array.isArray(selection.fanGroups) || selection.fanGroups.length > 16) throw new Error("Malformed BuildConfig: invalid fan groups");
     const seen = new Set<string>();
-    for (const group of data.selection.fanGroups) {
-      if (!group || typeof group !== "object" || typeof group.mountId !== "string" || !group.mountId.trim()) throw new Error("Malformed BuildConfig: invalid fan mount id");
+    for (const group of selection.fanGroups) {
+      if (!exactConfigFields(group, ["mountId", "sizeMm", "count"], ["mountId", "sizeMm", "count"]) || typeof group.mountId !== "string" || !group.mountId.trim()) throw new Error("Malformed BuildConfig: invalid fan mount id");
       if (seen.has(group.mountId)) throw new Error("Malformed BuildConfig: duplicate fan mount id");
       seen.add(group.mountId);
       if (group.sizeMm !== 120 && group.sizeMm !== 140) throw new Error("Malformed BuildConfig: invalid fan size");
-      if (!Number.isSafeInteger(group.count) || group.count < 1 || group.count > 16) throw new Error("Malformed BuildConfig: invalid fan count");
-      const keys = Object.keys(group as unknown as Record<string, unknown>);
-      if (keys.some((key) => !["mountId", "sizeMm", "count"].includes(key))) throw new Error("Malformed BuildConfig: unexpected fan group field");
+      if (!Number.isSafeInteger(group.count) || Number(group.count) < 1 || Number(group.count) > 16) throw new Error("Malformed BuildConfig: invalid fan count");
     }
   }
+  const seenBom = new Set<string>();
+  for (const line of record.bom) {
+    if (!exactConfigFields(line, ["skuId", "qty", "bucket"], ["skuId", "qty", "bucket"]) || typeof line.skuId !== "string" || !line.skuId.trim()
+      || !Number.isSafeInteger(line.qty) || Number(line.qty) <= 0 || !["owned", "buy_now", "upgrade_later", "optional"].includes(String(line.bucket))) throw new Error("Malformed BuildConfig: invalid BOM line");
+    if (seenBom.has(line.skuId)) throw new Error("Malformed BuildConfig: duplicate BOM SKU");
+    seenBom.add(line.skuId);
+  }
+  if (record.notes !== undefined && (!Array.isArray(record.notes) || record.notes.some((note) => typeof note !== "string"))) throw new Error("Malformed BuildConfig: invalid notes");
+  if (record.migration !== undefined && (!exactConfigFields(record.migration, ["fromSchemaVersion", "toSchemaVersion"], ["fromSchemaVersion", "toSchemaVersion"])
+    || typeof record.migration.fromSchemaVersion !== "string" || !record.migration.fromSchemaVersion || record.migration.toSchemaVersion !== "2.0.0")) throw new Error("Malformed BuildConfig: invalid migration metadata");
   return data;
+}
+
+export function parseConfig(raw: string): BuildConfig;
+export function parseConfig(raw: string, options: ParseConfigOptions & { topologyV3Enabled: false }): BuildConfig;
+export function parseConfig(raw: string, options: ParseConfigOptions & { topologyV3Enabled: true }): BuildConfigDocument;
+export function parseConfig(raw: string, options: ParseConfigOptions): BuildConfigDocument;
+export function parseConfig(raw: string, options: ParseConfigOptions = {}): BuildConfigDocument {
+  const input = JSON.parse(raw) as Record<string, unknown>;
+  const version = String(input.schemaVersion ?? "");
+  if (version !== "3.0.0") return parseConfigV2Input(input, version);
+  if (options.topologyV3Enabled !== true) {
+    if (options.v2FallbackRaw !== undefined) {
+      const fallbackInput = JSON.parse(options.v2FallbackRaw) as Record<string, unknown>;
+      const fallbackVersion = String(fallbackInput.schemaVersion ?? "");
+      if (fallbackVersion !== "2.0.0") throw new Error(`${TOPOLOGY_V3_FEATURE_FLAG}=false requires immutable schema 2.0.0 fallback bytes`);
+      if (typeof input.id !== "string" || fallbackInput.id !== input.id) {
+        throw new Error(`${TOPOLOGY_V3_FEATURE_FLAG}=false fallback identity does not match the V3 config`);
+      }
+      return parseConfigV2Input(fallbackInput, fallbackVersion);
+    }
+    throw new Error(`BuildConfig V3 is disabled; enable ${TOPOLOGY_V3_FEATURE_FLAG} or provide immutable V2 fallback bytes`);
+  }
+  const errors = validateBuildConfigV3(input);
+  if (errors.length > 0) throw new Error(`Malformed BuildConfigV3: ${errors.join("; ")}`);
+  return input as unknown as BuildConfigV3;
 }

@@ -1,8 +1,11 @@
 # Requirements, solver, scenarios, and allowlists
 
-This document freezes §4.6 and the U0 registry boundary. Requirements are
-user intent; the solver is bounded candidate generation; scenarios are
-immutable what-if derivations. None may invent an SKU or weaken evaluation.
+This document records the U2 implementation boundary for §4.6 and the U0
+registry boundary. Requirements are user intent; the solver is bounded
+candidate generation; scenarios are immutable what-if derivations. None may
+invent an SKU or weaken evaluation. The scenario repository and strict
+production closure are implemented, while authoritative replayable evaluation
+of a `WhatIfResult` is deliberately deferred (see below).
 
 ## RequirementSpec
 
@@ -44,6 +47,28 @@ there is no cross-purpose “universal performance score”. External
 devices are not topology nodes or BOM items, but their target FPS, throughput,
 or USB count may become internal requirements.
 
+U2 also exposes granular stable selectors for progressive edits. The top-level
+`config.requirementBudget` and `config.requirementHorizonYears` selectors
+replace one draft field at a time; `workloads` and `constraints` use their
+stable IDs, and `metrics` uses `(workloadId, metricId)` rather than an array
+index. A non-null existing RequirementSpec cannot be replaced wholesale by
+`PlanProposalService`; it must be edited through governed field/entity
+operations. `solverAnsweredDraftValue`, `solverActiveMetrics` and
+`solverActiveConstraints` are the solver-facing safe projections: a
+deferred/not-applicable field, an unconfirmed workload/metric/constraint, and
+an `agent_proposed` hard constraint are persisted data but not active solver
+authority. Legacy metric/workload shapes remain readable for compatibility, but
+missing confirmation metadata never becomes authority.
+
+The ordinary blank-plan Agent path is progressive. A first proposal may save
+only a requirement field (including an all-empty hardware topology); later
+proposals add only the explicitly identified component/edge/requirement. An
+unresolved identity retains the user's text and is not replaced by a default
+SKU. Human approval, revision/hash compare-and-swap and the governed selector
+validator remain required. The Agent does not auto-fill a case, board, GPU,
+storage, cable or other unmentioned component, and does not promote its
+interpretation to a user-confirmed hard constraint.
+
 ## Scenarios
 
 ```ts
@@ -55,6 +80,18 @@ interface ScenarioBranch {
   baseSnapshotHashes: SnapshotHashes;
   patch: TopologyV3StablePatchOperation[];
   simulationInputPatch?: JsonPatchOperation[];
+}
+
+interface ScenarioFamily {
+  schemaVersion: "1.0.0";
+  familyId: string;
+  planId: string;
+  name: string;
+  basePlanVersionId: string;
+  baseConfigHash: string;
+  baseSnapshotHashes: SnapshotHashes;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface TopologyV3StablePatchOperation {
@@ -84,7 +121,41 @@ Branches are rooted at an immutable plan version and never mutate the active
 plan. Default comparisons lock fact, price, rule, system, and simulation
 snapshots, so differences are attributable to the patch. If the user requests
 a refresh, input changes and market changes are labelled separately. A stale
-base version is rejected.
+base version is rejected. `ScenarioFamily` and `ScenarioBranch` are persisted
+as immutable repository envelopes. Every family/branch snapshot set has a
+content-addressed `scenario-snapshot-set-v1` manifest whose ID is derived from
+the complete snapshot-hash tuple; the family and branch must bind to the same
+manifest and config hash. Materialization re-resolves the exact base plan
+version and rejects changed version/config/snapshot state with `stale` rather
+than silently rebasing. Acceptance returns a normal plan proposal with the
+expected base revision/hash; it does not mutate the active plan.
+
+Branch creation and materialization validate resolved identities against the
+active generation's merged catalog. Unresolved identities remain valid, but a
+resolved SKU absent from or mismatched with that catalog is rejected. Patch
+authority is actor-bound (`user`, `agent`, `solver`, `system`): non-user actors
+cannot assert user source/confirmation/lock timestamps, role decisions are
+user-only, system mutations are limited to governed defaults/firmware paths,
+and interactive branches cannot mint `migration` provenance.
+
+Production validation scans the family, branch and snapshot-set envelopes and
+requires closure edges to the immutable base plan version, family and snapshot
+set. Unknown paths, symlinks, dangling bases/manifests, forged materialized
+hashes, semantically invalid materializations and resolved identities not
+proven by the active merged catalog fail backup, restore and Doctor checks.
+Until U3 replaces catalog-derived identity with a locked fact snapshot, an
+existing scenario whose resolved identity disappears from the active catalog
+therefore fails closed as stale rather than being silently reinterpreted. This
+interim freshness check does not mutate the branch or its base plan version.
+
+U2 intentionally does not persist what-if evaluation results. `WhatIfResult`
+has a structural validator for hashes and governed diff references, but
+`FileScenarioRepository.saveResult` and reads of persisted result/evaluation
+records return `evaluation_authority_unavailable`; production scanning rejects
+`results/`, `evaluations/` and `evaluation-snapshots/` authority paths. This is
+fail-closed until U6 supplies a governed, authoritative, replayable evaluator
+and verifier. A branch/materialized config is therefore not evidence that a
+before/after evaluation was run.
 
 ## Bounded solver
 

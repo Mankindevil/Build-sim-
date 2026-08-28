@@ -105,6 +105,7 @@ export const HASH_DOMAIN_REGISTRY = deepFreeze({
   "other-domain@1.0.0": { domain: "other-domain", schemaVersion: "1.0.0", canonicalizationPolicyId: "content-hash-self-v1" },
   "golden-self@2.0.0": { domain: "golden-self", schemaVersion: "2.0.0", canonicalizationPolicyId: "content-hash-self-v1" },
   "build-config@3.0.0": { domain: "build-config", schemaVersion: "3.0.0", canonicalizationPolicyId: "config-v3-v1" },
+  "spatial-topology@1.0.0": { domain: "spatial-topology", schemaVersion: "1.0.0", canonicalizationPolicyId: "canonical-json-v1" },
   "requirement-spec@1.0.0": { domain: "requirement-spec", schemaVersion: "1.0.0", canonicalizationPolicyId: "requirement-spec-v1" },
   "fact-snapshot@1.0.0": { domain: "fact-snapshot", schemaVersion: "1.0.0", canonicalizationPolicyId: "fact-snapshot-v1" },
   "user-observation-snapshot@1.0.0": { domain: "user-observation-snapshot", schemaVersion: "1.0.0", canonicalizationPolicyId: "observation-snapshot-v1" },

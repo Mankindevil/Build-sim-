@@ -10,7 +10,7 @@ import {
   parseConfig,
   serializeConfig,
 } from "../config/io";
-import type { BuildConfig, BootMode, HbaMode, PsuTopology } from "../config/types";
+import type { BuildConfig, BuildConfigDocument, BootMode, HbaMode, PsuTopology } from "../config/types";
 import { buildReadiness } from "../config/validate";
 import type { FanMode, FanGroupInput } from "../core/thermal";
 import { buildLabCatalogs } from "./view-models";
@@ -46,7 +46,9 @@ import { EvaluationCoordinator } from "../plans/evaluation";
 import { mountSpatialView, type SpatialViewController } from "./spatial-view";
 import { clearPartialResolvedSurfaces, markResolvedSurfacesReady } from "./partial-surfaces";
 import { createPlanAgentContext } from "../agent/plan-context";
-import type { PlanAgentContext } from "../plans/contracts";
+import type { BuildPlan, PlanAgentContext } from "../plans/contracts";
+import type { AuthoritativeEvaluationResponse } from "../server/evaluation-service";
+import { isPlanPartialEvaluationV3 } from "../plans/evaluation";
 import "./design-system.css";
 
 // Keep identity/spec facts separate from the active price overlay. Otherwise a
@@ -219,7 +221,9 @@ function configFromDom(): BuildConfig {
   return planStore?.getActiveConfig() ?? configFromDomLegacy();
 }
 
-function adviceInput() {
+function adviceInput(): ReturnType<typeof buildAdviceInput> | null {
+  const activeConfig = planStore?.getState().activePlan?.draft.config as BuildConfigDocument | undefined;
+  if (activeConfig?.schemaVersion === "3.0.0") return null;
   const evaluation = latestEvaluation ?? evaluate();
   const ids = new Set([
     evaluation.config.caseId,
@@ -260,26 +264,86 @@ function adviceInput() {
   });
 }
 
-function currentPlanAgentContext(): PlanAgentContext | null {
-  const state = planStore?.getState();
+async function currentPlanAgentContext(): Promise<PlanAgentContext | null> {
+  let state = planStore?.getState();
+  if (state?.activePlan && (state.activePlan.draft.config as BuildConfigDocument).schemaVersion === "3.0.0"
+    && (!state.evaluationSnapshot || state.evaluationSnapshot.draftRevision !== state.activePlan.draftRevision)) {
+    await ensureActiveV3Evaluation(state.activePlan as BuildPlan<BuildConfigDocument>);
+    state = planStore?.getState();
+  }
   if (!state?.activePlan || !state.evaluationSnapshot) return null;
+  const evaluation = state.evaluationSnapshot.evaluation;
+  const partialV3 = isPlanPartialEvaluationV3(evaluation);
   return createPlanAgentContext({
     plan: state.activePlan,
     snapshot: state.evaluationSnapshot,
     selection: state.selection,
     spatialViewContext: spatialView?.getContext() ?? null,
     purchaseSummary: {
-      bom: state.evaluationSnapshot.evaluation.bom.map((line) => ({ skuId: line.skuId, qty: line.qty, bucket: line.bucket })),
-      price: state.evaluationSnapshot.evaluation.price,
-      progress: buildProgress?.summary() ?? null,
+      bom: partialV3
+        ? evaluation.topologyBom.map((line) => structuredClone(line))
+        : evaluation.bom.map((line) => ({ skuId: line.skuId, qty: line.qty, bucket: line.bucket })),
+      price: partialV3
+        ? { status: "unknown", reason: "BuildConfig V3 price evaluation is not yet bound; no legacy total was reused." }
+        : evaluation.price,
+      progress: partialV3 ? null : buildProgress?.summary() ?? null,
       note: "汇总不含交易截图、凭据或支付信息。",
     },
-    buildTaskSummary: {
-      ...buildTaskStore?.summary(),
-      tasks: buildTaskStore?.getState().tasks.filter((task) => task.status !== "obsolete").slice(0, 20).map(({ id, kind, sourceRef, title, status, staleReason, dependsOn, relatedPartId, cableId }) => ({ id, kind, sourceRef, title, status, staleReason, dependsOn, relatedPartId, cableId })) ?? [],
-      policy: "Agent 可读取任务并提出建议；任务状态只能由用户在装机页明确确认。",
-    },
+    buildTaskSummary: partialV3
+      ? { status: "unknown", tasks: [], policy: "BuildConfig V3 尚未生成受治理装机任务；不得复用旧版任务或进度。" }
+      : {
+          ...buildTaskStore?.summary(),
+          tasks: buildTaskStore?.getState().tasks.filter((task) => task.status !== "obsolete").slice(0, 20).map(({ id, kind, sourceRef, title, status, staleReason, dependsOn, relatedPartId, cableId }) => ({ id, kind, sourceRef, title, status, staleReason, dependsOn, relatedPartId, cableId })) ?? [],
+          policy: "Agent 可读取任务并提出建议；任务状态只能由用户在装机页明确确认。",
+        },
   });
+}
+
+async function refreshAuthoritativePlanEvaluation(plan: BuildPlan<BuildConfigDocument>): Promise<void> {
+  const response = await fetch("/api/agent/evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ buildConfig: plan.draft.config }),
+  });
+  const payload = await response.json().catch(() => ({ error: "invalid_response" })) as AuthoritativeEvaluationResponse & { error?: string; message?: string };
+  if (!response.ok) throw new Error(payload.message ?? payload.error ?? `Authoritative evaluation failed with HTTP ${response.status}`);
+  const { snapshot, latest } = await evaluationCoordinator.acceptPlanResolved({
+    planId: plan.id,
+    planVersionId: plan.activeVersionId,
+    draftRevision: plan.draftRevision,
+    config: plan.draft.config,
+    evaluation: payload.evaluation,
+    expectedConfigHash: payload.configHash,
+    expectedEvaluationHash: payload.evaluationHash,
+  });
+  const active = planStore?.getState().activePlan;
+  if (!latest || !active || active.id !== plan.id || active.draftRevision !== plan.draftRevision) throw new Error("Authoritative evaluation became stale before installation");
+  planStore?.setEvaluationSnapshot(snapshot);
+}
+
+let activeV3EvaluationGeneration = 0;
+let activeV3EvaluationInFlight: { key: string; promise: Promise<void> } | null = null;
+
+function activePlanEvaluationKey(plan: BuildPlan<BuildConfigDocument>): string {
+  return `${plan.id}:${plan.draftRevision}:${canonicalJson(plan.draft.config)}`;
+}
+
+async function ensureActiveV3Evaluation(plan: BuildPlan<BuildConfigDocument>): Promise<void> {
+  if (plan.draft.config.schemaVersion !== "3.0.0") return;
+  const current = planStore?.getState();
+  if (current?.activePlan?.id !== plan.id || current.activePlan.draftRevision !== plan.draftRevision) return;
+  if (current.evaluationSnapshot?.draftRevision === plan.draftRevision
+    && isPlanPartialEvaluationV3(current.evaluationSnapshot.evaluation)) return;
+  const key = activePlanEvaluationKey(plan);
+  if (activeV3EvaluationInFlight?.key === key) return activeV3EvaluationInFlight.promise;
+  const generation = ++activeV3EvaluationGeneration;
+  const promise = refreshAuthoritativePlanEvaluation(plan).then(() => {
+    if (generation !== activeV3EvaluationGeneration) throw new Error("V3 evaluation refresh was superseded");
+  }).finally(() => {
+    if (activeV3EvaluationInFlight?.key === key) activeV3EvaluationInFlight = null;
+  });
+  activeV3EvaluationInFlight = { key, promise };
+  return promise;
 }
 
 function applyConfigToDom(config: BuildConfig): void {
@@ -991,10 +1055,14 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
 }
 
 function publishEvaluation(evaluation: BuildEvaluation): void {
-  buildProgress?.syncEvaluation(evaluation);
-  planStore?.setEvaluation(evaluation);
   const state = planStore?.getState();
   const active = state?.activePlan;
+  if (active && (active.draft.config as BuildConfigDocument).schemaVersion === "3.0.0") {
+    void ensureActiveV3Evaluation(active as BuildPlan<BuildConfigDocument>).catch(() => {});
+    return;
+  }
+  buildProgress?.syncEvaluation(evaluation);
+  planStore?.setEvaluation(evaluation);
   if (active) {
     void evaluationCoordinator.acceptResolved({
       planId: active.id,
@@ -1020,6 +1088,10 @@ function bindConfigChrome(): void {
   $("cfg-export-checklist")?.addEventListener("click", async () => {
     const state = planStore?.getState();
     const active = state?.activePlan;
+    if ((active?.draft.config as BuildConfigDocument | undefined)?.schemaVersion === "3.0.0") {
+      window.alert("当前为 V3 部分拓扑，尚无安全清单导出；不会调用旧版 V2 评估器。");
+      return;
+    }
     if (active && !active.activeVersionId) {
       window.alert("当前方案尚无已保存版本，请先保存版本后再导出可追溯清单。");
       return;
@@ -1069,6 +1141,7 @@ function bindPlanStoreToDom(): void {
   const capture = (event: Event) => {
     const target = event.target as HTMLInputElement | HTMLSelectElement | null;
     if (!target?.id || !PLAN_CONFIG_INPUT_IDS.has(target.id)) return;
+    if ((planStore?.getState().activePlan?.draft.config as BuildConfigDocument | undefined)?.schemaVersion === "3.0.0") return;
     planStore?.replaceDraft(configFromDomLegacy());
   };
   root.addEventListener("change", capture);
@@ -1078,6 +1151,10 @@ function bindPlanStoreToDom(): void {
   planStore.subscribe((state) => {
     const plan = state.activePlan;
     if (!plan) return;
+    if ((plan.draft.config as BuildConfigDocument).schemaVersion === "3.0.0") {
+      void ensureActiveV3Evaluation(plan as BuildPlan<BuildConfigDocument>).catch(() => {});
+      return;
+    }
     const signature = `${plan.id}:${canonicalJson(plan.draft.config)}`;
     if (signature === renderedSignature) return;
     renderedSignature = signature;
@@ -1107,6 +1184,8 @@ declare global {
       /** Runs the V2 engine for the current DOM config. Pure and synchronous. */
       evaluate: (options?: LabEvaluationOptions) => BuildEvaluation;
       isConfigReady: () => boolean;
+      /** False while the active draft is V3, so the inert V2 renderer stays dormant. */
+      isLegacyConfigActive: () => boolean;
       /** Millimetre-registered slice of the heat field, for the 2D canvas. */
       thermalSlice: (
         field: FieldBounds,
@@ -1141,7 +1220,11 @@ async function boot(): Promise<void> {
   buildTaskStore = new BuildTaskStore(window.localStorage);
   window.__BUILD_SIM_PLAN_STORE__ = planStore;
   const activeConfig = planStore.getState().activePlan?.draft.config;
-  if (activeConfig) applyConfigToDom(activeConfig);
+  if (activeConfig?.schemaVersion === "2.0.0") applyConfigToDom(activeConfig);
+  const initialPlan = planStore.getState().activePlan;
+  if (initialPlan && (initialPlan.draft.config as BuildConfigDocument).schemaVersion === "3.0.0") {
+    void ensureActiveV3Evaluation(initialPlan as BuildPlan<BuildConfigDocument>).catch(() => {});
+  }
   const labRoot = $("n6-lab");
   let router: WorkspaceRouter | null = null;
   if (labRoot) {
@@ -1168,6 +1251,7 @@ async function boot(): Promise<void> {
     priceSnapshot: bundledPriceSummary(),
     evaluate,
     isConfigReady: () => buildReadiness(configFromDom(), catalog).status === "ready",
+    isLegacyConfigActive: () => (planStore?.getState().activePlan?.draft.config as BuildConfigDocument | undefined)?.schemaVersion !== "3.0.0",
     thermalSlice: sampleSlice,
     caseGeometry: {
       envelope: { w: N6_ENVELOPE_BOX.w, h: N6_ENVELOPE_BOX.h, d: N6_ENVELOPE_BOX.d },
@@ -1208,6 +1292,7 @@ async function boot(): Promise<void> {
       const state = planStore?.getState();
       if (!state?.activePlan) return [];
       const activePlan = state.activePlan;
+      if ((activePlan.draft.config as BuildConfigDocument).schemaVersion !== "2.0.0") return [];
       const eligible = items.filter((item) => {
         const link = item.planLink;
         return link?.planId === activePlan.id && link.planVersionIdAtCapture === activePlan.activeVersionId;
@@ -1301,8 +1386,14 @@ async function boot(): Promise<void> {
   agentPanel = await initAgentPanel({
     getBuildConfig: configFromDom,
     getPlanContext: currentPlanAgentContext,
+    requirePlanContext: () => Boolean(planStore?.getState().activePlan),
     subscribePlanContext: (listener) => planStore?.subscribe(() => listener()) ?? (() => undefined),
-    acceptServerPlan: (plan) => planStore?.acceptServerPlan(plan),
+    acceptServerPlan: async (plan) => {
+      if (!planStore) throw new Error("Plan store is unavailable");
+      planStore.acceptServerPlan(plan);
+      await ensureActiveV3Evaluation(plan);
+      if (plan.draft.config.schemaVersion === "2.0.0") await refreshAuthoritativePlanEvaluation(plan);
+    },
     // Catalog acceptance and plan mutation deliberately stay separate. Chat
     // installs the server-confirmed SKU as an option; applying it still goes
     // through the existing plan-change review card in a later Agent turn.

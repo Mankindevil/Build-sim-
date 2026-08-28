@@ -3,6 +3,10 @@ import type { BuildConfig } from "../src/config/types";
 import type { BuildEvaluation } from "../src/core/evaluate";
 import { EvaluationCoordinator } from "../src/plans/evaluation";
 import { createDefaultN6Config } from "../src/plans/default-plan";
+import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
+import { configV3Hash } from "../src/topology/hash";
+import { createPlanPartialEvaluationV3 } from "../src/plans/evaluation";
+import { sha256Hex } from "../src/plans/canonical";
 
 function evaluation(config: BuildConfig, findingId = "finding"): BuildEvaluation {
   return { config, findings: [{ id: findingId, verdict: "warn" }], price: { knownCny: 100, unknownSkuIds: [] } } as unknown as BuildEvaluation;
@@ -34,5 +38,28 @@ describe("R4 evaluation coordinator", () => {
     resolvers.get(1)!(evaluation(slowConfig, "old"));
     await expect(slow).resolves.toMatchObject({ latest: false });
   });
-});
 
+  it("accepts a server-resolved V3 partial snapshot with domain-hash closure", async () => {
+    const coordinator = new EvaluationCoordinator((config) => evaluation(config));
+    const config = createEmptyBuildConfigV3("plan-v3-evaluation", "V3", "2026-08-27T00:00:00.000Z");
+    const partial = createPlanPartialEvaluationV3(config);
+    const result = await coordinator.acceptPlanResolved({
+      planId: config.id,
+      planVersionId: null,
+      draftRevision: 4,
+      config,
+      evaluation: partial,
+      expectedConfigHash: await configV3Hash(config),
+      expectedEvaluationHash: await sha256Hex(partial),
+    });
+    expect(result).toMatchObject({ latest: true, snapshot: { draftRevision: 4, evaluation: { kind: "topology-v3-partial", unknownDomains: expect.arrayContaining(["price", "compatibility"]) } } });
+    await expect(coordinator.acceptPlanResolved({
+      planId: config.id,
+      planVersionId: null,
+      draftRevision: 5,
+      config,
+      evaluation: partial,
+      expectedConfigHash: "0".repeat(64),
+    })).rejects.toThrow(/config hash mismatch/);
+  });
+});

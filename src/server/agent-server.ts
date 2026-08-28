@@ -5,7 +5,7 @@ import { DeepSeekProviderAdapter } from "../agent/providers/deepseek";
 import { ClaudeProviderAdapter } from "../agent/providers/claude";
 import { AgentToolRegistry } from "../agent/tool-registry";
 import { AgentSkillLoader } from "../agent/skill-loader";
-import { configureAuthoritativeCatalogRepository, evaluateBuildAuthoritatively, parseAuthoritativeBuildConfig } from "./evaluation-service";
+import { configureAuthoritativeCatalogRepository, evaluateBuildDocumentAuthoritatively, loadAuthoritativeCatalog, parseAuthoritativeBuildConfigDocument } from "./evaluation-service";
 import { FileAgentSessionStore } from "./file-session-store";
 import { FileAgentRunAuditStore } from "./file-audit-store";
 import { loadAgentRuntimeConfig } from "./agent-env";
@@ -14,6 +14,7 @@ import type { AgentSession, AgentWriteApprovalEnvelope } from "../agent/contract
 import { RuntimeCoordinator } from "../runtime/coordinator.mjs";
 import { FileJobRepository } from "../jobs/repository";
 import { FileArtifactRepository } from "../artifacts/repository.mjs";
+import { topologyV3Enabled } from "../config/io";
 
 const HOST = "127.0.0.1";
 const MAX_BODY_BYTES = 1_000_000;
@@ -56,7 +57,7 @@ export function handleAgentRoute(method: string | undefined, pathname: string, b
   }
   if (route === "POST /api/agent/evaluate") {
     const input = body as { buildConfig?: unknown };
-    return { status: 200, payload: evaluateBuildAuthoritatively(input.buildConfig) };
+    return { status: 200, payload: evaluateBuildDocumentAuthoritatively(input.buildConfig, undefined, { topologyV3Enabled: topologyV3Enabled(process.env) }) };
   }
   return { status: 404, payload: { error: "route_not_found", route } };
 }
@@ -110,12 +111,17 @@ async function handleRuntimeRoute(req: IncomingMessage, res: ServerResponse, url
   }
   const messageMatch = url.pathname.match(/^\/api\/agent\/sessions\/([^/]+)\/messages$/);
   if (req.method === "POST" && messageMatch?.[1]) {
-    const body = await readJson(req, maxBodyBytes) as { content?: string; buildConfig?: unknown; skillId?: string; approvals?: AgentWriteApprovalEnvelope[] };
+    const body = await readJson(req, maxBodyBytes) as { content?: string; buildConfig?: unknown; skillId?: string; approvals?: AgentWriteApprovalEnvelope[]; idempotencyKey?: string };
     const result = await runtime.startRun(decodeURIComponent(messageMatch[1]), {
       content: body.content ?? "",
-      ...(body.buildConfig !== undefined ? { buildConfig: parseAuthoritativeBuildConfig(body.buildConfig) } : {}),
+      ...(body.buildConfig !== undefined ? {
+        buildConfig: parseAuthoritativeBuildConfigDocument(body.buildConfig, loadAuthoritativeCatalog(), {
+          topologyV3Enabled: topologyV3Enabled(process.env),
+        }),
+      } : {}),
       ...(body.skillId !== undefined ? { skillId: body.skillId } : {}),
       ...(Array.isArray(body.approvals) ? { approvals: body.approvals } : {}),
+      ...(body.idempotencyKey !== undefined ? { idempotencyKey: body.idempotencyKey } : {}),
     });
     send(res, 202, result);
     return true;

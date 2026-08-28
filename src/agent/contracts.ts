@@ -1,4 +1,4 @@
-import type { BuildConfig } from "../config/types";
+import type { BuildConfigDocument } from "../config/types";
 
 export const AGENT_CONTRACT_VERSION = "1.0.0" as const;
 
@@ -115,7 +115,7 @@ export interface ProviderAdapter {
 export interface AgentToolContext {
   sessionId: string;
   runId: string;
-  buildConfig: BuildConfig | null;
+  buildConfig: BuildConfigDocument | null;
   signal: AbortSignal;
   approval?: AgentWriteApprovalEnvelope;
 }
@@ -177,7 +177,7 @@ export interface AgentSession {
   provider: AgentProviderId;
   model: string;
   messages: AgentMessage[];
-  buildConfig: BuildConfig | null;
+  buildConfig: BuildConfigDocument | null;
   createdAt: string;
   updatedAt: string;
 }

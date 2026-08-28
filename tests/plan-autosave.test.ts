@@ -5,6 +5,10 @@ import { PlanStore } from "../src/plans/client-store";
 import { PLAN_SCHEMA_VERSION, type BuildPlan, type BuildPlanSummary, type PlanVersion } from "../src/plans/contracts";
 import { sha256Hex } from "../src/plans/canonical";
 import { createDefaultN6Config } from "../src/plans/default-plan";
+import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
+import { createPlanPartialEvaluationV3 } from "../src/plans/evaluation";
+import { hashPlanConfig } from "../src/plans/canonical";
+import type { BuildConfigDocument } from "../src/config/types";
 
 const storage = { getItem: () => null, setItem: () => undefined };
 const now = "2026-08-25T00:00:00.000Z";
@@ -52,6 +56,41 @@ describe("R2 plan autosave", () => {
     store.patchDraft((config) => { config.selection.diskCount = 4; });
     await store.saveDraftNow();
     expect(store.getState()).toMatchObject({ saveStatus: "conflict", activePlan: { draft: { config: { selection: { diskCount: 4 } } } } });
+    store.dispose();
+  });
+
+  it("clears the old V2 snapshot before accepting a V3 server draft", async () => {
+    const store = new PlanStore({ api: testApi(async () => activePlan()), storage, debounceMs: 60_000 });
+    await store.initialize();
+    store.setEvaluationSnapshot({
+      schemaVersion: PLAN_SCHEMA_VERSION,
+      planId: "plan-12345678",
+      planVersionId: null,
+      draftRevision: 0,
+      configHash: await hashPlanConfig(store.getState().activePlan!.draft.config),
+      evaluationHash: "a".repeat(64),
+      evaluatedAt: now,
+      evaluation: {} as never,
+    });
+    const applied = structuredClone(store.getState().activePlan!) as BuildPlan<BuildConfigDocument>;
+    applied.draftRevision = 1;
+    applied.draft.config = createEmptyBuildConfigV3(applied.id, applied.name, now);
+    store.acceptServerPlan(applied);
+    expect(store.getState()).toMatchObject({ activePlan: { draftRevision: 1, draft: { config: { schemaVersion: "3.0.0" } } }, evaluation: null, evaluationSnapshot: null });
+
+    const partial = createPlanPartialEvaluationV3(applied.draft.config);
+    store.setEvaluationSnapshot({
+      schemaVersion: PLAN_SCHEMA_VERSION,
+      planId: applied.id,
+      planVersionId: applied.activeVersionId,
+      draftRevision: applied.draftRevision,
+      configHash: await hashPlanConfig(applied.draft.config),
+      evaluationHash: "b".repeat(64),
+      evaluatedAt: now,
+      evaluation: partial,
+    });
+    expect(store.getState().evaluationSnapshot?.evaluation).toMatchObject({ kind: "topology-v3-partial" });
+    expect(store.getState().evaluation).toBeNull();
     store.dispose();
   });
 });

@@ -14,7 +14,7 @@ export const RUNTIME_STATE_SCHEMA_VERSION = "runtime-state-v1";
 /** Frozen U1 active-generation layout. Repositories may add nested directories. */
 export const RUNTIME_ROOT_REGISTRY = Object.freeze([
   "plans", "transactions", "catalog-overlays", "domain-overlays", "facts", "prices", "snapshots",
-  "evidence", "attachments", "observations", "jobs", "artifacts", "config", "audit", "agent",
+  "evidence", "attachments", "observations", "scenarios", "jobs", "artifacts", "config", "audit", "agent",
   "execution-sessions", "exports", "backups", "diagnostics", "migrations",
 ]);
 

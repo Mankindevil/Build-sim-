@@ -10,13 +10,16 @@ import type { BuildProcedure, ExecutionSession, ProcedureDependencyContext } fro
 import { RuntimeCoordinator, RUNTIME_REQUIRED_ROOTS } from "../src/runtime/coordinator.mjs";
 import { atomicWriteFile, atomicWriteJson, confined, sha256Json } from "../src/runtime/fs.mjs";
 import { runDoctor } from "../src/doctor/runner.mjs";
+import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
+import { hashPlanConfigRuntime } from "../src/plans/canonical-runtime.mjs";
 
 const roots: string[] = [];
 const hash = (letter: string) => letter.repeat(64);
 async function writePlanFixture(activeRoot: string, evaluationHash: string): Promise<void> {
   const at = "2026-08-27T00:00:00.000Z";
-  const planId = "plan-fixture"; const versionId = "version-plan-v1"; const config = {};
-  const version = { schemaVersion: "1.0.0", id: versionId, planId, versionNumber: 1, createdAt: at, reason: "manual", config, configHash: sha256Json(config), evaluationHash, evaluatedAt: at, parentVersionId: null, evidenceBindings: [], evidenceHash: sha256Json([]) };
+  const planId = "plan-fixture"; const versionId = "version-plan-v1";
+  const config = createEmptyBuildConfigV3(planId, "Private plan", at);
+  const version = { schemaVersion: "1.0.0", id: versionId, planId, versionNumber: 1, createdAt: at, reason: "manual-save", config, configHash: hashPlanConfigRuntime(config), evaluationHash, evaluatedAt: at, parentVersionId: null, evidenceBindings: [], evidenceHash: sha256Json([]) };
   const plan = { schemaVersion: "1.0.0", id: planId, name: "Private plan", status: "active", createdAt: at, updatedAt: at, activeVersionId: versionId, draftRevision: 0, draft: { schemaVersion: "1.0.0", baseVersionId: versionId, config, evidenceBindings: [], dirty: false, updatedAt: at }, metadata: {} };
   await atomicWriteJson(confined(activeRoot, "plans", planId, "plan.json"), { schemaVersion: "1.0.0", kind: "plan", checksum: sha256Json(plan), payload: plan });
   await atomicWriteJson(confined(activeRoot, "plans", planId, "versions", `${versionId}.json`), { schemaVersion: "1.0.0", kind: "version", checksum: sha256Json(version), payload: version });

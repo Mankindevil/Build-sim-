@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { sha256Hex } from "../src/plans/canonical";
+import { canonicalJson, sha256Hex } from "../src/plans/canonical";
 import { createDefaultN6Config } from "../src/plans/default-plan";
 import { FilePlanRepository } from "../src/plans/file-repository";
 import { PlanConflictError } from "../src/plans/conflict";
@@ -11,6 +12,10 @@ import { RuntimeCoordinator } from "../src/runtime/coordinator.mjs";
 
 const roots: string[] = [];
 let counter = 0;
+
+function checksum(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
 
 async function repository() {
   const root = await mkdtemp(path.join(tmpdir(), "build-sim-plans-"));
@@ -111,6 +116,83 @@ describe("R1 file plan repository", () => {
     expect(copy.activeVersionId).toBeTruthy();
     expect(await store.listVersions(source.id)).toEqual([]);
     expect(await store.listVersions(copy.id)).toHaveLength(1);
+  });
+
+  it("stores only strict authoritative idempotency references and rejects forged replay owners", async () => {
+    const { root, store } = await repository();
+    const first = await store.create({ name: "First", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
+    const second = await store.create({ name: "Second", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
+    const candidate = structuredClone(first.draft.config);
+    candidate.selection.diskCount = 2;
+    const input = { expectedRevision: first.draftRevision, config: candidate, idempotencyKey: "strict-update-replay" };
+    await store.updateDraft(first.id, input);
+    const idempotencyRoot = path.join(root, ".idempotency");
+    const [recordName] = await readdir(idempotencyRoot);
+    const recordFile = path.join(idempotencyRoot, recordName!);
+    const envelope = JSON.parse(await readFile(recordFile, "utf8"));
+    expect(envelope.payload).toMatchObject({
+      schemaVersion: "plan-idempotency-v2", operation: `updateDraft:${first.id}`,
+      result: { kind: "plan", planId: first.id, resultHash: expect.stringMatching(/^[a-f0-9]{64}$/) },
+    });
+    expect(envelope.payload.result).not.toHaveProperty("value");
+
+    envelope.payload.result.planId = second.id;
+    const { resultHash: _ignored, ...resultMaterial } = envelope.payload.result;
+    envelope.payload.result.resultHash = checksum(resultMaterial);
+    envelope.checksum = checksum(envelope.payload);
+    await writeFile(recordFile, JSON.stringify(envelope));
+    await expect(new FilePlanRepository({ root }).updateDraft(first.id, input)).rejects.toMatchObject({ code: "corrupt_data", status: 500 });
+  });
+
+  it("rejects checksum-valid unknown idempotency operations after restart", async () => {
+    const { root, store } = await repository();
+    const input = { name: "Strict create", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z"), idempotencyKey: "strict-create-replay" };
+    await store.create(input);
+    const [recordName] = await readdir(path.join(root, ".idempotency"));
+    const recordFile = path.join(root, ".idempotency", recordName!);
+    const envelope = JSON.parse(await readFile(recordFile, "utf8"));
+    envelope.payload.operation = "forged-operation";
+    envelope.checksum = checksum(envelope.payload);
+    await writeFile(recordFile, JSON.stringify(envelope));
+    await expect(new FilePlanRepository({ root }).create(input)).rejects.toMatchObject({ code: "corrupt_data", status: 500 });
+  });
+
+  it("rejects checksum-valid unknown Plan, Draft, metadata, and Version fields", async () => {
+    const { root, store } = await repository();
+    const plan = await store.create({ name: "Exact authority", config: createDefaultN6Config("draft", "2026-08-25T00:00:00.000Z") });
+    const version = await store.saveVersion(plan.id, {
+      expectedRevision: plan.draftRevision, expectedConfigHash: await sha256Hex(plan.draft.config), reason: "manual-save",
+    });
+    const planFile = path.join(root, plan.id, "plan.json");
+    const originalPlanEnvelope = JSON.parse(await readFile(planFile, "utf8"));
+    const planMutations = [
+      (payload: any) => { payload.injected = true; },
+      (payload: any) => { payload.draft.derivedEvaluation = {}; },
+      (payload: any) => { payload.metadata.injected = true; },
+      (payload: any) => { payload.metadata.initialization = { status: "pending", source: "agent", injected: true }; },
+    ];
+    for (const mutate of planMutations) {
+      const envelope = structuredClone(originalPlanEnvelope);
+      mutate(envelope.payload);
+      envelope.checksum = checksum(envelope.payload);
+      await writeFile(planFile, JSON.stringify(envelope));
+      await expect(new FilePlanRepository({ root }).get(plan.id)).rejects.toMatchObject({ code: "corrupt_data" });
+    }
+    await writeFile(planFile, JSON.stringify(originalPlanEnvelope));
+
+    const versionFile = path.join(root, plan.id, "versions", `${version.id}.json`);
+    const originalVersionEnvelope = JSON.parse(await readFile(versionFile, "utf8"));
+    for (const mutate of [
+      (payload: any) => { payload.injected = true; },
+      (payload: any) => { payload.summary = 42; },
+      (payload: any) => { payload.evaluatedAt = 42; },
+    ]) {
+      const envelope = structuredClone(originalVersionEnvelope);
+      mutate(envelope.payload);
+      envelope.checksum = checksum(envelope.payload);
+      await writeFile(versionFile, JSON.stringify(envelope));
+      await expect(new FilePlanRepository({ root }).listVersions(plan.id)).rejects.toMatchObject({ code: "corrupt_data" });
+    }
   });
 
   it("seeds a genuinely empty first profile exactly once without a template checkpoint", async () => {

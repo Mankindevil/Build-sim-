@@ -32,8 +32,12 @@ describe("A4 Agent Skill loader", () => {
     expect(shopping.manifest.allowedTools).toEqual(expect.arrayContaining(["search_catalog_skus", "propose_catalog_review", "propose_plan_change"]));
     expect(shopping.manifest.allowedTools).not.toContain("enrich_official_catalog");
     const initializer = await loader.load("plan-initializer");
-    expect(initializer.manifest).toMatchObject({ version: "1.1.0", readOnly: true });
+    expect(initializer.manifest).toMatchObject({ version: "2.0.0", readOnly: true });
     expect(initializer.manifest.allowedTools).toContain("propose_catalog_review");
+    expect(initializer.manifest.allowedTools).toContain("propose_plan_change");
+    expect(initializer.manifest.allowedTools).not.toContain("propose_plan_initialization");
+    expect(initializer.instructions).toContain("渐进");
+    expect(initializer.instructions).toContain("stable selector");
     const audit = await loader.load("geometry-evidence-audit");
     expect(audit.manifest).toMatchObject({ version: "1.3.0", readOnly: true });
     expect(audit.manifest.allowedTools).toEqual(["get_build_evaluation", "get_sku_facts", "get_evidence_document", "get_evidence_excerpt", "discover_official_documents", "search_official_catalog"]);

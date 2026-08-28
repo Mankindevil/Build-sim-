@@ -1,7 +1,16 @@
-import type { BuildConfig } from "../config/types";
+import type { BuildConfig, BuildConfigDocument } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
-import { sha256Hex } from "./canonical";
-import { PLAN_SCHEMA_VERSION, type PlanEvaluationSnapshot } from "./contracts";
+import type { BuildConfigV3 } from "../topology/contracts";
+import { projectTopologyBom } from "../topology/projections";
+import { hashPlanConfig, sha256Hex } from "./canonical";
+import {
+  PLAN_PARTIAL_EVALUATION_V3_SCHEMA_VERSION,
+  PLAN_PARTIAL_EVALUATION_V3_UNKNOWN_DOMAINS,
+  PLAN_SCHEMA_VERSION,
+  type PlanEvaluation,
+  type PlanEvaluationSnapshot,
+  type PlanPartialEvaluationV3,
+} from "./contracts";
 
 export interface EvaluationInput {
   planId: string;
@@ -14,9 +23,33 @@ export interface ResolvedEvaluationInput extends EvaluationInput {
   evaluation: BuildEvaluation;
 }
 
+export interface ResolvedPlanEvaluationInput {
+  planId: string;
+  planVersionId: string | null;
+  draftRevision: number;
+  config: BuildConfigDocument;
+  evaluation: PlanEvaluation;
+  expectedConfigHash?: string;
+  expectedEvaluationHash?: string;
+}
+
 interface CachedEvaluation {
-  evaluation: BuildEvaluation;
+  evaluation: PlanEvaluation;
   evaluationHash: string;
+}
+
+export function createPlanPartialEvaluationV3(config: BuildConfigV3): PlanPartialEvaluationV3 {
+  return {
+    schemaVersion: PLAN_PARTIAL_EVALUATION_V3_SCHEMA_VERSION,
+    kind: "topology-v3-partial",
+    configSchemaVersion: "3.0.0",
+    topologyBom: projectTopologyBom(config),
+    unknownDomains: [...PLAN_PARTIAL_EVALUATION_V3_UNKNOWN_DOMAINS],
+  };
+}
+
+export function isPlanPartialEvaluationV3(value: PlanEvaluation): value is PlanPartialEvaluationV3 {
+  return "kind" in value && value.kind === "topology-v3-partial";
 }
 
 export class EvaluationCoordinator {
@@ -31,7 +64,7 @@ export class EvaluationCoordinator {
   async evaluate(input: EvaluationInput): Promise<{ snapshot: PlanEvaluationSnapshot; latest: boolean }> {
     const generation = (this.generations.get(input.planId) ?? 0) + 1;
     this.generations.set(input.planId, generation);
-    const configHash = await sha256Hex(input.config);
+    const configHash = await hashPlanConfig(input.config);
     let cached = this.cache.get(configHash);
     if (!cached) {
       cached = Promise.resolve(this.evaluator(structuredClone(input.config))).then(async (evaluation) => ({
@@ -55,9 +88,21 @@ export class EvaluationCoordinator {
   }
 
   async acceptResolved(input: ResolvedEvaluationInput): Promise<{ snapshot: PlanEvaluationSnapshot; latest: boolean }> {
+    return this.acceptPlanResolved(input);
+  }
+
+  async acceptPlanResolved(input: ResolvedPlanEvaluationInput): Promise<{ snapshot: PlanEvaluationSnapshot; latest: boolean }> {
     const generation = (this.generations.get(input.planId) ?? 0) + 1;
     this.generations.set(input.planId, generation);
-    const [configHash, evaluationHash] = await Promise.all([sha256Hex(input.config), sha256Hex(input.evaluation)]);
+    if (input.config.schemaVersion === "3.0.0") {
+      if (!isPlanPartialEvaluationV3(input.evaluation)) throw new Error("BuildConfig V3 requires a partial topology evaluation");
+      if (await sha256Hex(input.evaluation) !== await sha256Hex(createPlanPartialEvaluationV3(input.config))) throw new Error("V3 partial evaluation does not match the active topology");
+    } else if (isPlanPartialEvaluationV3(input.evaluation)) {
+      throw new Error("BuildConfig V2 cannot use a V3 partial evaluation");
+    }
+    const [configHash, evaluationHash] = await Promise.all([hashPlanConfig(input.config), sha256Hex(input.evaluation)]);
+    if (input.expectedConfigHash !== undefined && input.expectedConfigHash !== configHash) throw new Error("Authoritative evaluation config hash mismatch");
+    if (input.expectedEvaluationHash !== undefined && input.expectedEvaluationHash !== evaluationHash) throw new Error("Authoritative evaluation payload hash mismatch");
     this.cache.set(configHash, Promise.resolve({ evaluation: input.evaluation, evaluationHash }));
     const snapshot: PlanEvaluationSnapshot = {
       schemaVersion: PLAN_SCHEMA_VERSION,

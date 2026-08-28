@@ -1,8 +1,11 @@
 import type { AgentMessage, AgentRunAuditRecord, AgentRunEvent, AgentSession, ProviderModel } from "../agent/contracts";
 import type { FieldProvenance } from "../catalog-search/types";
-import type { BuildPlan, PlanAgentContext, PlanChangeProposal } from "../plans/contracts";
+import type { BuildConfigDocument } from "../config/types";
+import type { TopologyV3PatchOperation } from "../contracts/registries";
+import type { BuildPlan, PlanAgentContext, PlanChangeProposal, PlanPatchOperation } from "../plans/contracts";
 import type { SkuRecord } from "../sku/types";
 import { isPlanAgentContextStale, planAgentContextEnvelope } from "../agent/plan-context";
+import { hashPlanConfig } from "../plans/canonical";
 
 const API = "/api/agent";
 
@@ -78,9 +81,10 @@ interface EventStream {
 
 export interface AgentPanelOptions {
   getBuildConfig: () => unknown;
-  getPlanContext?: () => PlanAgentContext | null;
+  getPlanContext?: () => PlanAgentContext | null | Promise<PlanAgentContext | null>;
+  requirePlanContext?: () => boolean;
   subscribePlanContext?: (listener: () => void) => () => void;
-  acceptServerPlan?: (plan: BuildPlan) => void;
+  acceptServerPlan?: (plan: BuildPlan<BuildConfigDocument>) => void | Promise<void>;
   /** Installs an explicitly reviewed, server-confirmed SKU into the runtime catalog. */
   onCatalogSkuAccepted?: (sku: SkuRecord) => void | Promise<void>;
   fetchImpl?: typeof fetch;
@@ -290,7 +294,22 @@ function planningSummaryNode(preview: CatalogReviewPreview): HTMLElement {
   return list;
 }
 
-function proposalFieldLabel(path: string): string {
+function proposalFieldLabel(operation: PlanPatchOperation | TopologyV3PatchOperation): string {
+  if ("selector" in operation) {
+    const { collection, field, id, parentId } = operation.selector;
+    const configFields: Record<string, string> = {
+      name: "方案名称", intent: "装机意图", requirementSpec: "需求档案",
+      requirementBudget: "预算", requirementHorizonYears: "使用周期", system: "系统", notes: "备注",
+    };
+    if (collection === "config") return configFields[field ?? ""] ?? "方案设置";
+    const collections: Record<string, string> = {
+      components: "部件", roleDecisions: "角色决定", placements: "安装位", connections: "连接",
+      logicalLayouts: "逻辑存储布局", vdevs: "vdev", firmwareTargets: "固件目标",
+      workloads: "工作负载", metrics: "需求指标", constraints: "约束",
+    };
+    const target = id ?? parentId;
+    return `${collections[collection] ?? "拓扑设置"}${target ? ` · ${target}` : ""}${field ? ` · ${field}` : ""}`;
+  }
   return ({
     "/name": "方案名称", "/caseId": "机箱", "/boardId": "主板", "/cpuId": "处理器",
     "/selection/psuId": "电源", "/selection/psuTopology": "电源安装方式",
@@ -298,36 +317,126 @@ function proposalFieldLabel(path: string): string {
     "/selection/coolerId": "CPU 散热器", "/selection/diskCount": "硬盘数量",
     "/selection/boot": "启动盘", "/selection/nvmeCount": "NVMe 数量",
     "/selection/hbaMode": "硬盘扩展卡", "/selection/gpuId": "显卡", "/selection/memoryId": "内存",
-  } as Record<string, string>)[path] ?? "方案设置";
+  } as Record<string, string>)[operation.path] ?? "方案设置";
+}
+
+function proposalRequirementConfirmationId(kind: "budget" | "horizonYears" | "workload" | "metric" | "constraint", id?: string, parentId?: string): string {
+  if (kind === "budget" || kind === "horizonYears") return `requirement:${kind}`;
+  if (kind === "metric") return `requirement:metric:${JSON.stringify([parentId?.normalize("NFC"), id?.normalize("NFC")])}`;
+  return `requirement:${kind}:${JSON.stringify(id?.normalize("NFC"))}`;
+}
+
+function agentRequirementProposal(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && (value as Record<string, unknown>).source === "agent_proposed"
+    && (value as Record<string, unknown>).confirmedByUser === false;
+}
+
+function operationRequirementConfirmationIds(operation: PlanPatchOperation | TopologyV3PatchOperation): string[] {
+  if (!("selector" in operation)) return [];
+  const ids: string[] = [];
+  if (operation.op === "add" && operation.selector.collection === "workloads") {
+    if (agentRequirementProposal(operation.value)) ids.push(proposalRequirementConfirmationId("workload", operation.selector.id));
+    const workload = operation.value as Record<string, unknown>;
+    if (Array.isArray(workload.metrics)) for (const metric of workload.metrics) {
+      if (agentRequirementProposal(metric) && typeof metric.metricId === "string") ids.push(proposalRequirementConfirmationId("metric", metric.metricId, operation.selector.id));
+    }
+  } else if (operation.op === "add" && operation.selector.collection === "metrics" && agentRequirementProposal(operation.value)) {
+    ids.push(proposalRequirementConfirmationId("metric", operation.selector.id, operation.selector.parentId));
+  } else if (operation.op === "add" && operation.selector.collection === "constraints" && agentRequirementProposal(operation.value)) {
+    ids.push(proposalRequirementConfirmationId("constraint", operation.selector.id));
+  } else if (operation.op === "replace" && operation.selector.collection === "config") {
+    if (operation.selector.field === "requirementBudget" && agentRequirementProposal(operation.value)) ids.push(proposalRequirementConfirmationId("budget"));
+    else if (operation.selector.field === "requirementHorizonYears" && agentRequirementProposal(operation.value)) ids.push(proposalRequirementConfirmationId("horizonYears"));
+    else if (operation.selector.field === "requirementSpec" && operation.value && typeof operation.value === "object" && !Array.isArray(operation.value)) {
+      const spec = operation.value as Record<string, unknown>;
+      if (agentRequirementProposal(spec.budget)) ids.push(proposalRequirementConfirmationId("budget"));
+      if (agentRequirementProposal(spec.horizonYears)) ids.push(proposalRequirementConfirmationId("horizonYears"));
+      if (Array.isArray(spec.workloads)) for (const workload of spec.workloads) {
+        if (!workload || typeof workload !== "object" || Array.isArray(workload)) continue;
+        const row = workload as Record<string, unknown>;
+        if (agentRequirementProposal(row) && typeof row.workloadId === "string") ids.push(proposalRequirementConfirmationId("workload", row.workloadId));
+        if (typeof row.workloadId === "string" && Array.isArray(row.metrics)) for (const metric of row.metrics) {
+          if (agentRequirementProposal(metric) && typeof metric.metricId === "string") ids.push(proposalRequirementConfirmationId("metric", metric.metricId, row.workloadId));
+        }
+      }
+      if (Array.isArray(spec.constraints)) for (const constraint of spec.constraints) {
+        if (agentRequirementProposal(constraint) && typeof constraint.constraintId === "string") ids.push(proposalRequirementConfirmationId("constraint", constraint.constraintId));
+      }
+    }
+  }
+  return ids;
 }
 
 function proposalNode(
-  proposal: PlanChangeProposal,
-  onApply: (indexes: number[], card: HTMLElement) => Promise<void>,
+  proposal: PlanChangeProposal<BuildConfigDocument>,
+  onApply: (indexes: number[], confirmedRequirementFieldIds: string[], card: HTMLElement) => Promise<void>,
   onReject: (card: HTMLElement) => void,
 ): HTMLElement {
   const card = document.createElement("article");
   card.className = "agent-plan-proposal";
   card.dataset.planProposal = proposal.id;
   const heading = document.createElement("h4"); heading.textContent = proposal.summary;
-  const initialization = proposal.kind === "initialization";
   const technical = document.createElement("details"); technical.className = "agent-proposal-technical";
   const technicalSummary = document.createElement("summary"); technicalSummary.textContent = "查看技术校验信息";
-  const meta = document.createElement("p"); meta.textContent = `${initialization ? "完整初始化" : "方案修改"} · 方案 ${proposal.planId} · revision ${proposal.expectedDraftRevision} · config ${proposal.expectedConfigHash.slice(0, 12)}`;
+  const meta = document.createElement("p"); meta.textContent = `方案修改 · 方案 ${proposal.planId} · revision ${proposal.expectedDraftRevision} · config ${proposal.expectedConfigHash.slice(0, 12)}`;
   technical.append(technicalSummary, meta);
   const list = document.createElement("ol");
+  const operationCheckboxes: HTMLInputElement[] = [];
   proposal.operations.forEach((operation, index) => {
     const item = document.createElement("li");
     const label = document.createElement("label"); const checkbox = document.createElement("input");
-    checkbox.type = "checkbox"; checkbox.checked = true; checkbox.disabled = initialization; checkbox.dataset.proposalOperation = String(index);
+    checkbox.type = "checkbox"; checkbox.checked = true; checkbox.dataset.proposalOperation = String(index);
+    operationCheckboxes.push(checkbox);
     const value = operation.op === "remove" ? "不再使用" : JSON.stringify(operation.value);
-    label.append(checkbox, ` ${proposalFieldLabel(operation.path)}：${value.length > 80 ? `${value.slice(0, 80)}…` : value}`); item.append(label); list.append(item);
+    label.append(checkbox, ` ${proposalFieldLabel(operation)}：${value.length > 80 ? `${value.slice(0, 80)}…` : value}`); item.append(label); list.append(item);
   });
+  const confirmationHost = document.createElement("fieldset");
+  confirmationHost.dataset.proposalRequirementConfirmations = "";
+  const confirmationLegend = document.createElement("legend");
+  confirmationLegend.textContent = "可选：确认 Agent 建议的需求字段进入求解";
+  confirmationHost.append(confirmationLegend);
+  const authorizedConfirmationIds = new Set(proposal.confirmableRequirementFieldIds ?? []);
+  const confirmationOwners = new Map<string, Set<number>>();
+  proposal.operations.forEach((operation, index) => {
+    for (const id of operationRequirementConfirmationIds(operation)) {
+      if (!authorizedConfirmationIds.has(id)) continue;
+      const owners = confirmationOwners.get(id) ?? new Set<number>();
+      owners.add(index); confirmationOwners.set(id, owners);
+    }
+  });
+  const confirmationCheckboxes: HTMLInputElement[] = [];
+  for (const id of [...authorizedConfirmationIds].sort()) {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = false;
+    checkbox.dataset.proposalRequirementConfirmation = id;
+    const owners = confirmationOwners.get(id) ?? new Set(proposal.operations.map((_, index) => index));
+    checkbox.dataset.proposalConfirmationOperationIndexes = JSON.stringify([...owners]);
+    label.append(checkbox, ` 确认此需求字段：${id}`);
+    confirmationHost.append(label);
+    confirmationCheckboxes.push(checkbox);
+  }
+  const syncConfirmations = () => {
+    let visible = 0;
+    for (const checkbox of confirmationCheckboxes) {
+      const owners = JSON.parse(checkbox.dataset.proposalConfirmationOperationIndexes ?? "[]") as number[];
+      const enabled = owners.some((index) => operationCheckboxes[index]?.checked);
+      checkbox.disabled = !enabled;
+      checkbox.parentElement!.hidden = !enabled;
+      if (!enabled) checkbox.checked = false;
+      if (enabled) visible += 1;
+    }
+    confirmationHost.hidden = visible === 0;
+  };
+  operationCheckboxes.forEach((checkbox) => checkbox.addEventListener("change", syncConfirmations));
+  syncConfirmations();
   const impact = document.createElement("p");
   impact.className = "agent-proposal-impact";
   impact.textContent = `预计解决 ${proposal.predictedImpact.resolvedFindingIds.length} 个问题 · 可能新增 ${proposal.predictedImpact.introducedFindingIds.length} 个提醒 · ${proposal.predictedImpact.budgetDeltaCny === null ? "价格影响仍需确认" : `预算变化 ${proposal.predictedImpact.budgetDeltaCny >= 0 ? "+" : ""}${proposal.predictedImpact.budgetDeltaCny} 元`}`;
   const approvalLabel = document.createElement("label"); const approval = document.createElement("input");
-  approval.type = "checkbox"; approval.dataset.proposalApproval = ""; approvalLabel.append(approval, initialization ? " 我已审阅完整配置与需求摘要，并批准整体替换初始化脚手架" : " 我已审阅所选字段并批准写入当前草稿");
+  approval.type = "checkbox"; approval.dataset.proposalApproval = ""; approvalLabel.append(approval, " 我已审阅所选字段并批准写入当前草稿");
   const actions = document.createElement("div"); const apply = document.createElement("button"); const reject = document.createElement("button");
   apply.type = "button"; apply.textContent = "应用所选项"; apply.disabled = true; apply.dataset.applyProposal = "";
   reject.type = "button"; reject.textContent = "拒绝"; reject.dataset.rejectProposal = "";
@@ -336,11 +445,13 @@ function proposalNode(
   apply.addEventListener("click", async () => {
     const indexes = [...card.querySelectorAll<HTMLInputElement>("[data-proposal-operation]:checked")].map((entry) => Number(entry.dataset.proposalOperation));
     if (!indexes.length) { state.textContent = "至少选择一项修改。"; return; }
+    const confirmedRequirementFieldIds = [...card.querySelectorAll<HTMLInputElement>("[data-proposal-requirement-confirmation]:checked:not(:disabled)")]
+      .map((entry) => entry.dataset.proposalRequirementConfirmation!);
     apply.disabled = true; reject.disabled = true; state.textContent = "正在重新检查型号、兼容性和预算影响…";
-    try { await onApply(indexes, card); } catch (error) { state.textContent = `无法应用：${text((error as Error).message)}`; reject.disabled = false; }
+    try { await onApply(indexes, confirmedRequirementFieldIds, card); } catch (error) { state.textContent = `无法应用：${text((error as Error).message)}`; reject.disabled = false; }
   });
   reject.addEventListener("click", () => onReject(card));
-  actions.append(apply, reject); card.append(heading, list, impact, approvalLabel, actions, state, technical);
+  actions.append(apply, reject); card.append(heading, list, confirmationHost, impact, approvalLabel, actions, state, technical);
   return card;
 }
 
@@ -521,7 +632,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
   let boundContext: PlanAgentContext | null = null;
   const catalogReviewKeys = new Set<string>();
 
-  const currentContext = () => options.getPlanContext?.() ?? null;
+  const currentContext = async () => await (options.getPlanContext?.() ?? null);
   const setContextCopy = (summaryText: string, detailText: string) => {
     const summary = document.createElement("summary");
     const detail = document.createElement("small");
@@ -529,8 +640,13 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
     detail.textContent = detailText;
     contextBadge.replaceChildren(summary, detail);
   };
-  const refreshContextBadge = () => {
-    const current = currentContext();
+  let contextRefreshGeneration = 0;
+  const refreshContextBadge = async () => {
+    const generation = ++contextRefreshGeneration;
+    let current: PlanAgentContext | null;
+    try { current = await currentContext(); }
+    catch { current = null; }
+    if (generation !== contextRefreshGeneration) return;
     if (!current) {
       setContextCopy("尚未同步装机方案", "普通问答仍可使用；同步方案后才能给出可直接确认的配置建议。");
       contextBadge.dataset.stale = "true";
@@ -538,17 +654,13 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
     }
     const stale = isPlanAgentContextStale(boundContext, current);
     contextBadge.dataset.stale = String(stale);
-    const pending = current.initialization?.status === "pending";
-    const friendly = pending ? "空白方案待初始化 · 请先告诉我用途和预算"
-      : boundContext && stale ? "方案刚有变化 · 下次发送时会自动同步"
-        : "已同步当前装机方案";
+    const friendly = boundContext && stale ? "方案刚有变化 · 下次发送时会自动同步" : "已同步当前装机方案";
     const technicalState = boundContext ? stale ? "context stale，发送时刷新" : "context current" : "尚未发送";
-    setContextCopy(friendly, `方案 ${current.planId} · revision ${current.draftRevision} · evaluation ${current.evaluationHash.slice(0, 12)} · ${technicalState}${pending ? " · 当前配置仅为初始化脚手架" : ""}`);
-    if (pending && [...skill.options].some((entry) => entry.value === "plan-initializer") && !activeRunId) skill.value = "plan-initializer";
-    input.placeholder = pending ? "例如：我想配一台预算 8000 元的 2K 游戏主机，请先问我必要问题" : "输入问题，Ctrl/⌘ + Enter 发送";
+    setContextCopy(friendly, `方案 ${current.planId} · revision ${current.draftRevision} · evaluation ${current.evaluationHash.slice(0, 12)} · ${technicalState}`);
+    input.placeholder = "例如：预算 8000 元，先记录 2K 游戏需求；其余信息请逐项问我";
   };
-  refreshContextBadge();
-  const unsubscribePlanContext = options.subscribePlanContext?.(refreshContextBadge) ?? (() => undefined);
+  void refreshContextBadge();
+  const unsubscribePlanContext = options.subscribePlanContext?.(() => { void refreshContextBadge(); }) ?? (() => undefined);
 
   const setStatus = (content: string, level: "ok" | "warn" | "bad" = "warn") => {
     status.textContent = content;
@@ -560,20 +672,35 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
     if (!proposal) return;
     try {
       const validated = await workspaceJson<{ proposal: PlanChangeProposal }>(fetchImpl, `/plans/${encodeURIComponent(proposal.planId)}/proposals/validate`, { method: "POST", body: JSON.stringify({ proposal }) });
-      const card = proposalNode(validated.proposal, async (indexes, target) => {
-        const current = currentContext();
+      const card = proposalNode(validated.proposal, async (indexes, confirmedRequirementFieldIds, target) => {
+        const current = await currentContext();
         if (!current) throw new Error("当前方案尚未完成同步，请等待评估完成后重新生成提案。");
         if (current.planId !== validated.proposal.planId) throw new Error("当前方案已经切换；这张提案卡不会修改原方案，请重新生成建议。");
         if (current.draftRevision !== validated.proposal.expectedDraftRevision || current.configHash !== validated.proposal.expectedConfigHash) {
           throw new Error("当前草稿已发生变化；这张提案卡已过期，请基于最新方案重新生成建议。");
         }
-        const result = await workspaceJson<{ proposal: PlanChangeProposal; plan: BuildPlan; audit: { approvalId: string } }>(fetchImpl, `/plans/${encodeURIComponent(validated.proposal.planId)}/proposals/apply`, {
+        const result = await workspaceJson<{ proposal: PlanChangeProposal; plan: BuildPlan<BuildConfigDocument>; audit: { approvalId: string } }>(fetchImpl, `/plans/${encodeURIComponent(validated.proposal.planId)}/proposals/apply`, {
           method: "POST",
-          body: JSON.stringify({ proposal: validated.proposal, operationIndexes: indexes, approvalConfirmed: true, approvedBy: "local-human" }),
+          body: JSON.stringify({
+            proposal: validated.proposal,
+            operationIndexes: indexes,
+            approvalConfirmed: true,
+            approvedBy: "local-human",
+            confirmedRequirementFieldIds,
+          }),
         });
-        options.acceptServerPlan?.(result.plan);
+        boundContext = null;
+        void refreshContextBadge();
+        if (!options.acceptServerPlan) throw new Error("方案已写入，但浏览器无法安装服务端草稿；上下文保持停用。");
+        await options.acceptServerPlan(result.plan);
+        const refreshed = await currentContext();
+        const refreshedConfigHash = await hashPlanConfig(result.plan.draft.config);
+        if (!refreshed || refreshed.planId !== result.plan.id || refreshed.draftRevision !== result.plan.draftRevision
+          || refreshed.configHash !== refreshedConfigHash || refreshed.buildConfig.schemaVersion !== result.plan.draft.config.schemaVersion) {
+          throw new Error("方案已写入，但最新评估上下文尚未就绪；请刷新评估后继续。");
+        }
         target.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach((control) => { control.disabled = true; });
-        target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = `${validated.proposal.kind === "initialization" ? "初始化完成" : "修改已应用"} · 已进入当前方案，尚未保存为检查点`;
+        target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = "修改已应用 · 已进入当前方案，尚未保存为检查点";
       }, (target) => {
         target.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach((control) => { control.disabled = true; });
         target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = "已放弃这条建议 · 方案没有改变";
@@ -669,7 +796,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
     usage.textContent = "尚无用量记录";
     assistantBody = null;
     boundContext = null;
-    refreshContextBadge();
+    void refreshContextBadge();
   };
 
   const createSession = async (): Promise<AgentSession> => {
@@ -762,7 +889,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
       if (data) {
         const summary = formatCatalogToolResult(data.toolName, data.result.content);
         addEvent(`Tool 结果 · ${data.toolName} · ${data.result.ok ? "ok" : data.result.errorCode ?? "error"}${summary ? ` · ${summary}` : ""}`, data.result.ok ? "ok" : "warn");
-        if (data.result.ok && (data.toolName === "propose_plan_change" || data.toolName === "propose_plan_initialization")) void receiveProposal(data.result.content);
+        if (data.result.ok && data.toolName === "propose_plan_change") void receiveProposal(data.result.content);
         if (data.result.ok && data.toolName === "propose_catalog_review") receiveCatalogReview(data.result.content);
       }
     });
@@ -809,9 +936,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
       return option;
     });
     skill.replaceChildren(general, ...skillOptions);
-    skill.value = currentContext()?.initialization?.status === "pending" && skillPayload.skills.some((entry) => entry.manifest.id === "plan-initializer")
-      ? "plan-initializer"
-      : "";
+    skill.value = "";
     if (!modelPayload.models.length) throw new Error("服务端没有可用模型");
     catalogReady = true;
     setBusy(false);
@@ -850,23 +975,25 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
     transcript.append(messageNode("user", content));
     input.value = "";
     try {
-      const planContext = currentContext();
+      const planContext = await currentContext();
+      if (!planContext && options.requirePlanContext?.()) throw new Error("当前方案评估上下文尚未就绪；没有启动 Agent run。");
       if (session && boundContext && planContext && boundContext.planId !== planContext.planId) clearConversation();
       const current = await createSession();
       const agentContent = planContext ? planAgentContextEnvelope(content, planContext) : content;
+      const idempotencyKey = planContext ? `context-${crypto.randomUUID()}` : undefined;
+      const contextAudit = planContext ? await workspaceJson<{ runId: string }>(fetchImpl, "/agent-context", {
+        method: "POST",
+        body: JSON.stringify({ sessionId: current.id, idempotencyKey, context: planContext }),
+      }) : null;
+      if (planContext) addEvent(`方案上下文审计 · ${planContext.planId} r${planContext.draftRevision} · ${planContext.evaluationHash.slice(0, 12)}`);
       const run = await json<{ runId: string }>(fetchImpl, `/sessions/${encodeURIComponent(current.id)}/messages`, {
         method: "POST",
-        body: JSON.stringify({ content: agentContent, buildConfig: planContext?.buildConfig ?? options.getBuildConfig(), ...(skill.value ? { skillId: skill.value } : {}) }),
+        body: JSON.stringify({ content: agentContent, buildConfig: planContext?.buildConfig ?? options.getBuildConfig(), ...(skill.value ? { skillId: skill.value } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) }),
       });
+      if (contextAudit && run.runId !== contextAudit.runId) throw new Error("Agent run 与已审计方案上下文不一致");
       if (planContext) {
         boundContext = structuredClone(planContext);
-        refreshContextBadge();
-        try {
-          await workspaceJson(fetchImpl, "/agent-context", { method: "POST", body: JSON.stringify({ sessionId: current.id, runId: run.runId, context: planContext }) });
-          addEvent(`方案上下文审计 · ${planContext.planId} r${planContext.draftRevision} · ${planContext.evaluationHash.slice(0, 12)}`);
-        } catch (error) {
-          addEvent(`方案上下文审计失败：${text((error as Error).message)}`, "bad");
-        }
+        void refreshContextBadge();
       }
       activeRunId = run.runId;
       cancel.disabled = false;

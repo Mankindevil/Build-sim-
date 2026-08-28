@@ -2,16 +2,18 @@ import { createHash, randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { open, readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
-import type { BuildConfig } from "../config/types";
+import { serializeConfig, TOPOLOGY_V3_FEATURE_FLAG, type BuildConfig, type BuildConfigDocument, type ConfigV2 } from "../config/types";
+import { sha256Hex as sha256String } from "../hash";
 import {
   EVIDENCE_SCHEMA_VERSION,
   type EvidenceCapture,
   type EvidenceDocument,
   type PlanEvidenceBinding,
 } from "../evidence/contracts";
-import { canonicalJson, deepReadonly, sha256Hex } from "./canonical";
+import { canonicalJson, deepReadonly, hashPlanConfig, sha256Hex } from "./canonical";
 import { assertExpectedConfigHash, assertExpectedRevision, PlanConflictError } from "./conflict";
 import {
+  PLAN_IDEMPOTENCY_REQUEST,
   PLAN_SCHEMA_VERSION,
   type BuildPlan,
   type BuildPlanSummary,
@@ -20,7 +22,9 @@ import {
   type DuplicatePlanInput,
   type EvidenceCaptureLookup,
   type EvidenceDocumentLookup,
+  type MigrateDraftToV3Input,
   type PlanRepository,
+  type ReplayIdempotentPlanWriteInput,
   type PlanVersion,
   type SaveVersionInput,
   type UnbindPlanEvidenceInput,
@@ -28,8 +32,11 @@ import {
   type UpdatePlanInfoInput,
 } from "./contracts";
 import { PlanRepositoryError } from "./errors";
-import { assertValidBuildPlan, assertValidPlanVersion, validatePlanEvidenceBinding } from "./validation";
+import { assertValidBuildPlan, assertValidPlanVersion, planEvidenceBindingId, planEvidenceBindingIdentity, validatePlanEvidenceBinding } from "./validation";
 import { createImmutablePlanVersion } from "./version";
+import { migrateBuildConfigV2ToV3 } from "./migration";
+import { applyPlanV3ProposalOperations, applyRequirementConfirmations, confirmableRequirementFieldIds } from "./proposals";
+import { validatePlanIdempotencyRuntime } from "./canonical-runtime.mjs";
 import { assertValidConfig } from "../config/validate";
 import { loadBundledCatalog } from "../sku/catalog";
 import type { SkuCatalog } from "../sku/types";
@@ -46,10 +53,25 @@ interface StoredEnvelope<T> {
   payload: T;
 }
 
+type IdempotencyResultMaterial =
+  | { kind: "plan"; planId: string; writeReceipt?: PlanWriteReceipt }
+  | { kind: "version"; planId: string; versionId: string }
+  | { kind: "evidence-binding"; planId: string; bindingId: PlanEvidenceBinding["id"] }
+  | { kind: "void"; planId: string };
+
+interface PlanWriteReceipt {
+  schemaVersion: "plan-write-receipt-v1";
+  appliedDraftRevision: number;
+  appliedConfigHash: string;
+  appliedUpdatedAt: string;
+  appliedPlanHash: string;
+}
+
 interface IdempotencyRecord {
+  schemaVersion: "plan-idempotency-v2";
   operation: string;
   requestHash: string;
-  result: { planId?: string; versionId?: string; value?: unknown };
+  result: IdempotencyResultMaterial & { resultHash: string };
 }
 
 type EvidenceBindingIdentity = Pick<PlanEvidenceBinding,
@@ -72,6 +94,8 @@ export interface FilePlanRepositoryOptions {
   /** Root-aware lookups used while the shared coordinator barrier is held. */
   getEvidenceDocumentAtRoot?: (activeRoot: string, documentId: string) => ReturnType<EvidenceDocumentLookup>;
   getEvidenceCaptureAtRoot?: (activeRoot: string, captureId: string) => ReturnType<EvidenceCaptureLookup>;
+  topologyV3Enabled?: boolean;
+  v3ReadFallback?: "migration_source";
 }
 
 function checksum(value: unknown): string {
@@ -82,7 +106,7 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
-export class FilePlanRepository implements PlanRepository {
+export class FilePlanRepository<TConfig extends BuildConfigDocument = BuildConfig> implements PlanRepository<TConfig> {
   private readonly root: string;
   private readonly coordinator: RuntimeCoordinator | undefined;
   private readonly now: () => string;
@@ -93,6 +117,8 @@ export class FilePlanRepository implements PlanRepository {
   private readonly getEvidenceCapture: EvidenceCaptureLookup;
   private readonly getEvidenceDocumentAtRoot: FilePlanRepositoryOptions["getEvidenceDocumentAtRoot"];
   private readonly getEvidenceCaptureAtRoot: FilePlanRepositoryOptions["getEvidenceCaptureAtRoot"];
+  private readonly topologyV3Enabled: boolean;
+  private readonly v3ReadFallback: FilePlanRepositoryOptions["v3ReadFallback"];
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly boundary = new AsyncLocalStorage<boolean>();
 
@@ -109,6 +135,13 @@ export class FilePlanRepository implements PlanRepository {
     this.getEvidenceCapture = options.getEvidenceCapture ?? (() => null);
     this.getEvidenceDocumentAtRoot = options.getEvidenceDocumentAtRoot;
     this.getEvidenceCaptureAtRoot = options.getEvidenceCaptureAtRoot;
+    this.topologyV3Enabled = options.topologyV3Enabled === true;
+    this.v3ReadFallback = options.v3ReadFallback;
+  }
+
+  /** Exact catalog snapshot used by a V2 -> V3 preview before the governed write. */
+  migrationCatalogSnapshot(): SkuCatalog {
+    return clone(this.getCatalog());
   }
 
   private async assertLegacyRootEmpty(): Promise<void> {
@@ -119,9 +152,11 @@ export class FilePlanRepository implements PlanRepository {
     if (entries.some((entry) => !entry.name.startsWith("."))) throw new PlanRepositoryError("invalid_input", "Legacy runtime/plans contains data; run the explicit active-generation migration dry-run before startup", 409);
   }
 
-  private atActiveRoot(activeRoot: string): FilePlanRepository {
-    return new FilePlanRepository({
+  private atActiveRoot(activeRoot: string): FilePlanRepository<TConfig> {
+    return new FilePlanRepository<TConfig>({
       root: confined(activeRoot, "plans"), now: this.now, id: this.id,
+      topologyV3Enabled: this.topologyV3Enabled,
+      ...(this.v3ReadFallback ? { v3ReadFallback: this.v3ReadFallback } : {}),
       getCatalog: this.getCatalogAtRoot ? () => this.getCatalogAtRoot!(activeRoot) : this.getCatalog,
       ...(this.getCatalogAtRoot ? { getCatalogAtRoot: this.getCatalogAtRoot } : {}),
       getEvidenceDocument: this.getEvidenceDocumentAtRoot ? (id) => this.getEvidenceDocumentAtRoot!(activeRoot, id) : this.getEvidenceDocument,
@@ -129,7 +164,7 @@ export class FilePlanRepository implements PlanRepository {
     });
   }
 
-  private async publicBoundary<T>(write: boolean, coordinated: (repository: FilePlanRepository) => Promise<T>, local: () => Promise<T>): Promise<T> {
+  private async publicBoundary<T>(write: boolean, coordinated: (repository: FilePlanRepository<TConfig>) => Promise<T>, local: () => Promise<T>): Promise<T> {
     if (this.coordinator) {
       await this.coordinator.initialize();
       await this.assertLegacyRootEmpty();
@@ -146,9 +181,9 @@ export class FilePlanRepository implements PlanRepository {
    * In particular, fan groups are checked against the selected case adapter so
    * HTTP callers cannot persist a count/size that the UI or geometry would clamp.
    */
-  private assertSemanticConfig(config: BuildConfig): void {
+  private assertSemanticConfig(config: BuildConfigDocument): void {
     try {
-      assertValidConfig(config, this.getCatalog());
+      assertValidConfig(config, this.getCatalog(), { topologyV3Enabled: this.topologyV3Enabled });
     } catch (error) {
       throw new PlanRepositoryError("invalid_input", error instanceof Error ? error.message : "Invalid BuildConfig", 400);
     }
@@ -159,22 +194,11 @@ export class FilePlanRepository implements PlanRepository {
   }
 
   private evidenceBindingIdentity(value: EvidenceBindingIdentity): unknown {
-    const purposes = [...value.purposes].sort();
-    const locators = value.locators
-      ? [...value.locators].map((locator) => clone(locator)).sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)))
-      : undefined;
-    return {
-      planId: value.planId,
-      documentId: value.documentId,
-      ...(value.captureId ? { captureId: value.captureId } : {}),
-      subject: clone(value.subject),
-      purposes,
-      ...(locators ? { locators } : {}),
-    };
+    return planEvidenceBindingIdentity(value);
   }
 
   private evidenceBindingId(value: EvidenceBindingIdentity): PlanEvidenceBinding["id"] {
-    return `binding-sha256-${checksum(this.evidenceBindingIdentity(value))}` as PlanEvidenceBinding["id"];
+    return planEvidenceBindingId(value);
   }
 
   private async resolveEvidenceDocument(documentId: PlanEvidenceBinding["documentId"], expectedHash?: string): Promise<EvidenceDocument> {
@@ -261,11 +285,12 @@ export class FilePlanRepository implements PlanRepository {
     return envelope.payload as T;
   }
 
-  private async readPlan(planId: string): Promise<BuildPlan> {
-    const stored = await this.readEnvelope<BuildPlan>(this.planFile(planId), "plan");
+  private async readStoredPlan(planId: string): Promise<BuildPlan<BuildConfigDocument>> {
+    const stored = await this.readEnvelope<BuildPlan<BuildConfigDocument>>(this.planFile(planId), "plan");
+    if (stored.draft?.configAccess !== undefined) throw new PlanRepositoryError("corrupt_data", "Persisted plan must not contain runtime configAccess", 500);
     // Legacy records predate draft evidence bindings. Normalize only after the
     // stored-envelope checksum has been verified so their original bytes remain valid.
-    const plan: BuildPlan = {
+    const plan: BuildPlan<BuildConfigDocument> = {
       ...stored,
       draft: { ...stored.draft, evidenceBindings: clone(stored.draft?.evidenceBindings ?? []) },
     };
@@ -277,16 +302,75 @@ export class FilePlanRepository implements PlanRepository {
     return plan;
   }
 
-  private async readVersion(planId: string, versionId: string): Promise<PlanVersion> {
-    const version = await this.readEnvelope<PlanVersion>(this.versionFile(planId, versionId), "version");
+  private async readVersion(planId: string, versionId: string): Promise<PlanVersion<BuildConfigDocument>> {
+    const version = await this.readEnvelope<PlanVersion<BuildConfigDocument>>(this.versionFile(planId, versionId), "version");
     try {
       assertValidPlanVersion(version);
-      if (version.configHash !== await sha256Hex(version.config)) throw new Error("PlanVersion config hash mismatch");
+      if (version.id !== versionId || version.planId !== planId) throw new Error("PlanVersion owner/path identity mismatch");
+      if (version.configHash !== await hashPlanConfig(version.config)) throw new Error("PlanVersion config hash mismatch");
       if (version.evidenceBindings && version.evidenceHash !== await sha256Hex(version.evidenceBindings)) throw new Error("PlanVersion evidence hash mismatch");
     } catch (error) {
       throw new PlanRepositoryError("corrupt_data", error instanceof Error ? error.message : "Invalid version data", 500);
     }
-    return deepReadonly(version) as PlanVersion;
+    return deepReadonly(version) as PlanVersion<BuildConfigDocument>;
+  }
+
+  private async assertMigrationClosure(plan: BuildPlan<BuildConfigDocument>): Promise<PlanVersion<ConfigV2> | null> {
+    const migration = plan.draft.configMigration;
+    if (!migration) return null;
+    if (plan.draft.config.schemaVersion !== "3.0.0") throw new PlanRepositoryError("corrupt_data", "Only a V3 draft may carry config migration metadata", 500);
+    let source: PlanVersion<BuildConfigDocument>;
+    try {
+      source = await this.readVersion(plan.id, migration.sourceVersionId);
+    } catch (error) {
+      throw new PlanRepositoryError("corrupt_data", `Plan migration source is unavailable: ${error instanceof Error ? error.message : "unknown error"}`, 500);
+    }
+    if (source.planId !== plan.id || source.config.schemaVersion !== "2.0.0") throw new PlanRepositoryError("corrupt_data", "Plan migration source must be an immutable V2 version", 500);
+    const sourceBytes = serializeConfig(source.config);
+    const sourceByteHash = await sha256String(sourceBytes);
+    const recomputed = await migrateBuildConfigV2ToV3(source.config, {
+      sourceBytes,
+      sourceHash: sourceByteHash,
+      catalogBinding: migration.catalogBinding,
+    });
+    if (
+      source.configHash !== migration.sourceConfigHash
+      || source.configHash !== await hashPlanConfig(source.config)
+      || migration.rollbackRef.configId !== plan.id
+      || migration.rollbackRef.sourceHash !== sourceByteHash
+      || migration.rollbackRef.sourceByteLength !== Buffer.byteLength(sourceBytes, "utf8")
+      || canonicalJson(migration.diff) !== canonicalJson(recomputed.diff)
+      || canonicalJson(migration.warnings) !== canonicalJson(recomputed.warnings)
+      || canonicalJson(migration.rollbackRef) !== canonicalJson(recomputed.rollbackRef)
+      || canonicalJson(migration.catalogBinding) !== canonicalJson(recomputed.catalogBinding)
+    ) throw new PlanRepositoryError("corrupt_data", "Plan migration source/hash/rollback closure is invalid", 500);
+    return source as PlanVersion<ConfigV2>;
+  }
+
+  private async readPlan(planId: string, allowFallback = true): Promise<BuildPlan<TConfig>> {
+    const stored = await this.readStoredPlan(planId);
+    const versions = await this.readAllVersions(planId);
+    const versionIds = new Set(versions.map((version) => version.id));
+    for (const [field, versionId] of [["activeVersionId", stored.activeVersionId], ["draft.baseVersionId", stored.draft.baseVersionId]] as const) {
+      if (versionId !== null && !versionIds.has(versionId)) throw new PlanRepositoryError("corrupt_data", `${field} does not resolve to an owned immutable version`, 500);
+    }
+    const source = await this.assertMigrationClosure(stored);
+    if (stored.draft.config.schemaVersion !== "3.0.0") return stored as BuildPlan<TConfig>;
+    if (this.topologyV3Enabled) return stored as BuildPlan<TConfig>;
+    if (!allowFallback || this.v3ReadFallback !== "migration_source" || !source) {
+      const message = !allowFallback && this.v3ReadFallback === "migration_source"
+        ? "V3-backed plan is exposed through a read-only fallback"
+        : `BuildConfig V3 is disabled; enable ${TOPOLOGY_V3_FEATURE_FLAG}${source ? " or configure v3ReadFallback=migration_source" : ""}`;
+      throw new PlanRepositoryError("invalid_input", message, 409);
+    }
+    return {
+      ...stored,
+      draft: {
+        ...stored.draft,
+        config: clone(source.config),
+        configAccess: { mode: "v2_fallback", sourceVersionId: source.id },
+      },
+    } as BuildPlan<TConfig>;
   }
 
   private async serialize<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -300,12 +384,42 @@ export class FilePlanRepository implements PlanRepository {
     }
   }
 
+  private async readAllVersions(planId: string): Promise<PlanVersion<BuildConfigDocument>[]> {
+    const directory = path.join(this.planDirectory(planId), "versions");
+    let files: string[];
+    try {
+      files = await readdir(directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    const versions = await Promise.all(files.filter((file) => file.endsWith(".json")).map((file) => this.readVersion(planId, file.slice(0, -5))));
+    const byId = new Map(versions.map((version) => [version.id, version]));
+    for (const version of versions) {
+      if (version.parentVersionId === version.id) throw new PlanRepositoryError("corrupt_data", "PlanVersion lineage cannot reference itself", 500);
+      if (version.parentVersionId !== null) {
+        const parent = byId.get(version.parentVersionId);
+        if (!parent || parent.planId !== planId) throw new PlanRepositoryError("corrupt_data", "PlanVersion parent does not resolve to an owned immutable version", 500);
+        if (parent.versionNumber >= version.versionNumber) throw new PlanRepositoryError("corrupt_data", "PlanVersion parent must precede its child", 500);
+      }
+    }
+    for (const version of versions) {
+      const visited = new Set<string>();
+      let cursor: PlanVersion<BuildConfigDocument> | undefined = version;
+      while (cursor && cursor.parentVersionId !== null) {
+        if (visited.has(cursor.id)) throw new PlanRepositoryError("corrupt_data", "PlanVersion lineage contains a cycle", 500);
+        visited.add(cursor.id);
+        cursor = byId.get(cursor.parentVersionId);
+      }
+    }
+    return versions.sort((left, right) => left.versionNumber - right.versionNumber);
+  }
+
   private async idempotent<T>(
     scope: string,
     key: string | undefined,
     request: unknown,
-    readResult: (record: IdempotencyRecord) => Promise<T>,
-    operation: () => Promise<{ value: T; result: IdempotencyRecord["result"] }>,
+    operation: () => Promise<{ value: T; result: IdempotencyResultMaterial }>,
   ): Promise<T> {
     if (!key) return (await operation()).value;
     if (key.length > 200) throw new PlanRepositoryError("invalid_input", "Idempotency key is too long", 400);
@@ -313,14 +427,105 @@ export class FilePlanRepository implements PlanRepository {
     const requestHash = checksum(request);
     try {
       const stored = await this.readEnvelope<IdempotencyRecord>(file, "idempotency");
+      const validationErrors = validatePlanIdempotencyRuntime(stored);
+      if (validationErrors.length) throw new PlanRepositoryError("corrupt_data", `Plan idempotency record is invalid: ${validationErrors.join("; ")}`, 500);
       if (stored.operation !== scope || stored.requestHash !== requestHash) throw new PlanRepositoryError("idempotency_conflict", "Idempotency key was reused for another request", 409);
-      return readResult(stored);
+      return await this.readIdempotencyResult(stored) as T;
     } catch (error) {
       if (!(error instanceof PlanRepositoryError) || error.code !== "not_found") throw error;
     }
     const completed = await operation();
-    await this.atomicWrite(file, "idempotency", { operation: scope, requestHash, result: completed.result });
+    const resultMaterial: IdempotencyResultMaterial = completed.result.kind === "plan"
+      ? {
+          ...completed.result,
+          writeReceipt: await this.planWriteReceipt(completed.value, completed.result.planId),
+        }
+      : completed.result;
+    const result = { ...resultMaterial, resultHash: checksum(resultMaterial) } as IdempotencyRecord["result"];
+    const record: IdempotencyRecord = { schemaVersion: "plan-idempotency-v2", operation: scope, requestHash, result };
+    const validationErrors = validatePlanIdempotencyRuntime(record);
+    if (validationErrors.length) throw new PlanRepositoryError("corrupt_data", `Generated Plan idempotency record is invalid: ${validationErrors.join("; ")}`, 500);
+    await this.atomicWrite(file, "idempotency", record);
     return completed.value;
+  }
+
+  private async planWriteReceipt(value: unknown, expectedPlanId: string): Promise<PlanWriteReceipt> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new PlanRepositoryError("corrupt_data", "Plan idempotency result did not produce a Plan authority", 500);
+    }
+    const plan = value as BuildPlan<BuildConfigDocument>;
+    if (plan.id !== expectedPlanId) {
+      throw new PlanRepositoryError("corrupt_data", "Plan idempotency result owner does not match its Plan authority", 500);
+    }
+    assertValidBuildPlan(plan);
+    return {
+      schemaVersion: "plan-write-receipt-v1",
+      appliedDraftRevision: plan.draftRevision,
+      appliedConfigHash: await hashPlanConfig(plan.draft.config),
+      appliedUpdatedAt: plan.updatedAt,
+      appliedPlanHash: checksum(plan),
+    };
+  }
+
+  private async readIdempotencyResult(record: IdempotencyRecord, options: { requirePlanWriteReceipt?: boolean } = {}): Promise<unknown> {
+    const result = record.result;
+    if (result.kind === "plan") {
+      const plan = await this.readPlan(result.planId);
+      if (!result.writeReceipt) {
+        if (options.requirePlanWriteReceipt) {
+          throw new PlanRepositoryError("idempotency_conflict", "Legacy Plan idempotency result has no immutable write receipt and cannot be safely replayed", 409);
+        }
+        return clone(plan);
+      }
+      const currentReceipt = await this.planWriteReceipt(plan, result.planId);
+      if (canonicalJson(currentReceipt) !== canonicalJson(result.writeReceipt)) {
+        throw new PlanRepositoryError("idempotency_conflict", "Completed Plan idempotency result was superseded by a later authoritative write", 409);
+      }
+      return clone(plan);
+    }
+    if (result.kind === "version") return deepReadonly(clone(await this.readVersion(result.planId, result.versionId)));
+    if (result.kind === "evidence-binding") {
+      const plan = await this.readPlan(result.planId);
+      const binding = (plan.draft.evidenceBindings ?? []).find((candidate) => candidate.id === result.bindingId);
+      if (!binding || validatePlanEvidenceBinding(binding).length) throw new PlanRepositoryError("corrupt_data", "Idempotency evidence binding reference is unavailable or invalid", 500);
+      return clone(binding);
+    }
+    await this.readPlan(result.planId);
+    return undefined;
+  }
+
+  async replayIdempotentPlanWrite(planId: string, input: ReplayIdempotentPlanWriteInput): Promise<BuildPlan<TConfig> | null> {
+    return this.publicBoundary(false, (repository) => repository.replayIdempotentPlanWrite(planId, input), async () => {
+      this.assertId(planId);
+      if (!input.idempotencyKey || input.idempotencyKey.length > 200) {
+        throw new PlanRepositoryError("invalid_input", "Idempotency key is invalid", 400);
+      }
+      const expectedRequestHash = checksum(input.request);
+      let replay: BuildPlan<TConfig> | null = null;
+      for (const scope of [`updateDraft:${planId}`, `migrateDraftToV3:${planId}`]) {
+        let stored: IdempotencyRecord;
+        try {
+          stored = await this.readEnvelope<IdempotencyRecord>(this.idempotencyFile(scope, input.idempotencyKey), "idempotency");
+        } catch (error) {
+          if (error instanceof PlanRepositoryError && error.code === "not_found") continue;
+          throw error;
+        }
+        const validationErrors = validatePlanIdempotencyRuntime(stored);
+        if (validationErrors.length) {
+          throw new PlanRepositoryError("corrupt_data", `Plan idempotency record is invalid: ${validationErrors.join("; ")}`, 500);
+        }
+        if (stored.operation !== scope || stored.requestHash !== expectedRequestHash) {
+          throw new PlanRepositoryError("idempotency_conflict", "Idempotency key was reused for another request", 409);
+        }
+        if (replay) throw new PlanRepositoryError("corrupt_data", "Proposal approval resolved to multiple plan writes", 500);
+        const result = await this.readIdempotencyResult(stored, { requirePlanWriteReceipt: true });
+        if (!result || typeof result !== "object" || (result as BuildPlan<TConfig>).id !== planId) {
+          throw new PlanRepositoryError("corrupt_data", "Proposal approval plan result is unavailable", 500);
+        }
+        replay = result as BuildPlan<TConfig>;
+      }
+      return replay;
+    });
   }
 
   async list(): Promise<BuildPlanSummary[]> {
@@ -352,27 +557,29 @@ export class FilePlanRepository implements PlanRepository {
     });
   }
 
-  async get(planId: string): Promise<BuildPlan> {
+  async get(planId: string): Promise<BuildPlan<TConfig>> {
     return this.publicBoundary(false, (repository) => repository.get(planId), async () => clone(await this.readPlan(planId)));
   }
 
-  async create(input: CreatePlanInput): Promise<BuildPlan> {
+  async create(input: CreatePlanInput<TConfig>): Promise<BuildPlan<TConfig>> {
     return this.publicBoundary(true, (repository) => repository.create(input), async () => {
     if (!input.name.trim()) throw new PlanRepositoryError("invalid_input", "Plan name is required", 400);
     return this.serialize("create", () => this.idempotent(
       "create",
       input.idempotencyKey,
       input,
-      async (record) => clone(record.result.value as BuildPlan),
       async () => {
         const planId = this.id("plan");
         this.assertId(planId);
         const timestamp = this.now();
         const config = clone(input.config);
+        if (config.schemaVersion === "3.0.0" && !this.topologyV3Enabled) {
+          throw new PlanRepositoryError("invalid_input", `BuildConfig V3 is disabled; enable ${TOPOLOGY_V3_FEATURE_FLAG}`, 409);
+        }
         config.id = planId;
         config.name = input.name.trim();
         config.updatedAt = timestamp;
-        const plan: BuildPlan = {
+        const plan: BuildPlan<TConfig> = {
           schemaVersion: PLAN_SCHEMA_VERSION,
           id: planId,
           name: input.name.trim(),
@@ -388,30 +595,34 @@ export class FilePlanRepository implements PlanRepository {
         assertValidBuildPlan(plan);
         this.assertSemanticConfig(plan.draft.config);
         await this.atomicWrite(this.planFile(planId), "plan", plan);
-        return { value: clone(plan), result: { planId, value: clone(plan) } };
+        return { value: clone(plan), result: { kind: "plan" as const, planId } };
       },
     ));
     });
   }
 
-  async updateDraft(planId: string, input: UpdateDraftInput): Promise<BuildPlan> {
+  async updateDraft(planId: string, input: UpdateDraftInput<TConfig>): Promise<BuildPlan<TConfig>> {
     return this.publicBoundary(true, (repository) => repository.updateDraft(planId, input), async () => this.serialize(planId, () => this.idempotent(
       `updateDraft:${planId}`,
       input.idempotencyKey,
-      input,
-      async (record) => clone(record.result.value as BuildPlan),
+      input[PLAN_IDEMPOTENCY_REQUEST] ?? input,
       async () => {
-        const plan = await this.readPlan(planId);
+        const plan = await this.readPlan(planId, false);
         if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
         assertExpectedRevision(input.expectedRevision, plan.draftRevision);
         const timestamp = this.now();
         const config = clone(input.config);
+        if (config.schemaVersion !== plan.draft.config.schemaVersion) {
+          throw new PlanRepositoryError("invalid_input", plan.draft.config.schemaVersion === "2.0.0"
+            ? "Use migrateDraftToV3 for an explicit V2 to V3 transition"
+            : "A V3-backed plan cannot be rewritten as V2", 409);
+        }
         const name = input.name?.trim() || plan.name;
         if (!name || name.length > 120) throw new PlanRepositoryError("invalid_input", "Plan name must contain 1 to 120 characters", 400);
         config.id = planId;
         config.name = name;
         config.updatedAt = timestamp;
-        const updated: BuildPlan = {
+        const updated: BuildPlan<TConfig> = {
           ...plan,
           name,
           ...(input.metadata ? { metadata: clone(input.metadata) } : {}),
@@ -422,14 +633,110 @@ export class FilePlanRepository implements PlanRepository {
         assertValidBuildPlan(updated);
         this.assertSemanticConfig(updated.draft.config);
         await this.atomicWrite(this.planFile(planId), "plan", updated);
-        return { value: clone(updated), result: { planId, value: clone(updated) } };
+        return { value: clone(updated), result: { kind: "plan" as const, planId } };
       },
     )));
   }
 
-  async updateInfo(planId: string, input: UpdatePlanInfoInput): Promise<BuildPlan> {
+  async migrateDraftToV3(planId: string, input: MigrateDraftToV3Input): Promise<BuildPlan<BuildConfigDocument>> {
+    return this.publicBoundary(true, (repository) => repository.migrateDraftToV3(planId, input), async () => this.serialize(planId, () => this.idempotent(
+      `migrateDraftToV3:${planId}`,
+      input.idempotencyKey,
+      input[PLAN_IDEMPOTENCY_REQUEST] ?? input,
+      async () => {
+        if (!this.topologyV3Enabled) throw new PlanRepositoryError("invalid_input", `BuildConfig V3 is disabled; enable ${TOPOLOGY_V3_FEATURE_FLAG}`, 409);
+        const plan = await this.readPlan(planId, false) as BuildPlan<BuildConfigDocument>;
+        if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
+        assertExpectedRevision(input.expectedRevision, plan.draftRevision);
+        if (plan.draft.config.schemaVersion !== "2.0.0") throw new PlanRepositoryError("invalid_input", "Only a V2 draft can be migrated to V3", 409);
+        this.assertSemanticConfig(plan.draft.config);
+
+        const sourceConfig = clone(plan.draft.config);
+        const sourceConfigHash = await hashPlanConfig(sourceConfig);
+        const versions = await this.readAllVersions(planId);
+        let sourceVersion = plan.draft.baseVersionId
+          ? versions.find((version) => version.id === plan.draft.baseVersionId && version.config.schemaVersion === "2.0.0" && version.configHash === sourceConfigHash)
+          : undefined;
+        sourceVersion ??= [...versions].reverse().find((version) => (
+          version.reason === "migration-source" && version.config.schemaVersion === "2.0.0" && version.configHash === sourceConfigHash
+        ));
+        if (!sourceVersion) {
+          const sourceVersionId = this.id("version");
+          sourceVersion = await createImmutablePlanVersion({
+            id: sourceVersionId,
+            planId,
+            versionNumber: versions.reduce((maximum, version) => Math.max(maximum, version.versionNumber), 0) + 1,
+            createdAt: this.now(),
+            reason: "migration-source",
+            summary: "Immutable V2 source retained for BuildConfig V3 migration",
+            config: sourceConfig,
+            evidenceBindings: plan.draft.evidenceBindings ?? [],
+            parentVersionId: plan.activeVersionId,
+          });
+          await this.atomicWrite(this.versionFile(planId, sourceVersionId), "version", sourceVersion);
+        }
+        if (sourceVersion.config.schemaVersion !== "2.0.0") throw new PlanRepositoryError("corrupt_data", "Migration source version is not V2", 500);
+
+        const sourceBytes = serializeConfig(sourceVersion.config);
+        const sourceHash = await sha256String(sourceBytes);
+        const result = await migrateBuildConfigV2ToV3(sourceVersion.config, {
+          sourceBytes,
+          sourceHash,
+          ...(input.catalogBinding ? { catalogBinding: input.catalogBinding } : { catalog: this.getCatalog() }),
+        });
+        let migratedConfig = input.operations?.length
+          ? applyPlanV3ProposalOperations(result.config, input.operations, this.now())
+          : result.config;
+        if (input.confirmedRequirementFieldIds?.length) {
+          const confirmable = new Set(confirmableRequirementFieldIds(input.operations ?? []));
+          if (new Set(input.confirmedRequirementFieldIds).size !== input.confirmedRequirementFieldIds.length
+            || input.confirmedRequirementFieldIds.some((id) => !confirmable.has(id))) {
+            throw new PlanRepositoryError("invalid_input", "Requirement confirmation is outside the reviewed migration edit", 409);
+          }
+          migratedConfig = applyRequirementConfirmations(migratedConfig, input.confirmedRequirementFieldIds);
+        }
+        this.assertSemanticConfig(migratedConfig);
+        const migratedName = migratedConfig.name.trim();
+        if (!migratedName || migratedName.length > 120) throw new PlanRepositoryError("invalid_input", "Plan name must contain 1 to 120 characters", 400);
+        const migratedAt = this.now();
+        const updated: BuildPlan<BuildConfigDocument> = {
+          ...plan,
+          name: migratedName,
+          ...(input.metadata ? { metadata: clone(input.metadata) } : {}),
+          activeVersionId: sourceVersion.id,
+          updatedAt: migratedAt,
+          draftRevision: plan.draftRevision + 1,
+          draft: {
+            ...plan.draft,
+            baseVersionId: sourceVersion.id,
+            config: migratedConfig,
+            configMigration: {
+              schemaVersion: "plan-config-migration-v1",
+              sourceSchemaVersion: "2.0.0",
+              targetSchemaVersion: "3.0.0",
+              sourceVersionId: sourceVersion.id,
+              sourceConfigHash: sourceVersion.configHash,
+              migratedAt,
+              catalogBinding: clone(result.catalogBinding),
+              diff: clone(result.diff),
+              warnings: clone(result.warnings),
+              rollbackRef: clone(result.rollbackRef),
+            },
+            dirty: true,
+            updatedAt: migratedAt,
+          },
+        };
+        assertValidBuildPlan(updated);
+        await this.assertMigrationClosure(updated);
+        await this.atomicWrite(this.planFile(planId), "plan", updated);
+        return { value: clone(updated), result: { kind: "plan" as const, planId } };
+      },
+    )));
+  }
+
+  async updateInfo(planId: string, input: UpdatePlanInfoInput): Promise<BuildPlan<TConfig>> {
     return this.publicBoundary(true, (repository) => repository.updateInfo(planId, input), async () => this.serialize(planId, async () => {
-      const plan = await this.readPlan(planId);
+      const plan = await this.readPlan(planId, false);
       if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
       assertExpectedRevision(input.expectedRevision, plan.draftRevision);
       const name = input.name.trim();
@@ -438,7 +745,7 @@ export class FilePlanRepository implements PlanRepository {
       const config = clone(plan.draft.config);
       config.name = name;
       config.updatedAt = timestamp;
-      const updated: BuildPlan = {
+      const updated: BuildPlan<TConfig> = {
         ...plan,
         name,
         ...(input.metadata ? { metadata: clone(input.metadata) } : {}),
@@ -456,19 +763,17 @@ export class FilePlanRepository implements PlanRepository {
     }));
   }
 
-  async saveVersion(planId: string, input: SaveVersionInput): Promise<PlanVersion> {
+  async saveVersion(planId: string, input: SaveVersionInput): Promise<PlanVersion<TConfig>> {
     return this.publicBoundary(true, (repository) => repository.saveVersion(planId, input), async () => this.serialize(planId, () => this.idempotent(
       `saveVersion:${planId}`,
       input.idempotencyKey,
       input,
-      async (record) => deepReadonly(clone(record.result.value as PlanVersion)) as PlanVersion,
       async () => {
-        const plan = await this.readPlan(planId);
+        const plan = await this.readPlan(planId, false);
         if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
-        if (plan.metadata.initialization?.status === "pending") throw new PlanRepositoryError("initialization_pending", "Pending Agent initialization scaffolds cannot be saved as versions", 409);
         assertExpectedRevision(input.expectedRevision, plan.draftRevision);
         this.assertSemanticConfig(plan.draft.config);
-        const actualHash = await sha256Hex(plan.draft.config);
+        const actualHash = await hashPlanConfig(plan.draft.config);
         assertExpectedConfigHash(input.expectedConfigHash, actualHash);
         const versions = await this.listVersions(planId);
         const versionId = this.id("version");
@@ -486,28 +791,27 @@ export class FilePlanRepository implements PlanRepository {
           parentVersionId: plan.activeVersionId,
         });
         await this.atomicWrite(this.versionFile(planId, versionId), "version", version);
-        const updated: BuildPlan = {
+        const updated: BuildPlan<TConfig> = {
           ...plan,
           activeVersionId: versionId,
           updatedAt: version.createdAt,
           draft: { ...plan.draft, baseVersionId: versionId, dirty: false, updatedAt: version.createdAt },
         };
         await this.atomicWrite(this.planFile(planId), "plan", updated);
-        return { value: version, result: { planId, versionId, value: clone(version) } };
+        return { value: version, result: { kind: "version" as const, planId, versionId } };
       },
     )));
   }
 
-  async duplicate(planId: string, input: DuplicatePlanInput): Promise<BuildPlan> {
+  async duplicate(planId: string, input: DuplicatePlanInput): Promise<BuildPlan<TConfig>> {
     return this.publicBoundary(true, (repository) => repository.duplicate(planId, input), async () => {
     if (!input.name.trim()) throw new PlanRepositoryError("invalid_input", "Plan name is required", 400);
     return this.serialize(`duplicate:${planId}`, () => this.idempotent(
       `duplicate:${planId}`,
       input.idempotencyKey,
       input,
-      async (record) => clone(record.result.value as BuildPlan),
       async () => {
-        const source = await this.readPlan(planId);
+        const source = await this.readPlan(planId, false);
         let created = await this.create({ name: input.name, config: source.draft.config, metadata: clone(source.metadata) });
         const copiedBindingsById = new Map<PlanEvidenceBinding["id"], PlanEvidenceBinding>();
         for (const binding of source.draft.evidenceBindings ?? []) {
@@ -528,13 +832,10 @@ export class FilePlanRepository implements PlanRepository {
           assertValidBuildPlan(created);
           await this.atomicWrite(this.planFile(created.id), "plan", created);
         }
-        if (source.metadata.initialization?.status === "pending") {
-          return { value: created, result: { planId: created.id, value: clone(created) } };
-        }
-        const hash = await sha256Hex(created.draft.config);
+        const hash = await hashPlanConfig(created.draft.config);
         await this.saveVersion(created.id, { expectedRevision: created.draftRevision, expectedConfigHash: hash, reason: "initial" });
         const saved = await this.get(created.id);
-        return { value: saved, result: { planId: saved.id, value: clone(saved) } };
+        return { value: saved, result: { kind: "plan" as const, planId: saved.id } };
       },
     ));
     });
@@ -552,9 +853,8 @@ export class FilePlanRepository implements PlanRepository {
       `bindEvidence:${planId}`,
       input.idempotencyKey,
       input,
-      async (record) => clone(record.result.value as PlanEvidenceBinding),
       async () => {
-        const plan = await this.readPlan(planId);
+        const plan = await this.readPlan(planId, false);
         if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
         const document = await this.resolveEvidenceDocument(input.documentId, input.contentHash);
         if (input.captureId) await this.resolveEvidenceCapture(input.captureId, document.id);
@@ -581,9 +881,9 @@ export class FilePlanRepository implements PlanRepository {
         const errors = validatePlanEvidenceBinding(binding);
         if (errors.length) throw new PlanRepositoryError("invalid_input", `Invalid evidence binding: ${errors.join("; ")}`, 400);
         const existing = (plan.draft.evidenceBindings ?? []).find((candidate) => this.evidenceBindingId(candidate) === binding.id);
-        if (existing) return { value: clone(existing), result: { planId, value: clone(existing) } };
+        if (existing) return { value: clone(existing), result: { kind: "evidence-binding" as const, planId, bindingId: existing.id } };
         assertExpectedRevision(input.expectedRevision, plan.draftRevision);
-        const updated: BuildPlan = {
+        const updated: BuildPlan<TConfig> = {
           ...plan,
           updatedAt: timestamp,
           draftRevision: plan.draftRevision + 1,
@@ -596,7 +896,7 @@ export class FilePlanRepository implements PlanRepository {
         };
         assertValidBuildPlan(updated);
         await this.atomicWrite(this.planFile(planId), "plan", updated);
-        return { value: clone(binding), result: { planId, value: clone(binding) } };
+        return { value: clone(binding), result: { kind: "evidence-binding" as const, planId, bindingId: binding.id } };
       },
     )));
   }
@@ -607,9 +907,8 @@ export class FilePlanRepository implements PlanRepository {
       `unbindEvidence:${planId}`,
       input.idempotencyKey,
       input,
-      async () => undefined,
       async () => {
-        const plan = await this.readPlan(planId);
+        const plan = await this.readPlan(planId, false);
         if (plan.status !== "active") throw new PlanRepositoryError("invalid_input", "Archived plans are read-only", 409);
         assertExpectedRevision(input.expectedRevision, plan.draftRevision);
         const bindings = plan.draft.evidenceBindings ?? [];
@@ -617,7 +916,7 @@ export class FilePlanRepository implements PlanRepository {
           throw new PlanRepositoryError("not_found", "Plan evidence binding was not found", 404);
         }
         const timestamp = this.now();
-        const updated: BuildPlan = {
+        const updated: BuildPlan<TConfig> = {
           ...plan,
           updatedAt: timestamp,
           draftRevision: plan.draftRevision + 1,
@@ -630,7 +929,7 @@ export class FilePlanRepository implements PlanRepository {
         };
         assertValidBuildPlan(updated);
         await this.atomicWrite(this.planFile(planId), "plan", updated);
-        return { value: undefined, result: { planId } };
+        return { value: undefined, result: { kind: "void" as const, planId } };
       },
     ));
     });
@@ -639,7 +938,7 @@ export class FilePlanRepository implements PlanRepository {
   async archive(planId: string): Promise<void> {
     return this.publicBoundary(true, (repository) => repository.archive(planId), async () => {
     await this.serialize(planId, async () => {
-      const plan = await this.readPlan(planId);
+      const plan = await this.readPlan(planId, false);
       if (plan.status === "archived") return;
       await this.atomicWrite(this.planFile(planId), "plan", { ...plan, status: "archived", updatedAt: this.now() });
     });
@@ -649,7 +948,7 @@ export class FilePlanRepository implements PlanRepository {
   async restore(planId: string): Promise<void> {
     return this.publicBoundary(true, (repository) => repository.restore(planId), async () => {
     await this.serialize(planId, async () => {
-      const plan = await this.readPlan(planId);
+      const plan = await this.readPlan(planId, false);
       if (plan.status === "active") return;
       await this.atomicWrite(this.planFile(planId), "plan", { ...plan, status: "active", updatedAt: this.now() });
     });
@@ -659,13 +958,13 @@ export class FilePlanRepository implements PlanRepository {
   async delete(planId: string): Promise<void> {
     return this.publicBoundary(true, (repository) => repository.delete(planId), async () => {
     await this.serialize(planId, async () => {
-      await this.readPlan(planId);
+      await this.readPlan(planId, false);
       const target = path.join(this.root, ".trash", `${planId}-${this.now().replace(/[^0-9]/g, "")}`);
       await ensurePrivateDirectory(path.dirname(target));
       const manifestFile = confined(this.root, ".rollback", "manifest.json");
       const manifest = await readFile(manifestFile, "utf8").then((raw) => JSON.parse(raw)).catch((error) => (error as NodeJS.ErrnoException).code === "ENOENT" ? { schemaVersion: "plan-rollback-manifest-v1", entries: [] } : Promise.reject(error));
       const eventId = randomUUID();
-      const entry = { eventId, operation: "trash-plan", target: path.relative(this.root, this.planDirectory(planId)), backup: path.relative(this.root, target), previousHash: checksum(await this.readPlan(planId)), nextHash: null, status: "moving", createdAt: this.now() };
+      const entry = { eventId, operation: "trash-plan", target: path.relative(this.root, this.planDirectory(planId)), backup: path.relative(this.root, target), previousHash: checksum(await this.readPlan(planId, false)), nextHash: null, status: "moving", createdAt: this.now() };
       await atomicWriteJson(manifestFile, { ...manifest, entries: [...(manifest.entries ?? []), entry] });
       await rename(this.planDirectory(planId), target);
       await this.syncDirectory(this.root);
@@ -675,19 +974,11 @@ export class FilePlanRepository implements PlanRepository {
     });
   }
 
-  async listVersions(planId: string): Promise<PlanVersion[]> {
+  async listVersions(planId: string): Promise<PlanVersion<TConfig>[]> {
     return this.publicBoundary(false, (repository) => repository.listVersions(planId), async () => {
-    await this.readPlan(planId);
-    const directory = path.join(this.planDirectory(planId), "versions");
-    let files: string[];
-    try {
-      files = await readdir(directory);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
-    }
-    const versions = await Promise.all(files.filter((file) => file.endsWith(".json")).map((file) => this.readVersion(planId, file.slice(0, -5))));
-    return versions.sort((left, right) => left.versionNumber - right.versionNumber);
+    const plan = await this.readPlan(planId);
+    if (plan.draft.configAccess) return [await this.readVersion(planId, plan.draft.configAccess.sourceVersionId) as PlanVersion<TConfig>];
+    return await this.readAllVersions(planId) as PlanVersion<TConfig>[];
     });
   }
 }

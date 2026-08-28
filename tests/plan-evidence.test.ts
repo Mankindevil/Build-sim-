@@ -10,6 +10,8 @@ import type { BindPlanEvidenceInput } from "../src/plans/contracts";
 import { createDefaultN6Config } from "../src/plans/default-plan";
 import { FilePlanRepository } from "../src/plans/file-repository";
 import { createWorkspaceRepositories } from "../src/server/workspace-server";
+import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
+import type { BuildConfigDocument } from "../src/config/types";
 
 const roots: string[] = [];
 let idCounter = 0;
@@ -244,6 +246,49 @@ describe("plan evidence bindings", () => {
     expect(legacyVersions[0]).not.toHaveProperty("evidenceHash");
   });
 
+  it("fails closed when persisted evidence owner or document content closure is forged", async () => {
+    const ownerFixture = await fixture();
+    await ownerFixture.plans.bindEvidence(ownerFixture.plan.id, bindInput(ownerFixture.stored));
+    const ownerPlanFile = path.join(ownerFixture.root, ownerFixture.plan.id, "plan.json");
+    const ownerEnvelope = JSON.parse(await readFile(ownerPlanFile, "utf8"));
+    ownerEnvelope.payload.draft.evidenceBindings[0].planId = "plan-forged-owner";
+    ownerEnvelope.checksum = checksum(ownerEnvelope.payload);
+    await writeFile(ownerPlanFile, JSON.stringify(ownerEnvelope));
+    await expect(new FilePlanRepository({ root: ownerFixture.root }).get(ownerFixture.plan.id)).rejects.toThrow(/does not match owner/);
+
+    const contentFixture = await fixture();
+    await contentFixture.plans.bindEvidence(contentFixture.plan.id, bindInput(contentFixture.stored));
+    const contentPlanFile = path.join(contentFixture.root, contentFixture.plan.id, "plan.json");
+    const contentEnvelope = JSON.parse(await readFile(contentPlanFile, "utf8"));
+    contentEnvelope.payload.draft.evidenceBindings[0].contentHash = "f".repeat(64);
+    contentEnvelope.checksum = checksum(contentEnvelope.payload);
+    await writeFile(contentPlanFile, JSON.stringify(contentEnvelope));
+    await expect(new FilePlanRepository({ root: contentFixture.root }).get(contentFixture.plan.id)).rejects.toThrow(/documentId\/contentHash mismatch/);
+
+    const identityFixture = await fixture();
+    await identityFixture.plans.bindEvidence(identityFixture.plan.id, bindInput(identityFixture.stored));
+    const identityPlanFile = path.join(identityFixture.root, identityFixture.plan.id, "plan.json");
+    const identityEnvelope = JSON.parse(await readFile(identityPlanFile, "utf8"));
+    identityEnvelope.payload.draft.evidenceBindings[0].id = `binding-sha256-${"d".repeat(64)}`;
+    identityEnvelope.checksum = checksum(identityEnvelope.payload);
+    await writeFile(identityPlanFile, JSON.stringify(identityEnvelope));
+    await expect(new FilePlanRepository({ root: identityFixture.root }).get(identityFixture.plan.id)).rejects.toThrow(/id does not match semantic identity/);
+
+    const versionFixture = await fixture();
+    await versionFixture.plans.bindEvidence(versionFixture.plan.id, bindInput(versionFixture.stored));
+    const current = await versionFixture.plans.get(versionFixture.plan.id);
+    const version = await versionFixture.plans.saveVersion(versionFixture.plan.id, {
+      expectedRevision: current.draftRevision, expectedConfigHash: await sha256Hex(current.draft.config), reason: "manual-save",
+    });
+    const versionFile = path.join(versionFixture.root, versionFixture.plan.id, "versions", `${version.id}.json`);
+    const versionEnvelope = JSON.parse(await readFile(versionFile, "utf8"));
+    versionEnvelope.payload.evidenceBindings[0].planVersionId = "version-forged-owner";
+    versionEnvelope.payload.evidenceHash = await sha256Hex(versionEnvelope.payload.evidenceBindings);
+    versionEnvelope.checksum = checksum(versionEnvelope.payload);
+    await writeFile(versionFile, JSON.stringify(versionEnvelope));
+    await expect(new FilePlanRepository({ root: versionFixture.root }).listVersions(versionFixture.plan.id)).rejects.toThrow(/does not match version/);
+  });
+
   it("wires the production plan repository to the shared configured evidence repository", async () => {
     const planRoot = await mkdtemp(path.join(tmpdir(), "build-sim-workspace-plans-"));
     const evidenceRoot = await mkdtemp(path.join(tmpdir(), "build-sim-workspace-evidence-"));
@@ -294,6 +339,20 @@ describe("plan evidence bindings", () => {
     await expect(repository.bindEvidence(plan.id, bindInput(stored, { idempotencyKey: "shared-generation-bind" }))).resolves.toMatchObject({ documentId: stored.document.id });
     await expect(readFile(path.join(runtimeRoot, "generations", "1", "plans", plan.id, "plan.json"), "utf8")).resolves.toContain(stored.document.id);
     await expect(readFile(path.join(runtimeRoot, "generations", "1", "evidence", "documents", stored.document.sha256.slice(0, 2), `${stored.document.id}.json`), "utf8")).resolves.toContain(stored.document.id);
+  });
+
+  it("passes the explicit topology V3 flag into the workspace plan repository", async () => {
+    const runtimeRoot = await mkdtemp(path.join(tmpdir(), "build-sim-workspace-v3-runtime-")); roots.push(runtimeRoot);
+    const { repository } = createWorkspaceRepositories({
+      RUNTIME_ROOT: runtimeRoot,
+      BUILD_SIM_TOPOLOGY_V3_ENABLED: "true",
+    });
+    const documentRepository = repository as unknown as FilePlanRepository<BuildConfigDocument>;
+    const plan = await documentRepository.create({
+      name: "Progressive empty V3 plan",
+      config: createEmptyBuildConfigV3("draft", "Progressive empty V3 plan", "2026-08-27T03:00:00.000Z"),
+    });
+    expect(plan.draft.config).toMatchObject({ schemaVersion: "3.0.0", components: [], requirementSpec: null });
   });
 
   it("fails closed on conflicting active-generation and legacy repository roots", async () => {

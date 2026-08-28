@@ -7,16 +7,19 @@ import { FileArtifactRepository } from "../src/artifacts/repository.mjs";
 import { AttachmentRepository } from "../src/attachments/repository";
 import { RuntimeCoordinator } from "../src/runtime/coordinator.mjs";
 import { atomicWriteFile, atomicWriteJson, confined, readJson, sha256Json } from "../src/runtime/fs.mjs";
+import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
+import { hashPlanConfigRuntime } from "../src/plans/canonical-runtime.mjs";
 
 const roots: string[] = [];
 const fixedHash = (letter: string) => letter.repeat(64);
 async function writePlanFixture(activeRoot: string, options: { evaluationHash?: string; marker?: string } = {}): Promise<void> {
-  const at = "2026-08-27T00:00:00.000Z"; const planId = "plan-fixture"; const config = {};
+  const at = "2026-08-27T00:00:00.000Z"; const planId = "plan-fixture";
+  const config = createEmptyBuildConfigV3(planId, "Private plan", at);
   const versionId = options.evaluationHash ? "version-plan-v1" : null;
-  const plan = { schemaVersion: "1.0.0", id: planId, name: "Private plan", status: "active", createdAt: at, updatedAt: at, activeVersionId: versionId, draftRevision: 0, draft: { schemaVersion: "1.0.0", baseVersionId: versionId, config, evidenceBindings: [], dirty: versionId === null, updatedAt: at }, metadata: options.marker ? { marker: options.marker } : {} };
+  const plan = { schemaVersion: "1.0.0", id: planId, name: "Private plan", status: "active", createdAt: at, updatedAt: at, activeVersionId: versionId, draftRevision: 0, draft: { schemaVersion: "1.0.0", baseVersionId: versionId, config, evidenceBindings: [], dirty: versionId === null, updatedAt: at }, metadata: options.marker ? { tags: [options.marker] } : {} };
   await atomicWriteJson(confined(activeRoot, "plans", planId, "plan.json"), { schemaVersion: "1.0.0", kind: "plan", checksum: sha256Json(plan), payload: plan });
   if (versionId && options.evaluationHash) {
-    const version = { schemaVersion: "1.0.0", id: versionId, planId, versionNumber: 1, createdAt: at, reason: "manual", config, configHash: sha256Json(config), evaluationHash: options.evaluationHash, evaluatedAt: at, parentVersionId: null, evidenceBindings: [], evidenceHash: sha256Json([]) };
+    const version = { schemaVersion: "1.0.0", id: versionId, planId, versionNumber: 1, createdAt: at, reason: "manual-save", config, configHash: hashPlanConfigRuntime(config), evaluationHash: options.evaluationHash, evaluatedAt: at, parentVersionId: null, evidenceBindings: [], evidenceHash: sha256Json([]) };
     await atomicWriteJson(confined(activeRoot, "plans", planId, "versions", `${versionId}.json`), { schemaVersion: "1.0.0", kind: "version", checksum: sha256Json(version), payload: version });
   }
 }

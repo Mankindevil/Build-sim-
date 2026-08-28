@@ -1,7 +1,13 @@
-import type { BuildConfig } from "./types";
-import type { SkuCatalog, SkuCategory } from "../sku/types";
+import type { BuildConfig, BuildConfigDocument } from "./types";
+import type { SkuCatalog, SkuCategory, SkuRecord } from "../sku/types";
+import type { ComponentKindId } from "../contracts/registries";
+import { validateBuildConfigV3 } from "../topology/validation";
 import { boardCapabilities, caseCapabilities, orderedFanMounts } from "../core/capabilities";
 import { needsHba } from "../core/policy";
+import {
+  V3_RESOLVED_CATALOG_KIND_MATCHERS,
+  validateResolvedV3CatalogBindingsRuntime,
+} from "./v3-catalog-runtime.mjs";
 
 export interface ConfigValidationIssue {
   path: string;
@@ -45,7 +51,11 @@ function isFiniteInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
 }
 
-export function validateConfig(config: BuildConfig, catalog: SkuCatalog): ConfigValidationIssue[] {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validateConfigV2(config: BuildConfig, catalog: SkuCatalog): ConfigValidationIssue[] {
   const issues: ConfigValidationIssue[] = [];
   if (config.schemaVersion !== "2.0.0") issues.push({ path: "schemaVersion", message: "必须使用配置 schema 2.0.0", verdict: "bad" });
   if (!config.id || !config.name) issues.push({ path: "id/name", message: "配置必须有 id 和 name", verdict: "bad" });
@@ -142,7 +152,33 @@ export function validateConfig(config: BuildConfig, catalog: SkuCatalog): Config
   return issues;
 }
 
-export function assertValidConfig(config: BuildConfig, catalog: SkuCatalog): void {
-  const issues = validateConfig(config, catalog).filter((issue) => issue.verdict === "bad");
+export interface ConfigValidationOptions {
+  topologyV3Enabled?: boolean;
+}
+
+/**
+ * Compile-time coverage guard for the shared JS runtime matcher. Adding a new
+ * governed component kind cannot silently leave save and production paths with
+ * different identity semantics.
+ */
+const v3CatalogKindCoverage: Readonly<Record<ComponentKindId, (sku: SkuRecord) => boolean>> = V3_RESOLVED_CATALOG_KIND_MATCHERS;
+void v3CatalogKindCoverage;
+
+export function validateConfig(config: BuildConfigDocument, catalog: SkuCatalog, options: ConfigValidationOptions = {}): ConfigValidationIssue[] {
+  if (config.schemaVersion === "2.0.0") return validateConfigV2(config, catalog);
+  if (options.topologyV3Enabled !== true) {
+    return [{ path: "schemaVersion", message: "BuildConfig V3 需要启用 BUILD_SIM_TOPOLOGY_V3_ENABLED", verdict: "bad" }];
+  }
+  const issues: ConfigValidationIssue[] = validateBuildConfigV3(config).map((message) => ({
+    path: "topology",
+    message,
+    verdict: "bad" as const,
+  }));
+  issues.push(...validateResolvedV3CatalogBindingsRuntime(config, catalog).map((issue) => ({ ...issue, verdict: "bad" as const })));
+  return issues;
+}
+
+export function assertValidConfig(config: BuildConfigDocument, catalog: SkuCatalog, options: ConfigValidationOptions = {}): void {
+  const issues = validateConfig(config, catalog, options).filter((issue) => issue.verdict === "bad");
   if (issues.length > 0) throw new Error(`Invalid BuildConfig: ${issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
 }

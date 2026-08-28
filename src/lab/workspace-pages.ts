@@ -1,4 +1,4 @@
-import { parseConfig, type BuildConfig } from "../config/types";
+import { parseConfig, type BuildConfig, type BuildConfigDocument } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
 import { caseCapabilities, orderedFanMounts } from "../core/capabilities";
 import type { PlanStore, PlanStoreState } from "../plans/client-store";
@@ -14,6 +14,7 @@ import type { BuildProgressController, BuildProgressItem, BuildProgressSummary }
 import { BUILD_STAGE_LABELS } from "./build-progress";
 import { mountEvidencePanel, type EvidencePanelServices } from "./evidence-panel";
 import { WorkspaceRouter, type WorkspaceRoute } from "./workspace-router";
+import type { BuildConfigV3 } from "../topology/contracts";
 import "./workspace-pages.css";
 
 function escapeHtml(value: string): string {
@@ -34,6 +35,18 @@ function componentCategoryLabel(category: string): string {
     case: "机箱", motherboard: "主板", cpu: "处理器", psu: "电源", cooler: "散热器",
     gpu: "显卡", memory: "内存", storage: "存储", hba: "硬盘扩展卡", fan: "风扇", accessory: "配件",
   } as Record<string, string>)[category] ?? category;
+}
+
+function isBuildConfigV3(config: unknown): config is BuildConfigV3 {
+  return Boolean(config && typeof config === "object" && (config as { schemaVersion?: unknown }).schemaVersion === "3.0.0");
+}
+
+function topologyKindLabel(kind: string): string {
+  return ({
+    case: "机箱", motherboard: "主板", cpu: "处理器", memory_module: "内存", gpu: "显卡", psu: "电源",
+    cpu_cooler: "CPU 散热器", aio: "一体式水冷", radiator: "冷排", pump: "水泵", case_fan: "机箱风扇",
+    storage_drive: "存储盘", hba: "HBA", raid_controller: "RAID 控制器", nic: "网卡", cable: "线材", adapter: "转接件",
+  } as Record<string, string>)[kind] ?? kind;
 }
 
 function evaluationSummary(evaluation: BuildEvaluation | null): { bad: number; warn: number; budget: number | null; unknown: number; priceComplete: boolean } {
@@ -96,7 +109,29 @@ function fanFieldsMarkup(config: BuildConfig): string {
   return `${field("风扇策略", "selection.fanMode", `<select data-config-field="selection.fanMode"><option value="quiet"${(config.selection.fanMode ?? "balanced") === "quiet" ? " selected" : ""}>安静 · 低转速</option><option value="balanced"${(config.selection.fanMode ?? "balanced") === "balanced" ? " selected" : ""}>均衡</option><option value="performance"${(config.selection.fanMode ?? "balanced") === "performance" ? " selected" : ""}>散热优先</option></select>`, "只改变风扇曲线包络；没有风扇 SKU 或实测时，整机噪音仍保持未知。")}${mountRows}`;
 }
 
-function editorMarkup(config: BuildConfig, planName: string, catalog: SkuCatalog): string {
+function v3PartialEditorMarkup(config: BuildConfigV3): string {
+  const resolved = config.components.filter((component) => component.identity.status === "resolved");
+  const unresolved = config.components.filter((component) => component.identity.status === "unresolved");
+  const requirements = config.requirementSpec;
+  const requirementSummary = requirements
+    ? `工作负载 ${requirements.workloads.length} 项 · 约束 ${requirements.constraints.length} 项${requirements.budget ? " · 已记录预算意向" : " · 预算待补"}`
+    : "尚未填写需求规格";
+  const componentRows = config.components.length
+    ? config.components.map((component) => {
+      const identity = component.identity.status === "resolved"
+        ? `已解析 SKU：${component.identity.skuId}`
+        : `待解析：${component.identity.userText}`;
+      return `<li data-v3-component="${escapeHtml(component.instanceId)}"><strong>${escapeHtml(topologyKindLabel(component.kind))}</strong><span>${escapeHtml(component.role)} · ${escapeHtml(identity)}</span></li>`;
+    }).join("")
+    : "<li>尚未添加任何组件实例。</li>";
+  return `<section class="workspace-editor-group" data-v3-partial-editor><header><span>V3</span><div><h3>部分拓扑方案</h3><p>这是按组件实例保存的 V3 方案，不会把未知内容套成旧版下拉选择。</p></div></header>
+    <div class="workspace-empty" data-v3-partial-status><strong>兼容性、价格、物理布局和接线仍待确认</strong><p>当前已解析 ${resolved.length} 个实例，另有 ${unresolved.length} 个实例尚未解析；这些数量不代表可购买的完整清单。</p><button type="button" data-route-action="agent">让 Agent 逐步补全方案</button></div>
+    <div class="workspace-field-grid"><article class="workspace-editor-field"><strong>需求</strong><p>${escapeHtml(requirementSummary)}</p></article><article class="workspace-editor-field"><strong>拓扑边</strong><p>放置 ${config.placements.length} 条 · 连接 ${config.connections.length} 条 · 逻辑布局 ${config.logicalLayouts.length} 个</p></article><article class="workspace-editor-field"><strong>明确不需要的角色</strong><p>${config.roleDecisions.length ? `${config.roleDecisions.length} 项已记录` : "尚未记录"}</p></article></div>
+    <section class="workspace-editor-group"><header><span>实例</span><div><h3>当前组件拓扑</h3><p>已解析实例可在下方“官方证据”中按实例选择；未解析项不会伪装成具体型号。</p></div></header><ul class="workspace-v3-component-list">${componentRows}</ul></section></section>`;
+}
+
+function editorMarkup(config: BuildConfigDocument, planName: string, catalog: SkuCatalog): string {
+  if (isBuildConfigV3(config)) return v3PartialEditorMarkup(config);
   return `
     <section class="workspace-editor-group" id="editor-platform"><header><span>01</span><div><h3>先确定基础平台</h3><p>机箱、主板和处理器决定了后面能选什么。</p></div></header>
       <div class="workspace-field-grid">
@@ -369,21 +404,23 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     <section id="workspace-page-spatial" data-workspace-page="spatial" hidden aria-labelledby="workspace-spatial-title">
       <header class="workspace-page-head"><div><p>第 4 步 · 空间预演</p><h1 id="workspace-spatial-title">装之前，先在 3D 里试一遍</h1><span>拖动旋转、滚轮缩放、点击部件查看；问题可直接返回对应配置修正。</span></div><button type="button" data-route-action="evaluation">查看安全检查</button></header>
       <div class="workspace-spatial-help"><span data-desktop-gesture><b>左键拖动</b> 旋转</span><span data-desktop-gesture><b>右键拖动</b> 平移</span><span data-desktop-gesture><b>滚轮</b> 缩放</span><span data-desktop-gesture><b>双击空白</b> 复位</span><span data-touch-gesture><b>单指上下滑</b> 滚动页面</span><span data-touch-gesture><b>双指</b> 操控 3D</span><span data-touch-gesture><b>点按部件</b> 查看详情</span></div>
-      <section data-spatial-content></section><details class="workspace-spatial-evidence"><summary>查看实物图与官方手册证据</summary><div data-spatial-evidence></div></details>
+      <section data-spatial-content></section><div class="workspace-empty" data-v3-spatial-partial hidden><strong>V3 部分拓扑尚不能生成空间预演</strong><p>不会复用上一版机箱、尺寸、热场、走线或官方产品图。补全物理布局与证据后再生成。</p></div><details class="workspace-spatial-evidence"><summary>查看实物图与官方手册证据</summary><div data-spatial-evidence></div></details>
     </section>
     <section id="workspace-page-purchases" data-workspace-page="purchases" hidden aria-labelledby="workspace-purchases-title">
       <header class="workspace-page-head"><div><p>第 5 步 · 放心采购</p><h1 id="workspace-purchases-title">只买已经确认需要的硬件</h1><span>先核对安全检查，再记录成交价和订单截图；识别结果由你确认后才会归档。</span></div><button type="button" data-route-action="evaluation">先检查能不能买</button></header>
       <div class="workspace-purchase-gate" data-purchase-gate aria-live="polite"></div>
       <section data-purchase-content></section>
+      <div class="workspace-empty" data-v3-purchase-content hidden><strong>V3 部分拓扑尚无采购清单</strong><p>不会复用上一版的 BOM、订单或总价；先补全实例身份与评估。</p></div>
       <details class="workspace-market-details"><summary>查看市场行情与配件价格</summary><div data-purchase-market></div></details>
     </section>
     <section id="workspace-page-build" data-workspace-page="build" hidden aria-labelledby="workspace-build-title">
       <header class="workspace-page-head"><div><p>第 6 步 · 开始装机</p><h1 id="workspace-build-title">按顺序做，少返工</h1><span>采购、安装、接线和开机检查共用同一套任务状态。</span></div><button type="button" data-export-saved-checklist>导出离线清单</button></header>
       <section data-build-parts></section>
+      <div class="workspace-empty" data-v3-build-parts hidden><strong>V3 部分拓扑尚无装机部件清单</strong><p>不会显示同一方案旧版本留下的部件进度或装机任务。</p></div>
       <div class="workspace-task-summary" data-task-summary aria-live="polite"></div>
       <nav class="workspace-subnav" aria-label="装机任务阶段"><button type="button" data-task-filter="all" aria-pressed="true">全部任务</button><button type="button" data-task-filter="purchase" aria-pressed="false">采购准备</button><button type="button" data-task-filter="assembly" aria-pressed="false">安装部件</button><button type="button" data-task-filter="wiring" aria-pressed="false">连接线材</button><button type="button" data-task-filter="verification" aria-pressed="false">开机检查</button></nav>
       <div class="workspace-task-board" data-task-board></div>
-      <details class="workspace-build-checklist"><summary>查看完整装机知识清单</summary><div data-build-checklist></div></details>
+      <div class="workspace-empty" data-v3-checklist-partial hidden><strong>V3 部分拓扑的离线清单已阻断</strong><p>当前没有 V3 安全拓扑导出，不能调用旧版评估器生成 V2 清单。</p></div><p data-v3-checklist-export-status hidden role="alert"></p><details class="workspace-build-checklist"><summary>查看完整装机知识清单</summary><div data-build-checklist></div></details>
     </section>
     <section id="workspace-page-agent" data-workspace-page="agent" hidden aria-labelledby="workspace-agent-page-title">
       <header class="workspace-page-head"><div><p>全程可用 · 装机助手</p><h1 id="workspace-agent-page-title">用自己的话问，不需要懂术语</h1><span>助手会读取当前方案和检查结果，但不会替你静默修改或购买。</span></div><button type="button" data-route-action="workspace">返回下一步</button></header>
@@ -419,7 +456,50 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   const currentTasks = () => taskState.planId === state.activePlan?.id ? taskState.tasks : [];
   const currentTaskSummary = () => summarizeBuildTasks(currentTasks());
 
+  /**
+   * The guided shell rehomes a few V2-only panels. Keep their DOM for a later
+   * V2 plan switch, but never let it remain visible beside a V3 partial state.
+   */
+  const setLegacyV2SurfacesVisible = (v3Partial: boolean) => {
+    const legacyChildren = [
+      "[data-evaluation-summary] > *",
+      '[data-evaluation-detail="thermal"] > *',
+      '[data-evaluation-detail="wiring"] > *',
+      '[data-evaluation-detail="gpu"] > *',
+      "[data-spatial-content] > .lab-case-card",
+      "[data-spatial-evidence] > .product-reference",
+      "[data-purchase-market] > *",
+      "[data-build-checklist] > *",
+    ];
+    for (const selector of legacyChildren) {
+      for (const element of host.querySelectorAll<HTMLElement>(selector)) element.hidden = v3Partial;
+    }
+    const evaluationTechnical = host.querySelector<HTMLDetailsElement>(".workspace-evaluation-technical")!;
+    const spatialEvidence = host.querySelector<HTMLDetailsElement>(".workspace-spatial-evidence")!;
+    const buildChecklist = host.querySelector<HTMLDetailsElement>(".workspace-build-checklist")!;
+    evaluationTechnical.hidden = v3Partial;
+    spatialEvidence.hidden = v3Partial;
+    buildChecklist.hidden = v3Partial;
+    if (v3Partial) {
+      evaluationTechnical.open = false;
+      spatialEvidence.open = false;
+      buildChecklist.open = false;
+    }
+    host.querySelector<HTMLElement>("[data-v3-spatial-partial]")!.hidden = !v3Partial;
+    host.querySelector<HTMLElement>("[data-v3-checklist-partial]")!.hidden = !v3Partial;
+    const exportStatus = host.querySelector<HTMLElement>("[data-v3-checklist-export-status]")!;
+    if (!v3Partial) {
+      exportStatus.hidden = true;
+      exportStatus.textContent = "";
+    }
+  };
+
   const renderProgress = () => {
+    if (isBuildConfigV3(state.activePlan?.draft.config)) {
+      host.querySelector<HTMLElement>("[data-workspace-progress-summary]")!.innerHTML = `<div class="workspace-empty" data-v3-partial-progress><p>V3 部分拓扑尚未生成采购状态、价格或部件进度。</p></div>`;
+      host.querySelector<HTMLElement>("[data-workspace-progress-items]")!.innerHTML = "";
+      return;
+    }
     const summary = progress?.summary() ?? null;
     const items = progress?.items() ?? [];
     host.querySelector<HTMLElement>("[data-workspace-progress-summary]")!.innerHTML = progressSummaryMarkup(summary);
@@ -427,6 +507,11 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   };
 
   const renderTasks = () => {
+    if (isBuildConfigV3(state.activePlan?.draft.config)) {
+      taskSummaryHost.innerHTML = `<div data-v3-partial-tasks><strong>待评估</strong><span>V3 部分拓扑不复用旧版本的装机任务。</span></div>`;
+      taskBoard.innerHTML = `<div class="workspace-empty"><p>补全组件身份、物理布局和接线评估后，才能生成当前方案的任务。</p></div>`;
+      return;
+    }
     const activeTasks = currentTasks();
     const summary = currentTaskSummary();
     taskSummaryHost.innerHTML = `<div><strong>${summary.done}<small> / ${Math.max(0, summary.total - summary.obsolete)}</small></strong><span>已完成</span></div><div><strong>${summary.doing}</strong><span>正在做</span></div><div><strong>${summary.blocked}</strong><span>遇到问题</span></div><div><strong>${summary.obsolete}</strong><span>方案变化后已过期</span></div>`;
@@ -435,6 +520,10 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   };
 
   const renderImpact = () => {
+    if (isBuildConfigV3(state.activePlan?.draft.config)) {
+      impact.innerHTML = `<article data-level="warn"><small>方案状态</small><strong>V3 部分拓扑</strong></article><article><small>兼容性</small><strong>尚未评估</strong></article><article><small>价格</small><strong>尚未估算</strong></article><article><small>物理与接线</small><strong>尚未评估</strong></article>`;
+      return;
+    }
     const current = evaluationSummary(state.evaluation);
     const before = evaluationSummary(baselineEvaluation);
     const badDelta = baselineEvaluation ? current.bad - before.bad : 0;
@@ -444,6 +533,12 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   };
 
   const renderPurchaseGate = () => {
+    if (isBuildConfigV3(state.activePlan?.draft.config)) {
+      const gate = host.querySelector<HTMLElement>("[data-purchase-gate]")!;
+      gate.dataset.level = "warn";
+      gate.innerHTML = `<div data-v3-partial-purchase><small>V3 部分拓扑</small><strong>暂不生成采购核准或整套价格结论</strong><p>已解析的组件身份仍需分别核对价格、兼容性、物理位置和接线；未解析实例不能购买。</p></div><button type="button" data-route-action="editor">查看拓扑并让 Agent 补全</button>`;
+      return;
+    }
     const summary = evaluationSummary(state.evaluation);
     const gate = host.querySelector<HTMLElement>("[data-purchase-gate]")!;
     if (state.evaluation?.readiness.status === "incomplete") {
@@ -462,33 +557,71 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   const render = (next: PlanStoreState) => {
     state = next;
     const active = state.activePlan;
+    const config = active?.draft.config as BuildConfigDocument | undefined;
+    const v3Partial = isBuildConfigV3(config);
     const evalSummary = evaluationSummary(state.evaluation);
     const incomplete = state.evaluation?.readiness.status === "incomplete";
     const findings = state.evaluation ? evaluationGuideItems(state.evaluation).slice(0, 3) : [];
     const taskSummary = currentTaskSummary();
-    const nextRoute: WorkspaceRoute = incomplete ? "editor" : evalSummary.bad ? "evaluation" : (progress?.summary().candidate ?? 1) > 0 ? "editor" : (progress?.summary().purchased ?? 0) + (progress?.summary().installed ?? 0) < (progress?.summary().total ?? 0) ? "purchases" : "build";
-    const nextTitle = incomplete ? "继续逐件加入硬件" : evalSummary.bad ? `先解决 ${evalSummary.bad} 个购买前阻断` : nextRoute === "editor" ? "继续确认还没定下的部件" : nextRoute === "purchases" ? "开始按已确认清单采购" : "继续完成装机任务";
-    const nextDescription = incomplete ? "空白方案不会预填部件；你已经做出的每个选择都会保留。" : evalSummary.bad ? "这些问题可能导致买错、装不下或无法接线。" : "系统会一直保留你已经完成的进度。";
-    const nextAction = incomplete ? "继续添加" : evalSummary.bad ? "查看并解决" : nextRoute === "editor" ? "继续编辑" : nextRoute === "purchases" ? "打开采购清单" : "继续装机";
+    const nextRoute: WorkspaceRoute = v3Partial ? "editor" : incomplete ? "editor" : evalSummary.bad ? "evaluation" : (progress?.summary().candidate ?? 1) > 0 ? "editor" : (progress?.summary().purchased ?? 0) + (progress?.summary().installed ?? 0) < (progress?.summary().total ?? 0) ? "purchases" : "build";
+    const nextTitle = v3Partial ? "继续完善 V3 组件拓扑" : incomplete ? "继续逐件加入硬件" : evalSummary.bad ? `先解决 ${evalSummary.bad} 个购买前阻断` : nextRoute === "editor" ? "继续确认还没定下的部件" : nextRoute === "purchases" ? "开始按已确认清单采购" : "继续完成装机任务";
+    const nextDescription = v3Partial ? "当前是部分拓扑，不会把未知兼容性或价格当作已经完成。" : incomplete ? "空白方案不会预填部件；你已经做出的每个选择都会保留。" : evalSummary.bad ? "这些问题可能导致买错、装不下或无法接线。" : "系统会一直保留你已经完成的进度。";
+    const nextAction = v3Partial ? "查看并补全" : incomplete ? "继续添加" : evalSummary.bad ? "查看并解决" : nextRoute === "editor" ? "继续编辑" : nextRoute === "purchases" ? "打开采购清单" : "继续装机";
     const intent = active?.metadata.initialization?.intent;
     const preferences = intent?.preferences ?? [];
     const goalCopy = active ? [intent?.useCase ?? active.metadata.useCase ?? "用途待补充", intent?.budgetCny ?? active.metadata.budgetCny ? `预算 ${formatCny(intent?.budgetCny ?? active.metadata.budgetCny)}` : "预算待补充", ...preferences.slice(0, 2)].map(escapeHtml).join(" · ") : "";
-    currentHost.innerHTML = active ? `<article class="workspace-next-card"><div class="workspace-next-copy"><p>建议下一步</p><h2>${escapeHtml(nextTitle)}</h2><span>${escapeHtml(nextDescription)}</span><button data-route-action="${nextRoute}">${escapeHtml(nextAction)} →</button></div><div class="workspace-plan-health"><div><small>当前方案</small><strong>${escapeHtml(active.name)}</strong><span>${active.activeVersionId ? "已有保存检查点" : "还没有保存检查点"}</span><p>${goalCopy}</p></div><dl><div><dt>必须解决</dt><dd data-level="${evalSummary.bad ? "bad" : "ok"}">${evalSummary.bad}</dd></div><div><dt>建议确认</dt><dd>${evalSummary.warn}</dd></div><div><dt>预算参考</dt><dd>${formatCny(active.metadata.budgetCny ?? evalSummary.budget)}</dd></div><div><dt>下一步任务</dt><dd>${taskSummary.next.length}</dd></div></dl></div><div class="workspace-next-details"><div><h3>最先关注</h3><ul>${findings.map((finding) => `<li data-level="${finding.verdict}"><span>${finding.verdict === "bad" ? "必须" : "提醒"}</span><p>${escapeHtml(finding.title)}</p>${state.evaluation ? guideActionMarkup(state.evaluation, finding) : ""}</li>`).join("") || "<li class=workspace-all-clear><p>目前没有阻断或警告，可以继续下一步。</p></li>"}</ul></div><div class="workspace-quick-actions"><button data-route-action="editor">继续编辑</button><button data-route-action="evaluation">查看完整检查</button><button data-route-action="spatial">打开 3D</button><button data-route-action="purchases">记录一笔购买</button><button data-route-action="agent">问问助手</button></div></div></article>` : `<article class="workspace-empty"><h2>从第一套方案开始</h2><p>告诉我们用途、预算和对噪音的要求，再一步步完成装机。</p><button data-open-create>新建装机方案</button></article>`;
+    const health = v3Partial && config
+      ? `<dl><div><dt>方案状态</dt><dd>部分拓扑</dd></div><div><dt>已解析实例</dt><dd>${config.components.filter((item) => item.identity.status === "resolved").length}</dd></div><div><dt>待解析实例</dt><dd>${config.components.filter((item) => item.identity.status === "unresolved").length}</dd></div><div><dt>兼容性与价格</dt><dd>待评估</dd></div></dl>`
+      : `<dl><div><dt>必须解决</dt><dd data-level="${evalSummary.bad ? "bad" : "ok"}">${evalSummary.bad}</dd></div><div><dt>建议确认</dt><dd>${evalSummary.warn}</dd></div><div><dt>预算参考</dt><dd>${formatCny(active?.metadata.budgetCny ?? evalSummary.budget)}</dd></div><div><dt>下一步任务</dt><dd>${taskSummary.next.length}</dd></div></dl>`;
+    const priority = v3Partial
+      ? "<li data-level=warn><span>待补全</span><p>V3 部分拓扑尚未得到兼容性、价格、物理布局或接线结论。</p></li>"
+      : findings.map((finding) => `<li data-level="${finding.verdict}"><span>${finding.verdict === "bad" ? "必须" : "提醒"}</span><p>${escapeHtml(finding.title)}</p>${state.evaluation ? guideActionMarkup(state.evaluation, finding) : ""}</li>`).join("") || "<li class=workspace-all-clear><p>目前没有阻断或警告，可以继续下一步。</p></li>";
+    currentHost.innerHTML = active ? `<article class="workspace-next-card"><div class="workspace-next-copy"><p>建议下一步</p><h2>${escapeHtml(nextTitle)}</h2><span>${escapeHtml(nextDescription)}</span><button data-route-action="${nextRoute}">${escapeHtml(nextAction)} →</button></div><div class="workspace-plan-health"><div><small>当前方案</small><strong>${escapeHtml(active.name)}</strong><span>${active.activeVersionId ? "已有保存检查点" : "还没有保存检查点"}</span><p>${goalCopy}</p></div>${health}</div><div class="workspace-next-details"><div><h3>最先关注</h3><ul>${priority}</ul></div><div class="workspace-quick-actions"><button data-route-action="editor">继续编辑</button><button data-route-action="evaluation">查看完整检查</button><button data-route-action="spatial">打开 3D</button><button data-route-action="purchases">记录一笔购买</button><button data-route-action="agent">问问助手</button></div></div></article>` : `<article class="workspace-empty"><h2>从第一套方案开始</h2><p>告诉我们用途、预算和对噪音的要求，再一步步完成装机。</p><button data-open-create>新建装机方案</button></article>`;
     grid.innerHTML = state.plans.filter((plan) => plan.name.toLowerCase().includes(search.toLowerCase())).map((plan) => `<article data-plan-card="${escapeHtml(plan.id)}"${plan.id === active?.id ? " data-active=true" : ""}><div><small>${plan.status === "archived" ? "已归档" : plan.id === active?.id ? "正在进行" : "其他方案"}</small><h3>${escapeHtml(plan.name)}</h3><p>${plan.activeVersionId ? "已有保存检查点" : "还没有保存检查点"}</p><span>${formatDate(plan.updatedAt)} · ${plan.dirty ? "有新修改" : "已保存"}</span></div><footer>${plan.status === "archived" ? `<button data-restore-plan="${escapeHtml(plan.id)}">恢复方案</button>` : `<button data-activate-plan="${escapeHtml(plan.id)}">打开方案</button>`}<button data-delete-plan="${escapeHtml(plan.id)}">移入回收区</button></footer></article>`).join("") || `<div class="workspace-empty"><p>没有匹配的方案。</p></div>`;
     if (active) {
       const signature = `${active.id}:${active.draftRevision}:${state.localRevision}`;
-      if (signature !== editorPlanSignature) { editorPlanSignature = signature; fields.innerHTML = editorMarkup(active.draft.config, active.name, getCatalog()); }
+      if (signature !== editorPlanSignature) { editorPlanSignature = signature; fields.innerHTML = editorMarkup(active.draft.config as BuildConfigDocument, active.name, getCatalog()); }
     } else fields.innerHTML = `<div class="workspace-empty">请选择或创建方案。</div>`;
     host.querySelector<HTMLButtonElement>("[data-undo]")!.disabled = !state.canUndo;
     host.querySelector<HTMLButtonElement>("[data-redo]")!.disabled = !state.canRedo;
     renderImpact();
-    host.querySelector<HTMLElement>("[data-evaluation-guidance]")!.innerHTML = evaluationGuideMarkup(state.evaluation);
+    host.querySelector<HTMLElement>("[data-evaluation-guidance]")!.innerHTML = v3Partial
+      ? `<article class="workspace-evaluation-decision" data-level="warn" data-v3-partial-evaluation><header><div><small>V3 部分拓扑</small><h2>尚不能给出购买或兼容性结论</h2><p>兼容性、功耗、温度、噪音、价格、物理布局与接线都仍待评估；请逐步补全实例与证据。</p></div><button type="button" data-route-action="editor">查看拓扑</button></header></article>`
+      : evaluationGuideMarkup(state.evaluation);
+    const purchaseContent = host.querySelector<HTMLElement>("[data-purchase-content]")!;
+    const v3PurchaseContent = host.querySelector<HTMLElement>("[data-v3-purchase-content]")!;
+    const marketDetails = host.querySelector<HTMLDetailsElement>(".workspace-market-details")!;
+    const buildParts = host.querySelector<HTMLElement>("[data-build-parts]")!;
+    const v3BuildParts = host.querySelector<HTMLElement>("[data-v3-build-parts]")!;
+    purchaseContent.hidden = v3Partial;
+    v3PurchaseContent.hidden = !v3Partial;
+    marketDetails.hidden = v3Partial;
+    buildParts.hidden = v3Partial;
+    v3BuildParts.hidden = !v3Partial;
+    setLegacyV2SurfacesVisible(v3Partial);
     renderTasks();
     renderProgress();
     renderPurchaseGate();
   };
 
   const setEvaluationView = (view: string) => {
+    const v3Partial = isBuildConfigV3(state.activePlan?.draft.config);
+    if (v3Partial) {
+      for (const button of host.querySelectorAll<HTMLButtonElement>("[data-evaluation-view]")) {
+        const summary = button.dataset.evaluationView === "summary";
+        button.hidden = !summary;
+        button.disabled = true;
+        button.setAttribute("aria-pressed", String(summary));
+      }
+      for (const detail of host.querySelectorAll<HTMLElement>("[data-evaluation-detail]")) detail.hidden = detail.dataset.evaluationDetail !== "summary";
+      host.querySelector<HTMLElement>("[data-evaluation-summary]")!.hidden = true;
+      host.querySelector<HTMLDetailsElement>(".workspace-evaluation-technical")!.hidden = true;
+      return;
+    }
+    for (const button of host.querySelectorAll<HTMLButtonElement>("[data-evaluation-view]")) {
+      button.hidden = false;
+      button.disabled = false;
+    }
     for (const button of host.querySelectorAll<HTMLButtonElement>("[data-evaluation-view]")) button.setAttribute("aria-pressed", String(button.dataset.evaluationView === view));
     host.querySelector<HTMLElement>("[data-evaluation-summary]")!.hidden = view !== "summary";
     for (const detail of host.querySelectorAll<HTMLElement>("[data-evaluation-detail]")) detail.hidden = detail.dataset.evaluationDetail !== view;
@@ -546,7 +679,15 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
       document.dispatchEvent(new CustomEvent("build-sim:finding-focus", { detail: { findingId: evidenceRef.slice("finding:".length) } }));
       router.navigate("spatial");
     }
-    if (target.closest("[data-export-saved-checklist]")) document.getElementById("cfg-export-checklist")?.click();
+    if (target.closest("[data-export-saved-checklist]")) {
+      if (isBuildConfigV3(state.activePlan?.draft.config)) {
+        const status = host.querySelector<HTMLElement>("[data-v3-checklist-export-status]")!;
+        status.hidden = false;
+        status.textContent = "V3 部分拓扑尚无安全清单导出；已阻止调用旧版 V2 评估器。";
+      } else {
+        document.getElementById("cfg-export-checklist")?.click();
+      }
+    }
     const findingId = target.closest<HTMLElement>("[data-finding-id]")?.dataset.findingId;
     const findingTarget = target.closest<HTMLElement>("[data-finding-field]")?.dataset.findingField;
     if (findingId) {
@@ -600,7 +741,11 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   const renderVersions = (versions: PlanVersion[]) => {
     host.querySelector<HTMLElement>("[data-version-list]")!.innerHTML = versions.length ? [...versions].reverse().map((version) => `<article><div><strong>版本 ${version.versionNumber}</strong><span>${formatDate(version.createdAt)}</span><p>${escapeHtml(version.summary ?? "没有填写说明")}</p><details><summary>技术标识</summary><small>${escapeHtml(version.configHash.slice(0, 16))}…</small></details></div><footer><button data-compare-version="${escapeHtml(version.id)}">与当前方案对比</button><button data-restore-version="${escapeHtml(version.id)}">恢复为新草稿</button></footer></article>`).join("") : `<div class="workspace-empty">还没有保存过版本。</div>`;
   };
-  const renderVersionDiff = (version: PlanVersion, current: BuildConfig) => {
+  const renderVersionDiff = (version: PlanVersion, current: BuildConfigDocument) => {
+    if (isBuildConfigV3(current) || isBuildConfigV3(version.config)) {
+      host.querySelector<HTMLElement>("[data-version-diff]")!.innerHTML = `<h3>版本 ${version.versionNumber} 与当前方案</h3><p data-v3-version-diff-partial>V3 拓扑不使用旧版 V2 字段差异或评估结论；请在拓扑编辑器中逐个 review 组件实例。</p>`;
+      return;
+    }
     const diffs = diffBuildConfigs(version.config as BuildConfig, current).filter((diff) => !["/updatedAt"].includes(diff.path));
     host.querySelector<HTMLElement>("[data-version-diff]")!.innerHTML = `<h3>版本 ${version.versionNumber} 与当前方案</h3>${diffs.length ? `<table><thead><tr><th>项目</th><th>之前</th><th>现在</th></tr></thead><tbody>${diffs.map((diff) => `<tr><td>${escapeHtml(diff.path)}</td><td>${escapeHtml(String(diff.before ?? "—"))}</td><td>${escapeHtml(String(diff.after ?? "—"))}</td></tr>`).join("")}</tbody></table>` : "<p>没有配置变化。</p>"}`;
   };

@@ -11,15 +11,18 @@ import { FilePlanAgentContextAuditStore, MemoryPlanAgentContextAuditStore, type 
 import { loadAuthoritativeCatalogAtRoot } from "./evaluation-service";
 import { loadMergedCatalogSync } from "../../scripts/price-server/catalog/repository.mjs";
 import { RuntimeCoordinator } from "../runtime/coordinator.mjs";
+import { topologyV3Enabled } from "../config/io";
 
 const HOST = "127.0.0.1";
 const DEFAULT_PORT = 5176;
 const MAX_BODY_BYTES = 1_000_000;
 
 export interface WorkspaceRepositoryEnvironment {
+  [key: string]: string | undefined;
   RUNTIME_ROOT?: string;
   PLAN_REPOSITORY_ROOT?: string;
   EVIDENCE_REPOSITORY_ROOT?: string;
+  BUILD_SIM_TOPOLOGY_V3_ENABLED?: string;
 }
 
 export function createWorkspaceRepositories(environment: WorkspaceRepositoryEnvironment = process.env): {
@@ -43,6 +46,7 @@ export function createWorkspaceRepositories(environment: WorkspaceRepositoryEnvi
   const evidenceRepository = useCoordinator ? new FileEvidenceRepository({ coordinator, runtimeRoot }) : new FileEvidenceRepository({ root: evidenceRoot });
   const repository = new FilePlanRepository({
     ...(useCoordinator ? { coordinator: coordinator!, runtimeRoot } : { root: planRoot }),
+    topologyV3Enabled: topologyV3Enabled(environment),
     getCatalog: () => loadMergedCatalogSync({ persistRoot: runtimeRoot, direct: true, generationAware: false }),
     ...(useCoordinator ? { getCatalogAtRoot: (activeRoot: string) => loadAuthoritativeCatalogAtRoot(activeRoot, { runtimeRoot }) } : {}),
     getEvidenceDocument: (documentId) => evidenceRepository.getDocument(documentId),

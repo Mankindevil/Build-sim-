@@ -1,9 +1,29 @@
-import type { BuildConfig, BuildLineItem, BuildSelection } from "./types";
-import { parseConfig, serializeConfig } from "./types";
+import type { BuildConfig, BuildConfigDocument, BuildLineItem, BuildSelection } from "./types";
+import { parseConfig, serializeConfig, TOPOLOGY_V3_FEATURE_FLAG } from "./types";
 import type { BuildEvaluation } from "../core/evaluate";
 import type { BuildTask } from "../plans/contracts";
 
 export { parseConfig, serializeConfig };
+
+export function topologyV3Enabled(environment: Record<string, string | undefined>): boolean {
+  const raw = environment[TOPOLOGY_V3_FEATURE_FLAG];
+  if (raw === undefined || raw === "") return false;
+  const value = raw.toLowerCase();
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  throw new Error(`${TOPOLOGY_V3_FEATURE_FLAG} must be true or false`);
+}
+
+/** Reads V3 only behind its explicit flag; flag-off deployments may supply the immutable V2 bytes. */
+export function readConfigDocument(raw: string, options: {
+  environment: Record<string, string | undefined>;
+  v2FallbackRaw?: string;
+}): BuildConfigDocument {
+  return parseConfig(raw, {
+    topologyV3Enabled: topologyV3Enabled(options.environment),
+    ...(options.v2FallbackRaw !== undefined ? { v2FallbackRaw: options.v2FallbackRaw } : {}),
+  });
+}
 
 export function createConfig(partial: {
   id: string;

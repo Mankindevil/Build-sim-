@@ -5,6 +5,11 @@ import { WorkspaceRouter } from "../src/lab/workspace-router";
 import { initializedStore, makePlan, mountWorkspaceDom } from "./helpers/workspace-ui";
 import { evaluateBuild } from "../src/core/evaluate";
 import { loadBundledCatalog } from "../src/sku/catalog";
+import type { BuildConfigDocument } from "../src/config/types";
+import type { BuildPlan } from "../src/plans/contracts";
+import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
+import type { BuildTaskStore } from "../src/plans/build-task-store";
+import type { BuildProgressController } from "../src/lab/build-progress";
 
 describe("R3 workspace dashboard", () => {
   it("renders active, alternate and archived plans with explicit next actions", async () => {
@@ -72,6 +77,81 @@ describe("R3 workspace dashboard", () => {
 
     const pricePending = [...root.querySelectorAll("dt")].find((item) => item.textContent === "价格待补")?.nextElementSibling;
     expect(pricePending?.textContent).toBe(`${evaluation.price.unknownSkuIds.length + evaluation.price.unresolvedRequirements.length} 项`);
+    pages.dispose(); store.dispose();
+  });
+
+  it("renders requirements-only and resolved-instance V3 drafts safely after authoritative re-renders", async () => {
+    const root = mountWorkspaceDom();
+    const { store } = await initializedStore();
+    const router = new WorkspaceRouter();
+    root.insertAdjacentHTML("beforeend", `<section class="lab-kpis">旧 V2 兼容性结论</section><section class="verdict-card">旧 V2 verdict</section><section data-panel="thermal" class="is-hidden">旧 V2 thermal</section><section data-panel="wiring" class="is-hidden">旧 V2 wiring</section><section data-panel="gpu" class="is-hidden">旧 V2 gpu</section><section class="lab-case-card">旧 V2 scene</section><section class="product-reference">旧 V2 product evidence</section><section data-panel="price" class="is-hidden">旧 V2 price</section><section data-panel="checklist" class="is-hidden">旧 V2 checklist</section>`);
+    const legacyExport = document.createElement("button");
+    legacyExport.id = "cfg-export-checklist";
+    root.append(legacyExport);
+    const legacyExportClick = vi.spyOn(legacyExport, "click");
+    const staleTaskState = { planId: "plan-12345678", sourceVersionId: "version-v2", tasks: [{ schemaVersion: "1.0.0", id: "task-v2", planId: "plan-12345678", sourceVersionId: "version-v2", kind: "purchase", sourceRef: "sku:v2", title: "旧 V2 采购任务", status: "todo" }] };
+    const staleTaskStore = {
+      getState: () => structuredClone(staleTaskState),
+      subscribe: (listener: (state: typeof staleTaskState) => void) => { listener(structuredClone(staleTaskState)); return () => undefined; },
+    } as unknown as BuildTaskStore;
+    const staleProgress = {
+      summary: () => ({ total: 1, candidate: 0, locked: 0, purchased: 1, installed: 0, knownSpentCny: 999, unknownPurchasedPrice: 0 }),
+      items: () => [{ id: "v2-item", skuId: "psu.seasonic-focus-gx-850-v5", name: "旧 V2 总价 ¥999", category: "psu", qty: 1, unitPriceCny: 999, stage: "purchased", source: "catalog" as const }],
+      subscribe: () => () => undefined,
+    } as unknown as BuildProgressController;
+    store.setEvaluation(evaluateBuild(store.getState().activePlan!.draft.config, loadBundledCatalog()));
+    const pages = mountWorkspacePages(root, store, router, staleTaskStore, staleProgress);
+    root.querySelector<HTMLElement>("[data-purchase-content]")!.innerHTML = "<p>旧 V2 采购总价 ¥999</p>";
+    root.querySelector<HTMLElement>("[data-build-parts]")!.innerHTML = "<p>旧 V2 BOM</p>";
+    const requirementsOnly = createEmptyBuildConfigV3("plan-12345678", "V3 需求方案", "2026-08-27T13:00:00.000Z");
+    requirementsOnly.requirementSpec = { requirementSpecId: "requirements", schemaVersion: "1.0.0", workloads: [], constraints: [] };
+    const oneResolvedInstance = createEmptyBuildConfigV3("plan-12345678", "V3 部分方案", "2026-08-27T13:01:00.000Z");
+    oneResolvedInstance.components = [
+      {
+        instanceId: "psu-aaaaaaaaaaaaaaaaaaaaaaaa",
+        kind: "psu",
+        role: "primary",
+        state: "planned",
+        identity: { status: "resolved", skuId: "psu.seasonic-focus-gx-850-v5", identityClaimIds: ["claim-psu-aaaaaaaaaaaaaaaaaaaaaaaa"] },
+        source: "agent",
+      },
+    ];
+    for (const v3 of [requirementsOnly, oneResolvedInstance]) {
+      const accepted = structuredClone(store.getState().activePlan!) as BuildPlan<BuildConfigDocument>;
+      accepted.name = v3.name;
+      accepted.draft.config = v3;
+      accepted.draftRevision += 1;
+      expect(() => store.acceptServerPlan(accepted)).not.toThrow();
+      expect(() => pages.refreshCatalog()).not.toThrow();
+      for (const route of ["workspace", "editor", "evaluation", "spatial", "purchases", "build", "agent"] as const) {
+        expect(() => router.navigate(route)).not.toThrow();
+      }
+    }
+    expect(root.textContent).toContain("V3 部分拓扑");
+    expect(root.textContent).toContain("暂不生成采购核准或整套价格结论");
+    expect(root.querySelector("[data-v3-evidence-partial]")?.textContent).toContain("已解析身份的组件实例");
+    expect(root.querySelector<HTMLSelectElement>("[data-evidence-sku]")?.value).toBe("psu-aaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(root.querySelector("[data-v3-partial-editor]")).not.toBeNull();
+    expect(root.querySelector("[data-v3-partial-evaluation]")).not.toBeNull();
+    expect(root.querySelector<HTMLElement>("[data-evaluation-summary] .lab-kpis")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>('[data-evaluation-detail="thermal"] > [data-panel="thermal"]')?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>('[data-evaluation-detail="wiring"] > [data-panel="wiring"]')?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>('[data-evaluation-detail="gpu"] > [data-panel="gpu"]')?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>("[data-spatial-content] .lab-case-card")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>("[data-spatial-evidence] .product-reference")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>("[data-purchase-market] > [data-panel=price]")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>("[data-build-checklist] > [data-panel=checklist]")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLDetailsElement>(".workspace-evaluation-technical")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>("[data-purchase-content]")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>("[data-build-parts]")?.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>("[data-v3-build-parts]")).not.toBeNull();
+    expect(root.querySelector<HTMLElement>("[data-v3-partial-progress]")).not.toBeNull();
+    expect(root.querySelector<HTMLElement>("[data-v3-partial-tasks]")).not.toBeNull();
+    root.querySelector<HTMLButtonElement>("[data-export-saved-checklist]")!.click();
+    expect(legacyExportClick).not.toHaveBeenCalled();
+    expect(root.querySelector<HTMLElement>("[data-v3-checklist-export-status]")?.textContent).toContain("已阻止调用旧版 V2 评估器");
+    root.querySelector<HTMLButtonElement>('[data-evaluation-view="summary"]')!.click();
+    expect(root.querySelector<HTMLElement>('[data-evaluation-detail="thermal"]')?.hidden).toBe(true);
     pages.dispose(); store.dispose();
   });
 

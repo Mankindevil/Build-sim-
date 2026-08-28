@@ -1,9 +1,13 @@
 import { AGENT_CONTRACT_VERSION, type AgentToolContext, type AgentToolResult, type AgentToolSpec, type JsonSchema } from "../agent/contracts";
-import type { BuildConfig, BuildSelection } from "../config/types";
+import type { BuildConfig, BuildConfigDocument, BuildSelection, ConfigV2 } from "../config/types";
 import type { BuildEvaluation } from "../core/evaluate";
 import { evaluateBuildAuthoritatively, loadAuthoritativeCatalog, loadAuthoritativePriceSnapshot } from "./evaluation-service";
-import { PLAN_PATCH_PATHS, type BuildIntent, type PlanPatchOperation } from "../plans/contracts";
-import { previewPlanProposal } from "../plans/proposals";
+import { PLAN_PATCH_PATHS, type PlanPatchOperation } from "../plans/contracts";
+import { previewPlanProposal, previewPlanV3ProposalFromV2 } from "../plans/proposals";
+import { TOPOLOGY_V3_PATCH_COLLECTION_REGISTRY, type TopologyV3PatchOperation } from "../contracts/registries";
+import type { BuildConfigV3 } from "../topology/contracts";
+import { configV3Hash, spatialTopologyHash } from "../topology/hash";
+import { projectGeometrySubjects, projectSpatialTopology, projectTopologyBom } from "../topology/projections";
 
 const DEFAULT_PRICE_SERVICE = "http://127.0.0.1:5174";
 const SECTION_NAMES = ["config", "findings", "bom", "geometry", "occupancy", "wiring", "routing", "assembly", "power", "price", "noise", "physical", "calibration", "thermal"] as const;
@@ -13,9 +17,35 @@ function schema(properties: Record<string, unknown>, required: string[] = []): J
   return { type: "object", properties, ...(required.length ? { required } : {}), additionalProperties: false };
 }
 
-function requireConfig(context: AgentToolContext): BuildConfig {
+function requireConfig(context: AgentToolContext): BuildConfigDocument {
   if (!context.buildConfig) throw new Error("Active Agent session has no validated BuildConfig");
   return context.buildConfig;
+}
+
+async function v3EvaluationProjection(config: BuildConfigV3, sections: Section[]) {
+  const configHash = await configV3Hash(config);
+  const spatialHash = await spatialTopologyHash(config);
+  const unknown = (domain: string) => ({
+    status: "unknown",
+    reason: `${domain} evaluation is intentionally unavailable until governed facts, adapters and the universal evaluator are bound; no legacy product-specific defaults were applied.`,
+  });
+  const projections: Record<Section, unknown> = {
+    config,
+    findings: [{ id: "topology-v3.partial-evaluation", verdict: "warn", title: "通用评估尚未绑定", detail: "当前仅返回持久拓扑投影；兼容、供电、空间、散热和采购结论保持 unknown。" }],
+    bom: projectTopologyBom(config),
+    geometry: { status: "partial", subjects: projectGeometrySubjects(config), spatialTopology: projectSpatialTopology(config), spatialHash },
+    occupancy: unknown("occupancy"), wiring: unknown("wiring"), routing: unknown("routing"), assembly: unknown("assembly"),
+    power: unknown("power"), price: unknown("price"), noise: unknown("noise"), physical: unknown("physical"),
+    calibration: unknown("calibration"), thermal: unknown("thermal"),
+  };
+  return {
+    schemaVersion: "agent-topology-v3-projection-v1",
+    configHash,
+    spatialHash,
+    verdict: "partial",
+    sections: Object.fromEntries(sections.map((name) => [name, projections[name]])),
+    unknownDomains: ["identity", "mechanical", "electrical", "firmware", "system", "routing", "thermal", "acoustic", "procurement"],
+  };
 }
 
 function verdict(evaluation: BuildEvaluation): "ok" | "warn" | "bad" {
@@ -87,8 +117,16 @@ const getBuildEvaluation: AgentToolSpec = {
   maxResultBytes: 160_000,
   inputSchema: schema({ sections: { type: "array", items: { type: "string", enum: SECTION_NAMES }, maxItems: SECTION_NAMES.length, uniqueItems: true } }),
   async execute(input, context) {
+    const config = requireConfig(context);
+    if (config.schemaVersion === "3.0.0") {
+      return {
+        ok: true,
+        content: await v3EvaluationProjection(config, selectedSections(input)),
+        provenance: ["BuildConfigV3", "topology-projection", "no-legacy-defaults"],
+      };
+    }
     const catalog = loadAuthoritativeCatalog();
-    const result = evaluateBuildAuthoritatively(requireConfig(context), catalog);
+    const result = evaluateBuildAuthoritatively(config, catalog);
     return {
       ok: true,
       content: {
@@ -198,7 +236,15 @@ const compareBuilds: AgentToolSpec = {
   maxResultBytes: 100_000,
   inputSchema: schema({ selectionPatch: { type: "object", properties: selectionProperties, additionalProperties: false } }, ["selectionPatch"]),
   async execute(input, context) {
-    const baselineConfig = requireConfig(context);
+    const activeConfig = requireConfig(context);
+    if (activeConfig.schemaVersion === "3.0.0") return {
+      ok: false,
+      content: { schemaVersion: activeConfig.schemaVersion, supportedWorkflow: "scenario-or-stable-selector-proposal" },
+      errorCode: "topology_v3_compare_requires_scenario",
+      message: "BuildConfig V3 comparisons require an immutable Scenario branch; a legacy selection patch was not applied.",
+      provenance: ["BuildConfigV3", "no-legacy-selection-adapter"],
+    };
+    const baselineConfig = activeConfig;
     const patch = (input as { selectionPatch: Partial<BuildSelection> }).selectionPatch;
     const candidateConfig: BuildConfig = { ...baselineConfig, selection: { ...baselineConfig.selection, ...patch } };
     const catalog = loadAuthoritativeCatalog();
@@ -227,7 +273,7 @@ const proposePlanChange: AgentToolSpec = {
   contractVersion: AGENT_CONTRACT_VERSION,
   name: "propose_plan_change",
   title: "生成方案修改提案",
-  description: "Create a structured, non-mutating plan change proposal against the exact plan id, draft revision, and config hash supplied in PlanAgentContext. The server validates allowlisted paths, SKU/type constraints, and recomputes deterministic before/after BuildEvaluation. This tool never applies the proposal; only a separate explicit human approval can modify the draft.",
+  description: "Create a structured, non-mutating incremental proposal against the exact plan id, draft revision, and config hash supplied in PlanAgentContext. V3 proposals use governed stable selectors and preserve unknown or unmentioned topology; legacy V2 proposals use allowlisted paths and deterministic evaluation. This tool never applies the proposal or asserts user authority; only a separate explicit human approval can modify the draft.",
   effect: "read",
   approval: "never",
   timeoutMs: 8_000,
@@ -240,134 +286,56 @@ const proposePlanChange: AgentToolSpec = {
     rationale: { type: "array", items: { type: "string", maxLength: 500 }, minItems: 1, maxItems: 12 },
     operations: {
       type: "array", minItems: 1, maxItems: 24,
-      items: { type: "object", properties: { op: { type: "string", enum: ["add", "replace", "remove"] }, path: { type: "string", enum: PLAN_PATCH_PATHS }, value: {} }, required: ["op", "path"], additionalProperties: false },
+      items: {
+        oneOf: [
+          { type: "object", properties: { op: { type: "string", enum: ["add", "replace", "remove"] }, path: { type: "string", enum: PLAN_PATCH_PATHS }, value: {} }, required: ["op", "path"], additionalProperties: false },
+          {
+            type: "object",
+            properties: {
+              op: { type: "string", enum: ["add", "replace", "remove"] },
+              selector: {
+                type: "object",
+                properties: {
+                  collection: { type: "string", enum: Object.keys(TOPOLOGY_V3_PATCH_COLLECTION_REGISTRY) },
+                  id: { type: "string", minLength: 1, maxLength: 180 },
+                  parentId: { type: "string", minLength: 1, maxLength: 180 },
+                  field: { type: "string", minLength: 1, maxLength: 80 },
+                },
+                required: ["collection"],
+                additionalProperties: false,
+              },
+              value: {},
+            },
+            required: ["op", "selector"],
+            additionalProperties: false,
+          },
+        ],
+      },
     },
   }, ["planId", "expectedDraftRevision", "expectedConfigHash", "summary", "rationale", "operations"]),
   async execute(input, context) {
-    const value = input as { planId: string; expectedDraftRevision: number; expectedConfigHash: string; summary: string; rationale: string[]; operations: PlanPatchOperation[] };
-    const preview = await previewPlanProposal(requireConfig(context), value);
+    const value = input as { planId: string; expectedDraftRevision: number; expectedConfigHash: string; summary: string; rationale: string[]; operations: Array<PlanPatchOperation | TopologyV3PatchOperation> };
+    const config = requireConfig(context);
+    const topologyOperations = value.operations.every((operation) => "selector" in operation);
+    const legacyOperations = value.operations.every((operation) => "path" in operation);
+    if (!topologyOperations && !legacyOperations) throw new Error("Proposal operations cannot mix legacy paths and V3 stable selectors");
+    const preview = topologyOperations
+      ? config.schemaVersion === "3.0.0"
+        ? await previewPlanProposal(config, { ...value, operations: value.operations as TopologyV3PatchOperation[] })
+        : await previewPlanV3ProposalFromV2(
+            config as ConfigV2,
+            { ...value, operations: value.operations as TopologyV3PatchOperation[] },
+            loadAuthoritativeCatalog(),
+          )
+      : config.schemaVersion === "2.0.0"
+        ? await previewPlanProposal(config, { ...value, operations: value.operations as PlanPatchOperation[] })
+        : (() => { throw new Error("BuildConfig V3 proposals require stable selectors; legacy paths were not applied"); })();
     return {
       ok: true,
       content: { proposal: preview.proposal, confirmation: { required: true, effect: "update-active-draft", automaticApply: false } },
-      provenance: ["PlanAgentContext.configHash", "BuildEvaluation:before", "BuildEvaluation:after", "PLAN_PATCH_PATHS"],
-    };
-  },
-};
-
-const REQUIRED_INITIAL_SELECTION = ["psuId", "psuTopology", "coolerId", "gpuId", "memoryId", "diskCount", "boot", "hbaMode"] as const;
-
-function initializationOperations(baseline: BuildConfig, candidate: BuildConfig): PlanPatchOperation[] {
-  const operations: PlanPatchOperation[] = [
-    { op: "replace", path: "/name", value: candidate.name },
-    { op: "replace", path: "/caseId", value: candidate.caseId },
-    { op: "replace", path: "/boardId", value: candidate.boardId },
-    { op: "replace", path: "/cpuId", value: candidate.cpuId },
-  ];
-  for (const key of Object.keys(selectionProperties) as Array<keyof BuildSelection>) {
-    const path = `/selection/${key}` as Extract<PlanPatchOperation, { path: unknown }>["path"];
-    if (Object.hasOwn(candidate.selection, key) && candidate.selection[key] !== undefined) operations.push({ op: "replace", path, value: candidate.selection[key] });
-    else if (Object.hasOwn(baseline.selection, key)) operations.push({ op: "remove", path });
-  }
-  operations.push({ op: "replace", path: "/bom", value: candidate.bom });
-  if (candidate.notes?.length) operations.push({ op: "replace", path: "/notes", value: candidate.notes });
-  else if (baseline.notes) operations.push({ op: "remove", path: "/notes" });
-  return operations;
-}
-
-const proposePlanInitialization: AgentToolSpec = {
-  contractVersion: AGENT_CONTRACT_VERSION,
-  name: "propose_plan_initialization",
-  title: "生成完整方案初始化提案",
-  description: "Create one atomic, non-mutating initialization proposal for a pending Agent plan. Every selected part must use an exact governed local catalog SKU id. The server validates the complete configuration and recomputes BuildEvaluation; only explicit human approval can replace the scaffold draft.",
-  effect: "read",
-  approval: "never",
-  timeoutMs: 8_000,
-  maxResultBytes: 160_000,
-  inputSchema: schema({
-    planId: { type: "string", minLength: 1, maxLength: 180 },
-    expectedDraftRevision: { type: "integer", minimum: 0 },
-    expectedConfigHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
-    summary: { type: "string", minLength: 1, maxLength: 500 },
-    rationale: { type: "array", items: { type: "string", minLength: 1, maxLength: 500 }, minItems: 1, maxItems: 12 },
-    intent: {
-      type: "object",
-      properties: {
-        useCase: { type: "string", minLength: 1, maxLength: 240 },
-        budgetCny: { type: "number", minimum: 0 },
-        region: { type: "string", maxLength: 80 },
-        targetResolution: { type: "string", enum: ["1080p", "1440p", "4k", "other"] },
-        targetFps: { type: "integer", minimum: 1, maximum: 1000 },
-        games: { type: "array", items: { type: "string", maxLength: 120 }, maxItems: 20 },
-        ownedSkuIds: { type: "array", items: { type: "string", maxLength: 120 }, maxItems: 30, uniqueItems: true },
-        preferences: { type: "array", items: { type: "string", maxLength: 200 }, maxItems: 20 },
-      },
-      required: ["useCase"],
-      additionalProperties: false,
-    },
-    configuration: {
-      type: "object",
-      properties: {
-        name: { type: "string", minLength: 1, maxLength: 120 },
-        caseId: { type: "string", minLength: 1, maxLength: 120 },
-        boardId: { type: "string", minLength: 1, maxLength: 120 },
-        cpuId: { type: "string", minLength: 1, maxLength: 120 },
-        selection: { type: "object", properties: selectionProperties, required: REQUIRED_INITIAL_SELECTION, additionalProperties: false },
-        bom: {
-          type: "array",
-          maxItems: 80,
-          items: {
-            type: "object",
-            properties: {
-              skuId: { type: "string", minLength: 1, maxLength: 120 },
-              qty: { type: "integer", minimum: 1, maximum: 100 },
-              bucket: { type: "string", enum: ["owned", "buy_now", "upgrade_later", "optional"] },
-            },
-            required: ["skuId", "qty", "bucket"],
-            additionalProperties: false,
-          },
-        },
-        notes: { type: "array", items: { type: "string", maxLength: 500 }, maxItems: 30 },
-      },
-      required: ["name", "caseId", "boardId", "cpuId", "selection", "bom"],
-      additionalProperties: false,
-    },
-  }, ["planId", "expectedDraftRevision", "expectedConfigHash", "summary", "rationale", "intent", "configuration"]),
-  async execute(input, context) {
-    const baseline = requireConfig(context);
-    const value = input as {
-      planId: string;
-      expectedDraftRevision: number;
-      expectedConfigHash: string;
-      summary: string;
-      rationale: string[];
-      intent: BuildIntent;
-      configuration: Pick<BuildConfig, "name" | "caseId" | "boardId" | "cpuId" | "selection" | "bom" | "notes">;
-    };
-    const candidate: BuildConfig = {
-      ...baseline,
-      name: value.configuration.name,
-      caseId: value.configuration.caseId,
-      boardId: value.configuration.boardId,
-      cpuId: value.configuration.cpuId,
-      selection: structuredClone(value.configuration.selection),
-      bom: structuredClone(value.configuration.bom),
-    };
-    if (value.configuration.notes?.length) candidate.notes = [...value.configuration.notes];
-    else delete candidate.notes;
-    const preview = await previewPlanProposal(baseline, {
-      planId: value.planId,
-      expectedDraftRevision: value.expectedDraftRevision,
-      expectedConfigHash: value.expectedConfigHash,
-      summary: value.summary,
-      rationale: value.rationale,
-      operations: initializationOperations(baseline, candidate),
-      kind: "initialization",
-      intent: value.intent,
-    });
-    return {
-      ok: true,
-      content: { proposal: preview.proposal, confirmation: { required: true, effect: "initialize-active-draft", atomic: true, automaticApply: false } },
-      provenance: ["PlanAgentContext.configHash", "catalog:base+runtime", "BuildEvaluation:initialization-candidate"],
+      provenance: topologyOperations
+        ? ["PlanAgentContext.configHash", "BuildConfigV3", "stable-selector-governance", "human-approval-required"]
+        : ["PlanAgentContext.configHash", "BuildEvaluation:before", "BuildEvaluation:after", "PLAN_PATCH_PATHS"],
     };
   },
 };
@@ -621,5 +589,7 @@ function createSearchPriceCandidates(priceServiceUrl: string): AgentToolSpec {
 
 export function createBuildSimTools(options: { priceServiceUrl?: string } = {}): AgentToolSpec[] {
   const priceServiceUrl = options.priceServiceUrl ?? DEFAULT_PRICE_SERVICE;
-  return [getBuildEvaluation, searchCatalogSkus, compareBuilds, proposePlanChange, proposePlanInitialization, getSkuFacts, getPriceSnapshot, createSearchOfficialCatalog(priceServiceUrl), createGetCatalogSearchJob(priceServiceUrl), createInspectCatalogCandidate(priceServiceUrl), createListOfficialDomainProposals(priceServiceUrl), createDiscoverOfficialDocuments(priceServiceUrl), createGetEvidenceDocument(priceServiceUrl), createGetEvidenceExcerpt(priceServiceUrl), createProposeCatalogReview(priceServiceUrl), createEnrichOfficialCatalog(priceServiceUrl), createSearchPriceCandidates(priceServiceUrl)];
+  // The former full-plan initializer is intentionally not registered. Ordinary
+  // and Agent-assisted blanks now share one incremental proposal workflow.
+  return [getBuildEvaluation, searchCatalogSkus, compareBuilds, proposePlanChange, getSkuFacts, getPriceSnapshot, createSearchOfficialCatalog(priceServiceUrl), createGetCatalogSearchJob(priceServiceUrl), createInspectCatalogCandidate(priceServiceUrl), createListOfficialDomainProposals(priceServiceUrl), createDiscoverOfficialDocuments(priceServiceUrl), createGetEvidenceDocument(priceServiceUrl), createGetEvidenceExcerpt(priceServiceUrl), createProposeCatalogReview(priceServiceUrl), createEnrichOfficialCatalog(priceServiceUrl), createSearchPriceCandidates(priceServiceUrl)];
 }

@@ -1,4 +1,4 @@
-import type { BuildEvaluation } from "../core/evaluate";
+import type { PlanEvaluation } from "../plans/contracts";
 
 export const AGENT_EVALUATION_SCHEMA_VERSION = "1.0.0" as const;
 
@@ -19,10 +19,10 @@ export function stableAgentJson(value: unknown): string {
 }
 
 /**
- * The Agent receives the same complete evaluation object used by the UI. This
- * function is deliberately boring: projections belong to individual Tools,
- * while the authoritative hash must cover every deterministic consumer field.
+ * The Agent receives the same V2 evaluation or explicit V3 partial-evaluation
+ * object used by the plan context. Projections belong to individual Tools;
+ * the authoritative hash covers every deterministic field in this payload.
  */
-export function authoritativeEvaluationPayload(evaluation: BuildEvaluation): unknown {
+export function authoritativeEvaluationPayload(evaluation: PlanEvaluation): unknown {
   return canonicalAgentValue(evaluation);
 }

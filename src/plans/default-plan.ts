@@ -58,15 +58,7 @@ export function createEmptyBuildConfig(planId: string, timestamp: string): Build
   };
 }
 
-/** A pending Agent plan uses the same honest empty draft; metadata gates atomic initialization. */
+/** Agent and ordinary blank plans share the same honest, incrementally editable draft. */
 export function createAgentInitializationScaffold(planId: string, timestamp: string): { config: BuildConfig; metadata: BuildPlanMetadata } {
-  const config = createEmptyBuildConfig(planId, timestamp);
-  config.name = "待 Agent 初始化方案";
-  return {
-    config,
-    metadata: {
-      tags: ["agent-initialization"],
-      initialization: { status: "pending", source: "agent" },
-    },
-  };
+  return { config: createEmptyBuildConfig(planId, timestamp), metadata: {} };
 }

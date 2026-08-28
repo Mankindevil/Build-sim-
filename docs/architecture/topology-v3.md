@@ -1,8 +1,38 @@
 # Topology V3 contract
 
-This document freezes the canonical plan shape from §4.1 of the authoritative
-universal hardware plan. It is a future implementation contract, not a claim
-that V3 is currently accepted by the runtime.
+This document records the U2 implementation boundary for the canonical plan
+shape in §4.1 of the authoritative universal hardware plan. The schema below
+is now accepted by the V3-enabled plan/config paths; the remaining platform
+evaluator is intentionally outside this document. U2 status checkboxes and
+release evidence remain in the follow plan.
+
+## Implemented U2 boundary
+
+- `validateBuildConfigV3` is a total, strict input validator. It rejects
+  unknown/derived fields, malformed Unicode, unregistered component kinds,
+  invalid states, duplicate identities, dangling placement/connection/layout
+  references, occupied mounts, reused disks/cables, invalid vdev minima and
+  unregistered firmware settings. It does not infer defaults, resolve catalog
+  facts, normalize the caller's object, or mutate it.
+- `normalizeBuildConfigV3` validates before and after canonicalization. It
+  applies NFC text and `-0` normalization and sorts governed collections (and
+  delegates RequirementSpec ordering to `normalizeRequirementSpec`) while
+  retaining stable IDs and human note order. The returned value is a clone;
+  the input object is not modified.
+- `configV3Hash` hashes the normalized persisted input in the registered
+  `build-config@3.0.0` domain. `hashPlanConfig` preserves the legacy unscoped
+  V2 hash and selects this domain hash for V3. `spatialTopologyHash` hashes a
+  separate `spatial-topology@1.0.0` projection containing physical component
+  identity, placements and connection endpoints, so purchase state, source,
+  claim IDs, requirements, notes, firmware targets and connection status do
+  not perturb the spatial hash. These are the U2 domain hashes; they are not a
+  claim that the full compatibility/thermal/procedure evaluator exists.
+- `projectTopologyBom` is a lossless one-line-per-component projection with
+  `quantity: 1`. It preserves instance, role, state and unresolved user text;
+  consumers may aggregate only for display. Role decisions are not BOM rows,
+  and the projection does not inject a case-profile default or SKU.
+
+The implementation is split across `src/topology/{contracts,validation,normalize,hash,projections}.ts`.
 
 ## Canonical object
 
@@ -117,6 +147,31 @@ migrates to `ordered`; `buy_now`, `upgrade_later`, and `optional` migrate to
 `planned` with priority expressed in recommendation/task data. Migration must
 be dry-run-able, produce a manifest, preserve rollback data, and never infer a
 missing identity or add N6 defaults.
+
+The V2-to-V3 path is lazy/explicit: the first V3 edit uses
+`migrateDraftToV3`, retains an immutable V2 `migration-source` version and
+records a source-byte hash, deterministic diff/warnings, rollback reference,
+and a content-addressed projection of the exact governed catalog input used by
+the migration rule. The projection is deliberately narrow: it proves only the
+resolved identity emitted by that migration and cannot authorize later edits
+or unrelated SKUs. The migration closure is rechecked on reads, writes, backup
+and restore; a tampered source, catalog binding, or audit record is rejected.
+Historical migrated versions continue to validate against this immutable
+authority when the active catalog later changes, while newly resolved
+identities still require the current governed catalog. It maps only explicit V2 fields:
+`diskCount` expands to instances, an NVMe count without a SKU becomes
+unresolved storage instances, `gpu.none` becomes a `not_needed` role decision,
+fan groups become unresolved fan instances, and legacy HBA/topology/layout or
+unrecorded BOM rows are omitted with warnings. No workload, budget, BIOS,
+system, pool/vdev, accessory, tool or user observation is guessed.
+
+`BUILD_SIM_TOPOLOGY_V3_ENABLED` is the compatibility/rollback gate. With the
+flag off, V2 remains readable and writable and V3 creation/edit is rejected.
+A V3-backed plan can be exposed only through the explicit
+`v3ReadFallback: "migration_source"` mode, which returns the immutable V2
+source as `configAccess.mode: "v2_fallback"`; that view is read-only and cannot
+silently rewrite V3 as V2. Flag-off config parsing likewise requires immutable
+V2 fallback bytes whose plan identity matches the V3 input.
 
 Scenario branches belong to `ScenarioRepository`, not this object. Thus a
 what-if label cannot change a topology hash or mutate the active plan.

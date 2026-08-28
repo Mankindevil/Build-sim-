@@ -3,7 +3,7 @@ import type { UnitNormalizationRule } from "../hash";
 
 export { PLAN_PATCH_PATHS } from "../plans/contracts";
 
-export const REGISTRY_SCHEMA_VERSION = "governed-registries-v1" as const;
+export const REGISTRY_SCHEMA_VERSION = "governed-registries-v2" as const;
 
 function deepFreeze<T>(value: T): Readonly<T> {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -51,6 +51,7 @@ export const METRIC_REGISTRY = deepFreeze({
   "storage.concurrent_disk_count": { valueType: "number", unitIds: ["count"], operators: ["gte", "between"] },
   "network.throughput": { valueType: "number", unitIds: ["gbps"], operators: ["gte", "between"] },
   "power.capacity": { valueType: "number", unitIds: ["w"], operators: ["gte", "between"] },
+  "physical.case_volume": { valueType: "number", unitIds: ["liter"], operators: ["lte", "between"] },
   "physical.gpu_length": { valueType: "number", unitIds: ["mm"], operators: ["lte", "between"] },
   "thermal.ambient": { valueType: "number", unitIds: ["celsius"], operators: ["eq", "between"] },
   "acoustics.noise": { valueType: "number", unitIds: ["dba"], operators: ["lte", "between"] },
@@ -134,6 +135,7 @@ export const UNIT_REGISTRY = deepFreeze({
   fps: { dimension: "frame-rate", canonicalUnitId: "fps", scale: 1 },
   gbps: { dimension: "network-throughput", canonicalUnitId: "gbps", scale: 1 },
   dba: { dimension: "sound-pressure-level", canonicalUnitId: "dba", scale: 1 },
+  liter: { dimension: "volume-liter", canonicalUnitId: "liter", scale: 1 },
   score: { dimension: "benchmark-specific-score", canonicalUnitId: "score", scale: 1 },
   percent: { dimension: "ratio-percent", canonicalUnitId: "percent", scale: 1 },
 } as const);
@@ -397,7 +399,7 @@ export type SimulationJsonPatchPath =
  * the exact base config before applying the operation.
  */
 export const TOPOLOGY_V3_PATCH_COLLECTION_REGISTRY = deepFreeze({
-  config: { idField: null, parentCollection: null, mutableFields: ["name", "intent", "requirementSpec", "system", "notes"] },
+  config: { idField: null, parentCollection: null, mutableFields: ["name", "intent", "requirementSpec", "requirementBudget", "requirementHorizonYears", "system", "notes"] },
   components: { idField: "instanceId", parentCollection: null, mutableFields: ["kind", "role", "state", "identity"] },
   roleDecisions: { idField: "roleDecisionId", parentCollection: null, mutableFields: [] },
   placements: { idField: "placementId", parentCollection: null, mutableFields: ["componentInstanceId", "mountOwnerInstanceId", "mountId"] },
@@ -757,19 +759,41 @@ function validateDraft(value: unknown, valueKind: "intent" | "budget" | "horizon
 
 function validateMetricEntity(value: unknown, selectorId: string): string[] {
   if (!isRecord(value)) return ["metric value must be an object"];
-  const fields = ["metricId", "operator", "value", "unitId", "priority", "source", "confirmedByUser", "benchmarkId", "benchmarkContext"];
+  if (value.state === "deferred" || value.state === "not_applicable") {
+    const errors = !exactFields(value, ["metricId", "state", "source", "confirmedByUser"])
+      ? [`${value.state} metric must not contain answered fields`]
+      : [];
+    if (value.metricId !== selectorId || !isMetricId(value.metricId)) errors.push("metric selector id must equal a governed metricId");
+    if (!["user", "migration", "agent_proposed"].includes(String(value.source)) || typeof value.confirmedByUser !== "boolean") errors.push("metric provenance invalid");
+    return errors;
+  }
+  if (value.state !== undefined && value.state !== "answered") return ["metric state invalid"];
+  const fields = ["metricId", "state", "operator", "value", "unitId", "priority", "source", "confirmedByUser", "benchmarkId", "benchmarkContext"];
   const errors = !exactFields(value, fields) ? ["metric value contains unknown fields"] : [];
   if (value.metricId !== selectorId) errors.push("metric selector id must equal metricId");
   const governed = Object.fromEntries(Object.entries(value).filter(([key]) => ["metricId", "operator", "value", "unitId", "priority", "benchmarkId", "benchmarkContext"].includes(key)));
   errors.push(...validateRequirementMetric(governed));
-  if (("source" in value || "confirmedByUser" in value)
+  if ((value.state === "answered" || "source" in value || "confirmedByUser" in value)
     && (!['user', 'migration', 'agent_proposed'].includes(String(value.source)) || typeof value.confirmedByUser !== "boolean")) errors.push("metric provenance invalid");
   return errors;
 }
 
 function validateWorkloadEntity(value: unknown, selectorId: string): string[] {
   if (!isRecord(value)) return ["workload value must be an object"];
-  const errors = !exactFields(value, ["workloadId", "name", "metrics", "evidenceOrBenchmarkRefs"]) ? ["workload value contains unknown fields"] : [];
+  if (value.state === "deferred" || value.state === "not_applicable") {
+    const errors = !exactFields(value, ["workloadId", "metrics", "state", "source", "confirmedByUser"])
+      ? [`${value.state} workload must not contain answered fields`]
+      : [];
+    if (value.workloadId !== selectorId || !isNonEmptyString(value.workloadId)) errors.push("workload selector id must equal workloadId");
+    if (!Array.isArray(value.metrics) || value.metrics.length !== 0) errors.push("unanswered workload metrics must be empty");
+    if (!["user", "defaulted", "agent_proposed"].includes(String(value.source)) || typeof value.confirmedByUser !== "boolean") errors.push("workload provenance invalid");
+    return errors;
+  }
+  if (value.state !== undefined && value.state !== "answered") return ["workload state invalid"];
+  const fields = value.state === "answered"
+    ? ["workloadId", "state", "name", "metrics", "evidenceOrBenchmarkRefs", "source", "confirmedByUser"]
+    : ["workloadId", "name", "metrics", "evidenceOrBenchmarkRefs"];
+  const errors = !exactFields(value, fields) ? ["workload value contains unknown fields"] : [];
   if (value.workloadId !== selectorId || !isNonEmptyString(value.name) || !Array.isArray(value.metrics)) errors.push("workload identity/name/metrics invalid");
   else {
     const metricIds: string[] = [];
@@ -781,12 +805,26 @@ function validateWorkloadEntity(value: unknown, selectorId: string): string[] {
     if (new Set(metricIds).size !== metricIds.length) errors.push("workload metricId must be unique for stable selection");
   }
   if (value.evidenceOrBenchmarkRefs !== undefined && !stringArray(value.evidenceOrBenchmarkRefs)) errors.push("workload evidence refs invalid");
+  if (value.state === "answered"
+    && (!["user", "defaulted", "agent_proposed"].includes(String(value.source)) || typeof value.confirmedByUser !== "boolean")) errors.push("workload provenance invalid");
   return errors;
 }
 
 function validateConstraintEntity(value: unknown, selectorId: string): string[] {
   if (!isRecord(value)) return ["constraint value must be an object"];
-  const errors = !exactFields(value, ["constraintId", "predicate", "strength", "source", "confirmedByUser"]) ? ["constraint value contains unknown fields"] : [];
+  if (value.state === "deferred" || value.state === "not_applicable") {
+    const errors = !exactFields(value, ["constraintId", "state", "source", "confirmedByUser"])
+      ? [`${value.state} constraint must not contain answered fields`]
+      : [];
+    if (value.constraintId !== selectorId || !isNonEmptyString(value.constraintId)) errors.push("constraint selector id must equal constraintId");
+    if (!["user", "migration", "agent_proposed"].includes(String(value.source)) || typeof value.confirmedByUser !== "boolean") errors.push("constraint provenance invalid");
+    return errors;
+  }
+  if (value.state !== undefined && value.state !== "answered") return ["constraint state invalid"];
+  const fields = value.state === "answered"
+    ? ["constraintId", "state", "predicate", "strength", "source", "confirmedByUser"]
+    : ["constraintId", "predicate", "strength", "source", "confirmedByUser"];
+  const errors = !exactFields(value, fields) ? ["constraint value contains unknown fields"] : [];
   if (value.constraintId !== selectorId) errors.push("constraint selector id must equal constraintId");
   errors.push(...validateFacetPredicate(value.predicate).map((error) => `constraint predicate: ${error}`));
   if (!["hard", "soft"].includes(String(value.strength)) || !["user", "migration", "agent_proposed"].includes(String(value.source)) || typeof value.confirmedByUser !== "boolean") errors.push("constraint strength/provenance invalid");
@@ -896,6 +934,8 @@ function validateReplacementValue(selector: TopologyV3PatchSelector, value: unkn
     if (selector.field === "name") return isNonEmptyString(value) ? [] : ["config name must be a non-empty string"];
     if (selector.field === "intent") return value === null ? [] : validateDraft(value, "intent");
     if (selector.field === "requirementSpec") return validateRequirementSpecPatchValue(value);
+    if (selector.field === "requirementBudget") return validateDraft(value, "budget");
+    if (selector.field === "requirementHorizonYears") return validateDraft(value, "horizon");
     if (selector.field === "system") return validateSystemSelection(value);
     if (selector.field === "notes") return Array.isArray(value) && value.every((note) => typeof note === "string") ? [] : ["notes must be a string array"];
   }

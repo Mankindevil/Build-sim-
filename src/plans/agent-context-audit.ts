@@ -3,9 +3,11 @@ import path from "node:path";
 import type { PlanAgentContext, PlanRepository } from "./contracts";
 import { assertValidPlanAgentContext } from "./validation";
 import { assertExpectedConfigHash, assertExpectedRevision } from "./conflict";
-import { sha256Hex } from "./canonical";
+import { hashPlanConfig, sha256Hex } from "./canonical";
 import { RuntimeCoordinator } from "../runtime/coordinator.mjs";
 import { atomicWriteJson, confined, ensurePrivateDirectory, withDirectoryLock } from "../runtime/fs.mjs";
+import { createPlanPartialEvaluationV3, isPlanPartialEvaluationV3 } from "./evaluation";
+import type { BuildConfigDocument } from "../config/types";
 
 export interface PlanAgentRunContextAudit {
   schemaVersion: "1.0.0";
@@ -104,8 +106,22 @@ export async function recordPlanAgentRunContext(repository: PlanRepository, stor
   if (!input.sessionId || !input.runId) throw new Error("sessionId and runId are required");
   assertValidPlanAgentContext(input.context);
   const plan = await repository.get(input.context.planId);
+  const planConfig = plan.draft.config as BuildConfigDocument;
   assertExpectedRevision(input.context.draftRevision, plan.draftRevision);
-  assertExpectedConfigHash(input.context.configHash, await sha256Hex(plan.draft.config));
+  const authoritativeConfigHash = await hashPlanConfig(planConfig);
+  assertExpectedConfigHash(input.context.configHash, authoritativeConfigHash);
+  assertExpectedConfigHash(await hashPlanConfig(input.context.buildConfig), authoritativeConfigHash);
+  if (input.context.planVersionId !== plan.activeVersionId) throw new Error("stale_plan_version");
+  assertExpectedConfigHash(input.context.evaluationHash, await sha256Hex(input.context.evaluation));
+  if (planConfig.schemaVersion === "3.0.0") {
+    if (!isPlanPartialEvaluationV3(input.context.evaluation)
+      || await sha256Hex(input.context.evaluation) !== await sha256Hex(createPlanPartialEvaluationV3(planConfig))) {
+      throw new Error("stale_v3_partial_evaluation");
+    }
+  } else {
+    if (isPlanPartialEvaluationV3(input.context.evaluation)
+      || await hashPlanConfig(input.context.evaluation.config) !== authoritativeConfigHash) throw new Error("stale_v2_evaluation");
+  }
   const record: PlanAgentRunContextAudit = {
     schemaVersion: "1.0.0",
     sessionId: input.sessionId,

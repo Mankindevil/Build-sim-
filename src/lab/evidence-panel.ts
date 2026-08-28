@@ -1,4 +1,4 @@
-import type { BuildConfig } from "../config/types";
+import type { BuildConfigDocument } from "../config/types";
 import type {
   EvidenceCapture,
   EvidenceDocumentId,
@@ -20,6 +20,7 @@ import {
 } from "../plans/evidence-client";
 import type { BindPlanEvidenceInput } from "../plans/contracts";
 import type { SkuCatalog } from "../sku/types";
+import type { BuildConfigV3, ComponentInstance } from "../topology/contracts";
 
 export interface EvidencePanelServices {
   evidence: EvidenceServiceApi;
@@ -32,9 +33,12 @@ export interface EvidencePanelController {
 }
 
 interface SelectedSku {
+  /** V3 needs a per-instance UI key even when several instances share one SKU. */
+  selectionId?: string;
   id: string;
   name: string;
   category: EvidenceProductCategory;
+  componentInstanceId?: string;
 }
 
 const PURPOSES: Array<{ id: PlanEvidencePurpose; label: string }> = [
@@ -66,7 +70,33 @@ function formatDate(value: string): string {
   return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-function selectedSkus(config: BuildConfig, catalog: SkuCatalog): SelectedSku[] {
+function isBuildConfigV3(config: unknown): config is BuildConfigV3 {
+  return Boolean(config && typeof config === "object" && (config as { schemaVersion?: unknown }).schemaVersion === "3.0.0");
+}
+
+function categoryForComponent(kind: ComponentInstance["kind"]): EvidenceProductCategory {
+  return ({
+    case: "case", motherboard: "motherboard", cpu: "cpu", psu: "psu", cpu_cooler: "cooler", aio: "cooler",
+    radiator: "cooler", pump: "cooler", case_fan: "fan", gpu: "gpu", memory_module: "memory", storage_drive: "storage",
+    hba: "hba", raid_controller: "hba", storage_expander: "hba", backplane: "accessory",
+  } as Partial<Record<ComponentInstance["kind"], EvidenceProductCategory>>)[kind] ?? "accessory";
+}
+
+function selectedSkus(config: BuildConfigDocument, catalog: SkuCatalog): SelectedSku[] {
+  if (isBuildConfigV3(config)) {
+    const catalogById = new Map(catalog.skus.map((sku) => [sku.id, sku]));
+    return config.components.flatMap((component): SelectedSku[] => {
+      if (component.identity.status !== "resolved") return [];
+      const sku = catalogById.get(component.identity.skuId);
+      return [{
+        selectionId: component.instanceId,
+        componentInstanceId: component.instanceId,
+        id: component.identity.skuId,
+        name: sku?.name ?? `${component.kind} · ${component.role}`,
+        category: categoryForComponent(component.kind),
+      }];
+    });
+  }
   const values: Array<[string | null | undefined, EvidenceProductCategory]> = [
     [config.caseId, "case"],
     [config.boardId, "motherboard"],
@@ -168,7 +198,13 @@ export function mountEvidencePanel(
   let message = "";
   let error = "";
 
-  const currentSkus = () => state.activePlan ? selectedSkus(state.activePlan.draft.config, getCatalog()) : [];
+  const currentSkus = () => state.activePlan ? selectedSkus(state.activePlan.draft.config as BuildConfigDocument, getCatalog()) : [];
+  const selectionKey = (sku: SelectedSku) => sku.selectionId ?? sku.id;
+  const bindingMatches = (binding: PlanEvidenceBinding, sku: SelectedSku | undefined) => Boolean(sku && (
+    sku.componentInstanceId
+      ? binding.subject.kind === "component" && binding.subject.id === sku.componentInstanceId
+      : binding.subject.kind === "sku" && binding.subject.id === sku.id
+  ));
 
   const resetForPlan = (nextPlanId: string | null) => {
     planId = nextPlanId;
@@ -189,8 +225,8 @@ export function mountEvidencePanel(
 
   const chooseDefaultSku = () => {
     const skus = currentSkus();
-    if (!skus.some((sku) => sku.id === selectedSkuId)) {
-      selectedSkuId = skus[0]?.id ?? "";
+    if (!skus.some((sku) => selectionKey(sku) === selectedSkuId)) {
+      selectedSkuId = skus[0] ? selectionKey(skus[0]) : "";
       purposes = defaultPurposes(skus[0]?.category ?? "accessory");
     }
     return skus;
@@ -208,8 +244,7 @@ export function mountEvidencePanel(
     if (!staged) return "";
     const alreadyBound = bindings.some((binding) => binding.documentId === staged?.document.id
       && binding.captureId === staged?.capture.id
-      && binding.subject.kind === "sku"
-      && binding.subject.id === selected?.id);
+      && bindingMatches(binding, selected));
     return `<article class="workspace-evidence-staged" data-evidence-staged>
       <header><div><small>${staged.reusedDocument ? "已复用共享文件" : "已保存到共享证据库"}</small><strong>${escapeHtml(staged.capture.title)}</strong><span>SHA-256 ${escapeHtml(staged.document.sha256.slice(0, 16))}… · ${Math.ceil(staged.document.byteLength / 1024).toLocaleString("zh-CN")} KiB</span></div><a href="${safeHref(services.evidence.contentUrl(staged.document.id), true)}" target="_blank" rel="noreferrer">打开归档原文 ↗</a></header>
       ${evidenceBasisMarkup(staged.capture)}
@@ -243,9 +278,11 @@ export function mountEvidencePanel(
       bindings = structuredClone(active?.draft.evidenceBindings ?? []);
     }
     const skus = chooseDefaultSku();
-    const selected = skus.find((sku) => sku.id === selectedSkuId);
-    host.innerHTML = active ? `<header class="workspace-evidence-head"><div><p>配置依据 · 官方证据</p><h2>把手册保存一次，绑定到需要的方案</h2><span>发现是只读；只有点击“归档”和“绑定”才会写入。解除绑定或删除方案都不会删除共享原文。</span></div><button type="button" data-evidence-action="refresh"${busy ? " disabled" : ""}>刷新已有证据</button></header>
-      <div class="workspace-evidence-layout"><section class="workspace-evidence-discovery"><h3>1. 发现并归档</h3><label>当前方案部件<select data-evidence-sku${skus.length ? "" : " disabled"}>${skus.map((sku) => `<option value="${escapeHtml(sku.id)}"${sku.id === selectedSkuId ? " selected" : ""}>${escapeHtml(sku.name)}</option>`).join("") || `<option value="">请先选择硬件</option>`}</select></label><label>官网产品页 / 手册 URL（可选）<input type="url" data-evidence-url value="${escapeHtml(officialUrl)}" placeholder="不填时使用目录中的官网产品页"></label><label>补充关键词（可选）<input data-evidence-query value="${escapeHtml(query)}" maxlength="240" placeholder="例如 user manual 或型号"></label><button type="button" data-evidence-action="discover"${busy || !selected ? " disabled" : ""}>${busy === "discover" ? "正在发现…" : "发现官网文档"}</button>${renderCandidates()}${renderStaged(selected)}</section>
+    const selected = skus.find((sku) => selectionKey(sku) === selectedSkuId);
+    const v3Partial = isBuildConfigV3(active?.draft.config);
+    const v3Notice = v3Partial ? `<p data-v3-evidence-partial>仅列出 V3 中已解析身份的组件实例；未解析实例没有可绑定的 SKU，不能据此推断兼容性或价格。</p>` : "";
+    host.innerHTML = active ? `<header class="workspace-evidence-head"><div><p>配置依据 · 官方证据</p><h2>把手册保存一次，绑定到需要的方案</h2><span>发现是只读；只有点击“归档”和“绑定”才会写入。解除绑定或删除方案都不会删除共享原文。</span>${v3Notice}</div><button type="button" data-evidence-action="refresh"${busy ? " disabled" : ""}>刷新已有证据</button></header>
+      <div class="workspace-evidence-layout"><section class="workspace-evidence-discovery"><h3>1. 发现并归档</h3><label>当前方案部件<select data-evidence-sku${skus.length ? "" : " disabled"}>${skus.map((sku) => `<option value="${escapeHtml(selectionKey(sku))}"${selectionKey(sku) === selectedSkuId ? " selected" : ""}>${escapeHtml(sku.name)}</option>`).join("") || `<option value="">${v3Partial ? "还没有已解析的组件实例" : "请先选择硬件"}</option>`}</select></label><label>官网产品页 / 手册 URL（可选）<input type="url" data-evidence-url value="${escapeHtml(officialUrl)}" placeholder="不填时使用目录中的官网产品页"></label><label>补充关键词（可选）<input data-evidence-query value="${escapeHtml(query)}" maxlength="240" placeholder="例如 user manual 或型号"></label><button type="button" data-evidence-action="discover"${busy || !selected ? " disabled" : ""}>${busy === "discover" ? "正在发现…" : "发现官网文档"}</button>${renderCandidates()}${renderStaged(selected)}</section>
       <section class="workspace-evidence-current"><div><h3>2. 当前方案已绑定</h3><span>${bindings.length} 条引用 · 保存版本时会固定内容哈希</span></div>${renderBindings()}</section></div>
       <p class="workspace-evidence-status" data-evidence-status data-level="${error ? "bad" : message ? "ok" : "idle"}" ${error ? "role=alert" : "aria-live=polite"}>${escapeHtml(error || message || "官网候选不等于已归档证据；请先核对标题和 URL。")}</p>` : `<div class="workspace-evidence-empty"><p>请选择或创建方案后再管理官方证据。</p></div>`;
   };
@@ -280,7 +317,8 @@ export function mountEvidencePanel(
   };
 
   const discover = async () => {
-    if (!selectedSkuId) return;
+    const selected = currentSkus().find((sku) => selectionKey(sku) === selectedSkuId);
+    if (!selected) return;
     busy = "discover";
     error = "";
     message = "";
@@ -289,7 +327,7 @@ export function mountEvidencePanel(
     render();
     try {
       const result = await services.evidence.discover({
-        skuId: selectedSkuId,
+        skuId: selected.id,
         ...(officialUrl.trim() ? { url: officialUrl.trim() } : {}),
         ...(query.trim() ? { query: query.trim() } : {}),
       });
@@ -305,7 +343,8 @@ export function mountEvidencePanel(
 
   const archive = async (index: number) => {
     const candidate = candidates[index];
-    if (!candidate || !selectedSkuId) return;
+    const selected = currentSkus().find((sku) => selectionKey(sku) === selectedSkuId);
+    if (!candidate || !selected) return;
     busy = "archive";
     error = "";
     staged = null;
@@ -314,7 +353,7 @@ export function mountEvidencePanel(
     locatorSection = "";
     render();
     try {
-      staged = await services.evidence.acquire({ url: candidate.url, skuId: selectedSkuId, kind: candidate.kindHint, title: candidate.title });
+      staged = await services.evidence.acquire({ url: candidate.url, skuId: selected.id, kind: candidate.kindHint, title: candidate.title });
       stagedBindKey = idempotencyKey("evidence-bind-ui");
       documentDetails.set(staged.document.id, { document: staged.document, captures: [staged.capture] });
       message = staged.reusedDocument ? "已命中共享证据库，没有重复保存原文" : "官方原文已归档；请填写定位信息后再绑定方案";
@@ -327,7 +366,7 @@ export function mountEvidencePanel(
   };
 
   const bind = async () => {
-    const selected = currentSkus().find((sku) => sku.id === selectedSkuId);
+    const selected = currentSkus().find((sku) => selectionKey(sku) === selectedSkuId);
     if (!staged || !selected) return;
     if (!purposes.size) {
       error = "请至少选择一种证据用途";
@@ -349,7 +388,9 @@ export function mountEvidencePanel(
         documentId: staged.document.id,
         contentHash: staged.document.sha256,
         captureId: staged.capture.id,
-        subject: { kind: "sku", id: selected.id, category: selected.category },
+        subject: selected.componentInstanceId
+          ? { kind: "component", id: selected.componentInstanceId, category: selected.category }
+          : { kind: "sku", id: selected.id, category: selected.category },
         purposes: [...purposes],
         ...(locators ? { locators } : {}),
         note: "用户通过方案证据面板核对并绑定",
@@ -412,7 +453,7 @@ export function mountEvidencePanel(
     const target = event.target as HTMLInputElement | HTMLSelectElement;
     if (target.matches("[data-evidence-sku]")) {
       selectedSkuId = target.value;
-      const selected = currentSkus().find((sku) => sku.id === selectedSkuId);
+      const selected = currentSkus().find((sku) => selectionKey(sku) === selectedSkuId);
       purposes = defaultPurposes(selected?.category ?? "accessory");
       candidates = [];
       staged = null;

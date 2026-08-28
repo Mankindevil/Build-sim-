@@ -5,8 +5,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import baseline from "../data/configs/baseline-atx-1hdd.json";
 import { loadBundledPriceSnapshot } from "../src/sku/catalog";
-import { configureAuthoritativeCatalogRepository, evaluateBuildAuthoritatively } from "../src/server/evaluation-service";
+import { configureAuthoritativeCatalogRepository, evaluateBuildAuthoritatively, evaluateBuildDocumentAuthoritatively } from "../src/server/evaluation-service";
 import { RuntimeCoordinator } from "../src/runtime/coordinator.mjs";
+import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
 
 const roots: string[] = [];
 
@@ -29,5 +30,22 @@ describe("Agent authoritative runtime price snapshot", () => {
     configureAuthoritativeCatalogRepository({ priceRuntimeRoot: root });
     const result = evaluateBuildAuthoritatively(baseline);
     expect(result.priceSnapshotVersion).toBe("1.0.0:2026-08-27");
+  });
+
+  it("does not require a price snapshot for a V3 partial evaluation", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-agent-v3-no-price-"));
+    roots.push(root);
+    const coordinator = new RuntimeCoordinator({ root });
+    await coordinator.initialize();
+    configureAuthoritativeCatalogRepository({ runtimeRoot: root });
+
+    const result = evaluateBuildDocumentAuthoritatively(
+      createEmptyBuildConfigV3("plan-v3-no-price", "V3 no price", "2026-08-27T00:00:00.000Z"),
+      undefined,
+      { topologyV3Enabled: true },
+    );
+
+    expect(result.priceSnapshotVersion).toBeNull();
+    expect(result.evaluation).toMatchObject({ kind: "topology-v3-partial", unknownDomains: expect.arrayContaining(["price"]) });
   });
 });

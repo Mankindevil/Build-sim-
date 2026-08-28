@@ -731,6 +731,14 @@
     $('#pool-plan-list').innerHTML=[...bootPool,`单块 ${skuName(IDS.diskId)} 先建单盘数据 VDEV，但重要数据必须另有一份。`,`第二块 ≥${skuName(IDS.diskId)} 到位后用 Attach 转为镜像；容量取较小盘。` ,'长期按镜像对扩容；若用第 9 托架作 SATA Boot，数据 HDD 上限就是 8。'].map(x=>`<li>${esc(x)}</li>`).join('');
   }
   function render(){
+    // BuildConfig V3 is rendered by the progressive workspace surfaces. The
+    // legacy renderer must not project its inert N6 form defaults into a V3
+    // plan or call the V2 evaluator with a topology document.
+    if(LAB.isLegacyConfigActive&&!LAB.isLegacyConfigActive()){
+      lastEval=null;lastConfig=null;
+      spatialState.config=null;spatialState.parts=[];spatialState.routing=null;spatialState.showRoutes=false;spatialState.routeFocus=null;
+      return;
+    }
     // A new plan is a genuine partial draft. Never project hidden legacy select
     // defaults into it or run N6-only panels before its core parts are explicit.
     if(!LAB.isConfigReady()){

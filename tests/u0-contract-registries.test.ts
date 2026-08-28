@@ -10,6 +10,7 @@ import {
   METRIC_REGISTRY,
   OBSERVATION_FIELD_REGISTRY,
   PLAN_PATCH_PATHS,
+  REGISTRY_SCHEMA_VERSION,
   SIMULATION_JSON_PATCH_PATHS,
   SYSTEM_PROFILE_REGISTRY,
   SYSTEM_RELEASE_REGISTRY,
@@ -46,6 +47,7 @@ import {
 
 describe("U0 governed registries", () => {
   it("freezes IDs, comparisons, units and observation fields", () => {
+    expect(REGISTRY_SCHEMA_VERSION).toBe("governed-registries-v2");
     for (const registry of [METRIC_REGISTRY, FACET_REGISTRY, UNIT_REGISTRY, OBSERVATION_FIELD_REGISTRY]) {
       expect(Object.isFrozen(registry)).toBe(true);
       expect(Object.values(registry).every(Object.isFrozen)).toBe(true);
@@ -54,6 +56,7 @@ describe("U0 governed registries", () => {
     expect(isComparisonOperator("gte")).toBe(true);
     expect(isComparisonOperator("matches-free-text")).toBe(false);
     expect(() => assertMetricId("performance.gpu.frame_rate")).not.toThrow();
+    expect(validateRequirementMetric({ metricId: "physical.case_volume", operator: "lte", value: 25, unitId: "liter", priority: "important" })).toEqual([]);
     expect(() => assertMetricId("agent.invented_metric")).toThrow(/Unknown governed metricId/);
     expect(() => assertFacetId("agent.invented_facet")).toThrow(/Unknown governed facetId/);
     expect(() => assertUnitId("horsepower-ish")).toThrow(/Unknown governed unitId/);

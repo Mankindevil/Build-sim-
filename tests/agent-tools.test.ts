@@ -15,9 +15,9 @@ describe("A3 Build Sim Tool registry", () => {
   it("registers governed read/external-read tools and one approval-bound write tool", () => {
     const registry = new AgentToolRegistry(createBuildSimTools());
     expect(registry.names()).toEqual([
-      "compare_builds", "discover_official_documents", "enrich_official_catalog", "get_build_evaluation", "get_catalog_search_job", "get_evidence_document", "get_evidence_excerpt", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "list_official_domain_proposals", "propose_catalog_review", "propose_plan_change", "propose_plan_initialization", "search_catalog_skus", "search_official_catalog", "search_price_candidates",
+      "compare_builds", "discover_official_documents", "enrich_official_catalog", "get_build_evaluation", "get_catalog_search_job", "get_evidence_document", "get_evidence_excerpt", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "list_official_domain_proposals", "propose_catalog_review", "propose_plan_change", "search_catalog_skus", "search_official_catalog", "search_price_candidates",
     ]);
-    expect(registry.catalog()).toHaveLength(17);
+    expect(registry.catalog()).toHaveLength(16);
     expect(registry.catalog().every((tool) => /^[a-f0-9]{64}$/.test(tool.definitionHash))).toBe(true);
     expect(registry.catalog().filter((tool) => tool.effect === "write")).toEqual([expect.objectContaining({ name: "enrich_official_catalog", approval: "required" })]);
     expect(registry.definitions().map((tool) => tool.name)).toContain("propose_catalog_review");
@@ -63,56 +63,52 @@ describe("A3 Build Sim Tool registry", () => {
     expect(prices.result.content).toMatchObject({ asOf: "2026-08-21", quotes: [{ skuId: "case.jonsbo-n6", evidence: "audited" }] });
   });
 
-  it("discovers governed local SKUs and produces a complete non-mutating initialization proposal", async () => {
+  it("discovers governed local SKUs and proposes only one explicit incremental V3 node", async () => {
     const registry = new AgentToolRegistry(createBuildSimTools());
+    const before = structuredClone(baseline);
     const searched = await registry.dispatch("search_catalog_skus", { category: "gpu", query: "A2000", limit: 5 }, context());
     expect(searched.result.content).toMatchObject({ count: 1, records: [{ id: "gpu.rtx-a2000-12gb", category: "gpu" }] });
     const alias = await registry.dispatch("search_catalog_skus", { category: "psu", query: "GX-850 FX", limit: 5 }, context());
     expect(alias.result.content).toMatchObject({ count: 1, records: [{ id: "psu.seasonic-focus-plus-gold-850-fx", category: "psu" }] });
-    const configuration = structuredClone(baseline) as typeof baseline;
-    configuration.name = "Agent 游戏方案";
-    configuration.selection.gpuId = "gpu.rtx-a2000-12gb";
-    const proposed = await registry.dispatch("propose_plan_initialization", {
+    const proposed = await registry.dispatch("propose_plan_change", {
       planId: "plan-agent-init",
       expectedDraftRevision: 0,
       expectedConfigHash: await sha256Hex(baseline),
-      summary: "初始化当前目录内的游戏方案",
-      rationale: ["用户要求游戏用途"],
-      intent: { useCase: "游戏", budgetCny: 8000, targetResolution: "1440p", targetFps: 60 },
-      configuration: {
-        name: configuration.name,
-        caseId: configuration.caseId,
-        boardId: configuration.boardId,
-        cpuId: configuration.cpuId,
-        selection: configuration.selection,
-        bom: configuration.bom,
-        notes: ["当前目录覆盖有限"],
-      },
+      summary: "只记录用户提到的网卡候选",
+      rationale: ["用户只提到一块尚未确认型号的网卡"],
+      operations: [{
+        op: "add",
+        selector: { collection: "components", id: "nic-user-mentioned" },
+        value: {
+          instanceId: "nic-user-mentioned", kind: "nic", role: "network_adapter", state: "planned",
+          identity: { status: "unresolved", userText: "用户提到的网卡，型号待确认", candidateIds: ["nic.user-candidate"] },
+          source: "agent",
+        },
+      }],
     }, context());
-    expect(proposed.result.ok).toBe(true);
-    expect(proposed.result.content).toMatchObject({ proposal: { kind: "initialization", intent: { useCase: "游戏", budgetCny: 8000 }, status: "proposed" }, confirmation: { required: true, atomic: true } });
-    expect(baseline.selection.gpuId).not.toBe("gpu.rtx-a2000-12gb");
+    expect(proposed.result.ok, JSON.stringify(proposed.result)).toBe(true);
+    expect(proposed.result.content).toMatchObject({
+      proposal: {
+        configSchemaVersion: "3.0.0", status: "proposed",
+        operations: [{ selector: { collection: "components", id: "nic-user-mentioned" } }],
+      },
+      confirmation: { required: true, automaticApply: false },
+    });
+    expect((proposed.result.content as any).proposal.operations).toHaveLength(1);
+    expect(baseline).toEqual(before);
 
-    const incomplete = structuredClone(configuration);
-    Reflect.deleteProperty(incomplete.selection, "diskSkuId");
-    incomplete.selection.diskCount = 1;
-    const rejected = await registry.dispatch("propose_plan_initialization", {
+    const rejected = await registry.dispatch("propose_plan_change", {
       planId: "plan-agent-init",
       expectedDraftRevision: 0,
       expectedConfigHash: await sha256Hex(baseline),
-      summary: "缺少数据盘 SKU 的初始化",
-      rationale: ["测试完整性门禁"],
-      intent: { useCase: "游戏" },
-      configuration: {
-        name: incomplete.name,
-        caseId: incomplete.caseId,
-        boardId: incomplete.boardId,
-        cpuId: incomplete.cpuId,
-        selection: incomplete.selection,
-        bom: incomplete.bom,
-      },
+      summary: "非法混合寻址",
+      rationale: ["测试稳定 selector 门禁"],
+      operations: [
+        { op: "replace", path: "/name", value: "legacy" },
+        { op: "add", selector: { collection: "components", id: "gpu-2" }, value: { instanceId: "gpu-2" } },
+      ],
     }, context());
-    expect(rejected.result).toMatchObject({ ok: false, errorCode: "tool_execution_failed", message: expect.stringContaining("selection.diskSkuId") });
+    expect(rejected.result).toMatchObject({ ok: false, errorCode: "tool_execution_failed", message: expect.stringContaining("cannot mix") });
   });
 
   it("routes external reads only through the configured local service", async () => {

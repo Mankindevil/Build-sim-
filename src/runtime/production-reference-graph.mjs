@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { assertProductCatalogRuntimeAuthority } from "../../scripts/price-server/catalog/repository.mjs";
+import { assertProductCatalogRuntimeAuthority, loadMergedCatalogSync } from "../../scripts/price-server/catalog/repository.mjs";
 import {
   OFFICIAL_DOMAIN_REGISTRY,
   assertOfficialDomainOverlayDocument,
@@ -17,6 +17,16 @@ import { assertPriceRuntimeAuthority } from "../../scripts/price-server/store.mj
 import { sanitizeTransactionRecordForPersistence } from "../../scripts/price-server/transactions/archive.mjs";
 import { FileArtifactRepository } from "../artifacts/repository.mjs";
 import { validateRuntimeBackgroundJob } from "../jobs/runtime-validation.mjs";
+import { validateScenarioRuntimeRecords } from "../scenarios/runtime-validation.mjs";
+import {
+  hashPlanConfigRuntime,
+  migrationCatalogProjectionRuntime,
+  validatePlanEvidenceBindingRuntime,
+  validatePlanIdempotencyRuntime,
+  validatePlanRuntime,
+  validatePlanVersionRuntime,
+} from "../plans/canonical-runtime.mjs";
+import { validateResolvedPlanCatalogBindingsRuntime } from "../config/v3-catalog-runtime.mjs";
 import { RUNTIME_REQUIRED_ROOTS } from "./coordinator.mjs";
 import {
   canonicalJson,
@@ -50,6 +60,84 @@ function without(value, key) { const result = { ...value }; delete result[key]; 
 function providerRootRef(root) { return `runtime-repository:${root}`; }
 function pathId(logicalPath) { return path.posix.basename(logicalPath, ".json"); }
 
+function ownedPlanVersion(records, planId, versionId) {
+  if (typeof versionId !== "string") return undefined;
+  const record = records.find((candidate) => candidate.rootLogicalPath === `${planId}/versions/${versionId}.json`);
+  if (!record || !validEnvelope(record.value, "1.0.0", "version")) return undefined;
+  return record.value.payload?.id === versionId && record.value.payload?.planId === planId ? record.value.payload : undefined;
+}
+
+function planMigrationProjection(records, planId) {
+  const planRecord = records.find((candidate) => candidate.rootLogicalPath === `${planId}/plan.json`);
+  if (!planRecord || !validEnvelope(planRecord.value, "1.0.0", "plan")) return null;
+  const plan = planRecord.value.payload;
+  const migration = plan?.draft?.configMigration;
+  const sourceVersion = ownedPlanVersion(records, planId, migration?.sourceVersionId);
+  if (!migration || !sourceVersion) return null;
+  return migrationCatalogProjectionRuntime(migration, { planId, config: plan.draft.config, sourceVersion });
+}
+
+function migrationCatalogIdentity(component) {
+  if (!object(component)) return null;
+  return {
+    instanceId: component.instanceId,
+    kind: component.kind,
+    role: component.role,
+    state: component.state,
+    identity: component.identity,
+    source: component.source,
+  };
+}
+
+function catalogIssuesWithMigrationAuthority(config, catalog, projection, versionId = null) {
+  const issues = validateResolvedPlanCatalogBindingsRuntime(config, catalog);
+  if (!projection || !issues.length) return issues;
+  if (config?.schemaVersion === "2.0.0") {
+    return versionId === projection.sourceVersionId
+      ? issues.filter((issue) => issue.path !== "selection.coolerId")
+      : issues;
+  }
+  if (config?.schemaVersion !== "3.0.0" || !projection.migratedCoolerComponent || !Array.isArray(config.components)) return issues;
+  const expectedIdentityHash = sha256Json(migrationCatalogIdentity(projection.migratedCoolerComponent));
+  const coolerIndex = config.components.findIndex((component) => sha256Json(migrationCatalogIdentity(component)) === expectedIdentityHash);
+  if (coolerIndex < 0) return issues;
+  return issues.filter((issue) => !issue.path.startsWith(`components.${coolerIndex}.`));
+}
+
+function validatePlanRepositoryClosure(records) {
+  const owners = new Map();
+  const parentByVersion = new Map();
+  for (const record of records) {
+    const match = /^([^/]+)\/versions\/([^/]+)\.json$/.exec(record.rootLogicalPath);
+    if (!match || !validEnvelope(record.value, "1.0.0", "version")) continue;
+    const [planId, versionId] = match.slice(1);
+    invariant(!owners.has(versionId), "plan version IDs must be globally unique across plans");
+    owners.set(versionId, planId);
+    parentByVersion.set(versionId, record.value.payload?.parentVersionId ?? null);
+  }
+  const visiting = new Set(); const visited = new Set();
+  const visit = (versionId) => {
+    if (visited.has(versionId)) return;
+    invariant(!visiting.has(versionId), "plan version parent graph contains a cycle");
+    visiting.add(versionId);
+    const parentId = parentByVersion.get(versionId);
+    if (parentId !== null && parentId !== undefined) visit(parentId);
+    visiting.delete(versionId); visited.add(versionId);
+  };
+  for (const versionId of parentByVersion.keys()) visit(versionId);
+}
+
+function evidenceAuthorityIndex(records) {
+  const documents = new Map(); const captures = new Map();
+  for (const record of records) {
+    const document = /^documents\/[a-f0-9]{2}\/(doc-sha256-[a-f0-9]{64})\.json$/.exec(record.rootLogicalPath);
+    if (document && validEnvelope(record.value, "1.0.0", "evidence-document")) documents.set(document[1], record.value.payload);
+    const capture = /^captures\/[a-f0-9]{2}\/(capture-sha256-[a-f0-9]{64})\.json$/.exec(record.rootLogicalPath);
+    if (capture && validEnvelope(record.value, "1.0.0", "evidence-capture")) captures.set(capture[1], record.value.payload);
+  }
+  return { documents, captures };
+}
+
 async function recordsFor(activeRoot, root) {
   const repositoryRoot = confined(activeRoot, root);
   const files = await listRegularFiles(repositoryRoot);
@@ -72,40 +160,62 @@ async function recordsFor(activeRoot, root) {
   return records.sort((left, right) => compare(left.rootLogicalPath, right.rootLogicalPath));
 }
 
-function validatePlanRecord(record, context) {
+function validatePlanRecord(record, context, records, catalog, evidence) {
   const relative = record.rootLogicalPath;
   if (!relative.endsWith(".json")) return;
   const plan = /^([^/]+)\/plan\.json$/.exec(relative);
   if (plan) {
     invariant(PLAN_ID.test(plan[1]) && validEnvelope(record.value, "1.0.0", "plan"), "plan authority envelope is invalid");
     const value = record.value.payload;
-    invariant(value?.schemaVersion === "1.0.0" && value.id === plan[1] && typeof value.name === "string" && value.name
-      && ["active", "archived"].includes(value.status) && iso(value.createdAt) && iso(value.updatedAt)
-      && (value.activeVersionId === null || PLAN_ID.test(value.activeVersionId))
-      && Number.isInteger(value.draftRevision) && value.draftRevision >= 0 && object(value.metadata)
-      && value.draft?.schemaVersion === "1.0.0" && object(value.draft.config) && typeof value.draft.dirty === "boolean" && iso(value.draft.updatedAt), "plan authority payload is invalid");
+    const sourceVersionId = value?.draft?.configMigration?.sourceVersionId;
+    const sourceVersion = ownedPlanVersion(records, plan[1], sourceVersionId);
+    const migrationProjection = value?.draft?.configMigration
+      ? migrationCatalogProjectionRuntime(value.draft.configMigration, { planId: plan[1], config: value.draft.config, sourceVersion })
+      : null;
+    const activeVersion = value?.activeVersionId === null ? null : ownedPlanVersion(records, plan[1], value?.activeVersionId);
+    const baseVersion = value?.draft?.baseVersionId === null ? null : ownedPlanVersion(records, plan[1], value?.draft?.baseVersionId);
+    invariant(value?.id === plan[1] && validatePlanRuntime(value, { topologyV3Enabled: true, sourceVersion, catalog }).length === 0
+      && catalogIssuesWithMigrationAuthority(value?.draft?.config, catalog, migrationProjection).length === 0
+      && (value.activeVersionId === null || PLAN_ID.test(value.activeVersionId) && activeVersion)
+      && (value.draft.baseVersionId === null || PLAN_ID.test(value.draft.baseVersionId) && baseVersion), "plan authority payload is invalid");
     const ref = `plan:${value.id}`; context.nodes.push(ref); context.pointers.push(ref);
     if (value.activeVersionId) context.edges.push(edge(ref, `plan-version:${value.activeVersionId}`));
-    for (const binding of value.draft.evidenceBindings ?? []) addEvidenceEdges(context, ref, binding, "optional_for_audit");
+    if (value.draft.baseVersionId) context.edges.push(edge(ref, `plan-version:${value.draft.baseVersionId}`));
+    if (sourceVersionId) context.edges.push(edge(ref, `plan-version:${sourceVersionId}`));
+    for (const binding of value.draft.evidenceBindings ?? []) addEvidenceEdges(context, ref, binding, evidence, { planId: value.id }, "optional_for_audit");
     return;
   }
   const version = /^([^/]+)\/versions\/([^/]+)\.json$/.exec(relative);
   if (version) {
     invariant(PLAN_ID.test(version[1]) && PLAN_ID.test(version[2]) && validEnvelope(record.value, "1.0.0", "version"), "plan version envelope is invalid");
     const value = record.value.payload;
-    invariant(value?.schemaVersion === "1.0.0" && value.id === version[2] && value.planId === version[1]
-      && Number.isInteger(value.versionNumber) && value.versionNumber > 0 && iso(value.createdAt) && object(value.config)
-      && SHA256.test(String(value.configHash ?? "")) && value.configHash === sha256Json(value.config)
+    const migrationProjection = planMigrationProjection(records, version[1]);
+    const parentVersion = value?.parentVersionId === null ? null : ownedPlanVersion(records, version[1], value?.parentVersionId);
+    invariant(value?.id === version[2] && value.planId === version[1] && validatePlanVersionRuntime(value, { topologyV3Enabled: true }).length === 0
+      && catalogIssuesWithMigrationAuthority(value?.config, catalog, migrationProjection, value?.id).length === 0
+      && SHA256.test(String(value.configHash ?? "")) && value.configHash === hashPlanConfigRuntime(value.config)
+      && (value.parentVersionId === null || PLAN_ID.test(value.parentVersionId) && value.parentVersionId !== value.id
+        && parentVersion && parentVersion.versionNumber < value.versionNumber)
       && (value.evaluationHash === undefined || SHA256.test(value.evaluationHash))
       && (value.evidenceHash === undefined || value.evidenceHash === sha256Json(value.evidenceBindings ?? [])), "plan version payload/hash is invalid");
     const ref = `plan-version:${value.id}`; context.nodes.push(ref); context.pointers.push(ref); context.edges.push(edge(ref, `plan:${value.planId}`, "optional_for_audit"));
+    if (value.parentVersionId) context.edges.push(edge(ref, `plan-version:${value.parentVersionId}`));
     if (value.evaluationHash) { context.nodes.push(`evaluation:${value.evaluationHash}`); context.edges.push(edge(ref, `evaluation:${value.evaluationHash}`)); }
-    for (const binding of value.evidenceBindings ?? []) addEvidenceEdges(context, ref, binding);
+    for (const binding of value.evidenceBindings ?? []) addEvidenceEdges(context, ref, binding, evidence, { planId: value.planId, versionId: value.id });
     return;
   }
   if (/^\.idempotency\/[a-f0-9]{64}\.json$/.test(relative)) {
-    invariant(validEnvelope(record.value, "1.0.0", "idempotency") && typeof record.value.payload?.operation === "string"
-      && SHA256.test(String(record.value.payload?.requestHash ?? "")), "plan idempotency record is invalid");
+    invariant(validEnvelope(record.value, "1.0.0", "idempotency") && validatePlanIdempotencyRuntime(record.value.payload).length === 0, "plan idempotency record is invalid");
+    const result = record.value.payload.result;
+    const planPayload = records.find((candidate) => candidate.rootLogicalPath === `${result.planId}/plan.json`)?.value?.payload;
+    invariant(planPayload?.id === result.planId, "plan idempotency result plan reference is unavailable");
+    if (result.kind === "version") {
+      const versionPayload = records.find((candidate) => candidate.rootLogicalPath === `${result.planId}/versions/${result.versionId}.json`)?.value?.payload;
+      invariant(versionPayload?.id === result.versionId && versionPayload.planId === result.planId, "plan idempotency result version reference is unavailable or cross-plan");
+    } else if (result.kind === "evidence-binding") {
+      const binding = planPayload?.draft?.evidenceBindings?.find((candidate) => candidate.id === result.bindingId);
+      invariant(binding && validatePlanEvidenceBindingRuntime(binding, { planId: result.planId }).length === 0, "plan idempotency result evidence reference is unavailable or invalid");
+    }
     return;
   }
   if (relative === ".rollback/manifest.json") {
@@ -116,11 +226,16 @@ function validatePlanRecord(record, context) {
   throw new Error("plans repository contains an unrecognized JSON authority");
 }
 
-function addEvidenceEdges(context, fromRef, binding, necessity = "required_for_replay") {
-  invariant(object(binding) && /^doc-sha256-[a-f0-9]{64}$/.test(String(binding.documentId ?? "")), "plan evidence binding is invalid");
+function addEvidenceEdges(context, fromRef, binding, evidence, owner, necessity = "required_for_replay") {
+  invariant(validatePlanEvidenceBindingRuntime(binding, owner).length === 0, "plan evidence binding is invalid");
+  const document = evidence.documents.get(binding.documentId);
+  invariant(document?.id === binding.documentId && document.sha256 === binding.contentHash,
+    "plan evidence binding document content hash is missing or mismatched");
   context.edges.push(edge(fromRef, `evidence-document:${binding.documentId}`, necessity));
   if (binding.captureId !== undefined) {
-    invariant(/^capture-sha256-[a-f0-9]{64}$/.test(binding.captureId), "plan evidence capture binding is invalid");
+    const capture = evidence.captures.get(binding.captureId);
+    invariant(capture?.id === binding.captureId && capture.documentId === binding.documentId,
+      "plan evidence capture binding is missing or mismatched");
     context.edges.push(edge(fromRef, `evidence-capture:${binding.captureId}`, necessity));
   }
 }
@@ -680,8 +795,26 @@ function validateAuditRecord(record, context) {
 }
 
 async function validateRoot(root, records, context, activeRoot, generation) {
+  if (root === "scenarios") {
+    let catalog;
+    try { catalog = loadMergedCatalogSync({ activeRoot, generationAware: true }); }
+    catch (error) {
+      throw new Error(`runtime product catalog authority is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await validateScenarioRuntimeRecords(records, context, activeRoot, catalog);
+    return;
+  }
+  let catalog;
+  let evidence;
+  if (root === "plans") {
+    try { catalog = loadMergedCatalogSync({ activeRoot, generationAware: true }); }
+    catch (error) {
+      throw new Error(`runtime product catalog authority is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    evidence = evidenceAuthorityIndex(await recordsFor(activeRoot, "evidence"));
+  }
   for (const record of records) {
-    if (root === "plans") validatePlanRecord(record, context);
+    if (root === "plans") validatePlanRecord(record, context, records, catalog, evidence);
     else if (root === "evidence") await validateEvidenceRecord(record, context, activeRoot);
     else if (root === "attachments") validateAttachmentRecord(record, context);
     else if (root === "observations") validateObservationRecord(record, context);
@@ -707,6 +840,7 @@ async function validateRoot(root, records, context, activeRoot, generation) {
   if (root === "domain-overlays") validateDomainOverlayClosure(records);
   if (root === "audit") await validateDomainAuditClosure(records, context, activeRoot);
   if (root === "prices") validatePriceRepositoryClosure(records, context);
+  if (root === "plans") validatePlanRepositoryClosure(records);
 }
 
 function genericSnapshot(root, records, context) {

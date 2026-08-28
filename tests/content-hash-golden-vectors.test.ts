@@ -42,6 +42,11 @@ describe("hash-spec-v1 golden vectors", () => {
     expect(Object.isFrozen(HASH_CANONICALIZATION_POLICIES["config-v3-v1"].setPaths)).toBe(true);
     expect(Object.isFrozen(HASH_DOMAIN_REGISTRY)).toBe(true);
     expect(Object.isFrozen(HASH_DOMAIN_REGISTRY["build-config@3.0.0"])).toBe(true);
+    expect(HASH_DOMAIN_REGISTRY["spatial-topology@1.0.0"]).toEqual({
+      domain: "spatial-topology",
+      schemaVersion: "1.0.0",
+      canonicalizationPolicyId: "canonical-json-v1",
+    });
     expect(browserHash.hashContent).toBe(nodeHash.hashContent);
     expect(HASH_DOMAIN_REGISTRY["fact-snapshot@1.0.0"].canonicalizationPolicyId).toBe("fact-snapshot-v1");
     expect(HASH_DOMAIN_REGISTRY["user-observation-snapshot@1.0.0"].canonicalizationPolicyId).toBe("observation-snapshot-v1");

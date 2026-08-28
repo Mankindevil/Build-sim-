@@ -15,7 +15,6 @@ const navigation: Record<WorkspaceRoute, { step: string; label: string; hint: st
 };
 
 function statusLabel(state: PlanStoreState): string {
-  if (state.activePlan?.metadata.initialization?.status === "pending") return "先告诉助手你的用途和预算";
   if (state.saveStatus === "offline") return "离线使用 · 修改仅保存在此设备";
   if (state.saveStatus === "saving") return "正在自动保存…";
   if (state.saveStatus === "saved") return state.activePlan?.draft.dirty ? "修改已自动保存" : "已保存";
@@ -51,7 +50,7 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
         <h2 id="new-plan-title">新建方案</h2>
         <p>默认从空白开始，部件可以一件一件加入；模板只是明确的可选起点。</p>
         <button type="button" data-new-blank-plan><strong>创建空白方案</strong><span>不预选任何部件，逐件选择或让 Agent 提议</span></button>
-        <button type="button" data-new-agent-plan><strong>使用 Agent 初始化</strong><span>先收集预算与用途，完整提案经你批准后才写入草稿</span></button>
+        <button type="button" data-new-agent-plan><strong>让 Agent 渐进补全</strong><span>仍从真空白开始，每轮只提议你明确说到的需求或部件</span></button>
         <button type="button" data-new-template-plan><strong>使用 N6 模板</strong><span>立即创建现有默认配置</span></button>
         <button type="submit">取消</button>
       </form>
@@ -64,7 +63,7 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
     const options = state.plans.map((plan) => {
       const option = document.createElement("option");
       option.value = plan.id;
-      option.textContent = `${plan.name}${plan.initializationStatus === "pending" ? "（待初始化）" : ""}${plan.status === "archived" ? "（已归档）" : ""}`;
+      option.textContent = `${plan.name}${plan.status === "archived" ? "（已归档）" : ""}`;
       return option;
     });
     switcher.replaceChildren(...options);
@@ -75,7 +74,7 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
     const status = shell.querySelector<HTMLElement>("[data-save-status]")!;
     status.textContent = statusLabel(state);
     status.dataset.status = state.saveStatus;
-    shell.querySelector<HTMLButtonElement>("[data-save-version]")!.disabled = state.activePlan?.metadata.initialization?.status === "pending";
+    shell.querySelector<HTMLButtonElement>("[data-save-version]")!.disabled = !state.activePlan;
     error.hidden = !state.error;
     error.textContent = state.error ?? "";
   };
@@ -110,7 +109,7 @@ export function mountPlanShell(root: HTMLElement, store: PlanStore, router = new
   shell.querySelector<HTMLButtonElement>("[data-new-agent-plan]")!.addEventListener("click", () => {
     const timestamp = new Date().toISOString();
     const scaffold = createAgentInitializationScaffold("new-plan", timestamp);
-    void store.create("待 Agent 初始化方案", scaffold.config, scaffold.metadata).then(() => {
+    void store.create("Agent 渐进方案", scaffold.config, scaffold.metadata).then(() => {
       dialog.close?.();
       dialog.removeAttribute("open");
       router.navigate("agent");

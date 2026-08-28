@@ -10,6 +10,7 @@ import type {
   ProviderAdapter,
   AgentWriteApprovalEnvelope,
 } from "./contracts";
+import { agentRunIdForIdempotency } from "./run-identity";
 import { AGENT_CONTRACT_VERSION } from "./contracts";
 import type { AgentSessionStore } from "./session-store";
 import type { AgentToolRegistry } from "./tool-registry";
@@ -312,9 +313,7 @@ export class AgentRuntime {
       skillId: input.skillId ?? null,
       approvals: input.approvals ?? [],
     });
-    const runId = input.idempotencyKey
-      ? `run-${createHash("sha256").update(`${sessionId}\0${input.idempotencyKey}`, "utf8").digest("hex").slice(0, 32)}`
-      : this.id("run");
+    const runId = input.idempotencyKey ? agentRunIdForIdempotency(sessionId, input.idempotencyKey) : this.id("run");
     const jobIdempotencyKey = `agent-run:${runId}`;
     if (durable && input.idempotencyKey) {
       const jobId = `job-${createHash("sha256").update(jobIdempotencyKey.normalize("NFC"), "utf8").digest("hex")}`;

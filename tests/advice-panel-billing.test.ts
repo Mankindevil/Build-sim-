@@ -1,8 +1,20 @@
+// @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { renderBillingHtml } from "../src/lab/advice-panel";
+import { initAdvicePanel, renderBillingHtml } from "../src/lab/advice-panel";
 import type { AdviceBillingSummary } from "../src/advice/types";
 
 describe("DeepSeek billing panel", () => {
+  it("keeps V3 partial plans unknown instead of invoking legacy advice input", () => {
+    document.body.innerHTML = `
+      <button id="advice-generate"></button>
+      <div id="advice-status"></div>
+      <div id="advice-deterministic"></div>
+      <div id="advice-output"></div>`;
+    initAdvicePanel({ getInput: () => null });
+    expect(document.querySelector("#advice-deterministic")?.textContent).toContain("保持 unknown");
+    expect(document.querySelector("#advice-deterministic")?.textContent).not.toContain("确定性引擎判定");
+  });
+
   it("renders pricing band, cache split, per-call cost, reasoning tokens and provenance", () => {
     const totals = { schemaVersion: "1.1.0", pricingVersion: "deepseek-pricing-cn-tiered-2026-08-24", pricingHash: "a".repeat(64), pricingSourceUrl: "https://api-docs.deepseek.com/zh-cn/quick_start/pricing", pricingTimeZone: "Asia/Shanghai", currency: "CNY", estimated: true, cacheServed: false, providerCalls: 1, pricedCalls: 1, unknownCostCalls: 0, promptTokens: 3_000, promptCacheHitTokens: 1_000, promptCacheMissTokens: 2_000, completionTokens: 500, reasoningTokens: 125, totalTokens: 3_500, estimatedCostCny: 0.0106 } as const;
     const summary = {

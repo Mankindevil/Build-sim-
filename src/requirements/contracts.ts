@@ -1,4 +1,5 @@
 import {
+  isMetricId,
   validateFacetPredicate,
   validateRequirementMetric,
   type GovernedFacetPredicate,
@@ -14,11 +15,6 @@ export type RequirementDraftField<T> =
   | { state: "deferred"; value?: never; source: RequirementDraftSource; confirmedByUser: boolean }
   | { state: "not_applicable"; value?: never; source: RequirementDraftSource; confirmedByUser: boolean };
 
-export interface RequirementMetric extends GovernedRequirementMetric {
-  /** Optional only for migration compatibility; absence is never treated as confirmation. */
-  readonly source?: "user" | "migration" | "agent_proposed";
-  readonly confirmedByUser?: boolean;
-}
 export type FacetPredicate = GovernedFacetPredicate;
 
 export interface RequirementBudget {
@@ -27,20 +23,102 @@ export interface RequirementBudget {
   reserveCny?: number;
 }
 
-export interface WorkloadRequirement {
+export type RequirementMetricSource = "user" | "migration" | "agent_proposed";
+export type RequirementFieldState = "answered" | "deferred" | "not_applicable";
+
+/**
+ * U0 files used the governed metric shape directly. U2 adds an explicit draft
+ * state while retaining the legacy shape; absent confirmation metadata never
+ * becomes solver authority.
+ */
+export type LegacyRequirementMetric = GovernedRequirementMetric & (
+  | { state?: never; source?: never; confirmedByUser?: never }
+  | { state?: never; source: RequirementMetricSource; confirmedByUser: boolean }
+);
+
+export interface AnsweredRequirementMetric extends GovernedRequirementMetric {
+  state: "answered";
+  source: RequirementMetricSource;
+  confirmedByUser: boolean;
+}
+
+export interface UnansweredRequirementMetric {
+  metricId: GovernedRequirementMetric["metricId"];
+  state: "deferred" | "not_applicable";
+  source: RequirementMetricSource;
+  confirmedByUser: boolean;
+}
+
+export type RequirementMetric =
+  | LegacyRequirementMetric
+  | AnsweredRequirementMetric
+  | UnansweredRequirementMetric;
+export type ActionableRequirementMetric = LegacyRequirementMetric | AnsweredRequirementMetric;
+
+interface WorkloadIdentity {
   workloadId: string;
-  name: string;
+  /** Present for stable nested selectors; unanswered workloads keep it empty. */
   metrics: RequirementMetric[];
+}
+
+export interface LegacyWorkloadRequirement extends WorkloadIdentity {
+  state?: never;
+  name: string;
   evidenceOrBenchmarkRefs?: string[];
 }
 
-export interface RequirementConstraint {
-  constraintId: string;
-  predicate: FacetPredicate;
-  strength: "hard" | "soft";
-  source: "user" | "migration" | "agent_proposed";
+export interface AnsweredWorkloadRequirement extends WorkloadIdentity {
+  state: "answered";
+  name: string;
+  evidenceOrBenchmarkRefs?: string[];
+  source: RequirementDraftSource;
   confirmedByUser: boolean;
 }
+
+export interface UnansweredWorkloadRequirement extends WorkloadIdentity {
+  metrics: [];
+  state: "deferred" | "not_applicable";
+  source: RequirementDraftSource;
+  confirmedByUser: boolean;
+}
+
+export type WorkloadRequirement =
+  | LegacyWorkloadRequirement
+  | AnsweredWorkloadRequirement
+  | UnansweredWorkloadRequirement;
+export type ActionableWorkloadRequirement = LegacyWorkloadRequirement | AnsweredWorkloadRequirement;
+
+interface ConstraintIdentity {
+  constraintId: string;
+}
+
+export interface LegacyRequirementConstraint extends ConstraintIdentity {
+  state?: never;
+  predicate: FacetPredicate;
+  strength: "hard" | "soft";
+  source: RequirementMetricSource;
+  confirmedByUser: boolean;
+}
+
+export interface AnsweredRequirementConstraint extends ConstraintIdentity {
+  state: "answered";
+  predicate: FacetPredicate;
+  strength: "hard" | "soft";
+  source: RequirementMetricSource;
+  confirmedByUser: boolean;
+}
+
+export interface UnansweredRequirementConstraint extends ConstraintIdentity {
+  state: "deferred" | "not_applicable";
+  source: RequirementMetricSource;
+  confirmedByUser: boolean;
+}
+
+export type RequirementConstraint =
+  | LegacyRequirementConstraint
+  | AnsweredRequirementConstraint
+  | UnansweredRequirementConstraint;
+export type ActionableRequirementConstraint = LegacyRequirementConstraint | AnsweredRequirementConstraint;
 
 /** Persisted user goals. Evaluator-created RequirementNode records never belong here. */
 export interface RequirementSpec {
@@ -167,6 +245,15 @@ function finiteNonNegative(value: unknown): boolean {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
+function canonicalNonEmptyId(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.normalize("NFC") : null;
+}
+
+function uniqueCanonicalStrings(value: readonly string[]): boolean {
+  const normalized = value.map((item) => item.normalize("NFC"));
+  return new Set(normalized).size === normalized.length;
+}
+
 export function validateRequirementDraftField<T>(
   value: unknown,
   validateAnsweredValue: (value: unknown) => value is T,
@@ -200,10 +287,22 @@ function validateBudget(value: unknown): value is RequirementBudget {
 
 function validateRequirementMetricContract(value: unknown): string[] {
   if (!isRecord(value)) return ["requirement metric must be an object"];
+  const state = value.state;
+  if (state === "deferred" || state === "not_applicable") {
+    const errors: string[] = [];
+    if (Object.keys(value).some((key) => !["metricId", "state", "source", "confirmedByUser"].includes(key))) {
+      errors.push(`${state} requirement metric must not contain an answered value`);
+    }
+    if (!isMetricId(value.metricId)) errors.push("metricId is not allowlisted");
+    if (value.source !== "user" && value.source !== "migration" && value.source !== "agent_proposed") errors.push("requirement metric source invalid");
+    if (typeof value.confirmedByUser !== "boolean") errors.push("requirement metric confirmedByUser must be boolean");
+    return errors;
+  }
+  if (state !== undefined && state !== "answered") return ["requirement metric state invalid"];
   const governed = Object.fromEntries(Object.entries(value).filter(([key]) => ["metricId", "operator", "value", "unitId", "priority", "benchmarkId", "benchmarkContext"].includes(key)));
   const errors = validateRequirementMetric(governed);
-  if (Object.keys(value).some((key) => !["metricId", "operator", "value", "unitId", "priority", "benchmarkId", "benchmarkContext", "source", "confirmedByUser"].includes(key))) errors.push("requirement metric contains unknown fields");
-  const hasConfirmationMetadata = "source" in value || "confirmedByUser" in value;
+  if (Object.keys(value).some((key) => !["metricId", "state", "operator", "value", "unitId", "priority", "benchmarkId", "benchmarkContext", "source", "confirmedByUser"].includes(key))) errors.push("requirement metric contains unknown fields");
+  const hasConfirmationMetadata = state === "answered" || "source" in value || "confirmedByUser" in value;
   if (hasConfirmationMetadata) {
     if (value.source !== "user" && value.source !== "migration" && value.source !== "agent_proposed") errors.push("requirement metric source invalid");
     if (typeof value.confirmedByUser !== "boolean") errors.push("requirement metric confirmedByUser must be boolean");
@@ -217,7 +316,7 @@ export function validateRequirementSpec(value: unknown): string[] {
   const errors: string[] = [];
   const allowedKeys = ["requirementSpecId", "schemaVersion", "budget", "workloads", "constraints", "horizonYears"];
   if (Object.keys(value).some((key) => !allowedKeys.includes(key))) errors.push("requirement spec contains derived or unknown fields");
-  if (typeof value.requirementSpecId !== "string" || value.requirementSpecId.length === 0) errors.push("requirementSpecId missing");
+  if (canonicalNonEmptyId(value.requirementSpecId) === null) errors.push("requirementSpecId missing");
   if (value.schemaVersion !== "1.0.0") errors.push("requirement spec schemaVersion invalid");
   if ("budget" in value) errors.push(...validateRequirementDraftField(value.budget, validateBudget).map((error) => `budget: ${error}`));
   if ("horizonYears" in value) {
@@ -232,9 +331,22 @@ export function validateRequirementSpec(value: unknown): string[] {
     const ids = new Set<string>();
     for (const [index, workload] of value.workloads.entries()) {
       if (!isRecord(workload)) { errors.push(`workloads.${index} must be an object`); continue; }
-      if (typeof workload.workloadId !== "string" || workload.workloadId.length === 0 || ids.has(workload.workloadId)) errors.push(`workloads.${index}.workloadId invalid or duplicate`);
-      else ids.add(workload.workloadId);
-      if (typeof workload.name !== "string" || workload.name.length === 0) errors.push(`workloads.${index}.name missing`);
+      const workloadId = canonicalNonEmptyId(workload.workloadId);
+      if (workloadId === null || ids.has(workloadId)) errors.push(`workloads.${index}.workloadId invalid or duplicate`);
+      else ids.add(workloadId);
+      if (workload.state === "deferred" || workload.state === "not_applicable") {
+        if (Object.keys(workload).some((key) => !["workloadId", "metrics", "state", "source", "confirmedByUser"].includes(key))
+          || !Array.isArray(workload.metrics) || workload.metrics.length !== 0) errors.push(`workloads.${index}.${workload.state} must not contain answered fields`);
+        if (!DRAFT_SOURCES.includes(workload.source as RequirementDraftSource)) errors.push(`workloads.${index}.source invalid`);
+        if (typeof workload.confirmedByUser !== "boolean") errors.push(`workloads.${index}.confirmedByUser must be boolean`);
+        continue;
+      }
+      if (workload.state !== undefined && workload.state !== "answered") {
+        errors.push(`workloads.${index}.state invalid`);
+        continue;
+      }
+      const canonicalDraft = workload.state === "answered";
+      if (typeof workload.name !== "string" || workload.name.trim().length === 0) errors.push(`workloads.${index}.name missing`);
       if (!Array.isArray(workload.metrics)) errors.push(`workloads.${index}.metrics must be an array`);
       else {
         const metricIds: string[] = [];
@@ -244,8 +356,17 @@ export function validateRequirementSpec(value: unknown): string[] {
         });
         if (new Set(metricIds).size !== metricIds.length) errors.push(`workloads.${index}.metricId must be unique for stable selection`);
       }
-      if (workload.evidenceOrBenchmarkRefs !== undefined && (!Array.isArray(workload.evidenceOrBenchmarkRefs) || workload.evidenceOrBenchmarkRefs.some((ref) => typeof ref !== "string" || ref.length === 0))) errors.push(`workloads.${index}.evidenceOrBenchmarkRefs invalid`);
-      if (Object.keys(workload).some((key) => !["workloadId", "name", "metrics", "evidenceOrBenchmarkRefs"].includes(key))) errors.push(`workloads.${index} contains unknown fields`);
+      if (workload.evidenceOrBenchmarkRefs !== undefined && (!Array.isArray(workload.evidenceOrBenchmarkRefs)
+        || workload.evidenceOrBenchmarkRefs.some((ref) => typeof ref !== "string" || ref.trim().length === 0)
+        || !uniqueCanonicalStrings(workload.evidenceOrBenchmarkRefs))) errors.push(`workloads.${index}.evidenceOrBenchmarkRefs invalid`);
+      if (canonicalDraft) {
+        if (!DRAFT_SOURCES.includes(workload.source as RequirementDraftSource)) errors.push(`workloads.${index}.source invalid`);
+        if (typeof workload.confirmedByUser !== "boolean") errors.push(`workloads.${index}.confirmedByUser must be boolean`);
+      }
+      const allowedWorkloadKeys = canonicalDraft
+        ? ["workloadId", "state", "name", "metrics", "evidenceOrBenchmarkRefs", "source", "confirmedByUser"]
+        : ["workloadId", "name", "metrics", "evidenceOrBenchmarkRefs"];
+      if (Object.keys(workload).some((key) => !allowedWorkloadKeys.includes(key))) errors.push(`workloads.${index} contains unknown fields`);
     }
   }
   if (!Array.isArray(value.constraints)) {
@@ -254,29 +375,88 @@ export function validateRequirementSpec(value: unknown): string[] {
     const ids = new Set<string>();
     for (const [index, constraint] of value.constraints.entries()) {
       if (!isRecord(constraint)) { errors.push(`constraints.${index} must be an object`); continue; }
-      if (typeof constraint.constraintId !== "string" || constraint.constraintId.length === 0 || ids.has(constraint.constraintId)) errors.push(`constraints.${index}.constraintId invalid or duplicate`);
-      else ids.add(constraint.constraintId);
+      const constraintId = canonicalNonEmptyId(constraint.constraintId);
+      if (constraintId === null || ids.has(constraintId)) errors.push(`constraints.${index}.constraintId invalid or duplicate`);
+      else ids.add(constraintId);
+      if (constraint.state === "deferred" || constraint.state === "not_applicable") {
+        if (Object.keys(constraint).some((key) => !["constraintId", "state", "source", "confirmedByUser"].includes(key))) errors.push(`constraints.${index}.${constraint.state} must not contain answered fields`);
+        if (constraint.source !== "user" && constraint.source !== "migration" && constraint.source !== "agent_proposed") errors.push(`constraints.${index}.source invalid`);
+        if (typeof constraint.confirmedByUser !== "boolean") errors.push(`constraints.${index}.confirmedByUser must be boolean`);
+        continue;
+      }
+      if (constraint.state !== undefined && constraint.state !== "answered") {
+        errors.push(`constraints.${index}.state invalid`);
+        continue;
+      }
       errors.push(...validateFacetPredicate(constraint.predicate).map((error) => `constraints.${index}.predicate: ${error}`));
       if (constraint.strength !== "hard" && constraint.strength !== "soft") errors.push(`constraints.${index}.strength invalid`);
       if (constraint.source !== "user" && constraint.source !== "migration" && constraint.source !== "agent_proposed") errors.push(`constraints.${index}.source invalid`);
       if (typeof constraint.confirmedByUser !== "boolean") errors.push(`constraints.${index}.confirmedByUser must be boolean`);
-      if (Object.keys(constraint).some((key) => !["constraintId", "predicate", "strength", "source", "confirmedByUser"].includes(key))) errors.push(`constraints.${index} contains unknown fields`);
+      const allowedConstraintKeys = constraint.state === "answered"
+        ? ["constraintId", "state", "predicate", "strength", "source", "confirmedByUser"]
+        : ["constraintId", "predicate", "strength", "source", "confirmedByUser"];
+      if (Object.keys(constraint).some((key) => !allowedConstraintKeys.includes(key))) errors.push(`constraints.${index} contains unknown fields`);
     }
   }
   return errors;
 }
 
-/** Every hard constraint remains a persisted draft until the user explicitly confirms it. */
-export function solverActiveConstraints(spec: RequirementSpec): RequirementConstraint[] {
-  return spec.constraints.filter((constraint) => constraint.strength === "hard"
-    ? constraint.confirmedByUser === true
-    : true);
+export function isActionableRequirementMetric(metric: RequirementMetric): metric is ActionableRequirementMetric {
+  return metric.state === undefined || metric.state === "answered";
 }
 
-export function solverHardMetrics(spec: RequirementSpec): Array<{ workloadId: string; metric: RequirementMetric }> {
-  return spec.workloads.flatMap((workload) => workload.metrics
-    .filter((metric) => metric.priority === "must" && metric.confirmedByUser === true)
-    .map((metric) => ({ workloadId: workload.workloadId, metric })));
+export function isActionableWorkloadRequirement(workload: WorkloadRequirement): workload is ActionableWorkloadRequirement {
+  return workload.state === undefined || workload.state === "answered";
+}
+
+export function isActionableRequirementConstraint(constraint: RequirementConstraint): constraint is ActionableRequirementConstraint {
+  return constraint.state === undefined || constraint.state === "answered";
+}
+
+/** Safe projection for budget, horizon and any future top-level draft field. */
+export function solverAnsweredDraftValue<T>(field: RequirementDraftField<T> | undefined): T | null {
+  return field?.state === "answered" && field.confirmedByUser === true ? field.value : null;
+}
+
+/** Hard and soft constraints are solver inputs only after explicit user confirmation. */
+export function solverActiveConstraints(spec: RequirementSpec): ActionableRequirementConstraint[] {
+  return spec.constraints
+    .filter(isActionableRequirementConstraint)
+    .filter((constraint) => constraint.confirmedByUser === true);
+}
+
+export interface ActiveRequirementMetric {
+  workloadId: string;
+  metric: ActionableRequirementMetric;
+  strength: "hard" | "soft";
+}
+
+/** Deferred/not-applicable and unconfirmed metric proposals never reach the solver. */
+export function solverActiveMetrics(spec: RequirementSpec): ActiveRequirementMetric[] {
+  return spec.workloads.flatMap((workload) => {
+    if (!isActionableWorkloadRequirement(workload)) return [];
+    if (workload.state === "answered" && workload.confirmedByUser !== true) return [];
+    return workload.metrics
+      .filter(isActionableRequirementMetric)
+      .filter((metric) => metric.confirmedByUser === true)
+      .map((metric) => ({
+        workloadId: workload.workloadId,
+        metric,
+        strength: metric.priority === "must" ? "hard" as const : "soft" as const,
+      }));
+  });
+}
+
+export function solverHardMetrics(spec: RequirementSpec): Array<{ workloadId: string; metric: ActionableRequirementMetric }> {
+  return solverActiveMetrics(spec)
+    .filter((item) => item.strength === "hard")
+    .map(({ workloadId, metric }) => ({ workloadId, metric }));
+}
+
+export function solverSoftMetrics(spec: RequirementSpec): Array<{ workloadId: string; metric: ActionableRequirementMetric }> {
+  return solverActiveMetrics(spec)
+    .filter((item) => item.strength === "soft")
+    .map(({ workloadId, metric }) => ({ workloadId, metric }));
 }
 
 function allocationKey(value: Pick<RequirementAllocation, "source" | "refId" | "ownerInstanceId">): string {
