@@ -16,7 +16,7 @@
 - [Agent 官网目录补齐 Follow Plan](./2026-08-24-agent-official-catalog-enrichment-follow-plan.md)
 - [方案全生命周期平台重设计 Follow Plan](./2026-08-25-build-sim-plan-lifecycle-platform-redesign-follow-plan.md)
 
-本文件是一份可以由后续 Agent 或开发者逐项 follow、逐阶段测试、逐阶段回滚的实施计划。它描述的是目标和待完成工作，不代表这些能力已经上线。
+本文件是一份可以由后续 Agent 或开发者逐项 follow、逐阶段测试、逐阶段回滚的实施计划。总体章节描述目标和待完成工作；已完成阶段以看板、任务 checkbox、退出门禁和执行记录共同保存权威实施证据。
 
 本计划不继续把 JONSBO N6 当作产品边界。N6 只保留为第一套回归夹具和第一份完整 case adapter；所有新核心模块都必须面向普通 PC、工作站、NAS 以及后续未预置机箱。
 
@@ -1278,8 +1278,8 @@ U0 → U1 → U2 → U3 → ┬→ U4 ─┐
 |---|---|---|---|
 | U0 | 已完成 | 无 | 冻结全部首发契约、基线、通用/故障黄金夹具和 feature flags |
 | U1 | 已完成 | U0 | runtime repositories、附件/观察、durable jobs、备份 SPI 和 Doctor 骨架 |
-| U2 | 未开始 | U1 | BuildConfig V3、需求、情景、逻辑布局、渐进档案和 V2 迁移 |
-| U3 | 未开始 | U2 | Fact/Claim 与用户观察图、身份 scope、冲突、更新决定和快照 |
+| U2 | 已完成 | U1 | BuildConfig V3、需求、情景、逻辑布局、渐进档案和 V2 迁移 |
+| U3 | 进行中 | U2 | Fact/Claim 与用户观察图、身份 scope、冲突、更新决定和快照 |
 | U4 | 未开始 | U3 | 官网 → 第三方 → Agent 推断、附件提取和持久任务闭环 |
 | U5 | 未开始 | U3 | 通用 capabilities、随盒清单、标准库和 adapter registry |
 | U6 | 未开始 | U4、U5 | 渐进兼容、附件完整性、可启动性、可行性求解和 what-if |
@@ -1538,36 +1538,50 @@ U1。
 
 用实例、安装位和连接边替换固定 `selection`，同时把用户需求、NAS 逻辑布局、firmware 目标和不可变情景纳入渐进档案，让零硬件需求、重复型号和部分方案都可保存、版本化和提案。
 
+### 已实现边界
+
+以下事实来自已通过门禁的 U2 实现与对应验证：
+
+- `src/topology/contracts.ts`、`validation.ts`、`normalize.ts`、`hash.ts` 和 `projections.ts` 已提供 V3 输入合同、严格纯校验、NFC/数值/集合规范化、`build-config@3.0.0` 域 hash、`spatial-topology@1.0.0` 域 hash 与逐实例 BOM projection。校验拒绝未知/派生字段、悬空引用、重复槽位/磁盘/线材、非法布局和 firmware 值；空间 hash 只消费物理 topology projection。
+- `FilePlanRepository` 已按 `BUILD_SIM_TOPOLOGY_V3_ENABLED` 控制 V3 创建/编辑；V2 保持原 reader/hash。显式 `migrateDraftToV3` 在首次 V3 编辑路径保留不可变 V2 migration-source、源字节 hash、diff/warnings/rollbackRef 和迁移规则消费的内容寻址 catalog 投影，并在读写及备份/恢复闭包校验；flag-off 的 `v3ReadFallback: "migration_source"` 仅提供只读 V2 视图，不能回写 V3。
+- V2 迁移只映射可证明的旧字段：重复 disk 展开实例，缺 SKU 的 NVMe 与 fan group 保留 unresolved，`gpu.none` 变为 `RoleDecision(not_needed)`，`owned` 变为 `ordered`，其余采购 bucket 变为 `planned`；不会补 980 PRO、HBA、线材、需求、BIOS、系统、NAS layout、附件、工具或观察。
+- `RequirementSpec` 已支持 budget/workload/constraint/horizon 独立保存，以及 answered/deferred/not_applicable、source 和确认状态。`config.requirementBudget`、`config.requirementHorizonYears`、按 workload/metric/constraint 稳定 ID 的 patch selector 可做渐进编辑；solver-facing projection 只暴露用户确认的 active fields，未确认 Agent hard constraint 不生效。
+- `FileScenarioRepository` 已持久化 `ScenarioFamily`、`ScenarioBranch` 及内容寻址 snapshot-set manifest。建族、建分支和 materialize 均绑定 exact base version/config/snapshot hashes；base 改变返回 stale，不自动 rebase；resolved SKU 必须由 active merged catalog 证明；actor authority 约束 user/agent/solver/system provenance，且 production scanner/backup/Doctor 检查 family→snapshot-set、branch→family/base、materialized hash 与 catalog/拓扑 closure。
+- 普通空白 Agent proposal 与渐进 proposal 使用同一 V3 stable-selector/审批路径：可先只保存需求、随后只追加本轮明确识别的部件/边；unresolved 原话保持不变，Agent 不自动填充未提及部件或升级用户 hard constraint。
+- `WhatIfResult` 目前只有结构校验；`saveResult` 以及已存在的 result/evaluation authority 读取在 U2 均返回 `evaluation_authority_unavailable`，生产扫描拒绝相应路径。必须等 U6 提供权威、可重放 evaluator/verifier 后，才能持久化 before/after 评估结果；当前分支 materialization 不等于评估已执行。
+
+已知边界：U2 具备拓扑/需求/情景输入及仓储完整性闭包，但尚未声称全量 compatibility、thermal、procedure 或 what-if evaluator 已经权威可重放；scenario 的 simulation-input allowlist 也不替代仿真执行。上述边界是后续 U6/U7-U12 的依赖，不应通过扩大 U2 文档表述来提前关闭。
+
 ### 任务
 
-- [ ] 新增 `src/topology/contracts.ts`、`validation.ts`、`normalize.ts` 和 `hash.ts`；派生 requirement 实现放在独立 `src/requirements/`，不得成为 config 字段。
-- [ ] 实现 `BuildConfigV3`、`ComponentInstance`、`RoleDecision`、`PlacementEdge`、`ConnectionEdge`、`RequirementSpec`、`LogicalLayoutSelection`、`FirmwareTarget` 和 `SystemSelection`；当前 observation/派生结论不得进入这些持久输入类型。
-- [ ] 需求允许逐字段保存并区分 hard/soft、must/important/nice-to-have、用户已确认/尚未回答；预算、工作负载、容量、吞吐、噪音、体积和周期均可在零硬件时存在。
-- [ ] 建立可治理的 `component kind registry`，首批覆盖本计划范围内全部内部硬件。
-- [ ] 每个重复部件展开为独立稳定 instance ID。
-- [ ] 允许 identity unresolved 节点保存用户原话和候选。
-- [ ] 真实 component instance 状态严格限制为 `planned/ordered`，默认 planned；`not_needed` 只存 `RoleDecision`。
-- [ ] 真空白档案不创建默认 Windows 硬件节点、GPU none 节点或任何隐式用户需求；用户随后可以只添加需求而保持零硬件。
-- [ ] `not_needed` 作为用户明确的角色排除表达，不使用假 SKU `gpu.none`，不创建 component instance，也不伪装成派生 `RequirementNode`。
-- [ ] BOM 改为 topology projection；删除 profile default 注入。
-- [ ] NAS 物理盘保留独立实例；pool/vdev/mirror/RAIDZ 使用逻辑布局节点/边，同一物理盘不能同时进入互斥活动 vdev。
-- [ ] 附件/observation 存在方案域 repository，config 不内嵌 blob、提取正文或当前观察值；当前 BIOS 来自 observation snapshot，目标版本/设置来自 `firmwareTargets`。
-- [ ] 建立独立 `ScenarioRepository`，实现 `ScenarioFamily/ScenarioBranch/WhatIfResult`：分支以父 plan version + 固定 snapshots + allowlisted patch 表达，不进入 config；接受后才生成普通 plan proposal。
-- [ ] 修改 plan proposal allowlist，使 Agent 能按 instance/edge 做增量 proposal。
-- [ ] pending Agent plan 与普通空白 plan 统一，取消必须一次完整初始化的特例。
-- [ ] 每轮自然语言输入只提案明确识别的节点、状态、角色、连接和用户需求，不自动填满其余硬件或把 Agent 猜测升级成用户 hard constraint。
-- [ ] 增加 canonical ordering，确保相同语义产生稳定 config hash。
-- [ ] 增加 V2 → V3 迁移：
-  - [ ] case/board/cpu/psu/cooler/gpu/memory 转独立实例；
-  - [ ] `diskSkuId + diskCount` 展开实例；
-  - [ ] `nvmeCount` 无 SKU 时生成未解析 NVMe，不得生成 980 PRO；
-  - [ ] `gpu.none` 转 GPU role 的 `RoleDecision(not_needed)`，GPU instance 数仍为 0；
-  - [ ] fan groups 生成未解析风扇需求；
-  - [ ] `owned → ordered` 并记录 migration note；
-  - [ ] 其他采购 bucket → planned；
-  - [ ] 不猜测 workload、预算、BIOS 当前/目标版本、NAS pool/vdev、随盒附件、工具可用性、用户观察或首次启动状态；
-  - [ ] 旧版本文件保持不可变；首次编辑时创建 v3 draft。
-- [ ] 导出迁移前后 diff、warnings 和 rollback reference。
+- [x] 新增 `src/topology/contracts.ts`、`validation.ts`、`normalize.ts` 和 `hash.ts`；派生 requirement 实现放在独立 `src/requirements/`，不得成为 config 字段。
+- [x] 实现 `BuildConfigV3`、`ComponentInstance`、`RoleDecision`、`PlacementEdge`、`ConnectionEdge`、`RequirementSpec`、`LogicalLayoutSelection`、`FirmwareTarget` 和 `SystemSelection`；当前 observation/派生结论不得进入这些持久输入类型。
+- [x] 需求允许逐字段保存并区分 hard/soft、must/important/nice-to-have、用户已确认/尚未回答；预算、工作负载、容量、吞吐、噪音、体积和周期均可在零硬件时存在。
+- [x] 建立可治理的 `component kind registry`，首批覆盖本计划范围内全部内部硬件。
+- [x] 每个重复部件展开为独立稳定 instance ID。
+- [x] 允许 identity unresolved 节点保存用户原话和候选。
+- [x] 真实 component instance 状态严格限制为 `planned/ordered`，默认 planned；`not_needed` 只存 `RoleDecision`。
+- [x] 真空白档案不创建默认 Windows 硬件节点、GPU none 节点或任何隐式用户需求；用户随后可以只添加需求而保持零硬件。
+- [x] `not_needed` 作为用户明确的角色排除表达，不使用假 SKU `gpu.none`，不创建 component instance，也不伪装成派生 `RequirementNode`。
+- [x] BOM 改为 topology projection；删除 profile default 注入。
+- [x] NAS 物理盘保留独立实例；pool/vdev/mirror/RAIDZ 使用逻辑布局节点/边，同一物理盘不能同时进入互斥活动 vdev。
+- [x] 附件/observation 存在方案域 repository，config 不内嵌 blob、提取正文或当前观察值；当前 BIOS 来自 observation snapshot，目标版本/设置来自 `firmwareTargets`。
+- [x] 建立独立 `ScenarioRepository`，实现 `ScenarioFamily/ScenarioBranch/WhatIfResult`：分支以父 plan version + 固定 snapshots + allowlisted patch 表达，不进入 config；接受后才生成普通 plan proposal。
+- [x] 修改 plan proposal allowlist，使 Agent 能按 instance/edge 做增量 proposal。
+- [x] pending Agent plan 与普通空白 plan 统一，取消必须一次完整初始化的特例。
+- [x] 每轮自然语言输入只提案明确识别的节点、状态、角色、连接和用户需求，不自动填满其余硬件或把 Agent 猜测升级成用户 hard constraint。
+- [x] 增加 canonical ordering，确保相同语义产生稳定 config hash。
+- [x] 增加 V2 → V3 迁移：
+  - [x] case/board/cpu/psu/cooler/gpu/memory 转独立实例；
+  - [x] `diskSkuId + diskCount` 展开实例；
+  - [x] `nvmeCount` 无 SKU 时生成未解析 NVMe，不得生成 980 PRO；
+  - [x] `gpu.none` 转 GPU role 的 `RoleDecision(not_needed)`，GPU instance 数仍为 0；
+  - [x] fan groups 生成未解析风扇需求；
+  - [x] `owned → ordered` 并记录 migration note；
+  - [x] 其他采购 bucket → planned；
+  - [x] 不猜测 workload、预算、BIOS 当前/目标版本、NAS pool/vdev、随盒附件、工具可用性、用户观察或首次启动状态；
+  - [x] 旧版本文件保持不可变；首次编辑时创建 v3 draft。
+- [x] 导出迁移前后 diff、warnings 和 rollback reference。
 
 ### 主要文件
 
@@ -1589,21 +1603,21 @@ U1。
 ### 聚焦验证
 
 ```bash
-npx vitest run tests/plan-contracts.test.ts tests/plan-migration.test.ts tests/agent-plan-proposal.test.ts tests/capability-config.test.ts tests/topology-v3.test.ts tests/topology-user-requirements.test.ts tests/topology-role-decision.test.ts tests/topology-logical-layout.test.ts tests/what-if-plan-isolation.test.ts tests/scenario-hash-isolation.test.ts tests/config-v3-migration.test.ts
+npx vitest run tests/plan-contracts.test.ts tests/plan-migration.test.ts tests/agent-plan-proposal.test.ts tests/capability-config.test.ts tests/topology-v3.test.ts tests/topology-user-requirements.test.ts tests/topology-role-decision.test.ts tests/topology-logical-layout.test.ts tests/what-if-plan-isolation.test.ts tests/scenario-hash-isolation.test.ts tests/config-v3-migration.test.ts tests/plan-v3-persistence.test.ts tests/plan-v3-proposal.test.ts tests/plan-v3-runtime-hash.test.ts tests/scenario-patch-application.test.ts tests/scenario-production-runtime.test.ts tests/agent-topology-incremental.test.ts
 ```
 
 ### 退出门禁
 
-- [ ] 两块相同 SSD 可有不同槽位、角色和状态。
-- [ ] 多 GPU、NIC、HBA、不同硬盘和多个 DIMM 可同时表达。
-- [ ] 未识别型号可保存并继续版本化。
-- [ ] 空白和部分方案都没有隐式部件或 BOM。
-- [ ] Agent 连续多轮增量提案不会覆盖前一轮事实，也不会补造未提到部件。
-- [ ] V2 N6 迁移不新增 Samsung SSD、Exos、HBA 或线材。
-- [ ] 旧版本可只读复现；v3 新版本可回滚。
-- [ ] 用户可只保存需求而不选择任何硬件；派生 requirement 在 config 中的数量恒为 0。
-- [ ] what-if 完成后活动 config/version hash 不变，stale base snapshot 会被拒绝。
-- [ ] 相同 topology 的不同 scenario metadata 产生相同 config/spatial hash；无独显方案为 0 个 GPU instance + 1 条显式 role decision，真空白两者均为 0。
+- [x] 两块相同 SSD 可有不同槽位、角色和状态。
+- [x] 多 GPU、NIC、HBA、不同硬盘和多个 DIMM 可同时表达。
+- [x] 未识别型号可保存并继续版本化。
+- [x] 空白和部分方案都没有隐式部件或 BOM。
+- [x] Agent 连续多轮增量提案不会覆盖前一轮事实，也不会补造未提到部件。
+- [x] V2 N6 迁移不新增 Samsung SSD、Exos、HBA 或线材。
+- [x] 旧版本可只读复现；v3 新版本可回滚。
+- [x] 用户可只保存需求而不选择任何硬件；派生 requirement 在 config 中的数量恒为 0。
+- [x] what-if 完成后活动 config/version hash 不变，stale base snapshot 会被拒绝。
+- [x] 相同 topology 的不同 scenario metadata 产生相同 config/spatial hash；无独显方案为 0 个 GPU instance + 1 条显式 role decision，真空白两者均为 0。
 
 ### 回滚
 
@@ -1613,6 +1627,20 @@ npx vitest run tests/plan-contracts.test.ts tests/plan-migration.test.ts tests/a
 
 - `refactor(topology): add v3 component instance graph`
 - `feat(requirements): add progressive requirements and scenario branches`
+
+### U2 执行记录（2026-08-28）
+
+- 状态：已完成；独立 false-green 复审最终结论为 GO，0 P0/P1。
+- 提交：实现提交 `087b3af3f8bac75d50055173848f86cd8ac585d9`；执行记录随后独立提交；push 目标为 `origin/codex/complete-universal-hardware-platform`。
+- 主要变更：已落地 strict/total BuildConfig V3、实例 topology/BOM/spatial domain hash、渐进 RequirementSpec 与确认边界、稳定 selector proposal、不可变 Scenario family/branch/snapshot-set、V2 lazy migration/flag rollback、V3 partial evaluation/Agent context 和 V3 fail-closed UI/export。
+- 数据迁移：测试中完成 V2 dry-run/显式首次编辑迁移、不可变 migration-source、source-byte hash、diff/warnings、rollbackRef 和 flag-off 只读回退；迁移目录规则绑定到内容寻址的窄投影，活动目录改变不破坏健康历史，篡改绑定/迁移组件或新增非法 resolved SKU 会使 graph、backup、Doctor、verify、restore 全部失败。真实 runtime 未在 U2 迁移或切换 pointer。
+- 聚焦测试：权威 U2 扩展命令 24 files / 141 tests 通过；独立终审的 migration/Plan/production 子集 3 files / 27 tests 和隔离攻击脚本 1/1 通过；历史目录 A→B、state drift、lineage、idempotency、stale base、catalog/actor/evidence/restore 注入均已覆盖。
+- 全量测试：160 files / 985 tests；managed sandbox 为 159 files / 983 tests 通过，唯一失败文件的 2 项均为 `listen EPERM 127.0.0.1`，同一文件获准隔离回环重跑 2/2 通过；`npm run typecheck`、`npm run build`、`git diff --check` 均通过。
+- 浏览器测试：`npm run test:agent-initialization:browser` 在随机隔离回环环境通过；覆盖真空白、两轮渐进提案、选择性需求确认、未提及 GPU 不落盘、unresolved 8TB 磁盘、reload 后 plan/revision/domain hash/V3 partial evaluation/Agent context 一致。
+- 安全检查：`npm run agent:secret-scan` 扫描 538 files、0 findings；未访问或输出真实 `.env.remote` 值，未触碰现有 5174–5176 服务和真实 runtime。
+- live smoke：仅运行本地确定性 Price/Workspace/Agent/Chromium 组合；U2 未调用外部 provider，因此不声称公网目录、价格或模型服务健康。
+- 未解决限制：WhatIfResult 持久评估权威在 U2 明确 fail-closed，等待 U6 的可重放 evaluator/verifier；场景身份在 U3 fact snapshot 落地前仍以活动目录做 freshness 检查并在漂移时安全拒绝；客户端主 bundle 保留现有大 chunk warning。
+- 下一阶段前置条件：已满足；进入 U3 后必须先让 field registry 派生 fact safety/source/unit/scope，不能继续接受调用方自报安全级别。
 
 ---
 
