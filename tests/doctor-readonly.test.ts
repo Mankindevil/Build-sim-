@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -86,6 +86,32 @@ describe("U1 read-only Doctor", () => {
     expect(result.report.checks.find((check: { checkId: string }) => check.checkId === "integrity.reference_closure")).toMatchObject({ status: "fail", severity: "blocking" });
     expect(result.report.checks.find((check: { checkId: string }) => check.checkId === "jobs.stuck_lease")).toMatchObject({ status: "fail", severity: "blocking" });
     expect(await readFile(blob, "utf8")).toBe(before);
+  });
+
+  it("returns a complete blocking report instead of throwing when a runtime path is unreadable", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "buildsim-doctor-unreadable-")); roots.push(root);
+    const coordinator = new RuntimeCoordinator({ root });
+    const state = await coordinator.initialize("test");
+    const unreadable = path.join(coordinator.activeRoot(state), "unreadable-authority");
+    await mkdir(unreadable, { mode: 0o700 });
+    await writeFile(path.join(unreadable, "record.json"), "{}\n", { mode: 0o600 });
+    await chmod(unreadable, 0o000);
+    let result;
+    try {
+      result = await runDoctor({ coordinator, strict: true, offline: true, now: () => "2026-08-27T00:00:00.000Z" });
+    } finally {
+      await chmod(unreadable, 0o700);
+    }
+    expect(result.report.overall).toBe("unhealthy");
+    for (const checkId of [
+      "runtime.permissions", "integrity.repository_hashes", "integrity.reference_closure",
+      "migration.pending", "jobs.stuck_lease", "jobs.dead_letter", "backup.recent_verified", "security.log_redaction",
+    ]) {
+      expect(result.report.checks.find((check: { checkId: string }) => check.checkId === checkId), checkId)
+        .toMatchObject({ status: "fail", severity: "blocking" });
+    }
+    expect(result.exitCode).toBe(2);
+    expect(JSON.stringify(result.report)).not.toContain(unreadable);
   });
 
   it("fails closed when the revision changes during an optimistic read-only snapshot", async () => {

@@ -75,6 +75,7 @@ export async function runDoctor(options) {
   let activeRoot;
   let productionGraph;
   let productionGraphError = false;
+  let runtimeTraversalError = false;
   try {
     const captured = await coordinator.withReadOnlySnapshot(async ({ state: snapshotState, activeRoot: snapshotRoot }) => ({
       activeRoot: snapshotRoot,
@@ -92,13 +93,18 @@ export async function runDoctor(options) {
 
   const permission = await (async () => {
     if (!activeRoot) return status("fail", "Runtime pointer is unavailable or corrupt.", { pointerReadable: false }, { repairable: true, remediation: "Review the runtime pointer using an approved repair plan." });
-    const files = await listRegularFiles(coordinator.root);
-    const regular = files.filter((file) => !file.symlink);
-    const targets = new Set([coordinator.root, coordinator.controlRoot, activeRoot, ...regular.map((file) => file.absolutePath), ...regular.map((file) => path.dirname(file.absolutePath))]);
-    const modes = await Promise.all([...targets].map(async (target) => (await stat(target)).mode & 0o777));
-    const safe = modes.every((mode) => (mode & 0o077) === 0);
-    return safe ? status("pass", "Runtime directories use private permissions.", { private: true })
-      : status("fail", "Runtime permissions are broader than allowed.", { private: false }, { repairable: true, remediation: "Restrict permissions after an approved backup and repair plan." });
+    try {
+      const files = await listRegularFiles(coordinator.root);
+      const regular = files.filter((file) => !file.symlink);
+      const targets = new Set([coordinator.root, coordinator.controlRoot, activeRoot, ...regular.map((file) => file.absolutePath), ...regular.map((file) => path.dirname(file.absolutePath))]);
+      const modes = await Promise.all([...targets].map(async (target) => (await stat(target)).mode & 0o777));
+      const safe = modes.every((mode) => (mode & 0o077) === 0);
+      return safe ? status("pass", "Runtime directories use private permissions.", { private: true, readable: true })
+        : status("fail", "Runtime permissions are broader than allowed.", { private: false, readable: true }, { repairable: true, remediation: "Restrict permissions after an approved backup and repair plan." });
+    } catch {
+      runtimeTraversalError = true;
+      return status("fail", "Runtime permissions prevent a complete read-only inspection.", { private: null, readable: false }, { repairable: true, remediation: "Restore runtime ownership and private read access after an approved backup and repair plan." });
+    }
   })();
 
   const freeSpace = await (async () => {
@@ -111,7 +117,11 @@ export async function runDoctor(options) {
     } catch { return status("fail", "Runtime free space could not be measured.", { measurable: false }); }
   })();
 
-  const records = activeRoot ? await findJsonRecords(activeRoot) : [];
+  let records = [];
+  if (activeRoot) {
+    try { records = await findJsonRecords(activeRoot); }
+    catch { runtimeTraversalError = true; }
+  }
   let controlMigrationInvalid = false;
   let controlMigrationPending = false;
   if (activeRoot) {
@@ -260,7 +270,7 @@ export async function runDoctor(options) {
 
   let repositoryHashes = await (async () => {
     if (!activeRoot) return status("fail", "Repository integrity cannot be checked without an active runtime.", { active: false });
-    if (invalidRuntimeRecords || productionGraphError || controlMigrationInvalid) return status("fail", "A runtime repository record or migration control marker failed its checksum or schema check.", { ok: false, invalidRecordCount: invalidRuntimeRecords + Number(productionGraphError) + Number(controlMigrationInvalid) });
+    if (invalidRuntimeRecords || productionGraphError || controlMigrationInvalid || runtimeTraversalError) return status("fail", "A runtime repository record, migration marker, or required path could not be verified.", { ok: false, readable: !runtimeTraversalError, invalidRecordCount: invalidRuntimeRecords + Number(productionGraphError) + Number(controlMigrationInvalid) + Number(runtimeTraversalError) });
     const artifactRoot = confined(activeRoot, "artifacts");
     if (!await pathExists(confined(artifactRoot, "repository-manifest.json"))) return status("warn", "Artifact repository is not initialized.", { initialized: false });
     const inspected = await new FileArtifactRepository({ root: artifactRoot }).inspect();
@@ -270,6 +280,7 @@ export async function runDoctor(options) {
 
   let referenceClosure = await (async () => {
     if (!activeRoot) return status("fail", "Reference closure cannot be checked without an active runtime.", { active: false });
+    if (runtimeTraversalError) return status("fail", "Reference closure cannot be verified while runtime paths are unreadable.", { valid: false, readable: false });
     if (!productionGraph || productionGraphError) return status("fail", "The production reference graph could not be composed from runtime authorities.", { valid: false, generated: false });
     const generatedErrors = verifyProductionReferenceGraph(productionGraph, state);
     if (generatedErrors.length) return status("fail", "The generated production reference graph is invalid.", { valid: false, generated: true, errorCodes: generatedErrors.map((_, index) => `graph_error_${index + 1}`) });
@@ -314,11 +325,15 @@ export async function runDoctor(options) {
   const verifiedBackups = records.filter(({ logicalPath, value }) => logicalPath.startsWith("backups/verifications/") && validatePersistedBackupVerificationRecord(value));
   const freshBackup = verifiedBackups.some(({ value }) => nowMs - Date.parse(value.payload.report.verifiedAt) <= (options.backupFreshnessMs ?? 7 * 24 * 60 * 60 * 1000));
   let invalidLogs = records.some(({ logicalPath, value }) => /(?:^|\/)logs?\//.test(logicalPath) && sensitiveText(JSON.stringify(value)));
-  if (activeRoot && !invalidLogs) for (const file of await listRegularFiles(activeRoot)) {
-    if (file.symlink || !/(?:^|\/)(?:logs?)(?:\/|$)|\.log$/i.test(file.logicalPath)) continue;
-    const info = await stat(file.absolutePath);
-    if (info.size > 8 * 1024 * 1024) { invalidLogs = true; break; }
-    if (sensitiveText(await readFile(file.absolutePath, "utf8"))) { invalidLogs = true; break; }
+  if (activeRoot && !invalidLogs) {
+    try {
+      for (const file of await listRegularFiles(activeRoot)) {
+        if (file.symlink || !/(?:^|\/)(?:logs?)(?:\/|$)|\.log$/i.test(file.logicalPath)) continue;
+        const info = await stat(file.absolutePath);
+        if (info.size > 8 * 1024 * 1024) { invalidLogs = true; break; }
+        if (sensitiveText(await readFile(file.absolutePath, "utf8"))) { invalidLogs = true; break; }
+      }
+    } catch { runtimeTraversalError = true; }
   }
 
   const versions = options.serviceVersionsVerified === true
@@ -361,17 +376,22 @@ export async function runDoctor(options) {
   const results = new Map([
     ["runtime.permissions", permission], ["storage.free_space", freeSpace],
     ["integrity.repository_hashes", repositoryHashes], ["integrity.reference_closure", referenceClosure],
-    ["migration.pending", pendingMigration ? status("fail", "A runtime migration is pending.", { pending: true }) : status("pass", "No pending runtime migration is recorded.", { pending: false })],
+    ["migration.pending", runtimeTraversalError ? status("fail", "Migration state cannot be verified while runtime paths are unreadable.", { readable: false })
+      : pendingMigration ? status("fail", "A runtime migration is pending.", { pending: true }) : status("pass", "No pending runtime migration is recorded.", { pending: false })],
     ["services.versions", state.appVersion && state.appVersion !== "unknown" ? versions : status("fail", "Runtime application version is unavailable.", { versionBound: false })],
-    ["jobs.stuck_lease", expiredJobs || expiredExecutions || expiredMaintenanceLease || staleCoordinationLock || staleCatalogGeneration ? status("fail", "An expired active lease, stale runtime generation, or stale coordination lock was detected.", { expiredLeaseCount: expiredJobs + expiredExecutions + Number(expiredMaintenanceLease), staleCatalogGenerationCount: staleCatalogGeneration, staleCoordinationLock }) : status("pass", "No expired active lease, stale runtime generation, or stale coordination lock was detected.", { expiredLeaseCount: 0, staleCatalogGenerationCount: 0, staleCoordinationLock: false })],
-    ["jobs.dead_letter", deadLetters ? status("warn", "Dead-letter jobs require review.", { count: deadLetters }) : status("pass", "No dead-letter jobs were found.", { count: 0 })],
-    ["backup.recent_verified", freshBackup ? status("pass", "A recent verified backup is recorded.", { fresh: true }) : status("warn", "No recent verified backup is recorded.", { fresh: false })],
+    ["jobs.stuck_lease", runtimeTraversalError ? status("fail", "Job leases cannot be verified while runtime paths are unreadable.", { readable: false })
+      : expiredJobs || expiredExecutions || expiredMaintenanceLease || staleCoordinationLock || staleCatalogGeneration ? status("fail", "An expired active lease, stale runtime generation, or stale coordination lock was detected.", { expiredLeaseCount: expiredJobs + expiredExecutions + Number(expiredMaintenanceLease), staleCatalogGenerationCount: staleCatalogGeneration, staleCoordinationLock }) : status("pass", "No expired active lease, stale runtime generation, or stale coordination lock was detected.", { expiredLeaseCount: 0, staleCatalogGenerationCount: 0, staleCoordinationLock: false })],
+    ["jobs.dead_letter", runtimeTraversalError ? status("fail", "Dead-letter state cannot be verified while runtime paths are unreadable.", { readable: false })
+      : deadLetters ? status("warn", "Dead-letter jobs require review.", { count: deadLetters }) : status("pass", "No dead-letter jobs were found.", { count: 0 })],
+    ["backup.recent_verified", runtimeTraversalError ? status("fail", "Backup verification history cannot be read completely.", { readable: false })
+      : freshBackup ? status("pass", "A recent verified backup is recorded.", { fresh: true }) : status("warn", "No recent verified backup is recorded.", { fresh: false })],
     ["runtime.browser_webgl", browserWebgl],
     ["services.searxng", searxng],
     ["services.pdf_parser", pdfParser],
     ["network.offline", network],
     ["runtime.clock_skew", clock],
-    ["security.log_redaction", invalidLogs ? status("fail", "A log record failed the sensitive-detail policy.", { redacted: false }) : status("pass", "Inspected log records satisfy the redaction policy.", { redacted: true })],
+    ["security.log_redaction", runtimeTraversalError ? status("fail", "Log records cannot be inspected completely while runtime paths are unreadable.", { readable: false })
+      : invalidLogs ? status("fail", "A log record failed the sensitive-detail policy.", { redacted: false }) : status("pass", "Inspected log records satisfy the redaction policy.", { redacted: true })],
   ]);
 
   const evidenceArtifacts = new Map();
