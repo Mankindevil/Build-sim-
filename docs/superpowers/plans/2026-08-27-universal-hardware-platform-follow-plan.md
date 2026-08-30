@@ -2738,6 +2738,7 @@ live network 验收使用明确的只读测试帐号/本地服务，失败不得
 - release canary：`npm run release:canary` 已把 N6 阶段 A 固化为生产权威路径；8 项通过，CPU/SSD/旧款 PSU 的完整 official fact closure 与 i5-14500 最大睿频功耗 official fact 两项保持 blocked，命令退出码为 2，未从 catalog 属性补造。
 - physical holdout gate：`npm run release:holdouts` 已固化 strict/total/content-addressed 数据契约，要求独立 ATX、Mini-ITX、NAS 均绑定精确 plan/version/evaluation/adapter/simulation authority、校准仪器与净空/线长/温度/1m 标准化声学区间；当前无真实数据，命令按设计列出三类缺失并退出 2。
 - Osaka 发布脚本现在会先构建候选 Runtime 镜像，再在备份与服务重建之前依次执行 `release:canary` 与 `/app/runtime/release-evidence/physical-holdouts` 留样门禁；任一非零退出都不会启动候选服务栈。
+- 当前本机持久 runtime 的离线只读 Doctor 已执行：引用闭包、迁移状态与任务状态通过，但 48 个文件为 `0644`、37 个目录为 `0755`，因此 `runtime.permissions` 保持 blocking；`.env.remote` 尚无 `BUILDSIM_BACKUP_PASSWORD`，未绕过“先加密备份、再显式批准 repair”的门禁。真实 V2→V3 dry-run 为 ready/0 plans，目录用户数据 dry-run 为 38 SKU/0 移除/0 quarantine，facts migration 尚未 apply。
 - local smoke：隔离 `/tmp` runtime 上启动 built Price/Agent-disabled/Workspace 与静态本地搜索 fixture；创建/验证加密 full backup 后 strict Doctor 为 `healthy`/exit 0，临时状态已删除。
 - 未解决限制：三套未参与调参的 ATX/ITX/NAS 实物 holdout 缺失；N6 phase A/B 与跨产品发布 canary 尚未形成独立端到端证据；真实 runtime 迁移、远程推送、生产部署与部署后验证未执行。
 - 下一阶段前置条件：补齐 holdout 与 canary 证据，审阅并提交工作树；之后由用户明确批准远程推送和生产部署。

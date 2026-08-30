@@ -73,6 +73,14 @@ This report deliberately separates software fixture evidence from physical or li
 - `npm run release:holdouts` is a second strict gate. It requires independent ATX, Mini-ITX, and NAS datasets that were not used for tuning; exact plan/version/config/evaluation/adapter/simulation hashes; calibrated protocol/instrument identity; and bounded clearance, cable-length, temperature, and 1-metre standardized acoustic measurements. With no real datasets present it exits `2` and lists all three missing layouts.
 - `deploy/osaka/deploy.sh` invokes both gates from the just-built Runtime image and reads the reviewed holdout set from `/app/runtime/release-evidence/physical-holdouts`; either non-zero result stops before backup creation and before the candidate stack is started.
 
+### Current local persistent-runtime preflight
+
+- A strictly offline, read-only Doctor run against runtime generation `1` produced report hash `0d498e7092f86f5117bf4862a3b4f34151b0abb269cde86623f04bf9a4a8e5ac`. Reference closure, pending-migration state, job leases, dead-letter state, free space, clock, and log redaction passed; all service probes were skipped or local-only.
+- The blocking result is `runtime.permissions`: 48 regular files still use mode `0644` and 37 directories use mode `0755`; 151 files already use `0600` and 77 directories use `0700`. The repair is deliberately not applied before an encrypted verified backup and explicit repair-plan confirmation.
+- The same run reports that no recent verified backup is recorded and that the artifact repository is not initialized. The local deployment environment currently has no `BUILDSIM_BACKUP_PASSWORD`, so no production-runtime backup or repair was attempted.
+- The real runtime V2-to-V3 read-only projection is `ready` with source manifest hash `b379a3fce81d8ea124b3c756a79360ad3cdd4fbee350e109d819e86d2d104eac`; it contains zero plans, so there is no plan draft to transform. The catalog user-data dry-run scanned 38 SKUs and found zero fields to remove or quarantine.
+- The fact migration dry-run is stable at source hash `1bf946f7aa56c9c26be28dc2028f065bb8c9780157fa001e62080cd12bfcc6f5`: two bundled manuals yield 10 formal facts, while 237 legacy attributes remain `legacy_unverified` and 13 remain `planning_or_inferred`. The real runtime has not applied this migration; apply remains gated by the verified backup and operator review.
+
 ### Browser acceptance
 
 All browser scripts used local bundled fixtures and `127.0.0.1` services only:
