@@ -123,7 +123,7 @@ fi
 IMAGES_CHANGED=1
 "${COMPOSE[@]}" build
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
-  npm run release:canary
+  npm run release:canary -- --source-runtime-root /app/runtime
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
   npm run release:holdouts -- /app/runtime/release-evidence/physical-holdouts
 BACKUP_NAME="predeploy-${PREVIOUS_SHA}-$(date -u +%Y%m%dT%H%M%SZ).backup"

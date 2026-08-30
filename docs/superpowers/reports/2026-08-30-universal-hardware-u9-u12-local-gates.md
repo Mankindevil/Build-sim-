@@ -51,10 +51,10 @@ This report deliberately separates software fixture evidence from physical or li
 
 ### Full code gate
 
-- `npm test -- --testTimeout=30000`: 327 files, 1615 tests. In the default sandbox 325 files / 1612 tests passed; the only three failures were `listen EPERM` for two loopback test files. Those exact files were rerun with local-loopback permission and passed 2 files / 11 tests.
+- `npm test`: 329 files, 1622 tests. In the default sandbox 327 files / 1619 tests passed; the only three failures were `listen EPERM` for two loopback test files. Those exact files were rerun with local-loopback permission and passed 2 files / 11 tests.
 - `npm run typecheck`: passed.
 - `npm run build`: client, Agent SSR, and Workspace SSR passed. The existing Vite chunk-size warning remains non-blocking.
-- `npm run agent:secret-scan`: 1039 files scanned after the release-canary and physical-holdout gate follow-ups, zero findings.
+- `npm run agent:secret-scan`: 1043 files scanned, zero findings.
 - `git diff --check`: passed after the report and documentation update.
 
 ### Stage gates
@@ -62,16 +62,18 @@ This report deliberately separates software fixture evidence from physical or li
 - U9 focused: 13 files / 62 tests passed.
 - U10 focused: 20 files / 46 tests passed.
 - U11 focused: 17 files / 45 tests passed.
-- U12 focused, including migration rehearsal: 34 files / 105 tests passed.
+- U12 focused, including migration rehearsal and the read-only source-runtime canary: 34 files / 106 tests passed.
 - Full V2-to-V3 rehearsal: dry-run remained read-only; wrong manifest produced zero migration writes; apply created and verified an encrypted backup; active V2 migrated to V3; archived V2 remained readable; rollback authority remained valid.
 
 ### Executable release canary
 
-- `npm run release:canary` now runs the exact N6 partial configuration through the production repository, fact migration, locked evaluation, saved version, and spatial-scene composition.
-- Eight checks pass: two distinct 980 PRO instances, zero profile-default components, partial/not-power-ready evaluation with explicit requirements, zero empty-bay cable instances, locked spatial output with inferred coordinates/tolerances and exact component-placement/routing/assembly blockers, blocked thermal/acoustic output without fabricated point values, unknown price output without fabricated listings, and no executable first-power completion.
+- `npm run release:canary` runs the exact N6 partial configuration through the production repository, fact migration, locked evaluation, saved version, spatial-scene composition, claim-scope projection, separated current/future backplane capacity, and preparation-only procedure preview.
+- The deterministic empty-data run passes eleven checks and continues to prove that missing current prices remain unavailable rather than reusing catalog or historical values.
+- `--source-runtime-root <root>` now takes a consistency-checked, read-only copy of the active generation into a disposable directory before creating the canary plan. A focused production test proves four low-confidence single points and one independent-seller range (shared by the two exact storage instances), while the source pointer, plan directory, and current-price snapshot remain byte-for-byte unchanged.
+- The source-data price check requires the locked snapshot ID/date, one observation for a low-confidence point or at least two independent observations for a medium/high-confidence range, complete progressive price coverage, and zero unknown instance prices. Tmall and `other_cn` are now accepted by the replay validator consistently with the canonical price platform contract; unknown platforms remain rejected.
 - The command intentionally exits `2`: CPU/SSD/legacy-PSU official fact closure is incomplete, and no official `power.load` fact proves the i5-14500 maximum turbo power. It records those exact blockers and confirms that no `65 W × 1.35` fallback was used.
 - `npm run release:holdouts` is a second strict gate. It requires independent ATX, Mini-ITX, and NAS datasets that were not used for tuning; exact plan/version/config/evaluation/adapter/simulation hashes; calibrated protocol/instrument identity; and bounded clearance, cable-length, temperature, and 1-metre standardized acoustic measurements. With no real datasets present it exits `2` and lists all three missing layouts.
-- `deploy/osaka/deploy.sh` invokes both gates from the just-built Runtime image and reads the reviewed holdout set from `/app/runtime/release-evidence/physical-holdouts`; either non-zero result stops before backup creation and before the candidate stack is started.
+- `deploy/osaka/deploy.sh` invokes the canary with `--source-runtime-root /app/runtime`, then reads the reviewed holdout set from `/app/runtime/release-evidence/physical-holdouts`; either non-zero result stops before backup creation and before the candidate stack is started.
 
 ### Current local persistent-runtime preflight
 
@@ -80,6 +82,7 @@ This report deliberately separates software fixture evidence from physical or li
 - The same run reports that no recent verified backup is recorded and that the artifact repository is not initialized. The local deployment environment currently has no `BUILDSIM_BACKUP_PASSWORD`, so no production-runtime backup or repair was attempted.
 - The real runtime V2-to-V3 read-only projection is `ready` with source manifest hash `b379a3fce81d8ea124b3c756a79360ad3cdd4fbee350e109d819e86d2d104eac`; it contains zero plans, so there is no plan draft to transform. The catalog user-data dry-run scanned 38 SKUs and found zero fields to remove or quarantine.
 - The fact migration dry-run is stable at source hash `1bf946f7aa56c9c26be28dc2028f065bb8c9780157fa001e62080cd12bfcc6f5`: two bundled manuals yield 10 formal facts, while 237 legacy attributes remain `legacy_unverified` and 13 remain `planning_or_inferred`. The real runtime has not applied this migration; apply remains gated by the verified backup and operator review.
+- The new read-only source canary reaches the current runtime without copying its process-only `.locks` directory, then stops because `prices/latest.json` is still the legacy archive shape and has no immutable snapshot ID. It does not upgrade that archive in place and does not count the old N6 catalog quote as a current canary price.
 
 ### Browser acceptance
 

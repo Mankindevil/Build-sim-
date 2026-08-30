@@ -70,6 +70,7 @@ describe("Osaka lifecycle deployment", () => {
     const startup = script.indexOf('"${COMPOSE[@]}" up -d --force-recreate', backup);
 
     expect(canary).toBeGreaterThan(-1);
+    expect(script).toContain("npm run release:canary -- --source-runtime-root /app/runtime");
     expect(holdouts).toBeGreaterThan(canary);
     expect(backup).toBeGreaterThan(holdouts);
     expect(releaseStart).toBeGreaterThan(backup);

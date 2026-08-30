@@ -67,7 +67,11 @@ const SYSTEM_PROFILES = new Set([
 const SHA256 = /^[a-f0-9]{64}$/u;
 const RULE_ID = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/u;
 const RULE_VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$/u;
-const PRICE_PLATFORMS = new Set(["jd", "taobao", "pdd", "amazon", "official", "other"]);
+// Keep the replay validator aligned with src/price/types.ts. A valid locked
+// China-price interval may contain Tmall or another explicitly classified
+// domestic source; rejecting either would make the whole evaluation
+// non-replayable even though the price authority accepted the observation.
+const PRICE_PLATFORMS = new Set(["jd", "tmall", "taobao", "pdd", "amazon", "official", "other_cn", "other"]);
 
 /**
  * Release-pinned digest of the executable compatibility manifest. Both the

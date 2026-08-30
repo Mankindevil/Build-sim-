@@ -1,7 +1,7 @@
 #!/usr/bin/env -S vite-node
 
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,10 @@ import { createWorkspaceRepositories } from "../../src/server/workspace-server";
 import { createEmptyBuildConfigV3, type BuildConfigV3, type ComponentInstance } from "../../src/topology/contracts";
 import type { FactRecord } from "../../src/facts/contracts";
 import { isProgressiveBuildEvaluation, type ProgressiveBuildEvaluation } from "../../src/compatibility/contracts";
+import { projectCurrentChinaPrice, type CurrentPriceProjection } from "../../src/price/policy";
+import type { PriceObservation } from "../../src/price/contracts";
+import { loadRuntimePriceSnapshot } from "../../src/server/runtime-price-snapshot";
+import { RuntimeCoordinator } from "../../src/runtime/coordinator.mjs";
 
 const CANARY_AT = "2026-08-30T12:00:00.000Z";
 
@@ -45,7 +49,7 @@ const CANARY_COMPONENTS: ReadonlyArray<Pick<ComponentInstance, "instanceId" | "k
   { instanceId: "psu-ssr-850fx-canary", kind: "psu", role: "primary-power", skuId: "psu.seasonic-focus-plus-gold-850-fx" },
 ]);
 
-function canaryConfig(): BuildConfigV3 {
+function canaryConfig(priceIdentityClaimsBySku: ReadonlyMap<string, readonly string[]> = new Map()): BuildConfigV3 {
   const config = createEmptyBuildConfigV3("plan-universal-release-canary", "Universal release canary", CANARY_AT);
   config.components = CANARY_COMPONENTS.map((component) => ({
     instanceId: component.instanceId,
@@ -55,7 +59,7 @@ function canaryConfig(): BuildConfigV3 {
     identity: {
       status: "resolved",
       skuId: component.skuId,
-      identityClaimIds: [`canary-identity-${component.instanceId}`],
+      identityClaimIds: [...(priceIdentityClaimsBySku.get(component.skuId) ?? [`canary-identity-${component.instanceId}`])],
     },
     source: "user",
   }));
@@ -66,6 +70,106 @@ function canaryConfig(): BuildConfigV3 {
     constraints: [],
   };
   return config;
+}
+
+interface CanaryPriceSelection {
+  readonly skuId: string;
+  readonly variantIdentityFactIds: readonly string[];
+  readonly projection: CurrentPriceProjection;
+}
+
+interface CanarySourcePriceAuthority {
+  readonly priceSnapshotHash: string;
+  readonly priceSnapshotId: string;
+  readonly asOf: string;
+  readonly selections: ReadonlyMap<string, CanaryPriceSelection>;
+}
+
+async function cloneActiveRuntimeReadOnly(sourceRuntimeRootValue: string, targetRuntimeRootValue: string): Promise<void> {
+  const sourceRuntimeRoot = path.resolve(sourceRuntimeRootValue);
+  const targetRuntimeRoot = path.resolve(targetRuntimeRootValue);
+  const relative = path.relative(sourceRuntimeRoot, targetRuntimeRoot);
+  const inverse = path.relative(targetRuntimeRoot, sourceRuntimeRoot);
+  if (sourceRuntimeRoot === targetRuntimeRoot
+    || (!relative.startsWith("..") && !path.isAbsolute(relative))
+    || (!inverse.startsWith("..") && !path.isAbsolute(inverse))) {
+    throw new TypeError("release canary source and temporary runtime roots must be disjoint");
+  }
+  const source = new RuntimeCoordinator({ root: sourceRuntimeRoot });
+  await source.withReadOnlySnapshot(async ({ state, activeRoot }: {
+    state: { activeRoot: string };
+    activeRoot: string;
+  }) => {
+    const pointerSource = path.join(sourceRuntimeRoot, "control", "active-pointer.json");
+    const pointerStat = await lstat(pointerSource);
+    if (!pointerStat.isFile() || pointerStat.isSymbolicLink()) throw new Error("release canary source runtime pointer is not a regular file");
+    const targetActiveRoot = path.join(targetRuntimeRoot, state.activeRoot);
+    await mkdir(path.dirname(targetActiveRoot), { recursive: true, mode: 0o700 });
+    await cp(activeRoot, targetActiveRoot, {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+      filter: async (sourcePath) => {
+        const sourceRelative = path.relative(activeRoot, sourcePath);
+        if (sourceRelative.split(path.sep).includes(".locks")) return false;
+        const sourceStat = await lstat(sourcePath);
+        if (sourceStat.isSymbolicLink()) throw new Error(`release canary source runtime contains a symbolic link: ${sourcePath}`);
+        return true;
+      },
+    });
+    await mkdir(path.join(targetRuntimeRoot, "control"), { recursive: true, mode: 0o700 });
+    await mkdir(path.join(targetRuntimeRoot, "staging"), { recursive: true, mode: 0o700 });
+    await copyFile(pointerSource, path.join(targetRuntimeRoot, "control", "active-pointer.json"));
+  });
+}
+
+function priceStatusRank(status: CurrentPriceProjection["status"]): number {
+  return status === "range" ? 0 : status === "single" ? 1 : status === "conflict" ? 2 : 3;
+}
+
+async function selectCanarySourcePrices(
+  services: ReturnType<typeof createWorkspaceRepositories<BuildConfigV3>>,
+  runtimeRoot: string,
+): Promise<CanarySourcePriceAuthority> {
+  await services.priceRepository.initialize("universal-release-canary-price-read-v1");
+  const snapshot = loadRuntimePriceSnapshot({ runtimeRoot, allowSeedFallback: false });
+  if (snapshot.schemaVersion !== "1.1.0" || snapshot.priceVersion !== "price-snapshot-v2"
+    || typeof snapshot.snapshotId !== "string" || typeof snapshot.inputHash !== "string"
+    || typeof snapshot.generatedAt !== "string") {
+    throw new Error("release canary source requires a governed current-price snapshot v2; legacy price archives remain history-only");
+  }
+  if (typeof snapshot.contentHash !== "string") throw new Error("release canary source price snapshot is not content-addressed");
+  const boundObservationIds = new Set(snapshot.quotes.flatMap(({ provenanceId }) => (
+    typeof provenanceId === "string" ? [provenanceId] : []
+  )));
+  const observations = (await services.priceRepository.listObservations())
+    .filter(({ observationId }) => boundObservationIds.has(observationId));
+  const selections = new Map<string, CanaryPriceSelection>();
+  for (const skuId of [...new Set(CANARY_COMPONENTS.map((component) => component.skuId))].sort()) {
+    const groups = new Map<string, PriceObservation[]>();
+    for (const observation of observations.filter((candidate) => candidate.skuId === skuId)) {
+      const variantIdentityFactIds = [...observation.variantIdentityFactIds].sort();
+      const key = JSON.stringify(variantIdentityFactIds);
+      const group = groups.get(key) ?? [];
+      group.push(observation);
+      groups.set(key, group);
+    }
+    const candidates = [...groups.entries()].map(([key, group]) => {
+      const variantIdentityFactIds = JSON.parse(key) as string[];
+      const projection = projectCurrentChinaPrice({
+        skuId,
+        variantIdentityFactIds,
+        observations: group,
+        now: `${snapshot.asOf}T23:59:59.999Z`,
+      });
+      return { skuId, variantIdentityFactIds, projection } satisfies CanaryPriceSelection;
+    }).filter(({ projection }) => projection.status === "single" || projection.status === "range")
+      .sort((left, right) => priceStatusRank(left.projection.status) - priceStatusRank(right.projection.status)
+        || right.projection.sellerCount - left.projection.sellerCount
+        || JSON.stringify(left.variantIdentityFactIds).localeCompare(JSON.stringify(right.variantIdentityFactIds)));
+    if (candidates[0]) selections.set(skuId, candidates[0]);
+  }
+  return { priceSnapshotHash: snapshot.contentHash, priceSnapshotId: snapshot.snapshotId, asOf: snapshot.asOf, selections };
 }
 
 async function writeEmptyPriceSnapshot(services: ReturnType<typeof createWorkspaceRepositories<BuildConfigV3>>): Promise<void> {
@@ -106,17 +210,33 @@ function check(checkId: string, condition: boolean, evidence: unknown): Universa
   return { checkId, status: condition ? "pass" : "blocked", evidence };
 }
 
-export async function runUniversalReleaseCanary(options: { runtimeRoot?: string; keepRuntime?: boolean } = {}): Promise<UniversalCanaryReport> {
+export async function runUniversalReleaseCanary(options: {
+  runtimeRoot?: string;
+  /**
+   * Read-only source for a production-data canary. The active generation is
+   * copied to a disposable root before the canary creates its plan/version.
+   */
+  sourceRuntimeRoot?: string;
+  keepRuntime?: boolean;
+} = {}): Promise<UniversalCanaryReport> {
+  if (options.runtimeRoot !== undefined && options.sourceRuntimeRoot !== undefined) {
+    throw new TypeError("release canary accepts either runtimeRoot or sourceRuntimeRoot, not both");
+  }
+  const sourceMode = options.sourceRuntimeRoot !== undefined;
   const ownedRoot = options.runtimeRoot === undefined;
   const runtimeRoot = options.runtimeRoot ?? await mkdtemp(path.join(tmpdir(), "buildsim-universal-release-canary-"));
   try {
-    const migrationPlan = await planFactsV1Migration();
-    await migrateFactsV1({
-      dryRun: false,
-      expectedSourceHash: migrationPlan.sourceHash,
-      runtimeRoot,
-      now: () => CANARY_AT,
-    });
+    if (options.sourceRuntimeRoot !== undefined) {
+      await cloneActiveRuntimeReadOnly(options.sourceRuntimeRoot, runtimeRoot);
+    } else {
+      const migrationPlan = await planFactsV1Migration();
+      await migrateFactsV1({
+        dryRun: false,
+        expectedSourceHash: migrationPlan.sourceHash,
+        runtimeRoot,
+        now: () => CANARY_AT,
+      });
+    }
     const services = createWorkspaceRepositories<BuildConfigV3>({
       RUNTIME_ROOT: runtimeRoot,
       BUILD_SIM_TOPOLOGY_V3_ENABLED: "true",
@@ -128,12 +248,20 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
       BUILD_SIM_ACOUSTIC_V3_ENABLED: "true",
       BUILD_SIM_SYSTEM_PROFILES_ENABLED: "true",
       BUILD_SIM_BUILD_EXECUTION_V3_ENABLED: "true",
+      BUILD_SIM_DURABLE_JOBS_ENABLED: "true",
+      BUILD_SIM_PRICE_HISTORY_ENABLED: "true",
     });
     await services.coordinator!.initialize();
-    await initializeRuntimeCatalog({ coordinator: services.coordinator!, generationAware: true });
-    await writeEmptyPriceSnapshot(services);
+    if (!sourceMode) {
+      await initializeRuntimeCatalog({ coordinator: services.coordinator!, generationAware: true });
+      await writeEmptyPriceSnapshot(services);
+    }
+    const sourcePriceAuthority = sourceMode
+      ? await selectCanarySourcePrices(services, runtimeRoot)
+      : null;
 
-    const config = canaryConfig();
+    const config = canaryConfig(new Map([...sourcePriceAuthority?.selections.entries() ?? []]
+      .map(([skuId, selection]) => [skuId, selection.variantIdentityFactIds] as const)));
     const plan = await services.repository.create({ name: config.name, config });
     const configHash = await hashPlanConfig(plan.draft.config);
     const receipt = await services.evaluationPipeline!.evaluateCurrent({
@@ -153,6 +281,7 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
     const scene = await services.spatialScene!.get(plan.id, version.id);
     const procedurePreview = await services.systemExecution!.preview(plan.id, version.id);
     const resolutionSummary = await services.planResolutionSummary!.forPlan(plan.id);
+    const priceView = await services.planPrices!.forPlan(plan.id);
     const facts = await services.factRepository.listCurrentFacts();
     const official = officialFactSummary(facts);
     const storageInstances = config.components.filter(({ kind }) => kind === "storage_drive");
@@ -164,6 +293,29 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
     const unknownPriceIds = evaluation.priceProjection.lines
       .filter(({ status }) => status === "unknown")
       .map(({ instanceId }) => instanceId).sort();
+    const governedCurrentPrices = priceView.components.map(({ instanceId, skuId, current, currentObservations }) => ({
+      instanceId,
+      skuId,
+      status: current.status,
+      confidence: current.confidence,
+      minCny: current.minCny,
+      maxCny: current.maxCny,
+      sampleCount: current.sampleCount,
+      sellerCount: current.sellerCount,
+      observationIds: currentObservations.map(({ observationId }) => observationId),
+    }));
+    const sourcePriceReady = sourceMode
+      && sourcePriceAuthority !== null
+      && sourcePriceAuthority.priceSnapshotId === priceView.priceSnapshotId
+      && sourcePriceAuthority.asOf === priceView.asOf
+      && governedCurrentPrices.length === config.components.length
+      && governedCurrentPrices.every(({ status, confidence, minCny, maxCny, observationIds }) => (
+        (status === "single" && confidence === "low" && minCny !== null && minCny === maxCny && observationIds.length === 1)
+        || (status === "range" && ["medium", "high"].includes(confidence)
+          && minCny !== null && maxCny !== null && minCny <= maxCny && observationIds.length >= 2)
+      ))
+      && evaluation.priceProjection.complete === true
+      && evaluation.priceProjection.unknownInstanceIds.length === 0;
     const backplaneCapacity = procedurePreview.backplaneCapacities.find(({ caseInstanceId }) => caseInstanceId === "case-n6-canary") ?? null;
     const checks = [
       check("stage-a.two-distinct-ssd-instances", storageInstances.length === 2
@@ -235,9 +387,25 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
         acoustic: evaluation.thermalAcousticEvaluation.acoustic,
         powerReady: evaluation.readiness.powerReady,
       }),
-      check("stage-a.price-is-not-invented", evaluation.priceProjection.complete === false
-        && unknownPriceIds.length === config.components.length,
-      { knownSubtotalCny: evaluation.priceProjection.knownSubtotalCny, unknownInstanceIds: unknownPriceIds }),
+      sourceMode
+        ? check("stage-a.china-new-price-is-governed", sourcePriceReady, {
+          sourcePriceSnapshotHash: sourcePriceAuthority?.priceSnapshotHash ?? null,
+          sourcePriceSnapshotId: sourcePriceAuthority?.priceSnapshotId ?? null,
+          lockedPriceArtifactHash: receipt.evaluationLock.snapshotHashes.priceSnapshotHash,
+          selectedVariantIdentityFactIds: Object.fromEntries([...sourcePriceAuthority?.selections.entries() ?? []]
+            .map(([skuId, selection]) => [skuId, selection.variantIdentityFactIds])),
+          components: governedCurrentPrices,
+          progressiveKnownSubtotalCny: evaluation.priceProjection.knownSubtotalCny,
+          progressiveUnknownInstanceIds: evaluation.priceProjection.unknownInstanceIds,
+        })
+        : check("stage-a.price-is-not-invented", evaluation.priceProjection.complete === false
+          && unknownPriceIds.length === config.components.length
+          && priceView.components.every(({ current }) => current.status === "unavailable"),
+        {
+          knownSubtotalCny: evaluation.priceProjection.knownSubtotalCny,
+          unknownInstanceIds: unknownPriceIds,
+          governedCurrentPrices,
+        }),
       check("stage-a.no-executable-first-power-completion", evaluation.readiness.powerReady === false
         && evaluation.readiness.firstBootReady === false && evaluation.readiness.osInstallReady === false,
       { readiness: evaluation.readiness }),
@@ -280,7 +448,25 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
 const isMain = process.argv[1] !== undefined
   && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
-  const report = await runUniversalReleaseCanary();
+  const args = process.argv.slice(2);
+  let sourceRuntimeRoot: string | undefined;
+  let keepRuntime = false;
+  while (args.length > 0) {
+    const argument = args.shift();
+    if (argument === "--source-runtime-root") {
+      const value = args.shift();
+      if (!value) throw new TypeError("--source-runtime-root requires a path");
+      sourceRuntimeRoot = value;
+    } else if (argument === "--keep-runtime") {
+      keepRuntime = true;
+    } else {
+      throw new TypeError(`unknown release canary argument: ${argument}`);
+    }
+  }
+  const report = await runUniversalReleaseCanary({
+    ...(sourceRuntimeRoot === undefined ? {} : { sourceRuntimeRoot }),
+    ...(keepRuntime ? { keepRuntime: true } : {}),
+  });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (report.status !== "pass") process.exitCode = 2;
 }
