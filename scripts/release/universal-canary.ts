@@ -16,6 +16,7 @@ import { projectCurrentChinaPrice, type CurrentPriceProjection } from "../../src
 import type { PriceObservation } from "../../src/price/contracts";
 import { loadRuntimePriceSnapshot } from "../../src/server/runtime-price-snapshot";
 import { RuntimeCoordinator } from "../../src/runtime/coordinator.mjs";
+import { verifyUniversalJourneyEvidence } from "./universal-journey-canary";
 
 const CANARY_AT = "2026-08-30T12:00:00.000Z";
 
@@ -250,6 +251,15 @@ export async function runUniversalReleaseCanary(options: {
       BUILD_SIM_BUILD_EXECUTION_V3_ENABLED: "true",
       BUILD_SIM_DURABLE_JOBS_ENABLED: "true",
       BUILD_SIM_PRICE_HISTORY_ENABLED: "true",
+      BUILD_SIM_PRICE_TARGETS_ENABLED: "true",
+      BUILD_SIM_WHOLE_BUILD_SOLVER_ENABLED: "true",
+      BUILD_SIM_SCENARIO_WHAT_IF_ENABLED: "true",
+      BUILD_SIM_STORAGE_LAYOUT_ENABLED: "true",
+      BUILD_SIM_USER_OBSERVATIONS_ENABLED: "true",
+      BUILD_SIM_RECOMMENDATIONS_ENABLED: "true",
+      BUILD_SIM_BACKUP_RESTORE_ENABLED: "true",
+      BUILD_SIM_DOCTOR_REPAIR_ENABLED: "true",
+      BUILD_SIM_PORTABILITY_ENABLED: "true",
     });
     await services.coordinator!.initialize();
     if (!sourceMode) {
@@ -317,7 +327,7 @@ export async function runUniversalReleaseCanary(options: {
       && evaluation.priceProjection.complete === true
       && evaluation.priceProjection.unknownInstanceIds.length === 0;
     const backplaneCapacity = procedurePreview.backplaneCapacities.find(({ caseInstanceId }) => caseInstanceId === "case-n6-canary") ?? null;
-    const checks = [
+    const stageAChecks = [
       check("stage-a.two-distinct-ssd-instances", storageInstances.length === 2
         && new Set(storageInstances.map(({ instanceId }) => instanceId)).size === 2,
       storageInstances.map(({ instanceId, identity }) => ({ instanceId, identity }))),
@@ -427,6 +437,11 @@ export async function runUniversalReleaseCanary(options: {
         })) ?? [],
       }),
     ];
+    const journeyChecks = await verifyUniversalJourneyEvidence({
+      services,
+      evidenceRuntimeRoot: options.sourceRuntimeRoot ?? runtimeRoot,
+    });
+    const checks = [...stageAChecks, ...journeyChecks];
     const blockers = checks.filter(({ status }) => status === "blocked").map(({ checkId }) => checkId);
     return {
       schemaVersion: "universal-release-canary-v1",

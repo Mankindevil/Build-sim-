@@ -10,6 +10,7 @@ import type { ImmutableListingCapture, PriceObservation } from "../src/price/con
 import { PriceRepository } from "../src/price/repository";
 import { CurrentPriceSnapshotService } from "../src/price/snapshot";
 import { RuntimeCoordinator } from "../src/runtime/coordinator.mjs";
+import { UNIVERSAL_JOURNEY_CHECK_IDS } from "../scripts/release/universal-journey-canary";
 
 const canarySkus = [
   "case.jonsbo-n6",
@@ -84,6 +85,7 @@ describe("U12 universal release canary", () => {
       blockers: [
         "stage-a.official-fact-closure",
         "stage-a.cpu-max-turbo-power-is-official",
+        ...UNIVERSAL_JOURNEY_CHECK_IDS,
       ],
     });
     expect(report.checks.filter(({ status }) => status === "pass").map(({ checkId }) => checkId)).toEqual([
@@ -106,6 +108,9 @@ describe("U12 universal release canary", () => {
         "storage.samsung-980-pro",
         "psu.seasonic-focus-plus-gold-850-fx",
       ],
+    });
+    expect(report.checks.find(({ checkId }) => checkId === "stage-b.evidence-manifest")?.evidence).toMatchObject({
+      reason: "manifest_unavailable",
     });
   }, 30_000);
 
@@ -163,6 +168,7 @@ describe("U12 universal release canary", () => {
       expect(report.blockers).toEqual([
         "stage-a.official-fact-closure",
         "stage-a.cpu-max-turbo-power-is-official",
+        ...UNIVERSAL_JOURNEY_CHECK_IDS,
       ]);
 
       const [pointerAfter, latestAfter, plansAfter] = await Promise.all([
