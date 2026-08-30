@@ -18,6 +18,7 @@ describe("U12 universal release canary", () => {
       "stage-a.agent-claim-scopes-are-explicit",
       "stage-a.partial-remains-not-power-ready",
       "stage-a.no-empty-bay-data-cables",
+      "stage-a.backplane-current-and-future-scopes-are-distinct",
       "stage-a.spatial-scene-is-locked-and-blocked",
       "stage-a.thermal-acoustic-remains-blocked",
       "stage-a.price-is-not-invented",

@@ -24,6 +24,48 @@ function firmwareReason(reason: FirmwarePathEvaluation["reason"]): string {
   return labels[reason];
 }
 
+function leadCounts(value: { sata: number | null; molex: number | null; total: number | null } | null): string {
+  if (value === null) return "待确定";
+  return `共 ${value.total ?? "?"} 根（SATA ${value.sata ?? "?"} / Molex ${value.molex ?? "?"}）`;
+}
+
+function renderBackplaneCapacity(host: HTMLElement, preview: SystemProcedurePreview): void {
+  const capacities = preview.backplaneCapacities ?? [];
+  if (capacities.length === 0) return;
+  const section = element("section");
+  section.className = "workspace-backplane-capacity";
+  section.dataset.backplaneCapacity = "true";
+  section.append(
+    element("h4", "背板与电源线束范围"),
+    element("p", "当前方案需求与未来填满背板的能力分开显示；未来能力不会自动添加硬盘或线材。"),
+  );
+  for (const capacity of capacities) {
+    const article = element("article");
+    article.dataset.caseInstanceId = capacity.caseInstanceId;
+    article.append(element("strong", `${capacity.caseInstanceId} · ${capacity.psuInstanceId ?? "电源未唯一确定"}`));
+    const scopes = element("dl");
+    const add = (label: string, value: string, status: string) => {
+      const row = element("div");
+      row.dataset.capacityStatus = status;
+      row.append(element("dt", label), element("dd", value));
+      scopes.append(row);
+    };
+    add(
+      "当前盘位需求",
+      `${capacity.currentDemand.occupiedBayCount}/${capacity.currentDemand.totalBayCount} 个盘位 · 需要 ${leadCounts(capacity.currentDemand.requiredPowerLeads)}${capacity.currentDemand.pendingStorageInstanceIds.length ? ` · ${capacity.currentDemand.pendingStorageInstanceIds.length} 个存储实例待定盘位` : ""}`,
+      capacity.currentDemand.status,
+    );
+    add(
+      "全背板未来能力",
+      `${capacity.fullBackplaneCapability.occupiedBayCount}/${capacity.fullBackplaneCapability.totalBayCount} 个盘位 · 需要 ${leadCounts(capacity.fullBackplaneCapability.requiredPowerLeads)} · 电源已确认 ${leadCounts(capacity.fullBackplaneCapability.confirmedPsuPowerLeads)}`,
+      capacity.fullBackplaneCapability.status,
+    );
+    article.append(scopes, element("small", capacity.notes.join(" ")));
+    section.append(article);
+  }
+  host.append(section);
+}
+
 export function renderFirmwarePlan(host: HTMLElement, evaluations: readonly FirmwarePathEvaluation[]): void {
   const section = element("section");
   section.className = "workspace-firmware-plan";
@@ -99,5 +141,6 @@ export function renderProcedurePreview(host: HTMLElement, preview: SystemProcedu
     section.append(phaseList);
   } else section.append(element("p", "当前锁定输入仍有阻断，不能建立执行会话。"));
   host.append(section);
+  renderBackplaneCapacity(host, preview);
   renderFirmwarePlan(host, preview.firmwareEvaluations ?? []);
 }

@@ -164,6 +164,7 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
     const unknownPriceIds = evaluation.priceProjection.lines
       .filter(({ status }) => status === "unknown")
       .map(({ instanceId }) => instanceId).sort();
+    const backplaneCapacity = procedurePreview.backplaneCapacities.find(({ caseInstanceId }) => caseInstanceId === "case-n6-canary") ?? null;
     const checks = [
       check("stage-a.two-distinct-ssd-instances", storageInstances.length === 2
         && new Set(storageInstances.map(({ instanceId }) => instanceId)).size === 2,
@@ -196,6 +197,18 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
       check("stage-a.no-empty-bay-data-cables", config.components.every(({ kind }) => kind !== "cable")
         && config.connections.length === 0,
       { cableInstanceIds: config.components.filter(({ kind }) => kind === "cable").map(({ instanceId }) => instanceId), connections: config.connections }),
+      check("stage-a.backplane-current-and-future-scopes-are-distinct", backplaneCapacity !== null
+        && backplaneCapacity.currentDemand.scope === "current_plan"
+        && backplaneCapacity.currentDemand.occupiedBayCount === 0
+        && backplaneCapacity.currentDemand.pendingStorageInstanceIds.join(",") === "storage-980-pro-canary-a,storage-980-pro-canary-b"
+        && backplaneCapacity.currentDemand.requiredPowerLeads === null
+        && backplaneCapacity.currentDemand.status === "unknown"
+        && backplaneCapacity.fullBackplaneCapability.scope === "full_backplane"
+        && backplaneCapacity.fullBackplaneCapability.occupiedBayCount === 9
+        && backplaneCapacity.fullBackplaneCapability.requiredPowerLeads?.total === 4
+        && backplaneCapacity.fullBackplaneCapability.status === "unknown"
+        && backplaneCapacity.sourceFactIds.length === 0,
+      backplaneCapacity),
       check("stage-a.spatial-scene-is-locked-and-blocked", scene.evaluationHash === receipt.evaluationHash
         && scene.executionStatus === "partial"
         && scene.blockedDomains.join(",") === "component_placement,routing,assembly"

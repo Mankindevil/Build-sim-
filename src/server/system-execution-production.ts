@@ -25,6 +25,11 @@ import { SystemProfileRegistry } from "../system-profiles/registry";
 import { systemProfileEvaluationFromProgressive } from "../system-profiles/production";
 import type { SystemProfileDefinition, SystemProfileEvaluation } from "../system-profiles/contracts";
 import type { BuildConfigV3 } from "../topology/contracts";
+import type { CaseAdapterArtifactPayload } from "../adapters/registry";
+import {
+  projectBackplaneCapacities,
+  type BackplaneCapacityProjection,
+} from "../wiring/backplane-capacity";
 import type {
   AuthoritativeEvaluationReceipt,
 } from "./evaluation-service";
@@ -54,6 +59,7 @@ export interface SystemProcedurePreview {
   readonly systemEvaluation: SystemProfileEvaluation | null;
   readonly firmwareEvaluations: readonly FirmwarePathEvaluation[];
   readonly storageLayouts: readonly ProductionStorageLayoutProjection[];
+  readonly backplaneCapacities: readonly BackplaneCapacityProjection[];
   readonly blockers: readonly string[];
   readonly generated: GeneratedBuildProcedure | null;
   readonly destructiveActions: readonly {
@@ -193,10 +199,19 @@ export class ProductionSystemExecutionRuntime {
       });
       if (!receipt) throw new SystemExecutionProductionError("conflict", "saved version receipt is unavailable");
       const progressive = exactReceipt(receipt, planId, version);
-      if (version.config.system === null) {
-        return { version, receipt, progressive, profile: null, systemEvaluation: null, storageLayouts: [] };
-      }
       const artifacts = await this.options.locks.hydrateArtifactInputsAtRoot(activeRoot, version.evaluationLock);
+      const factClosure = await this.options.facts.getSnapshotClosureAtRoot(activeRoot, version.evaluationLock.factSnapshotId);
+      if (!factClosure || factClosure.snapshot.contentHash !== version.evaluationLock.snapshotHashes.factSnapshotHash) {
+        throw new SystemExecutionProductionError("unavailable", "procedure fact closure cannot be replayed");
+      }
+      const backplaneCapacities = projectBackplaneCapacities({
+        config: version.config,
+        adapterSnapshot: artifacts.adapterSnapshot.payload as CaseAdapterArtifactPayload,
+        facts: factClosure.facts,
+      });
+      if (version.config.system === null) {
+        return { version, receipt, progressive, profile: null, systemEvaluation: null, storageLayouts: [], backplaneCapacities };
+      }
       const registry = new SystemProfileRegistry((artifacts.systemProfile.payload as { registry?: unknown }).registry);
       const profile = registry.resolve(version.config.system.profileId);
       if (version.config.system.versionFactId !== profile.releaseFactId) {
@@ -204,14 +219,12 @@ export class ProductionSystemExecutionRuntime {
       }
       const systemEvaluation = systemProfileEvaluationFromProgressive(progressive, profile, version.config.system.source);
       if (!systemEvaluation) throw new SystemExecutionProductionError("blocked", "the governed receipt lacks a complete U7 system-profile evaluation");
-      const factClosure = await this.options.facts.getSnapshotClosureAtRoot(activeRoot, version.evaluationLock.factSnapshotId);
       const observationClosure = await this.options.observations.getSnapshotClosureAtRoot(
         activeRoot,
         planId,
         version.evaluationLock.userObservationSnapshotId,
       );
-      if (!factClosure || factClosure.snapshot.contentHash !== version.evaluationLock.snapshotHashes.factSnapshotHash
-        || !observationClosure || observationClosure.snapshot.contentHash !== version.evaluationLock.snapshotHashes.userObservationSnapshotHash) {
+      if (!observationClosure || observationClosure.snapshot.contentHash !== version.evaluationLock.snapshotHashes.userObservationSnapshotHash) {
         throw new SystemExecutionProductionError("unavailable", "procedure fact/observation closure cannot be replayed");
       }
       const storageLayouts = this.options.storageLayoutEnabled !== false
@@ -223,7 +236,7 @@ export class ProductionSystemExecutionRuntime {
           facts: factClosure.facts,
           observations: observationClosure.observations.map(({ observation }) => observation),
         }))) : [];
-      return { version, receipt, progressive, profile, systemEvaluation, storageLayouts };
+      return { version, receipt, progressive, profile, systemEvaluation, storageLayouts, backplaneCapacities };
     });
     const value = snapshot.result as {
       version: PlanVersion<BuildConfigV3>;
@@ -232,6 +245,7 @@ export class ProductionSystemExecutionRuntime {
       profile: SystemProfileDefinition | null;
       systemEvaluation: SystemProfileEvaluation | null;
       storageLayouts: ProductionStorageLayoutProjection[];
+      backplaneCapacities: BackplaneCapacityProjection[];
     };
     const blockers = [
       ...(value.profile === null ? ["a system profile must be selected before first-power or installation steps"] : []),
@@ -321,6 +335,7 @@ export class ProductionSystemExecutionRuntime {
       systemEvaluation: structuredClone(value.systemEvaluation),
       firmwareEvaluations: structuredClone(value.progressive.firmwareEvaluations),
       storageLayouts: structuredClone(value.storageLayouts),
+      backplaneCapacities: structuredClone(value.backplaneCapacities),
       blockers: [...new Set(blockers)].sort(),
       generated: generated ? structuredClone(generated) : null,
       destructiveActions: structuredClone(destructiveActions),
@@ -399,10 +414,11 @@ export class ProductionSystemExecutionRuntime {
         configHash: "0".repeat(64),
         evaluationHash: "0".repeat(64),
         evaluationLockHash: "0".repeat(64),
-        profile: {} as SystemProfileDefinition,
-        systemEvaluation: {} as SystemProfileEvaluation,
+        profile: null,
+        systemEvaluation: null,
         firmwareEvaluations: [],
         storageLayouts: [],
+        backplaneCapacities: [],
         blockers: [error.message],
         generated: null,
         destructiveActions: [],

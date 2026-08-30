@@ -102,6 +102,19 @@ describe("U7 version-bound system execution panel", () => {
       profile: { profileId: "system.truenas-scale", label: "TrueNAS SCALE" },
       systemEvaluation: { verdict: "pass" },
       blockers: [],
+      backplaneCapacities: [{
+        schemaVersion: "backplane-capacity-projection-v1",
+        caseInstanceId: "case-1", caseSkuId: "case.nas-nine", psuInstanceId: "psu-1", psuSkuId: "psu.fixture",
+        manifestHash: hash("1"), runtimeModelHash: hash("2"), sourceFactIds: ["fact-psu-cables"], notes: ["future remains separate"],
+        currentDemand: {
+          scope: "current_plan", occupiedBayCount: 2, totalBayCount: 9, pendingStorageInstanceIds: [],
+          requiredPowerLeads: { sata: 2, molex: 2, total: 4 }, confirmedPsuPowerLeads: { sata: 2, molex: 1, total: 3 }, status: "insufficient",
+        },
+        fullBackplaneCapability: {
+          scope: "full_backplane", occupiedBayCount: 9, totalBayCount: 9, pendingStorageInstanceIds: [],
+          requiredPowerLeads: { sata: 2, molex: 2, total: 4 }, confirmedPsuPowerLeads: { sata: 2, molex: 1, total: 3 }, status: "insufficient",
+        },
+      }],
       generated: { procedure },
       destructiveActions: [{
         stepId: "wipe-data",
@@ -171,6 +184,10 @@ describe("U7 version-bound system execution panel", () => {
     const planState = state();
     const controller = mountSystemExecutionPanel(host, { getState: () => structuredClone(planState), subscribePlan: () => () => undefined, fetchImpl });
     await vi.waitFor(() => expect(host.textContent).toContain("d1 → hba-1/p1 (sas)"));
+    expect(host.textContent).toContain("当前盘位需求");
+    expect(host.textContent).toContain("2/9 个盘位");
+    expect(host.textContent).toContain("全背板未来能力");
+    expect(host.textContent).toContain("9/9 个盘位");
     expect(host.textContent).toContain("可容忍 1 块盘故障");
     expect(host.textContent).toContain("RAID/RAIDZ 不是备份");
 
