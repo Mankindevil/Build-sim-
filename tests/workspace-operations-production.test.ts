@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -43,6 +43,30 @@ describe("U11 production local operations projection", () => {
       coordinator, runtimeRoot, now: () => "2026-08-30T00:00:00.000Z",
     });
     const before = await coordinator.readState();
+    const inspectionResponse = await handleWorkspaceRoute("POST", "/api/workspace/doctor/repairs/inspect", {
+      actionIds: ["restrict-runtime-permissions"],
+    }, {} as never, { operations, doctorEnabled: true, backupRestoreEnabled: false });
+    expect(inspectionResponse).toMatchObject({
+      status: 200,
+      payload: {
+        schemaVersion: "workspace-repair-inspection-v1",
+        inspectionStatus: "ready",
+        actionIds: ["restrict-runtime-permissions"],
+        affectedDirectoryCount: expect.any(Number),
+        affectedFileCount: expect.any(Number),
+        writesPerformed: false,
+        requiresVerifiedBackup: true,
+        requiresExplicitPreparationConfirmation: true,
+        requiresSecondConfirmation: true,
+      },
+    });
+    expect((inspectionResponse.payload as { affectedDirectoryCount: number }).affectedDirectoryCount).toBeGreaterThan(0);
+    expect(await coordinator.readState()).toEqual(before);
+    await expect(stat(path.join(runtimeRoot, "exports"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(operations.inspectRepair({
+      actionIds: ["restrict-runtime-permissions"], password: "must-not-be-accepted",
+    })).rejects.toThrow(/fields are invalid/);
+
     const previewResponse = await handleWorkspaceRoute("POST", "/api/workspace/doctor/repairs/preview", {
       actionIds: ["restrict-runtime-permissions"], password: "doctor repair password", confirmation: true,
     }, {} as never, { operations, doctorEnabled: true, backupRestoreEnabled: true });
@@ -85,4 +109,35 @@ describe("U11 production local operations projection", () => {
     });
     expect(replay).toMatchObject({ applied: false, idempotentReplay: true, rolledBack: false });
   }, 30_000);
+
+  it("reports an unreadable ownership boundary without creating a backup or repair plan", async () => {
+    const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "buildsim-workspace-repair-unreadable-"));
+    roots.push(runtimeRoot);
+    const coordinator = new RuntimeCoordinator({ root: runtimeRoot, now: () => "2026-08-30T00:00:00.000Z" });
+    await coordinator.initialize("workspace-repair-unreadable-test");
+    const before = await coordinator.readState();
+    const unreadable = path.join(coordinator.activeRoot(before), "legacy-owned");
+    await mkdir(unreadable, { recursive: true, mode: 0o700 });
+    await chmod(unreadable, 0o000);
+    try {
+      const operations = new ProductionWorkspaceOperations({
+        coordinator, runtimeRoot, now: () => "2026-08-30T00:00:00.000Z",
+      });
+      await expect(operations.inspectRepair({ actionIds: ["restrict-runtime-permissions"] })).resolves.toMatchObject({
+        schemaVersion: "workspace-repair-inspection-v1",
+        inspectionStatus: "blocked_unreadable",
+        targetFileCount: null,
+        targetDirectoryCount: null,
+        affectedFileCount: null,
+        affectedDirectoryCount: null,
+        currentFileModes: [],
+        currentDirectoryModes: [],
+        writesPerformed: false,
+      });
+      expect(await coordinator.readState()).toEqual(before);
+      await expect(stat(path.join(runtimeRoot, "exports"))).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await chmod(unreadable, 0o700);
+    }
+  });
 });

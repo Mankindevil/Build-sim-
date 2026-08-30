@@ -46,7 +46,7 @@ describe("U11 Doctor UI", () => {
     controller.dispose();
   });
 
-  it("requires backup confirmation, renders an impact preview, and asks again before applying", async () => {
+  it("inspects with zero writes before requiring backup confirmation and a second apply confirmation", async () => {
     const unhealthy = report();
     unhealthy.overall = "unhealthy";
     unhealthy.checks[0] = {
@@ -57,6 +57,14 @@ describe("U11 Doctor UI", () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input); const body = init?.body ? JSON.parse(String(init.body)) : null;
       calls.push({ url, body });
+      if (url.endsWith("/repairs/inspect")) return new Response(JSON.stringify({
+        schemaVersion: "workspace-repair-inspection-v1", reportHash: "a".repeat(64), runtimeGeneration: 4,
+        actionIds: ["restrict-runtime-permissions"], impactSummary: "仅收紧本地运行目录权限。",
+        inspectionStatus: "ready", targetFileCount: 12, targetDirectoryCount: 8,
+        affectedFileCount: 3, affectedDirectoryCount: 2, currentFileModes: [], currentDirectoryModes: [],
+        writesPerformed: false, requiresVerifiedBackup: true, requiresExplicitPreparationConfirmation: true,
+        requiresSecondConfirmation: true,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
       if (url.endsWith("/repairs/preview")) return new Response(JSON.stringify({
         repairPlanId: "11111111-1111-4111-8111-111111111111",
         planHash: "c".repeat(64), impactSummary: "仅收紧本地运行目录权限。",
@@ -69,6 +77,14 @@ describe("U11 Doctor UI", () => {
     }) as unknown as typeof fetch;
     const host = document.createElement("section"); document.body.append(host);
     const controller = mountDoctorPanel(host, { enabled: true, fetchImpl });
+    await vi.waitFor(() => expect(host.querySelector("[data-inspect-doctor-repair-action]")).not.toBeNull());
+    host.querySelector<HTMLButtonElement>("[data-inspect-doctor-repair-action]")!.click();
+    await vi.waitFor(() => expect(host.querySelector("[data-doctor-repair-inspection='ready']")).not.toBeNull());
+    expect(host.textContent).toContain("将收紧 2 个目录和 3 个文件；尚未写入任何内容");
+    expect(calls.find(({ url }) => url.endsWith("/repairs/inspect"))?.body).toEqual({
+      actionIds: ["restrict-runtime-permissions"],
+    });
+    expect(calls.find(({ url }) => url.endsWith("/repairs/inspect"))?.body).not.toHaveProperty("password");
     await vi.waitFor(() => expect(host.querySelector("[data-prepare-doctor-repair]")).not.toBeNull());
     const form = host.querySelector<HTMLFormElement>("[data-prepare-doctor-repair]")!;
     form.querySelector<HTMLInputElement>("input[type='password']")!.value = "doctor ui repair password";

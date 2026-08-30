@@ -90,6 +90,7 @@ describe("U11 backup and portability entry UI", () => {
       listBackups: vi.fn(async () => [first]),
       createFullBackup: vi.fn(async () => second),
       createDiagnostic: vi.fn(async () => ({ diagnosticId: "diagnostic-fixture" } as never)),
+      inspectRepair: vi.fn(async () => ({ inspectionStatus: "ready", writesPerformed: false } as never)),
       prepareRepair: vi.fn(async () => ({ repairPlanId: "repair-fixture" } as never)),
       applyRepair: vi.fn(async () => ({ applied: true } as never)),
     };

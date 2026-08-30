@@ -55,6 +55,25 @@ export interface WorkspaceRepairPreview {
   readonly requiresSecondConfirmation: true;
 }
 
+export interface WorkspaceRepairInspection {
+  readonly schemaVersion: "workspace-repair-inspection-v1";
+  readonly reportHash: string;
+  readonly runtimeGeneration: number;
+  readonly actionIds: readonly ["restrict-runtime-permissions"];
+  readonly impactSummary: string;
+  readonly inspectionStatus: "ready" | "blocked_unreadable";
+  readonly targetFileCount: number | null;
+  readonly targetDirectoryCount: number | null;
+  readonly affectedFileCount: number | null;
+  readonly affectedDirectoryCount: number | null;
+  readonly currentFileModes: ReadonlyArray<{ readonly mode: string; readonly count: number }>;
+  readonly currentDirectoryModes: ReadonlyArray<{ readonly mode: string; readonly count: number }>;
+  readonly writesPerformed: false;
+  readonly requiresVerifiedBackup: true;
+  readonly requiresExplicitPreparationConfirmation: true;
+  readonly requiresSecondConfirmation: true;
+}
+
 export interface WorkspaceRepairResult {
   readonly schemaVersion: "workspace-repair-result-v1";
   readonly repairPlanId: string;
@@ -94,6 +113,27 @@ function exactRepairPreviewInput(value: unknown): { password: string; confirmati
     throw new TypeError("repair preview requires one supported action, backup password, and explicit confirmation");
   }
   return { password: input.password, confirmation: true, actionIds: [PERMISSION_ACTION] };
+}
+
+function exactRepairInspectionInput(value: unknown): { actionIds: [typeof PERMISSION_ACTION] } {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1) {
+    throw new TypeError("repair inspection request fields are invalid");
+  }
+  const input = value as { actionIds?: unknown };
+  if (!Array.isArray(input.actionIds) || input.actionIds.length !== 1 || input.actionIds[0] !== PERMISSION_ACTION) {
+    throw new TypeError("repair inspection requires one supported action");
+  }
+  return { actionIds: [PERMISSION_ACTION] };
+}
+
+function summarizeModes(modes: readonly number[]): Array<{ mode: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const value of modes) {
+    const mode = (value & 0o777).toString(8).padStart(4, "0");
+    counts.set(mode, (counts.get(mode) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right))
+    .map(([mode, count]) => ({ mode, count }));
 }
 
 function exactRepairApplyInput(value: unknown): { repairPlanId: string; planHash: string; password: string; confirmation: true } {
@@ -199,6 +239,73 @@ export class ProductionWorkspaceOperations {
     const verification = await verifyRedactedDiagnosticBundle(file);
     if (!verification.valid) throw new Error(`diagnostic bundle verification failed: ${verification.errors.join("; ")}`);
     return { bytes: await readFile(file), fileName: `${diagnosticId}.buildsim-diagnostic.json` };
+  }
+
+  /**
+   * Read-only impact inspection. It deliberately creates neither a backup nor
+   * a repair plan, and returns only aggregate mode counts instead of paths.
+   */
+  async inspectRepair(value: unknown): Promise<WorkspaceRepairInspection> {
+    exactRepairInspectionInput(value);
+    const doctorRun = await runDoctor({ coordinator: this.options.coordinator, offline: true, now: this.options.now });
+    const permission = doctorRun.report.checks.find(({ checkId }) => checkId === "runtime.permissions");
+    if (!permission || permission.status !== "fail" || permission.repairable !== true) {
+      throw new Error("the requested repair is not applicable to the current Doctor report");
+    }
+    const base = {
+      schemaVersion: "workspace-repair-inspection-v1" as const,
+      reportHash: doctorRun.report.reportHash,
+      runtimeGeneration: doctorRun.report.runtimeGeneration,
+      actionIds: [PERMISSION_ACTION] as const,
+      impactSummary: PERMISSION_IMPACT,
+      writesPerformed: false as const,
+      requiresVerifiedBackup: true as const,
+      requiresExplicitPreparationConfirmation: true as const,
+      requiresSecondConfirmation: true as const,
+    };
+    try {
+      const snapshot = await this.options.coordinator.withReadOnlySnapshot(async ({ state, activeRoot }: {
+        state: { runtimeGeneration: number };
+        activeRoot: string;
+      }) => {
+        if (state.runtimeGeneration !== doctorRun.report.runtimeGeneration) {
+          throw new Error("runtime generation changed during repair inspection");
+        }
+        const files = await listRegularFiles(this.options.coordinator.root);
+        if (files.some(({ symlink }) => symlink)) throw new Error("runtime contains symbolic links");
+        const fileTargets = [...new Set(files.map(({ absolutePath }) => absolutePath))].sort();
+        const directoryTargets = [...new Set([
+          this.options.coordinator.root,
+          this.options.coordinator.controlRoot,
+          activeRoot,
+          ...fileTargets.map((file) => path.dirname(file)),
+        ])].sort();
+        const fileModes = await Promise.all(fileTargets.map(async (file) => (await stat(file)).mode & 0o777));
+        const directoryModes = await Promise.all(directoryTargets.map(async (directory) => (await stat(directory)).mode & 0o777));
+        return { fileModes, directoryModes };
+      });
+      return {
+        ...base,
+        inspectionStatus: "ready",
+        targetFileCount: snapshot.result.fileModes.length,
+        targetDirectoryCount: snapshot.result.directoryModes.length,
+        affectedFileCount: snapshot.result.fileModes.filter((mode: number) => mode !== 0o600).length,
+        affectedDirectoryCount: snapshot.result.directoryModes.filter((mode: number) => mode !== 0o700).length,
+        currentFileModes: summarizeModes(snapshot.result.fileModes),
+        currentDirectoryModes: summarizeModes(snapshot.result.directoryModes),
+      };
+    } catch {
+      return {
+        ...base,
+        inspectionStatus: "blocked_unreadable",
+        targetFileCount: null,
+        targetDirectoryCount: null,
+        affectedFileCount: null,
+        affectedDirectoryCount: null,
+        currentFileModes: [],
+        currentDirectoryModes: [],
+      };
+    }
   }
 
   async prepareRepair(value: unknown): Promise<WorkspaceRepairPreview> {

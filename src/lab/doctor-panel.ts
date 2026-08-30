@@ -10,6 +10,13 @@ export function mountDoctorPanel(host: HTMLElement, options: { readonly enabled:
   const fetchImpl = options.fetchImpl ?? fetch;
   let report: DoctorReport | null = null; let error: string | null = null;
   let diagnostic: { downloadUrl: string; bundleHash: string } | null = null;
+  let repairInspection: {
+    inspectionStatus: "ready" | "blocked_unreadable";
+    impactSummary: string;
+    affectedFileCount: number | null;
+    affectedDirectoryCount: number | null;
+    writesPerformed: false;
+  } | null = null;
   let repairPreview: { repairPlanId: string; planHash: string; impactSummary: string; backupId: string } | null = null;
   let repairPassword = ""; let repairStatus: string | null = null; let disposed = false; let generation = 0;
   const render = () => {
@@ -42,14 +49,30 @@ export function mountDoctorPanel(host: HTMLElement, options: { readonly enabled:
     const repairable = report.checks.some(({ checkId, status, repairable }) => (
       checkId === "runtime.permissions" && status === "fail" && repairable
     ));
-    if (repairable && !repairPreview) {
+    if (repairable && !repairInspection) {
+      const inspect = element("article"); inspect.dataset.inspectDoctorRepair = "true";
+      inspect.append(element("h4", "受治理修复"), element("p", "先只读核对影响范围；此步骤不创建备份、修复计划或修改运行数据。"));
+      const button = element("button", "只读检查影响范围"); button.type = "button"; button.dataset.inspectDoctorRepairAction = "true";
+      inspect.append(button); host.append(inspect);
+    }
+    if (repairable && repairInspection) {
+      const inspection = element("article"); inspection.dataset.doctorRepairInspection = repairInspection.inspectionStatus;
+      inspection.append(element("h4", "只读影响检查"), element("p", repairInspection.impactSummary));
+      if (repairInspection.inspectionStatus === "ready") {
+        inspection.append(element("p", `将收紧 ${repairInspection.affectedDirectoryCount ?? 0} 个目录和 ${repairInspection.affectedFileCount ?? 0} 个文件；尚未写入任何内容。`));
+      } else {
+        inspection.append(element("p", "当前运行目录不可完整读取；必须先由管理员恢复所有权和只读访问，才能创建并验证备份。"));
+      }
+      host.append(inspection);
+    }
+    if (repairable && repairInspection?.inspectionStatus === "ready" && !repairPreview) {
       const form = element("form"); form.dataset.prepareDoctorRepair = "true";
-      form.append(element("h4", "受治理修复"), element("p", "仅支持收紧本地运行目录权限。预览前会先创建并验证完整加密备份。"));
+      form.append(element("h4", "准备修复"), element("p", "下一步会先创建并验证完整加密备份，再生成需要二次确认的修复计划。"));
       const password = element("input"); password.type = "password"; password.required = true; password.minLength = 12;
       password.autocomplete = "new-password"; password.placeholder = "备份密码（至少 12 字节）"; password.value = repairPassword;
       const confirm = element("input"); confirm.type = "checkbox"; confirm.required = true;
-      const label = element("label"); label.append(confirm, " 我确认先创建完整备份并生成影响预览");
-      const submit = element("button", "预览修复影响"); submit.type = "submit";
+      const label = element("label"); label.append(confirm, " 我确认创建完整备份并准备修复计划");
+      const submit = element("button", "创建备份并准备修复"); submit.type = "submit";
       form.append(password, label, submit); host.append(form);
     }
     if (repairPreview) {
@@ -71,14 +94,33 @@ export function mountDoctorPanel(host: HTMLElement, options: { readonly enabled:
       const response = await fetchImpl("/api/workspace/doctor", { headers: { Accept: "application/json" } });
       const body: unknown = await response.json(); const errors = validateDoctorReport(body);
       if (!response.ok || errors.length > 0) throw new Error("诊断报告暂不可用");
-      if (disposed || current !== generation) return; report = body as DoctorReport;
+      if (disposed || current !== generation) return;
+      report = body as DoctorReport; repairInspection = null; repairPreview = null; repairPassword = "";
     } catch (cause) { if (!disposed && current === generation) { report = null; error = cause instanceof Error ? cause.message : "诊断报告暂不可用"; } }
     render();
   };
   host.addEventListener("click", (event) => {
     if ((event.target as HTMLElement).closest("[data-refresh-doctor]")) { void refresh(); return; }
+    if ((event.target as HTMLElement).closest("[data-inspect-doctor-repair-action]")) {
+      void fetchImpl("/api/workspace/doctor/repairs/inspect", {
+        method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ actionIds: ["restrict-runtime-permissions"] }),
+      }).then(async (response) => {
+        const body = await response.json() as Record<string, unknown>;
+        if (!response.ok || !["ready", "blocked_unreadable"].includes(String(body.inspectionStatus))
+          || typeof body.impactSummary !== "string" || body.writesPerformed !== false
+          || (body.affectedFileCount !== null && typeof body.affectedFileCount !== "number")
+          || (body.affectedDirectoryCount !== null && typeof body.affectedDirectoryCount !== "number")) {
+          throw new Error("只读影响检查失败");
+        }
+        repairInspection = body as unknown as typeof repairInspection;
+        repairStatus = body.inspectionStatus === "ready" ? "只读影响检查完成；尚未修改运行数据。" : "运行目录当前不可完整读取。";
+        error = null; render();
+      }).catch((cause) => { error = cause instanceof Error ? cause.message : "只读影响检查失败"; render(); });
+      return;
+    }
     if ((event.target as HTMLElement).closest("[data-cancel-doctor-repair]")) {
-      repairPreview = null; repairPassword = ""; repairStatus = "已取消修复；未修改运行数据。"; render(); return;
+      repairInspection = null; repairPreview = null; repairPassword = ""; repairStatus = "已取消修复；未修改运行数据。"; render(); return;
     }
     if ((event.target as HTMLElement).closest("[data-apply-doctor-repair]")) {
       if (!repairPreview || !repairPassword) return;
@@ -88,7 +130,7 @@ export function mountDoctorPanel(host: HTMLElement, options: { readonly enabled:
       }).then(async (response) => {
         const body = await response.json() as { applied?: unknown; idempotentReplay?: unknown };
         if (!response.ok || (body.applied !== true && body.idempotentReplay !== true)) throw new Error("修复执行失败");
-        repairPreview = null; repairPassword = ""; repairStatus = body.idempotentReplay === true ? "修复已在此前完成。" : "修复已完成并重新运行诊断。";
+        repairInspection = null; repairPreview = null; repairPassword = ""; repairStatus = body.idempotentReplay === true ? "修复已在此前完成。" : "修复已完成并重新运行诊断。";
         await refresh();
       }).catch((cause) => { error = cause instanceof Error ? cause.message : "修复执行失败"; render(); });
       return;

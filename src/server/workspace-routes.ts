@@ -132,7 +132,7 @@ export async function handleWorkspaceRoute<TConfig extends PlanConfig = PlanConf
   jobCenter?: Pick<ProductionWorkspaceJobCenter, "list" | "cancel" | "resume">;
   jobCenterEnabled?: boolean;
   operations?: Pick<ProductionWorkspaceOperations,
-    "doctor" | "listBackups" | "createFullBackup" | "createDiagnostic" | "prepareRepair" | "applyRepair"
+    "doctor" | "listBackups" | "createFullBackup" | "createDiagnostic" | "inspectRepair" | "prepareRepair" | "applyRepair"
   >;
   backupRestoreEnabled?: boolean;
   doctorEnabled?: boolean;
@@ -188,6 +188,12 @@ export async function handleWorkspaceRoute<TConfig extends PlanConfig = PlanConf
       if (!options.operations) return { status: 503, payload: { error: "doctor_unavailable" } };
       return method === "POST" ? { status: 201, payload: await options.operations.createDiagnostic(body) }
         : { status: 405, payload: { error: "method_not_allowed" } };
+    }
+    if (pathname === "/api/workspace/doctor/repairs/inspect") {
+      if (!options.doctorEnabled) return { status: 404, payload: { error: "doctor_repair_disabled" } };
+      if (!options.operations) return { status: 503, payload: { error: "doctor_repair_unavailable" } };
+      if (method !== "POST") return { status: 405, payload: { error: "method_not_allowed" } };
+      return { status: 200, payload: await options.operations.inspectRepair(body) };
     }
     if (pathname === "/api/workspace/doctor/repairs/preview" || pathname === "/api/workspace/doctor/repairs/apply") {
       if (!options.doctorEnabled || !options.backupRestoreEnabled) return { status: 404, payload: { error: "doctor_repair_disabled" } };
