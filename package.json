@@ -37,6 +37,7 @@
     "runtime:backup:verify": "node scripts/backup/verify.mjs",
     "runtime:backup:restore": "node scripts/backup/restore.mjs",
     "runtime:doctor": "node scripts/doctor.mjs",
+    "runtime:bootstrap-access": "node scripts/runtime/bootstrap-access.mjs",
     "doctor": "node scripts/doctor.mjs",
     "runtime:gc": "node scripts/runtime-gc.mjs",
     "evidence:import-bundled": "node scripts/evidence/import-bundled-manuals.mjs",

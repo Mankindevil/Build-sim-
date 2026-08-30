@@ -374,6 +374,29 @@ Server-facing verification and repair use `verifyDoctorReportAuthoritatively`
 and `verifyRepairExecutionAuthoritatively`; both resolve runner/repository state
 by stable ref before invoking the pure cryptographic checks.
 
+An older container-owned subtree can make the normal "verified backup before
+repair" sequence impossible because the application cannot traverse the bytes
+that must be backed up. This narrow bootstrap case uses
+`npm run runtime:bootstrap-access`. Its default plan mode is read-only and
+binds the active-pointer hash, runtime generation, runtime device/inode and the
+device/inode/mode/owner of only three frozen legacy locations:
+`<active-generation>/plans/.locks`, `plans/.agent-context-audit`, and
+`transactions`. It never accepts an arbitrary path.
+
+An administrator may explicitly persist the reviewed plan outside the runtime,
+then apply it with the exact `RESTORE_RUNTIME_READ_ACCESS` confirmation and an
+exact `--expected-plan-hash`, plus an external private rollback-file destination. Apply rescans every descendant,
+rejects symlinks, special files, hard-linked regular files and mount/device
+crossings, fsyncs a content-addressed ownership/mode manifest before mutation,
+and changes ownership through `O_NOFOLLOW` descriptor-bound writes only—never
+content or modes. Partial failure restores all already-touched entries.
+Rollback additionally requires both the original plan and its private manifest,
+their exact expected hashes, plus `ROLLBACK_RUNTIME_READ_ACCESS`; a self-hashed
+manifest alone has no authority. The bootstrap does not replace the ordinary
+repair flow: immediately after access is restored, the operator must create and
+verify the encrypted full backup, rerun Doctor, and use the governed repair
+plan for any permission-mode changes or migrations.
+
 ## Legacy runtime migration v1
 
 Pre-generation deployments must not be started against generation-aware
