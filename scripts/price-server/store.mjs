@@ -171,6 +171,14 @@ export function assertPriceRuntimeAuthority(logicalPath, value) {
     assertSnapshot(value, "runtime dated price snapshot", snapshot[1]);
     return { kind: "snapshot", snapshotId: value.snapshotId ?? `legacy-${value.contentHash}`, contentHash: value.contentHash, current: false };
   }
+  const legacySnapshot = /^snapshots\/legacy-([a-f0-9]{64})\.json$/.exec(logicalPath);
+  if (legacySnapshot) {
+    assertSnapshot(value, "runtime archived legacy price snapshot");
+    invariant(value.contentHash === legacySnapshot[1]
+      && value.priceVersion === undefined && value.snapshotId === undefined && value.inputHash === undefined,
+    "runtime archived legacy price snapshot identity is invalid");
+    return { kind: "snapshot", snapshotId: `legacy-${value.contentHash}`, contentHash: value.contentHash, current: false };
+  }
   if (logicalPath === "manual-quotes.json") {
     assertQuoteFile(value, "runtime manual price quotes", { allowUnknown: true });
     return { kind: "quote-source" };
@@ -607,7 +615,9 @@ export async function buildAndWriteLatest(asOf = today(), note, options = {}) {
     const latest = options.latestPath ?? paths.latestPath;
     const snapshots = options.snapshotsDir ?? paths.snapshotsDir;
     const previous = await readJson(latest, null);
-    const generatedAt = previous?.inputHash === inputHash && previous?.generatedAt ? previous.generatedAt : new Date().toISOString();
+    const requestedGeneratedAt = options.generatedAt ?? new Date().toISOString();
+    invariant(iso(requestedGeneratedAt), "price snapshot generatedAt is invalid");
+    const generatedAt = previous?.inputHash === inputHash && previous?.generatedAt ? previous.generatedAt : requestedGeneratedAt;
     const snapshot = { schemaVersion: "1.1.0", asOf, note: snapshotNote, snapshotId, generatedAt, catalogVersion, inputHash, priceVersion: "price-snapshot-v2", quotes };
     const next = { ...snapshot, contentHash: jsonHash(snapshot) };
     assertPriceRuntimeAuthority("latest.json", next);

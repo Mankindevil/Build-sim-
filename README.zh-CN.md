@@ -770,12 +770,13 @@ npm run price:fixture
 npm run release:canary
 npm run release:holdouts -- [留样目录]
 npm run runtime:migrate-plans-v3 -- --runtime-root <副本> --output <dry-run-report.json>
+npm run runtime:migrate-price-v2 -- --runtime-root <副本> --as-of YYYY-MM-DD --output <dry-run-report.json>
 BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:create -- --runtime-root <root> --output <root-外.backup>
 BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:verify -- --runtime-root <root> --input <root-外.backup>
 RUNTIME_ROOT=<root> npm run runtime:doctor -- --strict
 ```
 
-`release:canary` 和 `release:holdouts` 在发布证据未齐时会有意以退出码 `2` 阻断。留样必须覆盖未用于调参的独立 ATX、Mini-ITX、NAS 实物，并把净空、线长、温度、标准化硬件噪音区间绑定到精确方案/评估哈希和已校准仪器。迁移默认只做 dry-run。V2 → V3 apply 必须携带人工审阅过的精确 source-manifest hash、runtime root 外的备份路径和验证通过的加密备份。演练命令不得指向已部署 runtime。
+`release:canary` 和 `release:holdouts` 在发布证据未齐时会有意以退出码 `2` 阻断。留样必须覆盖未用于调参的独立 ATX、Mini-ITX、NAS 实物，并把净空、线长、温度、标准化硬件噪音区间绑定到精确方案/评估哈希和已校准仪器。迁移默认只做 dry-run。方案 V2 → V3 与当前价格 v2 的 apply 都必须携带人工审阅过的精确 source-manifest hash、runtime root 外的备份路径和验证通过的加密备份。价格迁移会逐字节归档旧 current 文件，并且只从受治理观察重建当前视图；旧 `latest.json` 中出现过的报价不会自动变成当前价。演练命令不得指向已部署 runtime。
 
 ## 仓库结构
 

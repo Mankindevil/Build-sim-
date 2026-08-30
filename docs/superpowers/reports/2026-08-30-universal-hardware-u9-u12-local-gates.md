@@ -45,16 +45,17 @@ This report deliberately separates software fixture evidence from physical or li
 - Full local backup is encrypted, authenticated, permission-restricted, reference-closed, verified through a temporary restore, and restored through staging plus one runtime-pointer change.
 - Doctor is read-only by default, has frozen strict exit semantics, validates repository/reference closure and operational prerequisites, and gates repairs behind backup, preview, exact preconditions, approval, idempotency, and rollback.
 - V2-to-V3 plan migration defaults to dry-run, hashes the exact source manifest, requires an external verified backup for apply, retains archived V2 history, and restores the verified backup on failure.
+- Current-price v2 migration separately locks the runtime generation/revision, raw legacy snapshot, governed observation/capture bytes, catalog, target date, and projection. Apply archives the legacy bytes, rebuilds only from governed observations, and restores the verified backup after any partial write.
 - Osaka Compose/deploy scripts now run the strict universal canary and independent physical-holdout gate inside the candidate Runtime image before backup or service recreation, followed by verified backup, bounded health checks, and strict Doctor. They were not executed against production in this report.
 
 ## Verification evidence
 
 ### Full code gate
 
-- `npm test`: 329 files, 1622 tests. In the default sandbox 327 files / 1619 tests passed; the only three failures were `listen EPERM` for two loopback test files. Those exact files were rerun with local-loopback permission and passed 2 files / 11 tests.
+- `npm test`: 330 files, 1625 tests. In the default sandbox 328 files / 1622 tests passed; the only three failures were `listen EPERM` for two loopback test files. Those exact files were rerun with local-loopback permission and passed 2 files / 11 tests.
 - `npm run typecheck`: passed.
 - `npm run build`: client, Agent SSR, and Workspace SSR passed. The existing Vite chunk-size warning remains non-blocking.
-- `npm run agent:secret-scan`: 1043 files scanned, zero findings.
+- `npm run agent:secret-scan`: 1045 files scanned, zero findings.
 - `git diff --check`: passed after the report and documentation update.
 
 ### Stage gates
@@ -62,7 +63,7 @@ This report deliberately separates software fixture evidence from physical or li
 - U9 focused: 13 files / 62 tests passed.
 - U10 focused: 20 files / 46 tests passed.
 - U11 focused: 17 files / 45 tests passed.
-- U12 focused, including migration rehearsal and the read-only source-runtime canary: 34 files / 106 tests passed.
+- U12 focused, including both migration rehearsals and the read-only source-runtime canary: 35 files / 109 tests passed.
 - Full V2-to-V3 rehearsal: dry-run remained read-only; wrong manifest produced zero migration writes; apply created and verified an encrypted backup; active V2 migrated to V3; archived V2 remained readable; rollback authority remained valid.
 
 ### Executable release canary
@@ -83,6 +84,7 @@ This report deliberately separates software fixture evidence from physical or li
 - The real runtime V2-to-V3 read-only projection is `ready` with source manifest hash `b379a3fce81d8ea124b3c756a79360ad3cdd4fbee350e109d819e86d2d104eac`; it contains zero plans, so there is no plan draft to transform. The catalog user-data dry-run scanned 38 SKUs and found zero fields to remove or quarantine.
 - The fact migration dry-run is stable at source hash `1bf946f7aa56c9c26be28dc2028f065bb8c9780157fa001e62080cd12bfcc6f5`: two bundled manuals yield 10 formal facts, while 237 legacy attributes remain `legacy_unverified` and 13 remain `planning_or_inferred`. The real runtime has not applied this migration; apply remains gated by the verified backup and operator review.
 - The new read-only source canary reaches the current runtime without copying its process-only `.locks` directory, then stops because `prices/latest.json` is still the legacy archive shape and has no immutable snapshot ID. It does not upgrade that archive in place and does not count the old N6 catalog quote as a current canary price.
+- `npm run runtime:migrate-price-v2 -- --runtime-root runtime --as-of 2026-08-30` completed a zero-write projection at runtime generation 1 / revision 98. Source manifest `85c8384810d4f4325046b5825adc036dba31365049508c26c429815c4a75996c` reports one legacy quote and zero governed captures/observations, so reviewed apply would archive the old bytes and produce an empty v2 current snapshot. No apply or backup was performed against the persistent runtime.
 
 ### Browser acceptance
 
@@ -128,6 +130,6 @@ An isolated runtime under `/tmp` started the built Price, Agent-disabled, and Wo
 1. Capture and review the three physical holdout datasets with exact plan/instance/instrument/method/error scope.
 2. Supply reviewed official document bytes for the exact i5-14500, Samsung 980 PRO variant, and SSR-850FX facts required by the phase-A canary; then rerun it to green.
 3. Run and record phase B and the non-N6 blank-plan release canary, including worker restart and portable/full-restore round trips.
-4. Review local commit `30b0ed0` plus the canary follow-up commit before any remote action.
-5. Generate the real runtime V2-to-V3 dry-run report without writes and present its manifest for approval.
+4. Review the current local commit series and the recorded price-v2 source manifest before any remote action.
+5. Provide the private backup input locally, create and verify the external runtime backup, then explicitly approve the reviewed price-v2 apply and remaining runtime preparation actions.
 6. After explicit approval, push the reviewed commits, execute the Osaka release gate and deployment, then verify public health, one authoritative evaluation, persistence across restart, and strict Doctor.

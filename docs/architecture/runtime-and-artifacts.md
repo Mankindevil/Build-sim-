@@ -475,6 +475,43 @@ generation and activates that copy. If this migration created the first
 pointer, it can remove only that pointer when its exact revision is unchanged;
 all legacy files and generated audit material remain recoverable.
 
+## Current price snapshot v2 migration
+
+`scripts/migrations/migrate-price-snapshot-v2.ts` is the explicit bridge from
+the historical `prices/latest.json` shape to the content-addressed current
+snapshot consumed by evaluation. Its default mode is a strictly read-only
+projection using the optimistic pointer/lock/pointer barrier. The report binds
+the runtime generation and revision, raw current-file hash, governed capture
+and observation bytes, merged catalog hash, selected/omitted observation IDs,
+target date, and deterministic effective time into one source-manifest hash.
+
+Apply requires that exact reviewed hash and an encrypted backup path outside
+the runtime root. It creates and verifies the backup first, then rechecks the
+complete source manifest under the runtime writer barrier. A legacy current
+file is copied byte-for-byte to
+`prices/snapshots/legacy-<contentHash>.json`; current state is rebuilt only from
+valid immutable price observations. Missing observations therefore produce an
+empty v2 current snapshot instead of promoting a historical quote. A source
+revision change before commit produces zero migration writes. A failure after
+the first write restores the verified backup into a new generation and
+regenerates the production reference graph.
+
+```bash
+# read-only review
+npm run runtime:migrate-price-v2 -- \
+  --runtime-root <runtime-copy> \
+  --as-of YYYY-MM-DD \
+  --output <dry-run-report.json>
+
+# apply only after reviewing the report and creating a private password input
+npm run runtime:migrate-price-v2 -- --apply \
+  --runtime-root <runtime-copy> \
+  --as-of YYYY-MM-DD \
+  --expected-source-manifest-hash '<dry-run hash>' \
+  --backup-output <outside-runtime.backup> \
+  --password-file <0600-password-file>
+```
+
 ## SimulationInput
 
 ```ts

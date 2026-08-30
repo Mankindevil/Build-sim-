@@ -12,6 +12,12 @@ export interface CurrentPriceSnapshotBuildResult {
   readonly omittedObservationIds: readonly string[];
 }
 
+export interface CurrentPriceSnapshotPreview {
+  readonly quotes: readonly PriceQuote[];
+  readonly selectedObservationIds: readonly string[];
+  readonly omittedObservationIds: readonly string[];
+}
+
 function groupKey(observation: PriceObservation): string {
   return JSON.stringify([observation.skuId, [...observation.variantIdentityFactIds].sort()]);
 }
@@ -40,12 +46,9 @@ export class CurrentPriceSnapshotService {
   }
 
   /** Root-pinned projection for a service already holding the runtime writer barrier. */
-  async rebuildAtRoot(activeRoot: string, asOf?: string, now?: string): Promise<CurrentPriceSnapshotBuildResult> {
+  async previewAtRoot(activeRoot: string, now?: string): Promise<CurrentPriceSnapshotPreview> {
     const currentTime = now ?? (this.options.now ?? (() => new Date().toISOString()))();
-    const snapshotDate = asOf ?? currentTime.slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate) || !Number.isFinite(Date.parse(`${snapshotDate}T00:00:00.000Z`))) {
-      throw new TypeError("price snapshot asOf must be a calendar date");
-    }
+    if (!Number.isFinite(Date.parse(currentTime))) throw new TypeError("price snapshot projection time must be an ISO timestamp");
     const [observations, captures, catalog] = await Promise.all([
       this.options.prices.listObservationsAtRoot(activeRoot),
       this.options.prices.listListingCapturesAtRoot(activeRoot),
@@ -96,15 +99,28 @@ export class CurrentPriceSnapshotService {
         ].join(" · "),
       };
     });
-    const snapshot = await buildAndWriteLatest(snapshotDate, "Derived from immutable current-new price observations.", {
-      pricesDir: confined(activeRoot, "prices"),
-      catalog,
-      quotes,
-    }) as CurrentPriceSnapshotBuildResult["snapshot"];
     return {
-      snapshot,
+      quotes,
       selectedObservationIds: [...selectedIds].sort(),
       omittedObservationIds: observations.filter(({ observationId }) => !selectedIds.has(observationId)).map(({ observationId }) => observationId).sort(),
     };
+  }
+
+  /** Root-pinned projection and write for a service already holding the runtime writer barrier. */
+  async rebuildAtRoot(activeRoot: string, asOf?: string, now?: string): Promise<CurrentPriceSnapshotBuildResult> {
+    const currentTime = now ?? (this.options.now ?? (() => new Date().toISOString()))();
+    const snapshotDate = asOf ?? currentTime.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate) || !Number.isFinite(Date.parse(`${snapshotDate}T00:00:00.000Z`))) {
+      throw new TypeError("price snapshot asOf must be a calendar date");
+    }
+    const preview = await this.previewAtRoot(activeRoot, currentTime);
+    const catalog = await this.options.catalog(activeRoot);
+    const snapshot = await buildAndWriteLatest(snapshotDate, "Derived from immutable current-new price observations.", {
+      pricesDir: confined(activeRoot, "prices"),
+      catalog,
+      quotes: preview.quotes,
+      generatedAt: currentTime,
+    }) as CurrentPriceSnapshotBuildResult["snapshot"];
+    return { snapshot, selectedObservationIds: preview.selectedObservationIds, omittedObservationIds: preview.omittedObservationIds };
   }
 }
