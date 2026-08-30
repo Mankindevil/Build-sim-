@@ -54,7 +54,7 @@ This report deliberately separates software fixture evidence from physical or li
 - `npm test -- --testTimeout=30000`: 325 files, 1610 tests. In the default sandbox 323 files / 1607 tests passed; the only three failures were `listen EPERM` for two loopback test files. Those exact files were rerun with local-loopback permission and passed 2 files / 11 tests.
 - `npm run typecheck`: passed.
 - `npm run build`: client, Agent SSR, and Workspace SSR passed. The existing Vite chunk-size warning remains non-blocking.
-- `npm run agent:secret-scan`: 1033 files scanned, zero findings.
+- `npm run agent:secret-scan`: 1036 files scanned after the release-canary follow-up, zero findings.
 - `git diff --check`: passed after the report and documentation update.
 
 ### Stage gates
@@ -64,6 +64,12 @@ This report deliberately separates software fixture evidence from physical or li
 - U11 focused: 17 files / 45 tests passed.
 - U12 focused, including migration rehearsal: 34 files / 105 tests passed.
 - Full V2-to-V3 rehearsal: dry-run remained read-only; wrong manifest produced zero migration writes; apply created and verified an encrypted backup; active V2 migrated to V3; archived V2 remained readable; rollback authority remained valid.
+
+### Executable release canary
+
+- `npm run release:canary` now runs the exact N6 partial configuration through the production repository, fact migration, locked evaluation, saved version, and spatial-scene composition.
+- Eight checks pass: two distinct 980 PRO instances, zero profile-default components, partial/not-power-ready evaluation, zero empty-bay cable instances, locked blocked spatial output, blocked thermal/acoustic output without fabricated point values, unknown price output without fabricated listings, and no executable first-power completion.
+- The command intentionally exits `2`: CPU/SSD/legacy-PSU official fact closure is incomplete, and no official `power.load` fact proves the i5-14500 maximum turbo power. It records those exact blockers and confirms that no `65 W × 1.35` fallback was used.
 
 ### Browser acceptance
 
@@ -98,7 +104,7 @@ An isolated runtime under `/tmp` started the built Price, Agent-disabled, and Wo
 ## Not implemented or not yet evidenced
 
 1. No repository artifact contains the required independent, not-used-for-tuning physical ATX, ITX, and NAS holdouts for measured clearance, minimum cable length, reproducible temperature interval, and standardized hardware-acoustic interval.
-2. The exact N6 phase-A/phase-B release canary and the cross-product blank-plan canary have not yet been recorded as one end-to-end release artifact, even though their component fixtures and focused tests pass.
+2. The exact N6 phase-A canary is now executable and records eight passing checks plus two precise evidence blockers. Phase B and the cross-product blank-plan canary still lack one passing end-to-end release artifact.
 3. The deployed runtime has not been migrated. A real apply requires an operator-reviewed dry-run report and source-manifest hash, an external verified backup, a maintenance window, and rollback readiness.
 4. Remote push, production deployment, and post-deploy verification have not run and require explicit user approval after local review.
 5. Live retail coverage and optional model-provider behavior were not tested; no external request was made. The platform must continue to show unavailable/unknown where live evidence is absent.
@@ -107,7 +113,8 @@ An isolated runtime under `/tmp` started the built Price, Agent-disabled, and Wo
 ## Next release actions
 
 1. Capture and review the three physical holdout datasets with exact plan/instance/instrument/method/error scope.
-2. Run and record the N6 partial/complete and non-N6 blank-plan release canaries, including worker restart and portable/full-restore round trips.
-3. Review the complete worktree diff and create the local release commit.
-4. Generate the real runtime V2-to-V3 dry-run report without writes and present its manifest for approval.
-5. After explicit approval, push the reviewed commit, execute the Osaka release gate and deployment, then verify public health, one authoritative evaluation, persistence across restart, and strict Doctor.
+2. Supply reviewed official document bytes for the exact i5-14500, Samsung 980 PRO variant, and SSR-850FX facts required by the phase-A canary; then rerun it to green.
+3. Run and record phase B and the non-N6 blank-plan release canary, including worker restart and portable/full-restore round trips.
+4. Review local commit `30b0ed0` plus the canary follow-up commit before any remote action.
+5. Generate the real runtime V2-to-V3 dry-run report without writes and present its manifest for approval.
+6. After explicit approval, push the reviewed commits, execute the Osaka release gate and deployment, then verify public health, one authoritative evaluation, persistence across restart, and strict Doctor.

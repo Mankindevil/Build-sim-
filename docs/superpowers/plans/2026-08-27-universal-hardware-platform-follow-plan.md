@@ -2590,7 +2590,7 @@ U0-U11 全部完成。
 
 阶段 A：部分方案验收（保持用户原始输入，不补造硬件）：
 
-- [ ] 两块 SSD 是两个实例，不来自 profile default。
+- [x] 两块 SSD 是两个实例，不来自 profile default。
 - [ ] Agent 展示精确/家族 claim scope。
 - [ ] 主板/CPU/SSD/PSU 官网事实可追溯。
 - [ ] i5-14500 最大睿频功耗使用官方事实，不再从 65W × 1.35 猜测。
@@ -2598,7 +2598,7 @@ U0-U11 全部完成。
 - [ ] PSU/背板线束区分“当前盘位需求”和“全背板未来能力”。
 - [ ] 空盘位不生成假数据线。
 - [ ] 3D/走线显示推断坐标、公差和 blocked 项。
-- [ ] 缺内存/散热等关键输入时，总热噪为 partial/blocked，不输出完整温度/噪音，也不允许 `powerReady`。
+- [x] 缺内存/散热等关键输入时，总热噪为 partial/blocked，不输出完整温度/噪音，也不允许 `powerReady`。
 - [ ] 中国新货价格按低置信单点或市场区间显示。
 - [ ] procedure 只能生成当前安全的 prepare/measurement/补证步骤，不得生成可执行首次通电完成状态。
 
@@ -2735,6 +2735,7 @@ live network 验收使用明确的只读测试帐号/本地服务，失败不得
 - 聚焦测试：U12 34 files / 105 tests 通过；U9 13/62、U10 20/46、U11 17/45 通过。
 - 全量测试：325 files / 1610 tests；默认沙箱内 3 项仅因禁止本机监听失败，精确回环复跑 2 files / 11 tests 通过。typecheck、三端 build、1033-file secret scan 与 diff-check 通过。
 - 浏览器测试：计划列出的 12 个本机页面脚本全部通过；未访问外部网络。
+- release canary：`npm run release:canary` 已把 N6 阶段 A 固化为生产权威路径；8 项通过，CPU/SSD/旧款 PSU 的完整 official fact closure 与 i5-14500 最大睿频功耗 official fact 两项保持 blocked，命令退出码为 2，未从 catalog 属性补造。
 - local smoke：隔离 `/tmp` runtime 上启动 built Price/Agent-disabled/Workspace 与静态本地搜索 fixture；创建/验证加密 full backup 后 strict Doctor 为 `healthy`/exit 0，临时状态已删除。
 - 未解决限制：三套未参与调参的 ATX/ITX/NAS 实物 holdout 缺失；N6 phase A/B 与跨产品发布 canary 尚未形成独立端到端证据；真实 runtime 迁移、远程推送、生产部署与部署后验证未执行。
 - 下一阶段前置条件：补齐 holdout 与 canary 证据，审阅并提交工作树；之后由用户明确批准远程推送和生产部署。
