@@ -54,7 +54,7 @@ This report deliberately separates software fixture evidence from physical or li
 - `npm test -- --testTimeout=30000`: 325 files, 1610 tests. In the default sandbox 323 files / 1607 tests passed; the only three failures were `listen EPERM` for two loopback test files. Those exact files were rerun with local-loopback permission and passed 2 files / 11 tests.
 - `npm run typecheck`: passed.
 - `npm run build`: client, Agent SSR, and Workspace SSR passed. The existing Vite chunk-size warning remains non-blocking.
-- `npm run agent:secret-scan`: 1036 files scanned after the release-canary follow-up, zero findings.
+- `npm run agent:secret-scan`: 1039 files scanned after the release-canary and physical-holdout gate follow-ups, zero findings.
 - `git diff --check`: passed after the report and documentation update.
 
 ### Stage gates
@@ -70,6 +70,7 @@ This report deliberately separates software fixture evidence from physical or li
 - `npm run release:canary` now runs the exact N6 partial configuration through the production repository, fact migration, locked evaluation, saved version, and spatial-scene composition.
 - Eight checks pass: two distinct 980 PRO instances, zero profile-default components, partial/not-power-ready evaluation, zero empty-bay cable instances, locked blocked spatial output, blocked thermal/acoustic output without fabricated point values, unknown price output without fabricated listings, and no executable first-power completion.
 - The command intentionally exits `2`: CPU/SSD/legacy-PSU official fact closure is incomplete, and no official `power.load` fact proves the i5-14500 maximum turbo power. It records those exact blockers and confirms that no `65 W × 1.35` fallback was used.
+- `npm run release:holdouts` is a second strict gate. It requires independent ATX, Mini-ITX, and NAS datasets that were not used for tuning; exact plan/version/config/evaluation/adapter/simulation hashes; calibrated protocol/instrument identity; and bounded clearance, cable-length, temperature, and 1-metre standardized acoustic measurements. With no real datasets present it exits `2` and lists all three missing layouts.
 
 ### Browser acceptance
 

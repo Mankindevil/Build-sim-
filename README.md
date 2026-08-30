@@ -775,13 +775,15 @@ npm run price:fixture
 Release and recovery checks:
 
 ```bash
+npm run release:canary
+npm run release:holdouts -- [holdout-directory]
 npm run runtime:migrate-plans-v3 -- --runtime-root <copy> --output <dry-run-report.json>
 BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:create -- --runtime-root <root> --output <outside-root.backup>
 BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:verify -- --runtime-root <root> --input <outside-root.backup>
 RUNTIME_ROOT=<root> npm run runtime:doctor -- --strict
 ```
 
-Migration defaults to dry-run. Applying V2-to-V3 requires the exact reviewed source-manifest hash, a backup path outside the runtime root, and a verified encrypted backup. Never point rehearsal commands at the deployed runtime.
+`release:canary` and `release:holdouts` intentionally exit `2` while any release evidence is missing. Holdout datasets must cover independent ATX, Mini-ITX, and NAS builds that were not used for tuning and must bind measured clearance, cable length, temperature, and standardized hardware-acoustic intervals to exact plan/evaluation hashes and calibrated instruments. Migration defaults to dry-run. Applying V2-to-V3 requires the exact reviewed source-manifest hash, a backup path outside the runtime root, and a verified encrypted backup. Never point rehearsal commands at the deployed runtime.
 
 ## Repository layout
 
