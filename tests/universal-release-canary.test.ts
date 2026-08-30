@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -179,6 +180,54 @@ describe("U12 universal release canary", () => {
       expect(pointerAfter.equals(pointerBefore)).toBe(true);
       expect(latestAfter.equals(latestBefore)).toBe(true);
       expect(plansAfter.sort()).toEqual(plansBefore.sort());
+    } finally {
+      await rm(sourceRuntimeRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("keeps a legacy price archive history-only while reporting every other source blocker", async () => {
+    const sourceRuntimeRoot = await mkdtemp(path.join(tmpdir(), "buildsim-canary-legacy-source-"));
+    try {
+      const migration = await planFactsV1Migration();
+      await migrateFactsV1({
+        dryRun: false,
+        expectedSourceHash: migration.sourceHash,
+        runtimeRoot: sourceRuntimeRoot,
+        now: () => "2026-08-30T07:00:00.000Z",
+      });
+      const coordinator = new RuntimeCoordinator({ root: sourceRuntimeRoot, now: () => "2026-08-30T09:00:00.000Z" });
+      await initializeRuntimeCatalog({ coordinator, generationAware: true });
+      const state = await coordinator.readState();
+      const latestPath = path.join(sourceRuntimeRoot, state.activeRoot, "prices", "latest.json");
+      const legacyMaterial = { schemaVersion: "1.0.0", asOf: "2026-08-30", quotes: [] };
+      const legacyBytes = Buffer.from(`${JSON.stringify({
+        ...legacyMaterial,
+        contentHash: createHash("sha256").update(JSON.stringify(legacyMaterial)).digest("hex"),
+      })}\n`);
+      await writeFile(latestPath, legacyBytes);
+      const pointerPath = path.join(sourceRuntimeRoot, "control", "active-pointer.json");
+      const [pointerBefore, latestBefore] = await Promise.all([readFile(pointerPath), readFile(latestPath)]);
+
+      const report = await runUniversalReleaseCanary({ sourceRuntimeRoot });
+      expect(report.checks.find(({ checkId }) => checkId === "stage-a.china-new-price-is-governed")).toMatchObject({
+        status: "blocked",
+        evidence: {
+          sourcePriceAuthorityStatus: "legacy_history_only",
+          sourcePriceSnapshotHash: null,
+          sourcePriceSnapshotId: null,
+          components: expect.arrayContaining([
+            expect.objectContaining({ status: "unavailable", confidence: "unavailable" }),
+          ]),
+        },
+      });
+      expect(report.blockers).toEqual([
+        "stage-a.official-fact-closure",
+        "stage-a.cpu-max-turbo-power-is-official",
+        "stage-a.china-new-price-is-governed",
+        ...UNIVERSAL_JOURNEY_CHECK_IDS,
+      ]);
+      await expect(readFile(pointerPath)).resolves.toEqual(pointerBefore);
+      await expect(readFile(latestPath)).resolves.toEqual(latestBefore);
     } finally {
       await rm(sourceRuntimeRoot, { recursive: true, force: true });
     }

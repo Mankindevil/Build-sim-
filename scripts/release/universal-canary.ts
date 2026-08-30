@@ -131,9 +131,10 @@ function priceStatusRank(status: CurrentPriceProjection["status"]): number {
 async function selectCanarySourcePrices(
   services: ReturnType<typeof createWorkspaceRepositories<BuildConfigV3>>,
   runtimeRoot: string,
-): Promise<CanarySourcePriceAuthority> {
+): Promise<CanarySourcePriceAuthority | null> {
   await services.priceRepository.initialize("universal-release-canary-price-read-v1");
   const snapshot = loadRuntimePriceSnapshot({ runtimeRoot, allowSeedFallback: false });
+  if (snapshot.schemaVersion === "1.0.0" && snapshot.priceVersion === undefined) return null;
   if (snapshot.schemaVersion !== "1.1.0" || snapshot.priceVersion !== "price-snapshot-v2"
     || typeof snapshot.snapshotId !== "string" || typeof snapshot.inputHash !== "string"
     || typeof snapshot.generatedAt !== "string") {
@@ -269,6 +270,12 @@ export async function runUniversalReleaseCanary(options: {
     const sourcePriceAuthority = sourceMode
       ? await selectCanarySourcePrices(services, runtimeRoot)
       : null;
+    if (sourceMode && sourcePriceAuthority === null) {
+      // Never project a legacy archive as current. Continue the canary with an
+      // empty governed snapshot in the disposable clone so every other release
+      // requirement is still reported in one read-only source run.
+      await writeEmptyPriceSnapshot(services);
+    }
 
     const config = canaryConfig(new Map([...sourcePriceAuthority?.selections.entries() ?? []]
       .map(([skuId, selection]) => [skuId, selection.variantIdentityFactIds] as const)));
@@ -399,6 +406,7 @@ export async function runUniversalReleaseCanary(options: {
       }),
       sourceMode
         ? check("stage-a.china-new-price-is-governed", sourcePriceReady, {
+          sourcePriceAuthorityStatus: sourcePriceAuthority === null ? "legacy_history_only" : "governed_current",
           sourcePriceSnapshotHash: sourcePriceAuthority?.priceSnapshotHash ?? null,
           sourcePriceSnapshotId: sourcePriceAuthority?.priceSnapshotId ?? null,
           lockedPriceArtifactHash: receipt.evaluationLock.snapshotHashes.priceSnapshotHash,
