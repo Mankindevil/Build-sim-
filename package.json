@@ -50,6 +50,7 @@
     "workspace:build": "vite build --config vite.workspace.config.ts",
     "test:workspace:governed-dist": "npm run workspace:build && node scripts/smoke-workspace-governed-evaluation.mjs",
     "release:canary": "vite-node --script scripts/release/universal-canary.ts",
+    "release:journey-manifest": "vite-node --script scripts/release/create-universal-journey-evidence.ts",
     "release:holdouts": "vite-node --script scripts/release/physical-holdouts.ts",
     "workspace:serve": "npm run workspace:build && node dist-workspace/workspace-server.js",
     "searxng:up": "node scripts/searxng-local.mjs up",
