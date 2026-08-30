@@ -178,9 +178,21 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
         && config.connections.length === 0,
       { cableInstanceIds: config.components.filter(({ kind }) => kind === "cable").map(({ instanceId }) => instanceId), connections: config.connections }),
       check("stage-a.spatial-scene-is-locked-and-blocked", scene.evaluationHash === receipt.evaluationHash
+        && scene.executionStatus === "partial"
+        && scene.blockedDomains.join(",") === "component_placement,routing,assembly"
         && scene.model.nodes.some(({ id }) => id === "case-shell")
+        && scene.model.nodes.some(({ evidence, note }) => evidence === "inferred" && note?.includes("±"))
         && evaluation.domainEvaluations.some(({ verdict }) => verdict === "blocked" || verdict === "unknown"),
-      { adapterSnapshotHash: scene.adapterSnapshotHash, evaluationHash: scene.evaluationHash, nodeCount: scene.model.nodes.length }),
+      {
+        adapterSnapshotHash: scene.adapterSnapshotHash,
+        evaluationHash: scene.evaluationHash,
+        executionStatus: scene.executionStatus,
+        blockedDomains: scene.blockedDomains,
+        inferredToleranceNodeIds: scene.model.nodes
+          .filter(({ evidence, note }) => evidence === "inferred" && note?.includes("±"))
+          .map(({ id }) => id),
+        nodeCount: scene.model.nodes.length,
+      }),
       check("stage-a.thermal-acoustic-remains-blocked", evaluation.thermalAcousticEvaluation.thermal.verdict === "blocked"
         && evaluation.thermalAcousticEvaluation.thermal.peakTemperatureC === null
         && evaluation.thermalAcousticEvaluation.acoustic.verdict === "blocked"

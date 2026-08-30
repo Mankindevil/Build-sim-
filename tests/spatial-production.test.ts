@@ -6,7 +6,7 @@ import { buildAuthoritativeSpatialScene } from "../src/spatial/authoritative-sce
 import { handleWorkspaceRoute } from "../src/server/workspace-routes";
 import type { WorkspaceSpatialSceneAuthority } from "../src/server/spatial-production";
 
-async function fixture() {
+async function fixture(options: { includePlacement?: boolean } = {}) {
   const { manifest } = await materializeCaseAdapterFixtureSeed(adapterSeed as unknown as CaseAdapterSeed);
   const config = createEmptyBuildConfigV3("plan-spatial", "Spatial", "2026-08-29T00:00:00.000Z");
   config.components = [
@@ -27,7 +27,12 @@ async function fixture() {
       source: "user",
     },
   ];
-  config.placements = [{ placementId: "placement-board", componentInstanceId: "board-spatial", mountOwnerInstanceId: "case-spatial", mountId: "mount.board.matx" }];
+  config.placements = options.includePlacement === false ? [] : [{
+    placementId: "placement-board",
+    componentInstanceId: "board-spatial",
+    mountOwnerInstanceId: "case-spatial",
+    mountId: "mount.board.matx",
+  }];
   const payload = {
     schemaVersion: "workspace-adapter-snapshot-v1",
     caseManifests: [manifest],
@@ -69,6 +74,13 @@ describe("U8 authoritative spatial production", () => {
     expect(scene.model.nodes.some((node) => node.id === "port:port.backplane.power")).toBe(true);
     expect(scene.model.nodes.some((node) => node.skuId === "board.example")).toBe(false);
     expect(scene.overlays.routes).toEqual([]);
+  });
+
+  it("keeps a selected but unplaced component blocked instead of treating an empty placement list as ready", async () => {
+    const scene = await fixture({ includePlacement: false });
+    expect(scene.executionStatus).toBe("partial");
+    expect(scene.blockedDomains).toEqual(["component_placement", "routing", "assembly"]);
+    expect(scene.model.nodes.some((node) => node.skuId === "board.example")).toBe(false);
   });
 
   it("derives plan/version ownership from the route and disappears when topology V3 is disabled", async () => {

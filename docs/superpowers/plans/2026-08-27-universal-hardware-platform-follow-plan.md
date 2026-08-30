@@ -2594,10 +2594,10 @@ U0-U11 全部完成。
 - [ ] Agent 展示精确/家族 claim scope。
 - [ ] 主板/CPU/SSD/PSU 官网事实可追溯。
 - [ ] i5-14500 最大睿频功耗使用官方事实，不再从 65W × 1.35 猜测。
-- [ ] 未选择内存、散热和显卡时仍显示局部评估与 requirements。
+- [x] 未选择内存、散热和显卡时仍显示局部评估与 requirements。
 - [ ] PSU/背板线束区分“当前盘位需求”和“全背板未来能力”。
-- [ ] 空盘位不生成假数据线。
-- [ ] 3D/走线显示推断坐标、公差和 blocked 项。
+- [x] 空盘位不生成假数据线。
+- [x] 3D/走线显示推断坐标、公差和 blocked 项。
 - [x] 缺内存/散热等关键输入时，总热噪为 partial/blocked，不输出完整温度/噪音，也不允许 `powerReady`。
 - [ ] 中国新货价格按低置信单点或市场区间显示。
 - [ ] procedure 只能生成当前安全的 prepare/measurement/补证步骤，不得生成可执行首次通电完成状态。
@@ -2735,7 +2735,7 @@ live network 验收使用明确的只读测试帐号/本地服务，失败不得
 - 聚焦测试：U12 34 files / 105 tests 通过；U9 13/62、U10 20/46、U11 17/45 通过。
 - 全量测试：325 files / 1610 tests；默认沙箱内 3 项仅因禁止本机监听失败，精确回环复跑 2 files / 11 tests 通过。typecheck、三端 build、1033-file secret scan 与 diff-check 通过。
 - 浏览器测试：计划列出的 12 个本机页面脚本全部通过；未访问外部网络。
-- release canary：`npm run release:canary` 已把 N6 阶段 A 固化为生产权威路径；8 项通过，CPU/SSD/旧款 PSU 的完整 official fact closure 与 i5-14500 最大睿频功耗 official fact 两项保持 blocked，命令退出码为 2，未从 catalog 属性补造。
+- release canary：`npm run release:canary` 已把 N6 阶段 A 固化为生产权威路径；8 项通过，包含局部 requirements、空盘位零假线材，以及由锁定 adapter 生成的推断坐标/公差与 component placement/routing/assembly 三域 blocked；CPU/SSD/旧款 PSU 的完整 official fact closure 与 i5-14500 最大睿频功耗 official fact 两项保持 blocked，命令退出码为 2，未从 catalog 属性补造。
 - physical holdout gate：`npm run release:holdouts` 已固化 strict/total/content-addressed 数据契约，要求独立 ATX、Mini-ITX、NAS 均绑定精确 plan/version/evaluation/adapter/simulation authority、校准仪器与净空/线长/温度/1m 标准化声学区间；当前无真实数据，命令按设计列出三类缺失并退出 2。
 - Osaka 发布脚本现在会先构建候选 Runtime 镜像，再在备份与服务重建之前依次执行 `release:canary` 与 `/app/runtime/release-evidence/physical-holdouts` 留样门禁；任一非零退出都不会启动候选服务栈。
 - 当前本机持久 runtime 的离线只读 Doctor 已执行：引用闭包、迁移状态与任务状态通过，但 48 个文件为 `0644`、37 个目录为 `0755`，因此 `runtime.permissions` 保持 blocking；`.env.remote` 尚无 `BUILDSIM_BACKUP_PASSWORD`，未绕过“先加密备份、再显式批准 repair”的门禁。真实 V2→V3 dry-run 为 ready/0 plans，目录用户数据 dry-run 为 38 SKU/0 移除/0 quarantine，facts migration 尚未 apply。

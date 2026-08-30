@@ -328,9 +328,14 @@ export function buildAuthoritativeSpatialScene(input: {
   const descriptor = descriptorFor(input.adapterPayload, manifest);
   const nodes = manifestNodes(manifest);
   const shell = nodes.find((candidate) => candidate.id === "case-shell")!;
+  const hasUnrenderedComponents = input.config.components.some((candidate) => candidate.instanceId !== component.instanceId);
   const hasPlacedComponents = input.config.placements.some((placement) => placement.mountOwnerInstanceId === component.instanceId);
   const routeProjection = manifestRoutes(manifest, input.config, component.instanceId);
-  const placementBlocked = hasPlacedComponents;
+  // The authoritative scene currently renders manifest-bound case geometry,
+  // not world poses for arbitrary component instances. An authored placement
+  // and a selected-but-unplaced component are therefore equally unresolved;
+  // treating the latter as ready would hide the exact gap in partial plans.
+  const placementBlocked = hasPlacedComponents || hasUnrenderedComponents;
   // A route cannot be authoritative while one of its potentially connected
   // component placements has no world pose, even when no connection edge has
   // been authored yet.
