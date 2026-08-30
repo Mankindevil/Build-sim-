@@ -60,4 +60,17 @@ describe("Osaka lifecycle deployment", () => {
     expect(script).toContain("scripts/backup/verify.mjs");
     expect(script).toContain("scripts/doctor.mjs --runtime-root /app/runtime --strict");
   });
+
+  it("blocks release startup until the universal canary and independent holdouts pass", async () => {
+    const script = await readFile("deploy/osaka/deploy.sh", "utf8");
+    const canary = script.indexOf("npm run release:canary");
+    const holdouts = script.indexOf("npm run release:holdouts -- /app/runtime/release-evidence/physical-holdouts");
+    const backup = script.indexOf("node scripts/backup/create.mjs");
+    const startup = script.indexOf('"${COMPOSE[@]}" up -d --force-recreate', backup);
+
+    expect(canary).toBeGreaterThan(-1);
+    expect(holdouts).toBeGreaterThan(canary);
+    expect(backup).toBeGreaterThan(holdouts);
+    expect(startup).toBeGreaterThan(backup);
+  });
 });

@@ -45,7 +45,7 @@ This report deliberately separates software fixture evidence from physical or li
 - Full local backup is encrypted, authenticated, permission-restricted, reference-closed, verified through a temporary restore, and restored through staging plus one runtime-pointer change.
 - Doctor is read-only by default, has frozen strict exit semantics, validates repository/reference closure and operational prerequisites, and gates repairs behind backup, preview, exact preconditions, approval, idempotency, and rollback.
 - V2-to-V3 plan migration defaults to dry-run, hashes the exact source manifest, requires an external verified backup for apply, retains archived V2 history, and restores the verified backup on failure.
-- Osaka Compose/deploy scripts contain release-gate health, verified-backup, and strict Doctor steps, but were not executed against production in this report.
+- Osaka Compose/deploy scripts now run the strict universal canary and independent physical-holdout gate inside the candidate Runtime image before backup or service recreation, followed by verified backup, bounded health checks, and strict Doctor. They were not executed against production in this report.
 
 ## Verification evidence
 
@@ -71,6 +71,7 @@ This report deliberately separates software fixture evidence from physical or li
 - Eight checks pass: two distinct 980 PRO instances, zero profile-default components, partial/not-power-ready evaluation, zero empty-bay cable instances, locked blocked spatial output, blocked thermal/acoustic output without fabricated point values, unknown price output without fabricated listings, and no executable first-power completion.
 - The command intentionally exits `2`: CPU/SSD/legacy-PSU official fact closure is incomplete, and no official `power.load` fact proves the i5-14500 maximum turbo power. It records those exact blockers and confirms that no `65 W × 1.35` fallback was used.
 - `npm run release:holdouts` is a second strict gate. It requires independent ATX, Mini-ITX, and NAS datasets that were not used for tuning; exact plan/version/config/evaluation/adapter/simulation hashes; calibrated protocol/instrument identity; and bounded clearance, cable-length, temperature, and 1-metre standardized acoustic measurements. With no real datasets present it exits `2` and lists all three missing layouts.
+- `deploy/osaka/deploy.sh` invokes both gates from the just-built Runtime image and reads the reviewed holdout set from `/app/runtime/release-evidence/physical-holdouts`; either non-zero result stops before backup creation and before the candidate stack is started.
 
 ### Browser acceptance
 

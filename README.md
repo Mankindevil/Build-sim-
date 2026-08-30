@@ -309,7 +309,7 @@ cd /home/linuxuser/Code/build-sim
 
 cp deploy/osaka/env.remote.example .env.remote
 chmod 600 .env.remote
-mkdir -p runtime deploy-backups
+mkdir -p runtime/release-evidence/physical-holdouts deploy-backups
 chmod 700 runtime
 ```
 
@@ -395,7 +395,7 @@ For a repeatable manual release, use the checked-in deployment script. With no a
 ./deploy/osaka/deploy.sh --ref <full-commit-sha>
 ```
 
-The script refuses tracked local changes, validates Compose, preserves `.env.remote` and `runtime/`, backs up the current Web and Runtime images, recreates the stack, and checks Web, Price, Agent, Workspace, and SearXNG. A failed build or health check restores the previous Git commit and image tags.
+The script refuses tracked local changes, validates Compose, preserves `.env.remote` and `runtime/`, and builds the candidate images. Before it backs up or recreates any running service, the candidate Runtime image must pass `release:canary` and the independent holdout set stored under `runtime/release-evidence/physical-holdouts/`. It then backs up the current Web and Runtime images, recreates the stack, and checks Web, Price, Agent, Workspace, and SearXNG. A failed release gate, build, or health check restores the previous Git commit and image tags without promoting the candidate stack.
 
 Stop the stack without deleting the bind-mounted `runtime/` data:
 

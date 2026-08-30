@@ -308,7 +308,7 @@ cd /home/linuxuser/Code/build-sim
 
 cp deploy/osaka/env.remote.example .env.remote
 chmod 600 .env.remote
-mkdir -p runtime deploy-backups
+mkdir -p runtime/release-evidence/physical-holdouts deploy-backups
 chmod 700 runtime
 ```
 
@@ -394,7 +394,7 @@ docker compose -f deploy/osaka/compose.yaml up -d --force-recreate
 ./deploy/osaka/deploy.sh --ref <完整提交 SHA>
 ```
 
-脚本会拒绝带有已跟踪本地改动的生产检出，校验 Compose，保留 `.env.remote` 与 `runtime/`，备份当前 Web/Runtime 镜像，重建服务，并检查 Web、Price、Agent、Workspace 与 SearXNG。构建或健康检查失败时，会恢复上一个 Git 提交及旧镜像标签。
+脚本会拒绝带有已跟踪本地改动的生产检出，校验 Compose，保留 `.env.remote` 与 `runtime/`，并构建候选镜像。在备份或重建任何运行中服务之前，候选 Runtime 镜像必须通过 `release:canary`，并通过 `runtime/release-evidence/physical-holdouts/` 中的独立留样集合。随后脚本才备份当前 Web/Runtime 镜像、重建服务，并检查 Web、Price、Agent、Workspace 与 SearXNG。发布门禁、构建或健康检查失败时，会恢复上一个 Git 提交及旧镜像标签，不会提升候选服务栈。
 
 停止服务但保留绑定挂载的 `runtime/` 数据：
 
