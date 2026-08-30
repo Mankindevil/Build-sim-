@@ -73,7 +73,9 @@ export function renderProcedurePreview(host: HTMLElement, preview: SystemProcedu
   const summary = element("article");
   summary.className = "workspace-system-procedure-summary";
   summary.append(
-    element("strong", `${preview.profile.label} · 系统可用性 ${preview.systemEvaluation.verdict}`),
+    element("strong", preview.mode === "preparation_only"
+      ? "仅准备 / 测量 / 补充资料 · 不允许首次通电"
+      : `${preview.profile?.label ?? "系统未选择"} · 系统可用性 ${preview.systemEvaluation?.verdict ?? "unknown"}`),
     element("p", `版本 ${preview.planVersionId} · evaluation ${preview.evaluationHash.slice(0, 12)}… · lock ${preview.evaluationLockHash.slice(0, 12)}…`),
   );
   if (preview.blockers.length > 0) {

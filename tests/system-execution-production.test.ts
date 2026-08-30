@@ -218,15 +218,25 @@ describe("U7 production system procedure and execution", () => {
     const preview = await runtime.systemExecution!.preview(plan.id, version.id);
     expect(preview).toMatchObject({
       schemaVersion: "system-procedure-preview-v1",
+      mode: "preparation_only",
       planId: plan.id,
       planVersionId: version.id,
       profile: { profileId: "system.windows-11" },
       systemEvaluation: { verdict: "blocked" },
-      blockers: [],
+      blockers: expect.arrayContaining([
+        "selected system is not yet governed-pass for first-power execution",
+        "power readiness is not established",
+        "first-boot readiness is not established",
+      ]),
     });
-    expect(preview.generated?.procedure.steps.map(({ stepId }) => stepId)).toEqual(expect.arrayContaining([
-      "prepare-inventory", "bench-minimal-post", "commission-windows-security", "commission-bitlocker-recovery",
-    ]));
+    expect(preview.generated?.procedure.phases).toEqual(["prepare"]);
+    expect(preview.generated?.procedure.steps.map(({ stepId }) => stepId)).toEqual([
+      "prepare-inventory", "record-bounded-measurements", "review-open-evidence-and-requirements",
+    ]);
+    expect(preview.generated?.procedure.steps.every(({ phase, safetyCritical, riskLevel }) => (
+      phase === "prepare" && safetyCritical === false && !["safety_critical", "destructive"].includes(riskLevel)
+    ))).toBe(true);
+    expect(preview.generated?.procedure.steps.some(({ action }) => action.includes("首次通电许可"))).toBe(true);
 
     const started = await runtime.systemExecution!.start(plan.id, version.id);
     expect(started.session).toMatchObject({ planVersionId: version.id, status: "active", results: [] });

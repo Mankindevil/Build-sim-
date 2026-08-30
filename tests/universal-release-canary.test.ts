@@ -22,6 +22,7 @@ describe("U12 universal release canary", () => {
       "stage-a.thermal-acoustic-remains-blocked",
       "stage-a.price-is-not-invented",
       "stage-a.no-executable-first-power-completion",
+      "stage-a.procedure-is-preparation-only",
     ]);
     const factCheck = report.checks.find(({ checkId }) => checkId === "stage-a.official-fact-closure");
     expect(factCheck?.evidence).toMatchObject({

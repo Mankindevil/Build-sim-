@@ -126,6 +126,8 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
       BUILD_SIM_PROGRESSIVE_EVALUATION_ENABLED: "true",
       BUILD_SIM_THERMAL_V3_ENABLED: "true",
       BUILD_SIM_ACOUSTIC_V3_ENABLED: "true",
+      BUILD_SIM_SYSTEM_PROFILES_ENABLED: "true",
+      BUILD_SIM_BUILD_EXECUTION_V3_ENABLED: "true",
     });
     await services.coordinator!.initialize();
     await initializeRuntimeCatalog({ coordinator: services.coordinator!, generationAware: true });
@@ -149,6 +151,7 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
       evaluationLock: receipt.evaluationLock,
     });
     const scene = await services.spatialScene!.get(plan.id, version.id);
+    const procedurePreview = await services.systemExecution!.preview(plan.id, version.id);
     const resolutionSummary = await services.planResolutionSummary!.forPlan(plan.id);
     const facts = await services.factRepository.listCurrentFacts();
     const official = officialFactSummary(facts);
@@ -225,6 +228,23 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
       check("stage-a.no-executable-first-power-completion", evaluation.readiness.powerReady === false
         && evaluation.readiness.firstBootReady === false && evaluation.readiness.osInstallReady === false,
       { readiness: evaluation.readiness }),
+      check("stage-a.procedure-is-preparation-only", procedurePreview.mode === "preparation_only"
+        && procedurePreview.generated !== null
+        && procedurePreview.generated.procedure.phases.join(",") === "prepare"
+        && procedurePreview.generated.procedure.steps.length > 0
+        && procedurePreview.generated.procedure.steps.every(({ phase, safetyCritical, riskLevel }) => (
+          phase === "prepare" && safetyCritical === false && !["safety_critical", "destructive"].includes(riskLevel)
+        ))
+        && procedurePreview.generated.procedure.steps.some(({ action }) => action.includes("测量"))
+        && procedurePreview.generated.procedure.steps.some(({ action }) => action.includes("首次通电许可")),
+      {
+        mode: procedurePreview.mode,
+        blockers: procedurePreview.blockers,
+        phases: procedurePreview.generated?.procedure.phases ?? [],
+        steps: procedurePreview.generated?.procedure.steps.map(({ stepId, phase, action, riskLevel }) => ({
+          stepId, phase, action, riskLevel,
+        })) ?? [],
+      }),
     ];
     const blockers = checks.filter(({ status }) => status === "blocked").map(({ checkId }) => checkId);
     return {

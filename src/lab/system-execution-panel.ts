@@ -117,9 +117,12 @@ export function mountSystemExecutionPanel(host: HTMLElement, options: SystemExec
     if (error) { const alert = element("p", error); alert.setAttribute("role", "alert"); alert.dataset.systemExecutionError = "true"; host.append(alert); }
     if (!preview) return;
     renderProcedurePreview(host, preview);
-    if (preview.profile.profileId === "system.truenas-scale") renderNasLayouts(host, preview.storageLayouts);
+    if (preview.profile?.profileId === "system.truenas-scale") renderNasLayouts(host, preview.storageLayouts);
     if (preview.generated) {
-      const start = element("button", sessions.length ? "建立新的执行会话" : "开始版本绑定执行"); start.type = "button"; start.dataset.startSystemExecution = "true"; host.append(start);
+      const start = element("button", preview.mode === "preparation_only"
+        ? (sessions.length ? "建立新的仅准备会话" : "开始仅准备流程")
+        : (sessions.length ? "建立新的执行会话" : "开始版本绑定执行"));
+      start.type = "button"; start.dataset.startSystemExecution = "true"; host.append(start);
     } else host.append(element("p", "当前锁定输入仍有阻断，不能建立执行会话。"));
     const sessionsHost = element("section"); sessionsHost.dataset.executionSessions = "true";
     sessionsHost.append(element("h4", `执行会话（${sessions.length}）`));

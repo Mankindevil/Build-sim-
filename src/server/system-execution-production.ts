@@ -4,6 +4,7 @@ import { startExecution } from "../build-execution/checklist";
 import type { StoredExecutionSession } from "../build-execution/repository";
 import { ExecutionRepository, ExecutionRepositoryError } from "../build-execution/repository";
 import { generateFirstBootProcedure, type GeneratedBuildProcedure } from "../build-execution/first-boot";
+import { generatePartialPreparationProcedure } from "../build-execution/partial-preparation";
 import { isProgressiveBuildEvaluation, type ProgressiveBuildEvaluation } from "../compatibility/contracts";
 import type { FactRepository } from "../facts/repository";
 import type { DomainHashes } from "../hash";
@@ -43,13 +44,14 @@ export interface SystemExecutionPlanAuthority {
 
 export interface SystemProcedurePreview {
   readonly schemaVersion: "system-procedure-preview-v1";
+  readonly mode: "preparation_only" | "full_execution";
   readonly planId: string;
   readonly planVersionId: string;
   readonly configHash: string;
   readonly evaluationHash: string;
   readonly evaluationLockHash: string;
-  readonly profile: SystemProfileDefinition;
-  readonly systemEvaluation: SystemProfileEvaluation;
+  readonly profile: SystemProfileDefinition | null;
+  readonly systemEvaluation: SystemProfileEvaluation | null;
   readonly firmwareEvaluations: readonly FirmwarePathEvaluation[];
   readonly storageLayouts: readonly ProductionStorageLayoutProjection[];
   readonly blockers: readonly string[];
@@ -94,13 +96,13 @@ function digest(domain: string, value: unknown): string {
   return hash;
 }
 
-function procedureDomainHashes(evaluation: ProgressiveBuildEvaluation, systemEvaluation: SystemProfileEvaluation, storageLayouts: readonly ProductionStorageLayoutProjection[]): DomainHashes {
+function procedureDomainHashes(evaluation: ProgressiveBuildEvaluation, systemEvaluation: SystemProfileEvaluation | null, storageLayouts: readonly ProductionStorageLayoutProjection[]): DomainHashes {
   const authority = evaluation.authority;
   const domain = (names: readonly string[]) => evaluation.domainEvaluations.filter((entry) => names.includes(entry.domain));
   const compatibilityHash = digest("procedure-compatibility-v1", {
     authority: { configHash: authority.configHash, ruleSet: authority.ruleSet, engine: authority.engine },
     domains: domain(["identity", "mechanical", "electrical", "firmware", "system", "storage", "assembly", "commissioning", "routing"]),
-    systemEvaluationHash: systemEvaluation.contentHash,
+    systemEvaluationHash: systemEvaluation?.contentHash ?? null,
   });
   const spatialHash = digest("procedure-spatial-v1", {
     configHash: authority.configHash,
@@ -120,7 +122,7 @@ function procedureDomainHashes(evaluation: ProgressiveBuildEvaluation, systemEva
     spatialHash,
     simulationHash,
     firmwareEvaluationHashes: evaluation.firmwareEvaluations.map(({ contentHash }) => contentHash).sort(),
-    systemEvaluationHash: systemEvaluation.contentHash,
+    systemEvaluationHash: systemEvaluation?.contentHash ?? null,
   });
   const priceHash = digest("procedure-price-v1", evaluation.priceProjection);
   return { compatibilityHash, spatialHash, simulationHash, procedureSafetyHash, priceHash };
@@ -191,7 +193,9 @@ export class ProductionSystemExecutionRuntime {
       });
       if (!receipt) throw new SystemExecutionProductionError("conflict", "saved version receipt is unavailable");
       const progressive = exactReceipt(receipt, planId, version);
-      if (version.config.system === null) throw new SystemExecutionProductionError("blocked", "a system profile must be selected first");
+      if (version.config.system === null) {
+        return { version, receipt, progressive, profile: null, systemEvaluation: null, storageLayouts: [] };
+      }
       const artifacts = await this.options.locks.hydrateArtifactInputsAtRoot(activeRoot, version.evaluationLock);
       const registry = new SystemProfileRegistry((artifacts.systemProfile.payload as { registry?: unknown }).registry);
       const profile = registry.resolve(version.config.system.profileId);
@@ -225,35 +229,53 @@ export class ProductionSystemExecutionRuntime {
       version: PlanVersion<BuildConfigV3>;
       receipt: AuthoritativeEvaluationReceipt;
       progressive: ProgressiveBuildEvaluation;
-      profile: SystemProfileDefinition;
-      systemEvaluation: SystemProfileEvaluation;
+      profile: SystemProfileDefinition | null;
+      systemEvaluation: SystemProfileEvaluation | null;
       storageLayouts: ProductionStorageLayoutProjection[];
     };
     const blockers = [
-      ...(value.systemEvaluation.verdict === "fail" ? ["selected system has a failed governed compatibility check"] : []),
-      ...(value.profile.profileId === "system.truenas-scale" && this.options.storageLayoutEnabled === false
+      ...(value.profile === null ? ["a system profile must be selected before first-power or installation steps"] : []),
+      ...(value.systemEvaluation !== null && value.systemEvaluation.verdict !== "pass"
+        ? ["selected system is not yet governed-pass for first-power execution"] : []),
+      ...(!value.progressive.readiness.powerReady ? ["power readiness is not established"] : []),
+      ...(!value.progressive.readiness.firstBootReady ? ["first-boot readiness is not established"] : []),
+      ...(value.profile?.profileId === "system.truenas-scale" && this.options.storageLayoutEnabled === false
         ? ["storage layout rollout is disabled"] : []),
-      ...(value.profile.profileId === "system.truenas-scale" && value.version.config.logicalLayouts.length === 0
+      ...(value.profile?.profileId === "system.truenas-scale" && value.version.config.logicalLayouts.length === 0
         ? ["TrueNAS requires one explicit boot/data layout before installation"] : []),
-      ...(value.profile.profileId === "system.truenas-scale" && value.version.config.logicalLayouts.length > 1
+      ...(value.profile?.profileId === "system.truenas-scale" && value.version.config.logicalLayouts.length > 1
         ? ["procedure generation requires one unambiguous active TrueNAS layout"] : []),
       ...value.storageLayouts.flatMap((entry) => entry.status === "blocked" ? entry.reasons : []),
     ];
     const readyStorage = value.storageLayouts.length === 1 && value.storageLayouts[0]?.status === "ready"
       ? value.storageLayouts[0].evaluation : null;
-    const generated = blockers.length > 0 ? null : generateFirstBootProcedure({
-      planVersionId,
-      config: value.version.config,
-      evaluationHash: value.receipt.evaluationHash,
-      domainHashes: procedureDomainHashes(value.progressive, value.systemEvaluation, value.storageLayouts),
-      profile: value.profile,
-      systemEvaluation: value.systemEvaluation,
-      firmwareEvaluations: value.progressive.firmwareEvaluations,
-      storageEvaluation: readyStorage,
-      evaluatorArtifactRef: `evaluation-artifact:${value.progressive.authority.engine.contentHash}`,
+    const domainHashes = procedureDomainHashes(value.progressive, value.systemEvaluation, value.storageLayouts);
+    const evaluatorAuthority = {
+      evaluatorArtifactRef: `evaluation-artifact:${value.progressive.authority.engine.contentHash}` as const,
       evaluatorArtifactHash: value.progressive.authority.engine.contentHash,
       evaluatorVersion: "progressive-build-evaluation-v1",
-    });
+    };
+    const mode = blockers.length === 0 ? "full_execution" as const : "preparation_only" as const;
+    const generated = mode === "full_execution"
+      ? generateFirstBootProcedure({
+        planVersionId,
+        config: value.version.config,
+        evaluationHash: value.receipt.evaluationHash,
+        domainHashes,
+        profile: value.profile!,
+        systemEvaluation: value.systemEvaluation!,
+        firmwareEvaluations: value.progressive.firmwareEvaluations,
+        storageEvaluation: readyStorage,
+        ...evaluatorAuthority,
+      })
+      : generatePartialPreparationProcedure({
+        planVersionId,
+        config: value.version.config,
+        evaluationHash: value.receipt.evaluationHash,
+        evaluation: value.progressive,
+        domainHashes,
+        ...evaluatorAuthority,
+      });
     const readyProjection = value.storageLayouts.length === 1 && value.storageLayouts[0]?.status === "ready"
       ? value.storageLayouts[0] : null;
     const planRevisionHash = digest("plan-version-revision-v1", {
@@ -289,6 +311,7 @@ export class ProductionSystemExecutionRuntime {
     });
     return {
       schemaVersion: "system-procedure-preview-v1",
+      mode,
       planId,
       planVersionId,
       configHash: value.version.configHash,
@@ -370,6 +393,7 @@ export class ProductionSystemExecutionRuntime {
       if (error.code === "not_found" || error.code === "invalid_input") throw error;
       preview = {
         schemaVersion: "system-procedure-preview-v1",
+        mode: "preparation_only",
         planId: input.planId,
         planVersionId: input.againstPlanVersionId,
         configHash: "0".repeat(64),
