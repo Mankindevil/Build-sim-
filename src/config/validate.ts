@@ -2,7 +2,7 @@ import type { BuildConfig, BuildConfigDocument } from "./types";
 import type { SkuCatalog, SkuCategory, SkuRecord } from "../sku/types";
 import type { ComponentKindId } from "../contracts/registries";
 import { validateBuildConfigV3 } from "../topology/validation";
-import { boardCapabilities, caseCapabilities, orderedFanMounts } from "../core/capabilities";
+import { boardCapabilities, caseCapabilities, orderedFanMounts, type CaseCapabilities } from "../core/capabilities";
 import { needsHba } from "../core/policy";
 import {
   V3_RESOLVED_CATALOG_KIND_MATCHERS,
@@ -30,8 +30,12 @@ export interface BuildReadiness {
   missing: string[];
 }
 
-/** Full N6 geometry/wiring only runs after every core identity is explicit. */
-export function buildReadiness(config: BuildConfig, catalog: SkuCatalog): BuildReadiness {
+/** Case runtime domains only run after every core identity is explicit. */
+export function buildReadiness(
+  config: BuildConfig,
+  catalog: SkuCatalog,
+  resolvedCaseCapabilities: CaseCapabilities | null = caseCapabilities(config.caseId),
+): BuildReadiness {
   const skuById = new Map(catalog.skus.map((sku) => [sku.id, sku]));
   const missing: string[] = [];
   for (const [field, category] of Object.entries(categories)) {
@@ -42,7 +46,7 @@ export function buildReadiness(config: BuildConfig, catalog: SkuCatalog): BuildR
     const id = config.selection?.[field];
     if (typeof id !== "string" || !id || skuById.get(id)?.category !== category) missing.push(`selection.${String(field)}`);
   }
-  if (config.caseId && !caseCapabilities(config.caseId)) missing.push("case.adapter");
+  if (config.caseId && !resolvedCaseCapabilities) missing.push("case.adapter");
   if (config.selection?.diskCount > 0 && (!config.selection.diskSkuId || skuById.get(config.selection.diskSkuId)?.category !== "storage")) missing.push("selection.diskSkuId");
   return { status: missing.length ? "incomplete" : "ready", missing };
 }
@@ -55,7 +59,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function validateConfigV2(config: BuildConfig, catalog: SkuCatalog): ConfigValidationIssue[] {
+function validateConfigV2(
+  config: BuildConfig,
+  catalog: SkuCatalog,
+  resolvedCaseCapabilities: CaseCapabilities | null,
+): ConfigValidationIssue[] {
   const issues: ConfigValidationIssue[] = [];
   if (config.schemaVersion !== "2.0.0") issues.push({ path: "schemaVersion", message: "必须使用配置 schema 2.0.0", verdict: "bad" });
   if (!config.id || !config.name) issues.push({ path: "id/name", message: "配置必须有 id 和 name", verdict: "bad" });
@@ -102,7 +110,7 @@ function validateConfigV2(config: BuildConfig, catalog: SkuCatalog): ConfigValid
   if (!isFiniteInteger(selection.diskCount) || selection.diskCount < 0) issues.push({ path: "selection.diskCount", message: "diskCount 必须是非负整数", verdict: "bad" });
   if (selection.nvmeCount !== undefined && (!isFiniteInteger(selection.nvmeCount) || selection.nvmeCount < 0)) issues.push({ path: "selection.nvmeCount", message: "nvmeCount 必须是非负整数", verdict: "bad" });
 
-  const caseCaps = caseCapabilities(config.caseId);
+  const caseCaps = resolvedCaseCapabilities;
   if (config.caseId && !caseCaps) issues.push({ path: "caseId", message: "当前机箱没有已审核的能力适配器，空间和风扇位置保持 unavailable", verdict: "warn" });
   if (caseCaps && isFiniteInteger(selection.diskCount) && selection.diskCount > caseCaps.trayCount) issues.push({ path: "selection.diskCount", message: `数据盘不能超过机箱 ${caseCaps.trayCount} 个托架`, verdict: "bad" });
   if (caseCaps && selection.boot === "bay" && isFiniteInteger(selection.diskCount) && selection.diskCount >= caseCaps.trayCount) issues.push({ path: "selection.boot", message: "SATA Boot 与占满全部托架冲突", verdict: "bad" });
@@ -154,6 +162,8 @@ function validateConfigV2(config: BuildConfig, catalog: SkuCatalog): ConfigValid
 
 export interface ConfigValidationOptions {
   topologyV3Enabled?: boolean;
+  /** Exact caller-resolved adapter capabilities; `null` means unavailable. */
+  caseCapabilities?: CaseCapabilities | null;
 }
 
 /**
@@ -165,7 +175,12 @@ const v3CatalogKindCoverage: Readonly<Record<ComponentKindId, (sku: SkuRecord) =
 void v3CatalogKindCoverage;
 
 export function validateConfig(config: BuildConfigDocument, catalog: SkuCatalog, options: ConfigValidationOptions = {}): ConfigValidationIssue[] {
-  if (config.schemaVersion === "2.0.0") return validateConfigV2(config, catalog);
+  if (config.schemaVersion === "2.0.0") {
+    const resolved = Object.prototype.hasOwnProperty.call(options, "caseCapabilities")
+      ? options.caseCapabilities ?? null
+      : caseCapabilities(config.caseId);
+    return validateConfigV2(config, catalog, resolved);
+  }
   if (options.topologyV3Enabled !== true) {
     return [{ path: "schemaVersion", message: "BuildConfig V3 需要启用 BUILD_SIM_TOPOLOGY_V3_ENABLED", verdict: "bad" }];
   }

@@ -1,7 +1,7 @@
 import type { EvidenceLevel } from "../core/evidence";
 
-/** `none` marks a bay the controllers cannot reach — a shortfall, not a spare tray. */
-export type DataPortKind = "sata" | "slimsas" | "hba" | "nvme" | "usb" | "none";
+/** `empty` is intentionally unplanned; `none` is a populated bay with a shortfall. */
+export type DataPortKind = "sata" | "slimsas" | "hba" | "nvme" | "usb" | "empty" | "none";
 
 export interface PortAssignment {
   controller: "board" | "hba" | "none";
@@ -11,7 +11,7 @@ export interface PortAssignment {
 
 export interface BayDataPath {
   bayId: string;
-  /** 1–9 for N6 trays */
+  /** 1-based index in the active case adapter's bay set. */
   bayIndex: number;
   target: DataPortKind;
   /** Structured controller/connector mapping; labels are presentation only. */
@@ -26,8 +26,8 @@ export interface BayDataPath {
 export type BackplaneConnector = "sata" | "molex";
 
 export interface BackplanePowerFeed {
-  /** N6 official: 4 backplane power inputs */
-  inletIndex: 1 | 2 | 3 | 4;
+  /** Adapter-declared backplane power input index. */
+  inletIndex: number;
   /** Manual p.14 figure: 2× SATA power + 2× PATA/Molex */
   connector: BackplaneConnector;
   psuId: string;

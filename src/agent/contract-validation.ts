@@ -42,11 +42,22 @@ export function validateSkillManifest(skill: AgentSkillManifest, registeredTools
   if (!skill.name.trim()) errors.push("skill.name missing");
   if (skill.description.trim().length < 20) errors.push("skill.description too short");
   if (!Number.isInteger(skill.contextBudget) || skill.contextBudget < 1_000 || skill.contextBudget > 100_000) errors.push("skill.contextBudget invalid");
-  if (!Array.isArray(skill.allowedTools) || new Set(skill.allowedTools).size !== skill.allowedTools.length) errors.push("skill.allowedTools invalid");
-  for (const name of skill.allowedTools ?? []) {
+  const allowedTools = Array.isArray(skill.allowedTools) && skill.allowedTools.every((name) => typeof name === "string" && TOOL_NAME.test(name))
+    ? skill.allowedTools : null;
+  const optionalTools = skill.optionalTools === undefined
+    ? []
+    : Array.isArray(skill.optionalTools) && skill.optionalTools.every((name) => typeof name === "string" && TOOL_NAME.test(name))
+      ? skill.optionalTools : null;
+  if (!allowedTools || new Set(allowedTools).size !== allowedTools.length) errors.push("skill.allowedTools invalid");
+  if (!optionalTools || new Set(optionalTools).size !== optionalTools.length) errors.push("skill.optionalTools invalid");
+  if (allowedTools && optionalTools && optionalTools.some((name) => allowedTools.includes(name))) {
+    errors.push("skill optionalTools overlap allowedTools");
+  }
+  for (const name of allowedTools ?? []) {
     if (!registeredTools.has(name)) errors.push(`skill references unknown tool: ${name}`);
   }
-  if (skill.readOnly && skill.allowedTools.some((name) => name.startsWith("apply_") || name.startsWith("accept_") || name.startsWith("confirm_") || name.startsWith("record_"))) {
+  if (skill.readOnly && [...(allowedTools ?? []), ...(optionalTools ?? [])]
+    .some((name) => name.startsWith("apply_") || name.startsWith("accept_") || name.startsWith("confirm_") || name.startsWith("record_"))) {
     errors.push("read-only skill declares a write-like tool");
   }
   return [...new Set(errors)];

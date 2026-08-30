@@ -1279,16 +1279,16 @@ U0 → U1 → U2 → U3 → ┬→ U4 ─┐
 | U0 | 已完成 | 无 | 冻结全部首发契约、基线、通用/故障黄金夹具和 feature flags |
 | U1 | 已完成 | U0 | runtime repositories、附件/观察、durable jobs、备份 SPI 和 Doctor 骨架 |
 | U2 | 已完成 | U1 | BuildConfig V3、需求、情景、逻辑布局、渐进档案和 V2 迁移 |
-| U3 | 进行中 | U2 | Fact/Claim 与用户观察图、身份 scope、冲突、更新决定和快照 |
-| U4 | 未开始 | U3 | 官网 → 第三方 → Agent 推断、附件提取和持久任务闭环 |
-| U5 | 未开始 | U3 | 通用 capabilities、随盒清单、标准库和 adapter registry |
-| U6 | 未开始 | U4、U5 | 渐进兼容、附件完整性、可启动性、可行性求解和 what-if |
-| U7 | 未开始 | U6 | 系统 profiles、BIOS 路径、首启程序和 NAS 存储布局 |
-| U8 | 未开始 | U5-U7 | 通用 3D、走线、公差、线材与电气安全 |
-| U9 | 未开始 | U8 | 工作负载驱动的热区间、标准化硬件噪音和情景差异 |
-| U10 | 未开始 | U3、U4、U6-U9 | 中国价格历史/目标价、整机排序和买/等建议 |
-| U11 | 未开始 | U7-U10 | 统一 UI/Agent、装机指南、情景比较、任务/导出/诊断体验 |
-| U12 | 未开始 | U0-U11 | 迁移、便携包、完整恢复、Doctor strict、通用性证明和发布门禁 |
+| U3 | 已完成 | U2 | Fact/Claim 与用户观察图、身份 scope、冲突、更新决定和快照 |
+| U4 | 已完成 | U3 | 官网 → 第三方 → Agent 推断、附件提取和持久任务闭环 |
+| U5 | 已完成 | U3 | 通用 capabilities、随盒清单、标准库和 adapter registry |
+| U6 | 已完成 | U4、U5 | 渐进兼容、附件完整性、可启动性、可行性求解和 what-if |
+| U7 | 已完成 | U6 | 系统 profiles、BIOS 路径、首启程序和 NAS 存储布局 |
+| U8 | 已完成 | U5-U7 | 通用 3D、走线、公差、线材与电气安全 |
+| U9 | 已完成 | U8 | 工作负载驱动的热区间、标准化硬件噪音和情景差异 |
+| U10 | 已完成 | U3、U4、U6-U9 | 中国价格历史/目标价、整机排序和买/等建议 |
+| U11 | 已完成 | U7-U10 | 统一 UI/Agent、装机指南、情景比较、任务/导出/诊断体验 |
+| U12 | 进行中 | U0-U11 | 软件实现与本地门禁通过；实物 holdout、发布 canary、迁移审阅和部署待完成 |
 
 执行者开始或完成一个阶段时，必须同时更新本表与对应阶段末尾的执行记录；不能只勾选任务而不保存验证证据。
 
@@ -1656,25 +1656,25 @@ U2。
 
 ### 任务
 
-- [ ] 新增 `src/facts/contracts.ts`、`resolver.ts`、`conflicts.ts`、`identity.ts`、`snapshots.ts` 和 `inference-policy.ts`。
-- [ ] 扩展 evidence contract，支持 claim、单位、scope、revision、region、有效时间、supersession 和 locator。
-- [ ] 实现 claim-level identity：family/model/variant/revision。
-- [ ] 为字段定义 `safetyClass`，并在 resolution policy 中强制安全红线。
-- [ ] 建立 `FactRepository` 和内容寻址 `FactSnapshot`。
-- [ ] 建立 plan/subject-revision-scoped `UserObservationRepository` 和内容寻址 `UserObservationSnapshot`，并把 observation snapshot hash 纳入 evaluation/cache key。
-- [ ] 用户观察记录 typed subject、governed fieldId、method、time、unit、uncertainty、attachment refs、config/subject hashes、确认/验证和失效原因；只有 active 且当前有效时投影为 `authority: user_observation`。
-- [ ] 定义观察激活/失效/撤回 CAS：更换实例/槽位/port、改变 route、重新刷 BIOS、附件删除或用户 retract/supersede 后，依赖 fact/decision/checkpoint 失效；附件删除保留 tombstone/hash。
-- [ ] 建立 `ConflictSet`；官网内部、官网与第三方、revision/地区冲突都不能静默覆盖。
-- [ ] 实现受审批的补充和替换；替换必须引用旧 fact hash 和 `supersedesFactId`。
-- [ ] 实现 `UpdateDecision`：accept/reject/defer/undo、作用方案、subject/claim/revision 记忆。
-- [ ] 方案版本锁定 fact snapshot；新事实只发送 update notice，不静默改变旧方案。
-- [ ] 用户接受更新后生成 evaluation diff；撤销后恢复旧 snapshot 并重算。
-- [ ] evaluation cache key 使用完整 `SnapshotHashes` 与 adapter/engine/simulation artifact closure；任一 adapter/model 更新必然 cache miss，旧 evaluation 标记 stale。
-- [ ] 建立 package contents、fastener/tool need、firmware release/CPU support/upgrade method、磁盘 sector/CMR-SMR/endurance/HBA mode 的正式 claim schema。
-- [ ] BIOS facts 按 board revision/region 记录 CPU support since version、bridge version、flashback/BMC/普通升级、回退和 firmware file hash；不得从同系列主板继承。
-- [ ] 逐步把 catalog `attrs` 转为治理 facets；未迁移的 legacy 字段进入 `legacy_unverified`，不能继续作为硬结论。
-- [ ] 为现有 N6/ASUS 捆绑手册建立正式 claim locator。
-- [ ] 写扫描器：活动 official fact 缺 evidence hash/locator 时测试失败。
+- [x] 新增 `src/facts/contracts.ts`、`resolver.ts`、`conflicts.ts`、`identity.ts`、`snapshots.ts` 和 `inference-policy.ts`。
+- [x] 扩展 evidence contract，支持 claim、单位、scope、revision、region、有效时间、supersession 和 locator。
+- [x] 实现 claim-level identity：family/model/variant/revision。
+- [x] 为字段定义 `safetyClass`，并在 resolution policy 中强制安全红线。
+- [x] 建立 `FactRepository` 和内容寻址 `FactSnapshot`。
+- [x] 建立 plan/subject-revision-scoped `UserObservationRepository` 和内容寻址 `UserObservationSnapshot`，并把 observation snapshot hash 纳入 evaluation/cache key。
+- [x] 用户观察记录 typed subject、governed fieldId、method、time、unit、uncertainty、attachment refs、config/subject hashes、确认/验证和失效原因；只有 active 且当前有效时投影为 `authority: user_observation`。
+- [x] 定义观察激活/失效/撤回 CAS：更换实例/槽位/port、改变 route、重新刷 BIOS、附件删除或用户 retract/supersede 后，依赖 fact/decision/checkpoint 失效；附件删除保留 tombstone/hash。
+- [x] 建立 `ConflictSet`；官网内部、官网与第三方、revision/地区冲突都不能静默覆盖。
+- [x] 实现受审批的补充和替换；替换必须引用旧 fact hash 和 `supersedesFactId`。
+- [x] 实现 `UpdateDecision`：accept/reject/defer/undo、作用方案、subject/claim/revision 记忆。
+- [x] 方案版本锁定 fact snapshot；新事实只发送 update notice，不静默改变旧方案。
+- [x] 用户接受更新后生成 evaluation diff；撤销后恢复旧 snapshot 并重算。
+- [x] evaluation cache key 使用完整 `SnapshotHashes` 与 adapter/engine/simulation artifact closure；任一 adapter/model 更新必然 cache miss，旧 evaluation 标记 stale。
+- [x] 建立 package contents、fastener/tool need、firmware release/CPU support/upgrade method、磁盘 sector/CMR-SMR/endurance/HBA mode 的正式 claim schema。
+- [x] BIOS facts 按 board revision/region 记录 CPU support since version、bridge version、flashback/BMC/普通升级、回退和 firmware file hash；不得从同系列主板继承。
+- [x] 逐步把 catalog `attrs` 转为治理 facets；未迁移的 legacy 字段进入 `legacy_unverified`，不能继续作为硬结论。
+- [x] 为现有 N6/ASUS 捆绑手册建立正式 claim locator。
+- [x] 写扫描器：活动 official fact 缺 evidence hash/locator 时测试失败。
 
 ### 主要文件
 
@@ -1697,15 +1697,15 @@ npx vitest run tests/evidence-repository.test.ts tests/plan-evidence.test.ts tes
 
 ### 退出门禁
 
-- [ ] 任一兼容、空间、热噪或采购输入可追到 claim/evidence 或推导链。
-- [ ] Agent 推断能完整重放，输入 fact 更新后自动失效。
-- [ ] family fact 不能越权支持 variant/revision 安全字段。
-- [ ] 官网更新不静默覆盖；accept/reject/defer/undo 可复现。
-- [ ] 修改一个尺寸、接口或功耗 fact 后，受影响 evaluation hash 变化。
-- [ ] 没有 provenance 的 legacy 值不会被显示为已验证 official。
-- [ ] 用户量尺修改/撤回会改变 observation snapshot 和受影响 evaluation hash，但不会影响其他方案/实例或全局 SKU。
-- [ ] 缺 uncertainty 的量尺不能支持临界机械 pass；用户观察不能单独绿色放行 pinout、线径、电流或额定安全字段。
-- [ ] unconfirmed/proposed/stale observation 用作 fact 的数量为 0；换槽/port/route 后旧观察不能产生 pass，新导出不含已删除附件 bytes。
+- [x] 任一兼容、空间、热噪或采购输入可追到 claim/evidence 或推导链。
+- [x] Agent 推断能完整重放，输入 fact 更新后自动失效。
+- [x] family fact 不能越权支持 variant/revision 安全字段。
+- [x] 官网更新不静默覆盖；accept/reject/defer/undo 可复现。
+- [x] 修改一个尺寸、接口或功耗 fact 后，受影响 evaluation hash 变化。
+- [x] 没有 provenance 的 legacy 值不会被显示为已验证 official。
+- [x] 用户量尺修改/撤回会改变 observation snapshot 和受影响 evaluation hash，但不会影响其他方案/实例或全局 SKU。
+- [x] 缺 uncertainty 的量尺不能支持临界机械 pass；用户观察不能单独绿色放行 pinout、线径、电流或额定安全字段。
+- [x] unconfirmed/proposed/stale observation 用作 fact 的数量为 0；换槽/port/route 后旧观察不能产生 pass，新导出不含已删除附件 bytes。
 
 ### 回滚
 
@@ -1715,6 +1715,15 @@ npx vitest run tests/evidence-repository.test.ts tests/plan-evidence.test.ts tes
 
 - `feat(facts): add claim graph snapshots and reversible updates`
 - `feat(observations): add plan scoped user evidence`
+
+### U3 执行记录（2026-08-28）
+
+- 已落地 governed field policy、EvidenceClaim、Fact/Conflict/Inference repositories、plan-scoped observation lifecycle、内容寻址快照、UpdateDecision/notice/diff/undo、完整 EvaluationLock/ArtifactLockfile/receipt，以及 PlanVersion issued-evaluation 门禁。
+- production composition、reference graph、加密 backup/verify/restore staging 和 Doctor 共用同一 U3 authority validator；checksum 正确但语义错误的 fact、claim、snapshot、notice、conflict、lock、receipt 或 pointer 均 fail closed，恢复失败时 active pointer 不切换。
+- notice accept/undo 的最终写入同时绑定 plan target、selected snapshot、memory、exact `activeRoot` 和 `runtimeGeneration`。独立故障注入证明：两份 evaluator receipt 完成后切换到内容相同的新 generation 时，普通 `decide` 拒绝且 transaction/diff/decision/plan/conflict pointer/memory 零写；合法 root-bound 路径由外层 writer 锁定代际。
+- 官方聚焦门禁：15 files / 70 tests 通过；update/notice/conflict/runtime 核心：5 files / 40 tests 通过；evaluation pipeline：9/9 通过；runtime graph/backup/Doctor：4 files / 23 tests 通过；回环 HTTP 项在允许本机监听后通过。
+- `npm run workspace:build` 通过；`git diff --check` 通过。全量 typecheck 曾仅被并行 U4 测试夹具遮挡，U3 源码无 TypeScript 诊断；U4 集成收口后统一复跑并作为后续阶段总门禁。
+- 回滚仍由 fact graph feature flag 控制；关闭后保留全部新 repositories 和历史 snapshots，不删除或逆写既有 PlanVersion。
 
 ---
 
@@ -1730,30 +1739,30 @@ U3。
 
 ### 任务
 
-- [ ] 定义 `EvidenceSearchOutcome.reason`：
-  - [ ] `official_not_published`；
-  - [ ] `official_page_found_field_missing`；
-  - [ ] `official_identity_unresolved`；
-  - [ ] `official_access_blocked`；
-  - [ ] `official_parse_failed`；
-  - [ ] `official_sources_conflict`；
-  - [ ] `official_search_exhausted`。
-- [ ] 将文档 discovery、acquisition、archive、OCR/PDF parse、excerpt、claim extraction、第三方 fallback、adapter candidate 和 binding 串成 U1 `JobRepository` 上的持久状态机；不得保留进程内权威 Map。
-- [ ] 首发 job handler 至少覆盖 official discovery/acquire/extract、third-party fallback、fact update impact、adapter generation；使用 revision CAS、active fencing token、runtime generation、checkpoint、域名限速、指数退避 + jitter 和幂等结果提交。
-- [ ] Agent 增加审批型 tools：`archive_official_evidence`、`propose_fact_update`、`bind_fact_evidence`、`resolve_fact_conflict`。
-- [ ] 官网文档只有正文确认 exact identity/revision 后才能成为 explicit official document。
-- [ ] 官网 registry 采用 seed + runtime overlay，支持未知品牌 proposal。
-- [ ] 扩展 category/vendor adapters，覆盖 socket、BIOS/QVL/CPU support/update manual、package contents/fasteners/tools、端口拓扑、线材、散热/风扇曲线、磁盘介质/HBA mode 和 TrueNAS 官方要求等当前缺失字段。
-- [ ] 增加审批型附件/观察 tools：`archive_user_attachment`、`inspect_attachment`、`propose_user_observation`、`bind_observation_attachment`；照片标签、BIOS 页面、OCR、条码和量尺只能形成 plan-scoped proposal。
-- [ ] 图片默认剥离非必要 EXIF，原件内容 hash 不变；限制 MIME、像素、页数、大小、解压比和处理时间，附件正文同样按不可信输入隔离。
-- [ ] 建立第三方来源 registry，记录来源类型、独立性、测试方法和对象 revision。
-- [ ] 一份合格专业实测可形成低置信 third-party fact；两份独立一致来源提升置信度。
-- [ ] 检测转载/同源，不能把多个转载算成独立证据。
-- [ ] Agent inference 只能引用已解析 facts；禁止以模型记忆直接补造数值。
-- [ ] 推断记录规则/模型版本、输入 hashes、公式、假设、区间和失效条件。
-- [ ] 普通推断可支持 planning pass；安全红线只允许 blocked/fail，不能单独 pass。
-- [ ] Agent 每次回答展示：采用的证据阶梯、未找到官方的原因、第三方来源、推断说明和补证动作。
-- [ ] 保留网页/PDF 为不可信数据，强化 prompt injection、HTML/PDF payload、XSS、SSRF、redirect 和大小/时间上限测试。
+- [x] 定义 `EvidenceSearchOutcome.reason`：
+  - [x] `official_not_published`；
+  - [x] `official_page_found_field_missing`；
+  - [x] `official_identity_unresolved`；
+  - [x] `official_access_blocked`；
+  - [x] `official_parse_failed`；
+  - [x] `official_sources_conflict`；
+  - [x] `official_search_exhausted`。
+- [x] 将文档 discovery、acquisition、archive、OCR/PDF parse、excerpt、claim extraction、第三方 fallback、adapter candidate 和 binding 串成 U1 `JobRepository` 上的持久状态机；不得保留进程内权威 Map。
+- [x] 首发 job handler 至少覆盖 official discovery/acquire/extract、third-party fallback、fact update impact、adapter generation；使用 revision CAS、active fencing token、runtime generation、checkpoint、域名限速、指数退避 + jitter 和幂等结果提交。
+- [x] Agent 增加审批型 tools：`archive_official_evidence`、`propose_fact_update`、`bind_fact_evidence`、`resolve_fact_conflict`。
+- [x] 官网文档只有正文确认 exact identity/revision 后才能成为 explicit official document。
+- [x] 官网 registry 采用 seed + runtime overlay，支持未知品牌 proposal。
+- [x] 扩展 category/vendor adapters，覆盖 socket、BIOS/QVL/CPU support/update manual、package contents/fasteners/tools、端口拓扑、线材、散热/风扇曲线、磁盘介质/HBA mode 和 TrueNAS 官方要求等当前缺失字段。
+- [x] 增加审批型附件/观察 tools：`archive_user_attachment`、`inspect_attachment`、`propose_user_observation`、`bind_observation_attachment`；照片标签、BIOS 页面、OCR、条码和量尺只能形成 plan-scoped proposal。
+- [x] 图片默认剥离非必要 EXIF，原件内容 hash 不变；限制 MIME、像素、页数、大小、解压比和处理时间，附件正文同样按不可信输入隔离。
+- [x] 建立第三方来源 registry，记录来源类型、独立性、测试方法和对象 revision。
+- [x] 一份合格专业实测可形成低置信 third-party fact；两份独立一致来源提升置信度。
+- [x] 检测转载/同源，不能把多个转载算成独立证据。
+- [x] Agent inference 只能引用已解析 facts；禁止以模型记忆直接补造数值。
+- [x] 推断记录规则/模型版本、输入 hashes、公式、假设、区间和失效条件。
+- [x] 普通推断可支持 planning pass；安全红线只允许 blocked/fail，不能单独 pass。
+- [x] Agent 每次回答展示：采用的证据阶梯、未找到官方的原因、第三方来源、推断说明和补证动作。
+- [x] 保留网页/PDF 为不可信数据，强化 prompt injection、HTML/PDF payload、XSS、SSRF、redirect 和大小/时间上限测试。
 
 ### 主要文件
 
@@ -1781,16 +1790,16 @@ npx vitest run tests/evidence-acquisition.test.ts tests/evidence-discovery.test.
 
 ### 退出门禁
 
-- [ ] ASUS、Intel、Samsung、Seasonic 和至少两个新增品牌完成离线 E2E fixture。
-- [ ] 验证码页、错误页、系列页不会升级成 exact official fact。
-- [ ] 第三方永远不显示为 official。
-- [ ] 搜索失败原因可见、可测试、可审计。
-- [ ] 推断可以重放并随输入失效。
-- [ ] 无法证明安全时产生 blocked 和补证任务，不制造确定值。
-- [ ] 在 download/OCR/extract 任一阶段杀进程后可从安全 checkpoint 续跑，不重复生成 claim/adapter；取消不留下半活动 snapshot。
-- [ ] 恶意附件、错误 OCR 和附件中的 prompt injection 不会升级成产品事实；用户附件永远不显示为 official。
-- [ ] 离线 job 进入 `paused_offline`，恢复网络后继续；dead-letter/脱敏错误和人工重试动作可见。
-- [ ] stale lease/旧 generation worker commit 为 0；外部重复 GET 只产生一个内容寻址 capture 和一个事务结果。
+- [x] ASUS、Intel、Samsung、Seasonic 和至少两个新增品牌完成离线 E2E fixture。
+- [x] 验证码页、错误页、系列页不会升级成 exact official fact。
+- [x] 第三方永远不显示为 official。
+- [x] 搜索失败原因可见、可测试、可审计。
+- [x] 推断可以重放并随输入失效。
+- [x] 无法证明安全时产生 blocked 和补证任务，不制造确定值。
+- [x] 在 download/OCR/extract 任一阶段杀进程后可从安全 checkpoint 续跑，不重复生成 claim/adapter；取消不留下半活动 snapshot。
+- [x] 恶意附件、错误 OCR 和附件中的 prompt injection 不会升级成产品事实；用户附件永远不显示为 official。
+- [x] 离线 job 进入 `paused_offline`，恢复网络后继续；dead-letter/脱敏错误和人工重试动作可见。
+- [x] stale lease/旧 generation worker commit 为 0；外部重复 GET 只产生一个内容寻址 capture 和一个事务结果。
 
 ### 回滚
 
@@ -1814,32 +1823,32 @@ U3。可与 U4 并行，但在 U6 前必须稳定。
 
 ### 任务
 
-- [ ] 新增 `src/capabilities/facets.ts`、`registry.ts`、`provider.ts`。
-- [ ] 新增 `src/standards/` 和 `data/standards/`，首批覆盖 CPU socket、DIMM、PCIe、M.2、SATA/SlimSAS、USB、风扇/pump header、ATX/EPS/PCIe/12V-2x6 等标准。
-- [ ] 新增 package supply、mount-fastener pattern、tool/consumable need facets；普通螺丝/扎带/导热膏/工具由 requirement/supply 表达，影响几何或电气的 riser/支架/转接板仍是 component instance。
-- [ ] 产品级 `BundleItem` 按 exact owner component instance 投影为 instance supply；allocation 必须包含 `ownerInstanceId + bundleItemId`，防止不同设备随盒物或同一物件被重复消耗。
-- [ ] 新增 firmware facets：CPU/version support table、普通升级/USB flashback/BMC、bridge version、rollback/recovery、settings reset、TPM/Secure Boot/CSM/Above 4G/ReBAR/IOMMU/SATA mode/ECC。
-- [ ] 新增 storage facets：logical/physical sector、CMR/SMR、TRIM/endurance、controller/HBA IT/RAID mode、passthrough、hot-swap/backplane 和 failure domain。
-- [ ] 建立 requirement → capability 候选索引，solver 只按白名单 facet predicate 取候选，不按品牌/SKU 名称字符串搜索；索引与 evaluator 使用同一 fact snapshot。
-- [ ] 新增 `src/adapters/contracts.ts`、`registry.ts`、`data-driven-case.ts`。
-- [ ] 定义通用 case manifest：外壳、内部空间、mount、slot、bay、fan/radiator、port anchor、routing zone、forbidden zone、service corridor、assembly constraints。
-- [ ] 每个 manifest 字段绑定 fact/derivation ID 和误差范围。
-- [ ] 将 N6 profile/geometry/routing/assembly 迁成普通 adapter 数据。
-- [ ] 移除 `caseCapabilities()` 只认 N6 的 registry 分支。
-- [ ] 逐步删除核心对 `buildN6Geometry`、`planN6Wiring`、`N6_INTERIOR_BOX` 等静态依赖。
-- [ ] 删除 SKU 名称字符串判断，如 A4000 专用分支；用 capabilities/facts 表达。
-- [ ] 未支持机箱流程：
-  - [ ] 解析 exact identity；
-  - [ ] 获取官网产品页/手册/图；
-  - [ ] 抽取官方外形、form factor、限高/限长、安装位；
-  - [ ] Agent 生成 provisional geometry/routing candidate；
-  - [ ] 每个推断 anchor 标误差和来源；
-  - [ ] schema/几何/端口/闭合性校验；
-  - [ ] 用户审核更新后写入 runtime adapter registry；
-  - [ ] plan-scoped 用户量尺可以形成当前实例 override，但不能回写全局 adapter seed；
-  - [ ] 证据不足只阻断受影响空间/走线，不阻断其他已知电子兼容。
-- [ ] 建立普通 ATX、mATX、Mini-ITX 和 NAS 背板四类 adapter fixtures，至少来自三个不同机箱布局、两个以上厂商。
-- [ ] 增加 architecture boundary test：通用 core 禁止包含具体机箱名称。
+- [x] 新增 `src/capabilities/facets.ts`、`registry.ts`、`provider.ts`。
+- [x] 新增 `src/standards/` 和 `data/standards/`，首批覆盖 CPU socket、DIMM、PCIe、M.2、SATA/SlimSAS、USB、风扇/pump header、ATX/EPS/PCIe/12V-2x6 等标准。
+- [x] 新增 package supply、mount-fastener pattern、tool/consumable need facets；普通螺丝/扎带/导热膏/工具由 requirement/supply 表达，影响几何或电气的 riser/支架/转接板仍是 component instance。
+- [x] 产品级 `BundleItem` 按 exact owner component instance 投影为 instance supply；allocation 必须包含 `ownerInstanceId + bundleItemId`，防止不同设备随盒物或同一物件被重复消耗。
+- [x] 新增 firmware facets：CPU/version support table、普通升级/USB flashback/BMC、bridge version、rollback/recovery、settings reset、TPM/Secure Boot/CSM/Above 4G/ReBAR/IOMMU/SATA mode/ECC。
+- [x] 新增 storage facets：logical/physical sector、CMR/SMR、TRIM/endurance、controller/HBA IT/RAID mode、passthrough、hot-swap/backplane 和 failure domain。
+- [x] 建立 requirement → capability 候选索引，solver 只按白名单 facet predicate 取候选，不按品牌/SKU 名称字符串搜索；索引与 evaluator 使用同一 fact snapshot。
+- [x] 新增 `src/adapters/contracts.ts`、`registry.ts`、`data-driven-case.ts`。
+- [x] 定义通用 case manifest：外壳、内部空间、mount、slot、bay、fan/radiator、port anchor、routing zone、forbidden zone、service corridor、assembly constraints。
+- [x] 每个 manifest 字段绑定 fact/derivation ID 和误差范围。
+- [x] 将 N6 profile/geometry/routing/assembly 迁成普通 adapter 数据。
+- [x] 移除 `caseCapabilities()` 只认 N6 的 registry 分支。
+- [x] 逐步删除核心对 `buildN6Geometry`、`planN6Wiring`、`N6_INTERIOR_BOX` 等静态依赖。
+- [x] 删除 SKU 名称字符串判断，如 A4000 专用分支；用 capabilities/facts 表达。
+- [x] 未支持机箱流程：
+  - [x] 解析 exact identity；
+  - [x] 获取官网产品页/手册/图；
+  - [x] 抽取官方外形、form factor、限高/限长、安装位；
+  - [x] Agent 生成 provisional geometry/routing candidate；
+  - [x] 每个推断 anchor 标误差和来源；
+  - [x] schema/几何/端口/闭合性校验；
+  - [x] 用户审核更新后写入 runtime adapter registry；
+  - [x] plan-scoped 用户量尺可以形成当前实例 override，但不能回写全局 adapter seed；
+  - [x] 证据不足只阻断受影响空间/走线，不阻断其他已知电子兼容。
+- [x] 建立普通 ATX、mATX、Mini-ITX 和 NAS 背板四类 adapter fixtures，至少来自三个不同机箱布局、两个以上厂商。
+- [x] 增加 architecture boundary test：通用 core 禁止包含具体机箱名称。
 
 ### 主要文件
 
@@ -1862,15 +1871,15 @@ npx vitest run tests/capability-config.test.ts tests/geometry.test.ts tests/rout
 
 ### 退出门禁
 
-- [ ] N6、普通 ATX、普通 mATX、Mini-ITX 使用同一 registry/evaluator。
-- [ ] 新增第二款非 N6 机箱时不修改核心 evaluator。
-- [ ] 通用模块不 import N6 数据。
-- [ ] 删除 N6 adapter 代码后，等价数据 manifest 仍通过 N6 黄金测试。
-- [ ] 未支持机箱可生成 provisional adapter；不能生成时有明确 blocked/补证结果。
-- [ ] `nvmeCount=0` 或无 NVMe 实例时 3D 不出现 SSD。
-- [ ] 随盒附件只在 exact region/revision/quantity 匹配时满足 requirement；不能用“通常附带”静默放行。
-- [ ] 新增 CPU 支持表、HBA mode 或 package contents 不需要修改 evaluator；用户量尺只影响当前方案实例。
-- [ ] adapter/standard/capability manifest 进入 `adapterSnapshotHash/ArtifactLockfile`；更新后旧 evaluation/cache 必然失效。
+- [x] N6、普通 ATX、普通 mATX、Mini-ITX 使用同一 registry/evaluator。
+- [x] 新增第二款非 N6 机箱时不修改核心 evaluator。
+- [x] 通用模块不 import N6 数据。
+- [x] 删除 N6 adapter 代码后，等价数据 manifest 仍通过 N6 黄金测试。
+- [x] 未支持机箱可生成 provisional adapter；不能生成时有明确 blocked/补证结果。
+- [x] `nvmeCount=0` 或无 NVMe 实例时 3D 不出现 SSD。
+- [x] 随盒附件只在 exact region/revision/quantity 匹配时满足 requirement；不能用“通常附带”静默放行。
+- [x] 新增 CPU 支持表、HBA mode 或 package contents 不需要修改 evaluator；用户量尺只影响当前方案实例。
+- [x] adapter/standard/capability manifest 进入 `adapterSnapshotHash/ArtifactLockfile`；更新后旧 evaluation/cache 必然失效。
 
 ### 回滚
 
@@ -1879,6 +1888,14 @@ npx vitest run tests/capability-config.test.ts tests/geometry.test.ts tests/rout
 ### 推荐提交
 
 `refactor(adapters): add generic capability and hardware registry`
+
+### U5 执行记录（2026-08-28）
+
+- N6 flag-on 路径已迁为 data-only `CaseRuntimeModel`，与普通 ATX、mATX、Mini-ITX 共用同一 registry、compiler 和 evaluator；case-specific TypeScript 只保留为显式 flag-off rollback，不进入通用生产依赖图。
+- capability、standard、package supply、firmware/storage facets、manifest/model/interpreter bytes 和动态 runtime registry 均进入 `adapterSnapshotHash`、ArtifactLockfile、engine transitive closure 与 evaluation cache；generation、immutable version 和 pinned replay 闭包由 production graph、Doctor、backup/restore 共用验证。
+- 未支持机箱通过 durable evidence job 生成 plan-scoped provisional candidate，经真实 Agent `waiting_approval` → HTTP confirm/resume → runtime registry CAS 注册；generic flag 关闭时 Tool 物理不存在且 registry 零写。
+- checksum 正确但语义伪造的 nested model、registry、receipt generation、version target、engine re-lock 和 generic→legacy 部分降级均 fail closed；精确 legacy 三字段 artifact 在 flag-off 下仍可 evaluation、Doctor 和 backup。
+- U5 focused 11 files / 85 tests、authority/graph 3 files / 32 tests、最终原样全量 218 files / 1286 tests 通过；`npm run typecheck`、client/Agent/workspace build、dist imports、`git diff --check` 和 secret scan 全部通过。独立 false-green 审计结论为 GO，稳定 P0/P1 为 0。
 
 ---
 
@@ -1894,39 +1911,39 @@ U4、U5。
 
 ### 任务
 
-- [ ] 新增 `src/compatibility/contracts.ts`、`engine.ts`、`requirements.ts`、`explain.ts`。
-- [ ] 将 `src/config/validate.ts` 限定为 schema/引用完整性；硬件兼容迁入 rule engine。
-- [ ] 每条规则声明需要的 component kinds、facts、placements、connections 和 system profile。
-- [ ] 已知输入足够时立即评估；缺少普通部件生成 requirement；缺少安全事实生成 blocked。
-- [ ] 实现 `RequirementNode` closure、cycle detection 与 `RequirementSatisfaction` 数量分配；候选部件继续产生的支架/线材/紧固件/耗材/工具需求必须运行到固定点。
-- [ ] 分离“档案完整度”“身份完整度”“兼容 verdict”“系统可用 verdict”。
-- [ ] 实现规则域：
-  - [ ] CPU socket、芯片组、BIOS support；
-  - [ ] 主板 form factor、螺柱、I/O 与机箱；
-  - [ ] RAM DDR/UDIMM/RDIMM/ECC、容量、rank、population、CPU IMC/QVL；
-  - [ ] GPU/HBA/NIC/扩展卡的 slot、lane、bifurcation、共享和空间；
-  - [ ] PSU 总功率、瞬态、ATX24、EPS、GPU 接头、模组线家族；
-  - [ ] 散热器 socket kit、高度、内存/VRM 干涉、冷排位置；
-  - [ ] M.2 key/长度/SATA/NVMe、lane sharing、散热片；
-  - [ ] SATA/SlimSAS/HBA/背板和启动盘；
-  - [ ] 前置 USB/Type-C/音频；
-  - [ ] fan/pump/RGB header 数量、电流和控制方式；
-  - [ ] NAS 启转负载、背板供电和 HBA 模式。
-- [ ] 增加装配完整性/首次通电规则：正确/多余螺柱、螺丝规格、散热器背板/扣具/保护膜、导热材料、ATX24/EPS/GPU、CPU fan/pump、12V-2x6 插入/弯折、松散金属件和必要工具。
-- [ ] U6 独占纯 `FirmwarePathEvaluation`/upgrade graph：使用 release fact 有向边计算当前版本观察、最低支持版本、bridge release、flashback/BMC/普通升级前置、临时 CPU/RAM/显示路径、settings reset 和回退 requirements；“存在目标 BIOS”不等于当前组合可升级。
-- [ ] 增加 NAS logical layout 结构规则：boot/data 分离、物理盘唯一归属、HBA/port 路径、控制器 mode 和 destructive target 唯一定位。
-- [ ] 新增 `src/solver/candidate-index.ts`、`solve.ts`、`requirement-closure.ts`、`unsat.ts`、`what-if.ts` 和 `explain.ts`，先完成有界可行性求解：
-  1. [ ] 锁定用户指定及 ordered 实例；
-  2. [ ] 从 hard requirements 与当前 topology 生成 requirement closure；
-  3. [ ] 用 capability index 和硬规则剪枝候选池；
-  4. [ ] 每个候选调用当前阶段可用的同一权威 evaluator，保存 evaluated domain coverage；
-  5. [ ] 只有证明无解才返回 `unsat_proven`；否则返回 irreducible conflict/放宽项，超时返回 `feasible_partial` 与未探索范围；
-  6. [ ] what-if 固定 base hashes、保持只读，接受结果仍走普通 proposal。
-- [ ] 求解作为 durable job 保存 candidate config/operations、base version/hash、seed/version/limits/checkpoint；重启后可复算/批准，同一 base 得到同一 hash，stale base 拒绝。
-- [ ] BOM 只由 topology、requirements 和状态派生。
-- [ ] 价格、证据和局部兼容在方案不完整时继续显示。
-- [ ] 修复空盘位生成数据线和零硬盘仍要求完整背板供电的错误。
-- [ ] 每条 decision 输出 rule ID/version、fact IDs、instance IDs、假设和 remediation。
+- [x] 新增 `src/compatibility/contracts.ts`、`engine.ts`、`requirements.ts`、`explain.ts`。
+- [x] 将 `src/config/validate.ts` 限定为 schema/引用完整性；硬件兼容迁入 rule engine。
+- [x] 每条规则声明需要的 component kinds、facts、placements、connections 和 system profile。
+- [x] 已知输入足够时立即评估；缺少普通部件生成 requirement；缺少安全事实生成 blocked。
+- [x] 实现 `RequirementNode` closure、cycle detection 与 `RequirementSatisfaction` 数量分配；候选部件继续产生的支架/线材/紧固件/耗材/工具需求必须运行到固定点。
+- [x] 分离“档案完整度”“身份完整度”“兼容 verdict”“系统可用 verdict”。
+- [x] 实现规则域：
+  - [x] CPU socket、芯片组、BIOS support；
+  - [x] 主板 form factor、螺柱、I/O 与机箱；
+  - [x] RAM DDR/UDIMM/RDIMM/ECC、容量、rank、population、CPU IMC/QVL；
+  - [x] GPU/HBA/NIC/扩展卡的 slot、lane、bifurcation、共享和空间；
+  - [x] PSU 总功率、瞬态、ATX24、EPS、GPU 接头、模组线家族；
+  - [x] 散热器 socket kit、高度、内存/VRM 干涉、冷排位置；
+  - [x] M.2 key/长度/SATA/NVMe、lane sharing、散热片；
+  - [x] SATA/SlimSAS/HBA/背板和启动盘；
+  - [x] 前置 USB/Type-C/音频；
+  - [x] fan/pump/RGB header 数量、电流和控制方式；
+  - [x] NAS 启转负载、背板供电和 HBA 模式。
+- [x] 增加装配完整性/首次通电规则：正确/多余螺柱、螺丝规格、散热器背板/扣具/保护膜、导热材料、ATX24/EPS/GPU、CPU fan/pump、12V-2x6 插入/弯折、松散金属件和必要工具。
+- [x] U6 独占纯 `FirmwarePathEvaluation`/upgrade graph：使用 release fact 有向边计算当前版本观察、最低支持版本、bridge release、flashback/BMC/普通升级前置、临时 CPU/RAM/显示路径、settings reset 和回退 requirements；“存在目标 BIOS”不等于当前组合可升级。
+- [x] 增加 NAS logical layout 结构规则：boot/data 分离、物理盘唯一归属、HBA/port 路径、控制器 mode 和 destructive target 唯一定位。
+- [x] 新增 `src/solver/candidate-index.ts`、`solve.ts`、`requirement-closure.ts`、`unsat.ts`、`what-if.ts` 和 `explain.ts`，先完成有界可行性求解：
+  1. [x] 锁定用户指定及 ordered 实例；
+  2. [x] 从 hard requirements 与当前 topology 生成 requirement closure；
+  3. [x] 用 capability index 和硬规则剪枝候选池；
+  4. [x] 每个候选调用当前阶段可用的同一权威 evaluator，保存 evaluated domain coverage；
+  5. [x] 只有证明无解才返回 `unsat_proven`；否则返回 irreducible conflict/放宽项，超时返回 `feasible_partial` 与未探索范围；
+  6. [x] what-if 固定 base hashes、保持只读，接受结果仍走普通 proposal。
+- [x] 求解作为 durable job 保存 candidate config/operations、base version/hash、seed/version/limits/checkpoint；重启后可复算/批准，同一 base 得到同一 hash，stale base 拒绝。
+- [x] BOM 只由 topology、requirements 和状态派生。
+- [x] 价格、证据和局部兼容在方案不完整时继续显示。
+- [x] 修复空盘位生成数据线和零硬盘仍要求完整背板供电的错误。
+- [x] 每条 decision 输出 rule ID/version、fact IDs、instance IDs、假设和 remediation。
 
 ### 主要文件
 
@@ -1950,18 +1967,18 @@ npx vitest run tests/engine.test.ts tests/reviewed-gpu-evaluation.test.ts tests/
 
 ### 退出门禁
 
-- [ ] 只录入机箱、主板、CPU、两块 SSD 和 PSU 时立即显示已有身份、证据、价格和局部结论。
-- [ ] 同时列出内存、散热、启动/显示等缺失 requirements。
-- [ ] 不生成不存在的 GPU、HDD、HBA、风扇或线材。
-- [ ] CPU/socket 或 PSU 接线已知错误时立即 fail，不等待整机完整。
-- [ ] 安全证据不足稳定 blocked，不显示绿色。
-- [ ] Agent 权威评估与本地评估 hash 一致。
-- [ ] 每个安装必要附件均有 instance-scoped package allocation、用户 resource assertion、采购 requirement 或明确 blocked；没有“盒里应该有”的隐式满足，也没有重复数量分配。
-- [ ] `powerReady=false` 直到全部 safety requirements 满足；普通勾选不能绕过安全 requirement。
-- [ ] `ordered`、官网 included claim 或 unverified allocation 都不能单独使 `powerReady=true`；必须有 `present_verified` 或安全 checkpoint。
-- [ ] U6 输出仅称 `feasibility_candidate`；不得提前称“可购买”或假定 U7-U9 尚未评估的 domain 已通过，固定 ordered 实例不会被替换。
-- [ ] 同 snapshot/version 的候选顺序稳定；无解状态与证明匹配；`feasible_partial` 只能称“已找到的候选”，不能称全局最优。
-- [ ] what-if 对 PlanRepository 的写操作为 0；base snapshot 过期时拒绝应用。
+- [x] 只录入机箱、主板、CPU、两块 SSD 和 PSU 时立即显示已有身份、证据、价格和局部结论。
+- [x] 同时列出内存、散热、启动/显示等缺失 requirements。
+- [x] 不生成不存在的 GPU、HDD、HBA、风扇或线材。
+- [x] CPU/socket 或 PSU 接线已知错误时立即 fail，不等待整机完整。
+- [x] 安全证据不足稳定 blocked，不显示绿色。
+- [x] Agent 权威评估与本地评估 hash 一致。
+- [x] 每个安装必要附件均有 instance-scoped package allocation、用户 resource assertion、采购 requirement 或明确 blocked；没有“盒里应该有”的隐式满足，也没有重复数量分配。
+- [x] `powerReady=false` 直到全部 safety requirements 满足；普通勾选不能绕过安全 requirement。
+- [x] `ordered`、官网 included claim 或 unverified allocation 都不能单独使 `powerReady=true`；必须有 `present_verified` 或安全 checkpoint。
+- [x] U6 输出仅称 `feasibility_candidate`；不得提前称“可购买”或假定 U7-U9 尚未评估的 domain 已通过，固定 ordered 实例不会被替换。
+- [x] 同 snapshot/version 的候选顺序稳定；无解状态与证明匹配；`feasible_partial` 只能称“已找到的候选”，不能称全局最优。
+- [x] what-if 对 PlanRepository 的写操作为 0；base snapshot 过期时拒绝应用。
 
 ### 回滚
 
@@ -1971,6 +1988,15 @@ npx vitest run tests/engine.test.ts tests/reviewed-gpu-evaluation.test.ts tests/
 
 - `feat(compat): add progressive compatibility and bootability rules`
 - `feat(solver): add bounded whole build feasibility and what-if`
+
+### U6 执行记录（2026-08-29）
+
+- 渐进兼容 evaluator 已进入 repository-backed workspace 与 Agent 生产路径；规则以版本化 manifest 声明所需 component/fact/placement/connection/system-profile authority，已知错误立即 fail，未知普通输入生成 requirement，未知安全输入保持 blocked。
+- requirement 固定点、SCC cycle、最大流数量守恒、instance-scoped package/user resource、装配首次通电与 `powerReady` closure 已闭合；零盘、空盘位以及不存在的 GPU/HDD/HBA/fan/cable 不再产生虚构需求。
+- `FirmwarePathEvaluation` 使用有向 release graph、可执行介质/临时部件/设置恢复与回退要求；整机 solver 通过同一权威 evaluator 保存 coverage/receipt，持久游标、unsat proof、人工批准、stale-base fence 与只读 what-if 均可跨重启重放。
+- U6 官方 focused 19 files / 143 tests、扩展生产回归 12 files / 76 tests、最终原样全量 237 files / 1410 tests 全部通过；`npm run typecheck`、client/Agent/workspace production build、`git diff --check` 均通过，secret scan 扫描 818 files / 0 findings。
+- 本地生产浏览器验收覆盖桌面/平板/手机创建、编辑、保存、复制、切换、提案审批和采购归档；7 个浏览器 hash golden vectors 精确一致，无横向溢出、无未命名按钮或破损 dialog。性能样本：首次加载 473 ms、重评估 1428 ms、方案切换 219 ms、3D 初始化 199 ms。
+- 生产 bundle main-entry smoke 证明 Agent 与 Workspace 仅启动各自服务；caller-scoped case runtime registry、同步保存重入 fence 和服务端 revision/config snapshot 绑定均有独立回归。
 
 ---
 
@@ -1986,25 +2012,25 @@ U6。
 
 ### 任务
 
-- [ ] 新增 `src/system-profiles/contracts.ts`、`registry.ts`、`defaults.ts`、`requirements.ts`、`evaluate.ts` 和 `compare.ts`。
-- [ ] 新增 `data/systems/`，系统事实引用官网 support lifecycle、硬件要求和驱动/兼容资料。
-- [ ] 实现 machine intent 默认建议：PC/工作站 → Windows，NAS → TrueNAS。
-- [ ] 默认建议必须记录 `source: defaulted`；用户选择记录 `source: user` 并锁定。
-- [ ] Agent 在第一次默认时给出简短理由和至少一个相关替代方案。
-- [ ] 系统 profile 检查 BIOS/UEFI、启动设备、显示输出、网卡/存储驱动、HBA 模式、ECC/IPMI 和安装前置条件。
-- [ ] TrueNAS profile 检查启动介质、磁盘/HBA 拓扑、直通方式和 NIC 支持。
-- [ ] Windows profile 检查 CPU/platform 支持、启动方式、驱动和显示路径。
-- [ ] 消费 U6 `FirmwarePathEvaluation`，在 `src/build-execution/bios-plan.ts` 和 `settings.ts` 中生成官方文件/步骤、介质/文件名、断电风险、恢复与升级后设置 procedure；U7 不重复实现 upgrade graph/evaluator，不自动执行刷写。
-- [ ] 新增 `src/build-execution/contracts.ts`、`first-boot.ts`、`commissioning.ts`、`checklist.ts`；生成绑定 `procedureSafetyHash` 的 bench test、pre-power、first-power、POST、OS install 和 verification 步骤及失败分支，并持久写入 U1 `ExecutionRepository`。
-- [ ] Windows 首启覆盖最小化 POST、debug LED/code、内存训练、BIOS 识别、异常温度停机、UEFI/TPM/Secure Boot、安装介质、驱动与显示路径；涉及 BitLocker/设备加密时先提示恢复密钥。
-- [ ] TrueNAS 首启覆盖启动池、磁盘唯一定位、HBA IT mode、控制器/端口映射、安装目标复核和数据盘禁止误清除。
-- [ ] 新增 `src/storage/contracts.ts`、`capacity.ts`、`truenas.ts`、`expansion.ts`、`explain.ts`；只读取 config 的 `LogicalLayoutSelection`，派生 `StorageLayoutEvaluation`：实际可用容量、容错、混盘损失、故障域、path decisions、spare、结构化扩容和 resilver 风险。
-- [ ] 任何 wipe/install step 生成独立 `DestructiveActionPlan`，列出精确 disk instance 和临时 device locator，确认绑定 safety hash；无法唯一定位、输入已变或未单独确认时只能 blocked。固定显示“RAID/RAIDZ 不是备份”。
-- [ ] 新增 `docs/guides/system-selection.md`，比较 Windows、TrueNAS、主流 Linux、Unraid、Proxmox 等相关系统。
-- [ ] 新增统一 explanation registry，每个比较结论有稳定 `helpRef`。
-- [ ] UI 新增可访问问号按钮，打开说明 dialog/页面；不复制一份旁路文案。
-- [ ] Agent 和 UI 使用相同 explanation/helpRef。
-- [ ] 系统版本变化通过 fact/update flow 提醒，不静默改方案。
+- [x] 新增 `src/system-profiles/contracts.ts`、`registry.ts`、`defaults.ts`、`requirements.ts`、`evaluate.ts` 和 `compare.ts`。
+- [x] 新增 `data/systems/`，系统事实引用官网 support lifecycle、硬件要求和驱动/兼容资料。
+- [x] 实现 machine intent 默认建议：PC/工作站 → Windows，NAS → TrueNAS。
+- [x] 默认建议必须记录 `source: defaulted`；用户选择记录 `source: user` 并锁定。
+- [x] Agent 在第一次默认时给出简短理由和至少一个相关替代方案。
+- [x] 系统 profile 检查 BIOS/UEFI、启动设备、显示输出、网卡/存储驱动、HBA 模式、ECC/IPMI 和安装前置条件。
+- [x] TrueNAS profile 检查启动介质、磁盘/HBA 拓扑、直通方式和 NIC 支持。
+- [x] Windows profile 检查 CPU/platform 支持、启动方式、驱动和显示路径。
+- [x] 消费 U6 `FirmwarePathEvaluation`，在 `src/build-execution/bios-plan.ts` 和 `settings.ts` 中生成官方文件/步骤、介质/文件名、断电风险、恢复与升级后设置 procedure；U7 不重复实现 upgrade graph/evaluator，不自动执行刷写。
+- [x] 新增 `src/build-execution/contracts.ts`、`first-boot.ts`、`commissioning.ts`、`checklist.ts`；生成绑定 `procedureSafetyHash` 的 bench test、pre-power、first-power、POST、OS install 和 verification 步骤及失败分支，并持久写入 U1 `ExecutionRepository`。
+- [x] Windows 首启覆盖最小化 POST、debug LED/code、内存训练、BIOS 识别、异常温度停机、UEFI/TPM/Secure Boot、安装介质、驱动与显示路径；涉及 BitLocker/设备加密时先提示恢复密钥。
+- [x] TrueNAS 首启覆盖启动池、磁盘唯一定位、HBA IT mode、控制器/端口映射、安装目标复核和数据盘禁止误清除。
+- [x] 新增 `src/storage/contracts.ts`、`capacity.ts`、`truenas.ts`、`expansion.ts`、`explain.ts`；只读取 config 的 `LogicalLayoutSelection`，派生 `StorageLayoutEvaluation`：实际可用容量、容错、混盘损失、故障域、path decisions、spare、结构化扩容和 resilver 风险。
+- [x] 任何 wipe/install step 生成独立 `DestructiveActionPlan`，列出精确 disk instance 和临时 device locator，确认绑定 safety hash；无法唯一定位、输入已变或未单独确认时只能 blocked。固定显示“RAID/RAIDZ 不是备份”。
+- [x] 新增 `docs/guides/system-selection.md`，比较 Windows、TrueNAS、主流 Linux、Unraid、Proxmox 等相关系统。
+- [x] 新增统一 explanation registry，每个比较结论有稳定 `helpRef`。
+- [x] UI 新增可访问问号按钮，打开说明 dialog/页面；不复制一份旁路文案。
+- [x] Agent 和 UI 使用相同 explanation/helpRef。
+- [x] 系统版本变化通过 fact/update flow 提醒，不静默改方案。
 
 ### 主要文件
 
@@ -2028,25 +2054,25 @@ npx vitest run tests/system-choice.test.ts tests/system-compatibility.test.ts te
 
 ### 浏览器验收
 
-- [ ] 新建 PC：硬件为空，出现 Windows 默认建议与解释，不自动添加购买项。
-- [ ] 新建 NAS：硬件为空，出现 TrueNAS 默认建议与解释。
-- [ ] 用户改选系统后刷新、保存、版本恢复和 Agent 重评估都不覆盖。
-- [ ] 问号可键盘操作、焦点返回正确、具有 `aria-label`。
-- [ ] 切换系统后兼容和 requirement 确定性重算。
-- [ ] 打开 BIOS/首启步骤可追到当前 plan version/procedure safety hash；刷新后 checkpoint 保留，价格刷新不影响机械确认，相关配置/安全事实变化只失效依赖步骤。
-- [ ] NAS 布局编辑器能显示每个 vdev 的物理盘、容量、容错、controller path、扩容限制和破坏性目标。
+- [x] 新建 PC：硬件为空，出现 Windows 默认建议与解释，不自动添加购买项。
+- [x] 新建 NAS：硬件为空，出现 TrueNAS 默认建议与解释。
+- [x] 用户改选系统后刷新、保存、版本恢复和 Agent 重评估都不覆盖。
+- [x] 问号可键盘操作、焦点返回正确、具有 `aria-label`。
+- [x] 切换系统后兼容和 requirement 确定性重算。
+- [x] 打开 BIOS/首启步骤可追到当前 plan version/procedure safety hash；刷新后 checkpoint 保留，价格刷新不影响机械确认，相关配置/安全事实变化只失效依赖步骤。
+- [x] NAS 布局编辑器能显示每个 vdev 的物理盘、容量、容错、controller path、扩容限制和破坏性目标。
 
 ### 退出门禁
 
-- [ ] 机械兼容与系统可用分开显示。
-- [ ] 默认建议可解释、可修改、可锁定。
-- [ ] 系统比较说明和 Agent 回答引用同一事实/帮助条目。
-- [ ] 目标系统缺关键驱动或启动链路时 fail/blocked，不声称可用。
-- [ ] BIOS 当前版本未知时产生明确观察动作；CPU 需要更高版本且无可行升级路径时系统/boot verdict 不得 pass。
-- [ ] 首启 checklist 与当前 topology、firmware plan、系统 profile 一致；步骤状态不改变 `PlanItemState`，不声称实物健康。
-- [ ] NAS 容量/容错计算可复现，同一盘不能属于两个活动 vdev，未唯一定位磁盘时不生成可执行破坏步骤。
-- [ ] ExecutionSession 可多次建立、重启恢复和标记 stale；安全步骤不能 skip，所有 readiness 均由当前 requirement/checkpoint 派生。
-- [ ] config 中只有 NAS selection；派生容量/容错/风险不会写回。destructive confirmation 在 safety hash 变化后失效。
+- [x] 机械兼容与系统可用分开显示。
+- [x] 默认建议可解释、可修改、可锁定。
+- [x] 系统比较说明和 Agent 回答引用同一事实/帮助条目。
+- [x] 目标系统缺关键驱动或启动链路时 fail/blocked，不声称可用。
+- [x] BIOS 当前版本未知时产生明确观察动作；CPU 需要更高版本且无可行升级路径时系统/boot verdict 不得 pass。
+- [x] 首启 checklist 与当前 topology、firmware plan、系统 profile 一致；步骤状态不改变 `PlanItemState`，不声称实物健康。
+- [x] NAS 容量/容错计算可复现，同一盘不能属于两个活动 vdev，未唯一定位磁盘时不生成可执行破坏步骤。
+- [x] ExecutionSession 可多次建立、重启恢复和标记 stale；安全步骤不能 skip，所有 readiness 均由当前 requirement/checkpoint 派生。
+- [x] config 中只有 NAS selection；派生容量/容错/风险不会写回。destructive confirmation 在 safety hash 变化后失效。
 
 ### 回滚
 
@@ -2056,6 +2082,15 @@ npx vitest run tests/system-choice.test.ts tests/system-compatibility.test.ts te
 
 - `feat(system): add Windows and TrueNAS profiles with help guide`
 - `feat(execution): add firmware first boot and storage layout plans`
+
+### U7 执行记录（2026-08-29）
+
+- Windows、TrueNAS、Linux 与 Proxmox profile、默认/用户锁定选择、统一 `helpRef` 与系统比较说明已进入 Workspace 和 Agent；空 PC/NAS 创建保持零硬件、零自动购买项。
+- firmware path、BIOS、bench/pre-power/POST、Windows/TrueNAS 首启、commissioning、存储布局与独立 destructive action 已投影为版本/评估锁绑定 procedure；容量、容错、混盘损失、controller path、扩容与 resilver 风险均为只读派生结果。
+- `ExecutionSession` 支持多次创建、CAS checkpoint、重启恢复及服务端 active-version 重验；价格变化保留已有确认，依赖或 safety hash 变化写入 stale audit，提交前版本切换以同一 coordinator writer 阻断且零副作用。
+- 系统 release requirement 变化已通过 plan-scoped fact update notice 映射到 `system` domain，不会静默覆盖选择；磁盘无法唯一定位或 safety authority 变化时 destructive confirmation/执行固定 blocked。
+- U7 官方 focused 18 files / 48 tests、扩展生产闭包 8 files / 52 tests、ExecutionSession 专项 6 files / 17 tests 与 update notice 10 tests 全部通过；`npm run build`（client/Agent/workspace）与 `git diff --check` 通过。
+- 本地 `127.0.0.1` 浏览器验收通过：PC 默认 Windows、NAS 默认 TrueNAS、两者硬件数均为 0，Linux 用户选择刷新后保持锁定，帮助 dialog 焦点正确返回；未访问外部网络。
 
 ---
 
@@ -2071,25 +2106,25 @@ U5-U7。
 
 ### 任务
 
-- [ ] 新增 `src/geometry/types.ts`、`frames.ts`、`instantiate.ts`、`tolerance.ts`、`collision.ts`、`service-space.ts`。
-- [ ] 几何实体支持局部坐标系、父 mount、6DoF pose、包络、插拔扫掠体、XYZ/角度公差。
-- [ ] 新增 `src/interconnect/types.ts`、`connector-library.ts`、`instantiate.ts`。
-- [ ] 每个 port 记录 connector family、公母、keying、pose、插拔方向、额定用途和 provenance。
-- [ ] 每根关键 cable instance 记录两端、pinout family、长度、线径、额定电流、分叉位置、直/弯头和最小弯曲半径。
-- [ ] 将 routing 拆成 graph、solver、bend、bundle-capacity、assembly-order。
-- [ ] 从可走区域、穿线孔和禁入区生成 route graph，而不是依赖 N6 固定 waypoint。
-- [ ] 对障碍物按公差和服务余量膨胀后求最坏路径。
-- [ ] 用户照片/量尺通过 observation override 提供端口 pose、净空、线长或穿线孔尺寸；显示测量端点、误差和 scope，不冒充厂商 CAD。无可靠比例尺的照片不能产生绝对毫米值。
-- [ ] 增加附件标注模型/工具：两点量距、接口方向、实例/port/mount 绑定；只解除依赖该观察的 decision。
-- [ ] 检查线长、弯折、束径、开孔容量、侧板空间、服务环、维修空间和装配顺序。
-- [ ] 电气安全独立于机械“插得上”：模组 PSU pinout、EPS/PCIe 误用、12V-2x6、菊链电流、背板浪涌分别判定。
-- [ ] 渲染器显示连接方向、公差带、blocked 位置和建议替代路径。
-- [ ] 保留 BoxGeometry fallback；可选 glTF/mesh 不能成为兼容结论唯一依据。
-- [ ] 未添加的实例不得出现在 geometry 或 route 中。
-- [ ] 不再用固定 `Math.min(socket, 3)` 等坐标映射代替真实接口实例。
-- [ ] 根据 topology、assembly constraints、requirements 和 route 顺序补全 `BuildProcedure` 的 mechanical/wiring 阶段；输出附件、工具、耗材、操作顺序、安全 stop condition 和替代路径。
-- [ ] NAS 逻辑盘映射到具体 bay、controller port、backplane path 和 cable；UI 能在物理盘与逻辑角色间双向导航。
-- [ ] what-if 支持旧/新包络、碰撞和 route diff 叠加，但场景对象不得进入活动 spatial scene。
+- [x] 新增 `src/geometry/types.ts`、`frames.ts`、`instantiate.ts`、`tolerance.ts`、`collision.ts`、`service-space.ts`。
+- [x] 几何实体支持局部坐标系、父 mount、6DoF pose、包络、插拔扫掠体、XYZ/角度公差。
+- [x] 新增 `src/interconnect/types.ts`、`connector-library.ts`、`instantiate.ts`。
+- [x] 每个 port 记录 connector family、公母、keying、pose、插拔方向、额定用途和 provenance。
+- [x] 每根关键 cable instance 记录两端、pinout family、长度、线径、额定电流、分叉位置、直/弯头和最小弯曲半径。
+- [x] 将 routing 拆成 graph、solver、bend、bundle-capacity、assembly-order。
+- [x] 从可走区域、穿线孔和禁入区生成 route graph，而不是依赖 N6 固定 waypoint。
+- [x] 对障碍物按公差和服务余量膨胀后求最坏路径。
+- [x] 用户照片/量尺通过 observation override 提供端口 pose、净空、线长或穿线孔尺寸；显示测量端点、误差和 scope，不冒充厂商 CAD。无可靠比例尺的照片不能产生绝对毫米值。
+- [x] 增加附件标注模型/工具：两点量距、接口方向、实例/port/mount 绑定；只解除依赖该观察的 decision。
+- [x] 检查线长、弯折、束径、开孔容量、侧板空间、服务环、维修空间和装配顺序。
+- [x] 电气安全独立于机械“插得上”：模组 PSU pinout、EPS/PCIe 误用、12V-2x6、菊链电流、背板浪涌分别判定。
+- [x] 渲染器显示连接方向、公差带、blocked 位置和建议替代路径。
+- [x] 保留 BoxGeometry fallback；可选 glTF/mesh 不能成为兼容结论唯一依据。
+- [x] 未添加的实例不得出现在 geometry 或 route 中。
+- [x] 不再用固定 `Math.min(socket, 3)` 等坐标映射代替真实接口实例。
+- [x] 根据 topology、assembly constraints、requirements 和 route 顺序补全 `BuildProcedure` 的 mechanical/wiring 阶段；输出附件、工具、耗材、操作顺序、安全 stop condition 和替代路径。
+- [x] NAS 逻辑盘映射到具体 bay、controller port、backplane path 和 cable；UI 能在物理盘与逻辑角色间双向导航。
+- [x] what-if 支持旧/新包络、碰撞和 route diff 叠加，但场景对象不得进入活动 spatial scene。
 
 ### 主要文件
 
@@ -2114,16 +2149,23 @@ npm run test:spatial:browser
 
 ### 退出门禁
 
-- [ ] 净空大于误差 + 公差 + 服务余量才 pass。
-- [ ] 公差区间可能碰撞时 blocked。
-- [ ] 每根必需线有唯一两端；不支持共享的 port 不得重复占用。
-- [ ] 最坏路径长度超过线长、弯折不足或开孔容量不足时 fail/blocked。
-- [ ] 外形相同但 PSU pinout family 不同的线材 fail。
-- [ ] 空盘位不生成数据线；无 NVMe 实例不绘制 NVMe。
-- [ ] 至少三种机箱布局能显示真实 topology 驱动的 3D 与走线。
-- [ ] observation 误差跨越干涉边界时仍 blocked；观察撤回后相关通过项恢复 blocked。
-- [ ] 每个装配步骤的附件/工具/线材需求都从中央 RequirementSatisfaction 读取；相关 procedure dependency hash 变化才标记对应步骤 stale。
-- [ ] what-if 3D/route 不污染活动场景；NAS 每块盘的逻辑角色与物理路径可相互定位。
+- [x] 净空大于误差 + 公差 + 服务余量才 pass。
+- [x] 公差区间可能碰撞时 blocked。
+- [x] 每根必需线有唯一两端；不支持共享的 port 不得重复占用。
+- [x] 最坏路径长度超过线长、弯折不足或开孔容量不足时 fail/blocked。
+- [x] 外形相同但 PSU pinout family 不同的线材 fail。
+- [x] 空盘位不生成数据线；无 NVMe 实例不绘制 NVMe。
+- [x] 至少三种机箱布局能显示真实 topology 驱动的 3D 与走线。
+- [x] observation 误差跨越干涉边界时仍 blocked；观察撤回后相关通过项恢复 blocked。
+- [x] 每个装配步骤的附件/工具/线材需求都从中央 RequirementSatisfaction 读取；相关 procedure dependency hash 变化才标记对应步骤 stale。
+- [x] what-if 3D/route 不污染活动场景；NAS 每块盘的逻辑角色与物理路径可相互定位。
+
+### 实现与验证（2026-08-29）
+
+- 生产 V3 空间接口从不可变 PlanVersion 的 evaluation lock hydrate 精确 adapter artifact，按 manifest envelope、区域、端口与 route graph 生成 renderer-neutral 场景；未闭合的 component pose、route 或 assembly 域保持 partial/blocked。
+- ATX、mATX、Mini-ITX 三种独立 manifest 布局均由各自 topology 生成不同 3D 外壳、走线区域、端点、公差带与连接路径；未选择具体线材时仅显示规划路径并保持待确认，不伪造线长或电气结论。
+- `BUILD_SIM_SPATIAL_ROUTING_ENABLED=false` 可独立关闭新空间/走线接口并回到 legacy renderer/evaluator，保留 V3 topology、fact 与已锁 artifact 数据。
+- U8 官方与扩展 focused 共 16 files / 93 tests 通过；生产 progressive workspace 的保存版本空间 hydrate/restart replay 通过；`npm run test:spatial:browser` 在隔离 `127.0.0.1` 环境通过；`npm run build`（client/Agent/workspace）与 `git diff --check` 通过。全过程未访问外部网络。
 
 ### 回滚
 
@@ -2147,26 +2189,26 @@ U8。噪音依赖负载、热模型和风扇/RPM 工作点。
 
 ### 任务
 
-- [ ] 新增 `src/thermal/types.ts`、`airflow-graph.ts`、`fan-operating-point.ts`、`steady-state.ts`、`scenarios.ts`、`calibration.ts`。
-- [ ] 支持任意腔体、开孔、滤网、风扇、冷排、散热器和泄漏边。
-- [ ] 热源来自 component instance 和 workload，不从 N6 profile 注入。
-- [ ] workload 必须来自当前 `RequirementSpec` 或用户显式选择的标准 scenario；未提供时展示默认假设并请求确认，不能从高端 SKU 反推“重负载”。
-- [ ] 风量由 fan P-Q curve 和系统阻抗区间求工作点；无曲线时使用明确 inference range。
-- [ ] 默认环境 `20-30°C`，UI 显示并允许覆盖。
-- [ ] 输出器件/腔体温度区间和最坏场景；区间跨越安全上限时 blocked/fail。
-- [ ] 保留 thermal field 作为展示插值，并明确非 CFD。
-- [ ] 新增 `src/acoustics/types.ts`、`normalize.ts`、`operating-point.ts`、`aggregate.ts`。
-- [ ] 声学事实记录 A-weighted、参考距离、负载、RPM、测试方法和来源。
-- [ ] 只聚合能够归一化到共同条件的硬件声源。
-- [ ] 输出各声源贡献、总区间和 quiet/normal/audible/loud 等级。
-- [ ] 不加入房间、机箱遮挡、机箱共振或用户位置模型。
-- [ ] coil whine 记录发生风险和来源，不加入确定性 dBA 总和。
-- [ ] Agent 权威 evaluation 接受 workload/environment profile，不能永远返回 thermal unknown。
-- [ ] plan-scoped observation 可输入环境温度、风扇 RPM、设备温度和符合记录条件的噪音测量；记录实例、负载、方法、距离、误差和时间，只校准当前方案区间，不提升成同型号全局事实。
-- [ ] NAS layout 驱动磁盘并发、启转、热与 HDD 噪音场景；改变 vdev/盘位/控制器路径必须改变相应 simulation hash。
-- [ ] 构建并冻结 `SimulationInput`；默认环境/工作负载/fan policy/storage activity/model version 全部进入 input hash，what-if 默认复用相同输入。
-- [ ] solver 可消费用户 hard thermal/acoustic constraints；证据不足时返回 blocked/宽区间，不能把缺失噪音数据当作满足“静音”。
-- [ ] what-if 输出温度/声学区间变化、主要贡献和变化来源，保持相同环境/工作负载口径。
+- [x] 新增 `src/thermal/types.ts`、`airflow-graph.ts`、`fan-operating-point.ts`、`steady-state.ts`、`scenarios.ts`、`calibration.ts`。
+- [x] 支持任意腔体、开孔、滤网、风扇、冷排、散热器和泄漏边。
+- [x] 热源来自 component instance 和 workload，不从 N6 profile 注入。
+- [x] workload 必须来自当前 `RequirementSpec` 或用户显式选择的标准 scenario；未提供时展示默认假设并请求确认，不能从高端 SKU 反推“重负载”。
+- [x] 风量由 fan P-Q curve 和系统阻抗区间求工作点；无曲线时使用明确 inference range。
+- [x] 默认环境 `20-30°C`，UI 显示并允许覆盖。
+- [x] 输出器件/腔体温度区间和最坏场景；区间跨越安全上限时 blocked/fail。
+- [x] 保留 thermal field 作为展示插值，并明确非 CFD。
+- [x] 新增 `src/acoustics/types.ts`、`normalize.ts`、`operating-point.ts`、`aggregate.ts`。
+- [x] 声学事实记录 A-weighted、参考距离、负载、RPM、测试方法和来源。
+- [x] 只聚合能够归一化到共同条件的硬件声源。
+- [x] 输出各声源贡献、总区间和 quiet/normal/audible/loud 等级。
+- [x] 不加入房间、机箱遮挡、机箱共振或用户位置模型。
+- [x] coil whine 记录发生风险和来源，不加入确定性 dBA 总和。
+- [x] Agent 权威 evaluation 接受 workload/environment profile，不能永远返回 thermal unknown。
+- [x] plan-scoped observation 可输入环境温度、风扇 RPM、设备温度和符合记录条件的噪音测量；记录实例、负载、方法、距离、误差和时间，只校准当前方案区间，不提升成同型号全局事实。
+- [x] NAS layout 驱动磁盘并发、启转、热与 HDD 噪音场景；改变 vdev/盘位/控制器路径必须改变相应 simulation hash。
+- [x] 构建并冻结 `SimulationInput`；默认环境/工作负载/fan policy/storage activity/model version 全部进入 input hash，what-if 默认复用相同输入。
+- [x] solver 可消费用户 hard thermal/acoustic constraints；证据不足时返回 blocked/宽区间，不能把缺失噪音数据当作满足“静音”。
+- [x] what-if 输出温度/声学区间变化、主要贡献和变化来源，保持相同环境/工作负载口径。
 
 ### 主要文件
 
@@ -2183,26 +2225,27 @@ U8。噪音依赖负载、热模型和风扇/RPM 工作点。
 
 ```bash
 npx vitest run tests/thermal.test.ts tests/thermal-field.test.ts tests/thermal-network.test.ts tests/acoustics.test.ts tests/agent-evaluation-server.test.ts tests/thermal-user-calibration.test.ts tests/acoustic-user-observation.test.ts tests/solver-thermal-acoustic-constraints.test.ts tests/simulation-input-hash.test.ts tests/layout-spatial-simulation-hash.test.ts tests/simulation-what-if.test.ts
+npx vitest run tests/storage-activity-simulation.test.ts tests/workspace-progressive-production.test.ts
 ```
 
 ### 数值性质测试
 
-- [ ] 能量守恒误差在声明容差内。
-- [ ] 功耗升高不能让最高预测温度下降。
-- [ ] 风扇关闭或阻抗增加不能改善温度。
-- [ ] 两个独立 30 dBA 声源聚合约为 33.01 dBA。
-- [ ] 不同参考距离能正确归一化。
-- [ ] 不可比较的声学数据不直接相加。
+- [x] 能量守恒误差在声明容差内。
+- [x] 功耗升高不能让最高预测温度下降。
+- [x] 风扇关闭或阻抗增加不能改善温度。
+- [x] 两个独立 30 dBA 声源聚合约为 33.01 dBA。
+- [x] 不同参考距离能正确归一化。
+- [x] 不可比较的声学数据不直接相加。
 
 ### 退出门禁
 
-- [ ] 通用热模型不 import N6 profile。
-- [ ] UI 和 Agent 显示区间、工作点、假设和 evidence。
-- [ ] 缺关键安全输入时 blocked，不生成单点温度。
-- [ ] 噪音明确为硬件标准化结果，不称房间实际噪音。
-- [ ] 用户观察只改变当前方案，撤回后恢复未校准区间；不同距离/负载的声学 observation 不直接相加。
-- [ ] 未满足严格热/噪 hard constraint 的候选不进入 U10 可购买排名；NAS layout 变化会重算热噪。
-- [ ] 价格或情景元数据变化不改变 simulation hash；相同环境下改变 vdev 会改变 layout/simulation hash。
+- [x] 通用热模型不 import N6 profile。
+- [x] UI 和 Agent 显示区间、工作点、假设和 evidence。
+- [x] 缺关键安全输入时 blocked，不生成单点温度。
+- [x] 噪音明确为硬件标准化结果，不称房间实际噪音。
+- [x] 用户观察只改变当前方案，撤回后恢复未校准区间；不同距离/负载的声学 observation 不直接相加。
+- [x] 未满足严格热/噪 hard constraint 的候选不进入 U10 可购买排名；NAS layout 变化会重算热噪。
+- [x] 价格或情景元数据变化不改变 simulation hash；相同环境下改变 vdev 会改变 layout/simulation hash。
 
 ### 回滚
 
@@ -2211,6 +2254,15 @@ npx vitest run tests/thermal.test.ts tests/thermal-field.test.ts tests/thermal-n
 ### 推荐提交
 
 `feat(simulation): add generic thermal and normalized acoustic models`
+
+### U9 执行记录（2026-08-30）
+
+- 状态：门禁通过（本地，随 U12 本地 release-gate commit 提交）
+- 主要变更：工作负载/环境驱动 airflow network、风扇工作点、温度区间、标准化硬件声学、方案观察校准、NAS 活动输入与 what-if 差异已接入同一 `SimulationInput`/评估锁。
+- 聚焦测试：13 files / 62 tests 通过，包含 production workspace 保存版本、重启 replay、solver 和 what-if。
+- 全量测试：纳入 325 files / 1610 tests；其中仅默认沙箱无法监听本机端口的 3 项在本机回环权限下复跑 11/11 通过。
+- 浏览器测试：`test:g7:browser`、`test:spatial:browser`、`test:platform:browser` 通过。
+- 未解决限制：热场不是 CFD；三套独立实物 holdout 的温度/声学区间验证仍属于 U12 发布门禁。
 
 ---
 
@@ -2226,61 +2278,61 @@ U3、U4、U6-U9。只有 U7-U9 完成并重验证当前 hard domains 后，feasi
 
 ### 任务：价格
 
-- [ ] 新增 `src/price/policy.ts`、`confidence.ts` 和服务端 `price-observations.mjs`。
-- [ ] listing capture 内容寻址并保留精确 variant、seller、库存声明、条件和抓取时间。
-- [ ] PriceObservation 必须由服务端 capture 派生。
-- [ ] 渠道分层：
+- [x] 新增 `src/price/policy.ts`、`confidence.ts` 和服务端 `price-observations.mjs`。
+- [x] listing capture 内容寻址并保留精确 variant、seller、库存声明、条件和抓取时间。
+- [x] PriceObservation 必须由服务端 capture 派生。
+- [x] 渠道分层：
   - [ ] S1：京东自营、品牌官方店、天猫官方旗舰店；
   - [ ] S2：可验证授权/专卖渠道；
   - [ ] S3：淘宝企业店、PDD 品牌/官方或有明确保修店；
   - [ ] S4：普通淘宝/PDD；允许低置信展示和备选。
-- [ ] seller tier 必须有证据，不能只按平台名猜。
-- [ ] 1 条有效 observation 显示低置信单点。
-- [ ] 2 条以上独立 seller 显示 min-max 区间、样本数和平台分布。
-- [ ] 72 小时 preferred、7 天 usable、超过 7 天 expired。
-- [ ] 同一 seller 多链接不算独立样本。
-- [ ] 极端价差进入 price conflict，不静默删除。
-- [ ] 发票、保修、授权、跨境、券/会员条件作为排序和风险标签。
-- [ ] 显示前重新检查 URL、variant 和库存声明；链接失效则降级/移除。
-- [ ] 清理跟踪参数，保留必要商品和 variant 参数；不默认加入联盟链接。
-- [ ] 无当前全新价时显示 unavailable 并寻找替代型号。
-- [ ] 新增 `PriceHistoryRepository`，保留所有合法 observation 和不可变聚合点；current snapshot 只是时间序列投影，不覆盖原始历史。
-- [ ] 历史按 exact variant、condition、seller、币种/地区和促销条件分组；统一使用 `comparableTotalCny = 商品价 + 必付运费 - 可无条件取得优惠`，会员/券/跨店条件单列。
-- [ ] 同一 seller/商品的重复链接和同一 observation 幂等去重；过期报价可以进入历史但不得进入当前预算，二手/预售不进入“全新历史”。
-- [ ] 历史图/统计显示窗口、样本数、覆盖天数、min/max/median、来源和缺口；数据覆盖不足时 market cycle 只能标为第三方/Agent inference。
-- [ ] 实现 plan-scoped `PriceTarget` 和 watchlist：精确变体、目标到手价、最低 seller tier/大陆保修要求、期限和 enabled 状态。
-- [ ] PriceTarget 编辑/停启使用 expected revision hash CAS，任何时刻只有一个 active head；并发 UI/Agent 修改产生冲突 proposal，不静默 last-write-wins。
-- [ ] price recheck、history rebuild 和 target evaluation 使用 durable jobs + persistent `JobSchedule`；append-only `PriceTargetEvent` 按 target revision/snapshot/transition 去重，只在跨线时提醒，编辑、二次跨线、停启、重启/离线补桶和 restore replay 不重复，首发不发外部通知。
-- [ ] 买/等建议显示当前价在可用历史窗口中的位置、未来扩容/替换摩擦、建议有效期、触发条件和反证；无足够历史时只能给保守 inference，不能伪造“历史低位”。
+- [x] seller tier 必须有证据，不能只按平台名猜。
+- [x] 1 条有效 observation 显示低置信单点。
+- [x] 2 条以上独立 seller 显示 min-max 区间、样本数和平台分布。
+- [x] 72 小时 preferred、7 天 usable、超过 7 天 expired。
+- [x] 同一 seller 多链接不算独立样本。
+- [x] 极端价差进入 price conflict，不静默删除。
+- [x] 发票、保修、授权、跨境、券/会员条件作为排序和风险标签。
+- [x] 显示前重新检查 URL、variant 和库存声明；链接失效则降级/移除。
+- [x] 清理跟踪参数，保留必要商品和 variant 参数；不默认加入联盟链接。
+- [x] 无当前全新价时显示 unavailable 并寻找替代型号。
+- [x] 新增 `PriceHistoryRepository`，保留所有合法 observation 和不可变聚合点；current snapshot 只是时间序列投影，不覆盖原始历史。
+- [x] 历史按 exact variant、condition、seller、币种/地区和促销条件分组；统一使用 `comparableTotalCny = 商品价 + 必付运费 - 可无条件取得优惠`，会员/券/跨店条件单列。
+- [x] 同一 seller/商品的重复链接和同一 observation 幂等去重；过期报价可以进入历史但不得进入当前预算，二手/预售不进入“全新历史”。
+- [x] 历史图/统计显示窗口、样本数、覆盖天数、min/max/median、来源和缺口；数据覆盖不足时 market cycle 只能标为第三方/Agent inference。
+- [x] 实现 plan-scoped `PriceTarget` 和 watchlist：精确变体、目标到手价、最低 seller tier/大陆保修要求、期限和 enabled 状态。
+- [x] PriceTarget 编辑/停启使用 expected revision hash CAS，任何时刻只有一个 active head；并发 UI/Agent 修改产生冲突 proposal，不静默 last-write-wins。
+- [x] price recheck、history rebuild 和 target evaluation 使用 durable jobs + persistent `JobSchedule`；append-only `PriceTargetEvent` 按 target revision/snapshot/transition 去重，只在跨线时提醒，编辑、二次跨线、停启、重启/离线补桶和 restore replay 不重复，首发不发外部通知。
+- [x] 买/等建议显示当前价在可用历史窗口中的位置、未来扩容/替换摩擦、建议有效期、触发条件和反证；无足够历史时只能给保守 inference，不能伪造“历史低位”。
 
 ### 任务：推荐
 
-- [ ] 新增 `src/recommendation/policy.ts`、`score.ts`、`market-cycle.ts`、`explain.ts`。
-- [ ] 首先过滤 fail 和安全 blocked 候选。
-- [ ] 建立透明初始权重，可由用户覆盖：
+- [x] 新增 `src/recommendation/policy.ts`、`score.ts`、`market-cycle.ts`、`explain.ts`。
+- [x] 首先过滤 fail 和安全 blocked 候选。
+- [x] 建立透明初始权重，可由用户覆盖：
   - [ ] 当前工作负载价值 30%；
   - [ ] 有证据的可靠性 20%；
   - [ ] 维护便利 15%；
   - [ ] 使用周期内实际可用的扩展性 15%；
   - [ ] 替换摩擦/骨架稳定性 10%；
   - [ ] 当前市场价格位置和生命周期成本 10%。
-- [ ] 额外惩罚单独展示，不藏入总分：
+- [x] 额外惩罚单独展示，不藏入总分：
   - [ ] 暂时用不到的能力；
   - [ ] 无证据的品牌/新品溢价；
   - [ ] 异常价格周期；
   - [ ] 快速折旧且容易后续扩容。
-- [ ] 骨架件默认 5 年，易替换/扩容件 2-3 年。
-- [ ] 性能分数必须按目标 workload/benchmark，不做跨用途统一“性能”。
-- [ ] 市场周期判断必须显示依据：本地历史、同代替代、发布周期或明确 Agent inference。
-- [ ] 输出经济、平衡、长期三档；每档至少一个替代。
-- [ ] 解释每项加减分、价格置信度、事实缺口和未来升级影响。
-- [ ] 价格不足时可以给兼容候选，但不得声称性价比排名确定。
-- [ ] 对 U6 candidate 用 U7-U9 已完成的 system/firmware/storage/spatial/simulation domains 重新运行同一 evaluator；只有全部 `requiredForPurchase` coverage 为当前 hash 的 pass、residual must 为 0，才能生成 `CandidatePromotionRecord(purchase_eligible)` 并排名。
-- [ ] scoring/recommendation 不拥有第二套兼容逻辑，也不能把 hard requirement 转为扣分项；late-domain 失败的候选退回 excluded/blocked 并解释。
-- [ ] 完成整机层排序：显示整机总预算、planned/ordered 拆分、每项价格置信度、骨架投入、可替换件投入、功耗/热噪/空间风险和升级路径。
-- [ ] 固定 ordered/用户锁定实例后只求解其余缺口；不得为了高分替换锁定部件。
-- [ ] 为经济、平衡、长期三档保存 requirement coverage、候选/剪枝摘要、solver/scoring version、全部输入 hashes 和未探索范围；`partial` 结果不显示“最优”。
-- [ ] scenario compare 默认使用相同 snapshots 并分别显示用户输入差异与市场刷新差异；支持换型号、改预算/系统/NAS layout、延后采购，输出总价/兼容/热噪/3D/线材/升级路径 diff 与敏感性。
+- [x] 骨架件默认 5 年，易替换/扩容件 2-3 年。
+- [x] 性能分数必须按目标 workload/benchmark，不做跨用途统一“性能”。
+- [x] 市场周期判断必须显示依据：本地历史、同代替代、发布周期或明确 Agent inference。
+- [x] 输出经济、平衡、长期三档；每档至少一个替代。
+- [x] 解释每项加减分、价格置信度、事实缺口和未来升级影响。
+- [x] 价格不足时可以给兼容候选，但不得声称性价比排名确定。
+- [x] 对 U6 candidate 用 U7-U9 已完成的 system/firmware/storage/spatial/simulation domains 重新运行同一 evaluator；只有全部 `requiredForPurchase` coverage 为当前 hash 的 pass、residual must 为 0，才能生成 `CandidatePromotionRecord(purchase_eligible)` 并排名。
+- [x] scoring/recommendation 不拥有第二套兼容逻辑，也不能把 hard requirement 转为扣分项；late-domain 失败的候选退回 excluded/blocked 并解释。
+- [x] 完成整机层排序：显示整机总预算、planned/ordered 拆分、每项价格置信度、骨架投入、可替换件投入、功耗/热噪/空间风险和升级路径。
+- [x] 固定 ordered/用户锁定实例后只求解其余缺口；不得为了高分替换锁定部件。
+- [x] 为经济、平衡、长期三档保存 requirement coverage、候选/剪枝摘要、solver/scoring version、全部输入 hashes 和未探索范围；`partial` 结果不显示“最优”。
+- [x] scenario compare 默认使用相同 snapshots 并分别显示用户输入差异与市场刷新差异；支持换型号、改预算/系统/NAS layout、延后采购，输出总价/兼容/热噪/3D/线材/升级路径 diff 与敏感性。
 
 ### 主要文件
 
@@ -2308,27 +2360,27 @@ npm run test:purchase-price:browser
 
 ### 价格验收样本
 
-- [ ] 一条 48 小时有效报价：低置信单点。
-- [ ] 两条 24 小时独立报价：市场区间。
-- [ ] 一条 48 小时 + 一条 5 天报价：区间，标出 usable。
-- [ ] 第 8 天：自动过期，不进入当前预算。
-- [ ] 普通淘宝/PDD 精确全新变体：可低置信显示，不冒充 S1。
-- [ ] 二手、预售、缺货、variant 不符、平台域名不符：不进入当前全新价。
-- [ ] 目标价跨线只提醒一次；服务重启不重复，错误变体/二手/预售不触发；无新货时为 unavailable。
-- [ ] 同一组历史在第 8 天仍可查询，但 current snapshot 已过期；历史最低价不显示成当前可买价。
+- [x] 一条 48 小时有效报价：低置信单点。
+- [x] 两条 24 小时独立报价：市场区间。
+- [x] 一条 48 小时 + 一条 5 天报价：区间，标出 usable。
+- [x] 第 8 天：自动过期，不进入当前预算。
+- [x] 普通淘宝/PDD 精确全新变体：可低置信显示，不冒充 S1。
+- [x] 二手、预售、缺货、variant 不符、平台域名不符：不进入当前全新价。
+- [x] 目标价跨线只提醒一次；服务重启不重复，错误变体/二手/预售不触发；无新货时为 unavailable。
+- [x] 同一组历史在第 8 天仍可查询，但 current snapshot 已过期；历史最低价不显示成当前可买价。
 
 ### 退出门禁
 
-- [ ] 页面、Agent 和权威评估读取同一 price snapshot。
-- [ ] 单条低置信报价不会被显示成市场价。
-- [ ] 推荐列表没有 fail/安全 blocked 候选。
-- [ ] 排序完整解释用户哲学的加减分。
-- [ ] 每个推荐有精确型号、证据、价格状态和备选。
-- [ ] 历史/目标/触发去重状态在服务重启后不丢失；任何历史点可追到 observation IDs 和 snapshot。
-- [ ] target 编辑/停启/二次跨线/恢复后 duplicate event count = 0；离线恢复最多补一个时间桶 job。
-- [ ] 买/等建议显示有效期、历史覆盖和不确定性；样本不足时不确定宣称异常周期或确定最佳购买时机。
-- [ ] 每个整机候选全部 hard requirements 满足且无 fail/安全 blocked；无当前价时预算明确不完整，不能声称价格优胜。
-- [ ] 每个 ranked solution 引用当前 `CandidatePromotionRecord`；任一 required domain hash stale 时自动撤销 purchase eligibility 并重验证。
+- [x] 页面、Agent 和权威评估读取同一 price snapshot。
+- [x] 单条低置信报价不会被显示成市场价。
+- [x] 推荐列表没有 fail/安全 blocked 候选。
+- [x] 排序完整解释用户哲学的加减分。
+- [x] 每个推荐有精确型号、证据、价格状态和备选。
+- [x] 历史/目标/触发去重状态在服务重启后不丢失；任何历史点可追到 observation IDs 和 snapshot。
+- [x] target 编辑/停启/二次跨线/恢复后 duplicate event count = 0；离线恢复最多补一个时间桶 job。
+- [x] 买/等建议显示有效期、历史覆盖和不确定性；样本不足时不确定宣称异常周期或确定最佳购买时机。
+- [x] 每个整机候选全部 hard requirements 满足且无 fail/安全 blocked；无当前价时预算明确不完整，不能声称价格优胜。
+- [x] 每个 ranked solution 引用当前 `CandidatePromotionRecord`；任一 required domain hash stale 时自动撤销 purchase eligibility 并重验证。
 
 ### 回滚
 
@@ -2338,6 +2390,15 @@ npm run test:purchase-price:browser
 
 - `feat(price): add China observations history targets and timing`
 - `feat(recommendation): rank feasible whole build scenarios`
+
+### U10 执行记录（2026-08-30）
+
+- 状态：门禁通过（本地，随 U12 本地 release-gate commit 提交）
+- 主要变更：服务端 capture 派生价格观察、seller/时效/冲突策略、不可变历史、目标价 CAS/调度/幂等事件、买等解释、late-domain promotion 与整机透明排名均已进入生产 repository 和 Workspace route。
+- 聚焦测试：20 files / 46 tests 通过；单点/区间/过期、重复 seller、编辑/二次跨线/重启/restore、市场周期依据、locked ordered、late-domain 撤销和 what-if 均覆盖。
+- 浏览器测试：`test:purchase-price:browser` 与 `test:platform:browser` 通过；页面、Agent 与评估使用同一持久价格投影。
+- 回滚：价格历史/目标/推荐与采集分别受 flag 控制；关闭后保留不可变 capture/history/event，不删除数据。
+- 未解决限制：真实市场覆盖依赖部署者批准的本地采集运行；fixture 不作为当前可购买价格证据。
 
 ---
 
@@ -2353,37 +2414,37 @@ U7-U10。
 
 ### 任务
 
-- [ ] 新建空白方案只显示用途/系统建议和“添加第一个部件”，不显示默认部件。
-- [ ] 提供渐进需求向导：用途/工作负载、硬目标、预算、容量/冗余/吞吐、体积/热噪和周期均可跳过；hard/soft、已确认/待确认清楚分开，外设目标不创建外设拓扑。
-- [ ] Agent 从自然语言提取需求时先给细粒度 proposal；不得把推断的偏好静默标成用户 hard constraint。
-- [ ] 提供整机求解入口、探索/partial 状态、无解冲突和经济/平衡/长期完整候选；每套显示 requirement coverage 与硬门槛证据。
-- [ ] 提供 what-if 实验区和并排比较，显著标明“尚未写入方案”；接受后才进入普通 proposal，能分开显示输入变化与事实/市场刷新影响。
-- [ ] Agent 对用户每轮描述生成小范围 proposal，逐项展示新增/修改/删除。
-- [ ] 组件卡显示 instance、角色、状态、身份解析、证据阶梯和待补信息。
-- [ ] 区分 `not_needed`、`planned`、`ordered`；`not_needed` UI 写入 RoleDecision 而非组件节点，提供 ordered → planned 回退。
-- [ ] 方案完整度与兼容 verdict 分开显示。
-- [ ] `pass/fail/blocked` 使用一致颜色、文字和可访问标签；不只依赖颜色。
-- [ ] blocked 卡显示阻断原因和可执行补证动作。
-- [ ] 证据面板显示 official/third-party/user-observation/agent-inference、原文定位、hash、版本和适用 scope。
-- [ ] 支持附件导入、绑定 plan/instance/placement/connection/port/mount/firmware subject、隐私/EXIF 提示、处理 job、两点量距/方向标注和观察 proposal；观察卡显示 proposed/active/stale、方法、误差、subject revision、附件 hash、作用域与撤回。
-- [ ] 更新收件箱显示旧值、新值、来源、受影响规则、evaluation diff、accept/reject/defer/undo。
-- [ ] 3D 可选择 instance/finding/route，显示公差带和来源。
-- [ ] 热噪面板显示区间、工作点、假设和声源贡献。
-- [ ] 价格卡显示单点/区间、置信度、seller tier、时效、条件和 canonical link。
-- [ ] 推荐卡显示硬门槛、分项得分、惩罚、时间跨度和备选。
-- [ ] 附件/工具面板区分随盒已证实、随盒未证实、用户可用、需另购和 blocked；工具/耗材不混入内部硬件 BOM。
-- [ ] 装机/首启页显示与当前 procedure safety hash 绑定的 bench test、assembly、wiring、pre-power、POST、firmware、OS install 步骤、stop conditions 和故障分支；刷新/重启恢复 ExecutionSession，按依赖选择性失效 checkpoint。
-- [ ] BIOS 卡显示当前/最低/目标版本、可行 transition、官方文件/手册、临时硬件、设置 reset、风险和恢复；平台不提供自动刷写按钮。
-- [ ] NAS 布局页同时显示 pool/vdev/盘 instance/bay/controller path、容量、容错、扩容限制、SMR/HBA 风险和待清盘目标；破坏性动作需要单独确认。
-- [ ] 当前价与历史图/目标价/买等建议分栏；历史点不可呈现为当前购买链接，目标提醒进入现有更新收件箱。
-- [ ] 系统问号连接到统一 helpRef/说明手册。
-- [ ] Agent 输出引用同一 decision/fact/price/help IDs，不复制自由文本结论。
-- [ ] `.buildsim` 便携导出提供 slim/complete/脱敏模式；complete 包含 config、requirement、fact/observation/price snapshots、execution、ArtifactLockfile 和所有 replay-required rules/system/adapter/engine/model artifacts，厂商原文可作为 optional audit ref。
-- [ ] 导入先生成 `ImportPlan` dry-run：同 ID+hash no-op，同 ID 异 hash 只能复制为新档案或备份后替换；显示 ID remap、冲突、schema/hash/closure，绝不静默覆盖。
-- [ ] 整站备份/恢复与单方案导出使用分开的入口、文案和权限提示；显示最近备份验证状态，不把“下载方案”说成灾难恢复。
-- [ ] Job 中心显示 type、阶段、进度、waiting user/网络暂停/restore review、attempt、依赖、取消/重试/dead-letter 和脱敏错误；后台 job 结果仍走 candidate/update/proposal 审批。
-- [ ] Doctor 页面只读投影 CLI 结果，显示完整性、磁盘/权限、版本/迁移、服务、浏览器/WebGL、parser、队列和备份；repair 必须打开影响预览、先备份并再次确认。
-- [ ] 保持 desktop/tablet/mobile、键盘、screen reader、WebGL fallback 和离线体验。
+- [x] 新建空白方案只显示用途/系统建议和“添加第一个部件”，不显示默认部件。
+- [x] 提供渐进需求向导：用途/工作负载、硬目标、预算、容量/冗余/吞吐、体积/热噪和周期均可跳过；hard/soft、已确认/待确认清楚分开，外设目标不创建外设拓扑。
+- [x] Agent 从自然语言提取需求时先给细粒度 proposal；不得把推断的偏好静默标成用户 hard constraint。
+- [x] 提供整机求解入口、探索/partial 状态、无解冲突和经济/平衡/长期完整候选；每套显示 requirement coverage 与硬门槛证据。
+- [x] 提供 what-if 实验区和并排比较，显著标明“尚未写入方案”；接受后才进入普通 proposal，能分开显示输入变化与事实/市场刷新影响。
+- [x] Agent 对用户每轮描述生成小范围 proposal，逐项展示新增/修改/删除。
+- [x] 组件卡显示 instance、角色、状态、身份解析、证据阶梯和待补信息。
+- [x] 区分 `not_needed`、`planned`、`ordered`；`not_needed` UI 写入 RoleDecision 而非组件节点，提供 ordered → planned 回退。
+- [x] 方案完整度与兼容 verdict 分开显示。
+- [x] `pass/fail/blocked` 使用一致颜色、文字和可访问标签；不只依赖颜色。
+- [x] blocked 卡显示阻断原因和可执行补证动作。
+- [x] 证据面板显示 official/third-party/user-observation/agent-inference、原文定位、hash、版本和适用 scope。
+- [x] 支持附件导入、绑定 plan/instance/placement/connection/port/mount/firmware subject、隐私/EXIF 提示、处理 job、两点量距/方向标注和观察 proposal；观察卡显示 proposed/active/stale、方法、误差、subject revision、附件 hash、作用域与撤回。
+- [x] 更新收件箱显示旧值、新值、来源、受影响规则、evaluation diff、accept/reject/defer/undo。
+- [x] 3D 可选择 instance/finding/route，显示公差带和来源。
+- [x] 热噪面板显示区间、工作点、假设和声源贡献。
+- [x] 价格卡显示单点/区间、置信度、seller tier、时效、条件和 canonical link。
+- [x] 推荐卡显示硬门槛、分项得分、惩罚、时间跨度和备选。
+- [x] 附件/工具面板区分随盒已证实、随盒未证实、用户可用、需另购和 blocked；工具/耗材不混入内部硬件 BOM。
+- [x] 装机/首启页显示与当前 procedure safety hash 绑定的 bench test、assembly、wiring、pre-power、POST、firmware、OS install 步骤、stop conditions 和故障分支；刷新/重启恢复 ExecutionSession，按依赖选择性失效 checkpoint。
+- [x] BIOS 卡显示当前/最低/目标版本、可行 transition、官方文件/手册、临时硬件、设置 reset、风险和恢复；平台不提供自动刷写按钮。
+- [x] NAS 布局页同时显示 pool/vdev/盘 instance/bay/controller path、容量、容错、扩容限制、SMR/HBA 风险和待清盘目标；破坏性动作需要单独确认。
+- [x] 当前价与历史图/目标价/买等建议分栏；历史点不可呈现为当前购买链接，目标提醒进入现有更新收件箱。
+- [x] 系统问号连接到统一 helpRef/说明手册。
+- [x] Agent 输出引用同一 decision/fact/price/help IDs，不复制自由文本结论。
+- [x] `.buildsim` 便携导出提供 slim/complete/脱敏模式；complete 包含 config、requirement、fact/observation/price snapshots、execution、ArtifactLockfile 和所有 replay-required rules/system/adapter/engine/model artifacts，厂商原文可作为 optional audit ref。
+- [x] 导入先生成 `ImportPlan` dry-run：同 ID+hash no-op，同 ID 异 hash 只能复制为新档案或备份后替换；显示 ID remap、冲突、schema/hash/closure，绝不静默覆盖。
+- [x] 整站备份/恢复与单方案导出使用分开的入口、文案和权限提示；显示最近备份验证状态，不把“下载方案”说成灾难恢复。
+- [x] Job 中心显示 type、阶段、进度、waiting user/网络暂停/restore review、attempt、依赖、取消/重试/dead-letter 和脱敏错误；后台 job 结果仍走 candidate/update/proposal 审批。
+- [x] Doctor 页面只读投影 CLI 结果，显示完整性、磁盘/权限、版本/迁移、服务、浏览器/WebGL、parser、队列和备份；repair 必须打开影响预览、先备份并再次确认。
+- [x] 保持 desktop/tablet/mobile、键盘、screen reader、WebGL fallback 和离线体验。
 
 ### 主要文件
 
@@ -2427,13 +2488,13 @@ npm run test:platform:browser
 
 ### 退出门禁
 
-- [ ] 所有页面数据来自同一 BuildEvaluation snapshot。
-- [ ] 无 hidden components、hidden BOM 或自动填满。
-- [ ] Agent 文本不能直接修改方案；proposal 仍需明确批准。
-- [ ] 更新决定可撤销且不会污染其他方案。
-- [ ] 可访问性、清理、性能和 fallback 测试不退化。
-- [ ] what-if 活动方案写入次数为 0；complete portable 缺 replay-required artifact 时拒绝导入，成功导入后权威 hashes 与 manifest 一致；slim 模式只承诺按当前 runtime 重评并明确差异。
-- [ ] execution/checkpoint、job、target reminder 和 Doctor 状态刷新/进程重启后保持；所有 repair/破坏性动作均有独立确认。
+- [x] 所有页面数据来自同一 BuildEvaluation snapshot。
+- [x] 无 hidden components、hidden BOM 或自动填满。
+- [x] Agent 文本不能直接修改方案；proposal 仍需明确批准。
+- [x] 更新决定可撤销且不会污染其他方案。
+- [x] 可访问性、清理、性能和 fallback 测试不退化。
+- [x] what-if 活动方案写入次数为 0；complete portable 缺 replay-required artifact 时拒绝导入，成功导入后权威 hashes 与 manifest 一致；slim 模式只承诺按当前 runtime 重评并明确差异。
+- [x] execution/checkpoint、job、target reminder 和 Doctor 状态刷新/进程重启后保持；所有 repair/破坏性动作均有独立确认。
 
 ### 回滚
 
@@ -2442,6 +2503,15 @@ npm run test:platform:browser
 ### 推荐提交
 
 `feat(ui): integrate progressive evidence-first build workflow`
+
+### U11 执行记录（2026-08-30）
+
+- 状态：门禁通过（本地，随 U12 本地 release-gate commit 提交）
+- 主要变更：空白/渐进需求、solver、what-if、证据与附件、更新收件箱、通用 3D/热噪、价格与推荐、装机/首启/NAS、Job 中心、便携包、备份与 Doctor 投影已统一到同一 plan-scoped authority。
+- 聚焦测试：17 files / 45 tests 通过；全量 UI、可访问性、清理与性能测试通过。
+- 浏览器测试：计划列出的 Agent、空间和平台验收全部通过；额外通过 workspace、初始化、交易、装机任务、目录与 U7 浏览器路径。桌面/平板/手机均无横向溢出，按钮/对话框与 live region 验收通过。
+- 回滚：UI flags 可退回旧 projection，V3 数据、快照和不可变版本保持不变。
+- 未解决限制：正式部署与部署后真实运行验证属于 U12，尚未执行。
 
 ---
 
@@ -2457,11 +2527,11 @@ U0-U11 全部完成。
 
 ### 任务：完成便携、恢复与诊断实现
 
-- [ ] 完成 slim/complete `.buildsim` exporter、reference necessity graph、ArtifactLockfile、ImportPlan、ID remap、dry-run/conflict/rollback API；在非空 repository 验证 no-op、copy-as-new 和 replace-after-backup。
-- [ ] 完成加密 `full_local_backup`、verification report、maintenance lease、staging restore、root pointer/runtime generation 切换和 crash recovery；错误密码、篡改、切换前后崩溃均不能破坏 active runtime。
-- [ ] 完成所有 Doctor mandatory checks、strict exit、backup freshness/restore verification、结构化脱敏 report 和 RepairPlan executor；repair 重验 preconditions、幂等且 rollback 后 hash 恢复。
-- [ ] 完成 restored job quarantine/fencing、price schedule catch-up、ExecutionSession closure 和 runtime quota/retention/安全 GC；任何删除先 dry-run 并尊重活动 snapshot/审计/备份引用。
-- [ ] 完成脱敏诊断包；不得包含 raw path、网页正文、用户字段、secret、cookie 或 private attachment bytes。
+- [x] 完成 slim/complete `.buildsim` exporter、reference necessity graph、ArtifactLockfile、ImportPlan、ID remap、dry-run/conflict/rollback API；在非空 repository 验证 no-op、copy-as-new 和 replace-after-backup。
+- [x] 完成加密 `full_local_backup`、verification report、maintenance lease、staging restore、root pointer/runtime generation 切换和 crash recovery；错误密码、篡改、切换前后崩溃均不能破坏 active runtime。
+- [x] 完成所有 Doctor mandatory checks、strict exit、backup freshness/restore verification、结构化脱敏 report 和 RepairPlan executor；repair 重验 preconditions、幂等且 rollback 后 hash 恢复。
+- [x] 完成 restored job quarantine/fencing、price schedule catch-up、ExecutionSession closure 和 runtime quota/retention/安全 GC；任何删除先 dry-run 并尊重活动 snapshot/审计/备份引用。
+- [x] 完成脱敏诊断包；不得包含 raw path、网页正文、用户字段、secret、cookie 或 private attachment bytes。
 
 ### 主要文件
 
@@ -2491,21 +2561,21 @@ U0-U11 全部完成。
 
 ### 必须通过的通用 fixture
 
-- [ ] ATX、Micro-ATX、Mini-ITX 各至少一套。
-- [ ] 至少三款不同布局机箱，只有一款是 N6。
-- [ ] 游戏 PC、无独显办公 PC、TrueNAS NAS、HBA 多盘 NAS、多扩展卡工作站。
-- [ ] 至少一个运行时新发现、此前不在本地 catalog/case registry 的机箱。
-- [ ] 多 SSD、多 DIMM、多 GPU/扩展卡、不同硬盘型号和多线材实例。
-- [ ] socket/BIOS/RAM/PSU/PCIe/M.2/冷排/前置接口/系统驱动的正反例。
-- [ ] 错误模组线、12V-2x6 弯折不足、header 超载和背板浪涌。
-- [ ] 官网完整、官网缺字段、官网访问受阻、第三方补齐、Agent 推断、来源冲突和更新撤销。
-- [ ] 一条价格、两条价格、过期价格、普通淘宝/PDD、无新货。
-- [ ] hard/soft 需求、feasible/unsat/partial solver、locked ordered 部件和只读 what-if。
-- [ ] 随盒/缺失附件、紧固件短路、工具、BIOS 无升级路径、首启安全 checkpoint。
-- [ ] TrueNAS mirror/RAIDZ/混盘/HBA mode/唯一 destructive target。
-- [ ] 用户量尺/照片/BIOS 观察、撤回、跨方案隔离和 attachment security。
-- [ ] 价格历史/目标价/买等、job 重启/离线/去重、portable/backup/restore/Doctor。
-- [ ] Node/browser canonical hash、adapter/model cache invalidation、procedure selective invalidation、restored job fencing 和 import ID conflict。
+- [x] ATX、Micro-ATX、Mini-ITX 各至少一套。
+- [x] 至少三款不同布局机箱，只有一款是 N6。
+- [x] 游戏 PC、无独显办公 PC、TrueNAS NAS、HBA 多盘 NAS、多扩展卡工作站。
+- [x] 至少一个运行时新发现、此前不在本地 catalog/case registry 的机箱。
+- [x] 多 SSD、多 DIMM、多 GPU/扩展卡、不同硬盘型号和多线材实例。
+- [x] socket/BIOS/RAM/PSU/PCIe/M.2/冷排/前置接口/系统驱动的正反例。
+- [x] 错误模组线、12V-2x6 弯折不足、header 超载和背板浪涌。
+- [x] 官网完整、官网缺字段、官网访问受阻、第三方补齐、Agent 推断、来源冲突和更新撤销。
+- [x] 一条价格、两条价格、过期价格、普通淘宝/PDD、无新货。
+- [x] hard/soft 需求、feasible/unsat/partial solver、locked ordered 部件和只读 what-if。
+- [x] 随盒/缺失附件、紧固件短路、工具、BIOS 无升级路径、首启安全 checkpoint。
+- [x] TrueNAS mirror/RAIDZ/混盘/HBA mode/唯一 destructive target。
+- [x] 用户量尺/照片/BIOS 观察、撤回、跨方案隔离和 attachment security。
+- [x] 价格历史/目标价/买等、job 重启/离线/去重、portable/backup/restore/Doctor。
+- [x] Node/browser canonical hash、adapter/model cache invalidation、procedure selective invalidation、restored job fencing 和 import ID conflict。
 - [ ] 至少 ATX、ITX、NAS 三套未用于调参的 holdout：实测净空落入声明公差、建议线长不短于实物需要、可复现实测温度/标准化声学点落入预测区间。
 
 ### 端到端 canary
@@ -2557,47 +2627,47 @@ N6 示例不能单独证明首发完成。还必须从另一份真空白方案�
 
 ### 便携、恢复、任务与 Doctor 门禁
 
-- [ ] `.buildsim` 导入支持 dry-run、冲突预览、checksum、schema 兼容、ID remap 和 rollback；绝对路径、`..`、symlink、重复路径、zip bomb、缺 required blob/artifact 和未知 schema 安全拒绝。
-- [ ] 在空与非空 repository 测试重复导入/ID 冲突：同 hash no-op，异 hash 绝不静默覆盖；complete portable 离线精确 replay，slim 模式明确重评。
-- [ ] 完整备份取得 maintenance lease 与一致性屏障；恢复失败不改变 active pointer，空环境恢复后 plans/facts/evidence/attachments/observations/prices/jobs/execution/decisions 与备份前引用闭包一致。
-- [ ] `private_user`/内层 manifest 在备份中无明文；secret、cookie、浏览器 profile、订单地址和无关个人路径在默认 portable/full backup/诊断包中的明文命中数为 0。
-- [ ] 在各 job 阶段杀进程后可继续或安全进入 retry/dead-letter；重复事务副作用为 0，stale worker/旧 generation 无法提交；恢复后的非终态 job 必须等待用户 review。
-- [ ] Doctor 在新安装、迁移后和恢复后三种场景通过；能检出坏 blob、悬空 snapshot、过宽权限、stuck lease、pending migration 和未验证备份。
-- [ ] Doctor 默认命令零写入；repair 先生成计划与备份、需显式批准、幂等且可回滚；离线只让网络检查 skipped/degraded，不误报数据损坏。
-- [ ] Doctor strict exit/status/severity 符合冻结契约，report/repair plan 无 raw sensitive detail；错误 precondition 拒绝 repair，重复 repair 和 rollback hashes 可验证。
+- [x] `.buildsim` 导入支持 dry-run、冲突预览、checksum、schema 兼容、ID remap 和 rollback；绝对路径、`..`、symlink、重复路径、zip bomb、缺 required blob/artifact 和未知 schema 安全拒绝。
+- [x] 在空与非空 repository 测试重复导入/ID 冲突：同 hash no-op，异 hash 绝不静默覆盖；complete portable 离线精确 replay，slim 模式明确重评。
+- [x] 完整备份取得 maintenance lease 与一致性屏障；恢复失败不改变 active pointer，空环境恢复后 plans/facts/evidence/attachments/observations/prices/jobs/execution/decisions 与备份前引用闭包一致。
+- [x] `private_user`/内层 manifest 在备份中无明文；secret、cookie、浏览器 profile、订单地址和无关个人路径在默认 portable/full backup/诊断包中的明文命中数为 0。
+- [x] 在各 job 阶段杀进程后可继续或安全进入 retry/dead-letter；重复事务副作用为 0，stale worker/旧 generation 无法提交；恢复后的非终态 job 必须等待用户 review。
+- [x] Doctor 在新安装、迁移后和恢复后三种场景通过；能检出坏 blob、悬空 snapshot、过宽权限、stuck lease、pending migration 和未验证备份。
+- [x] Doctor 默认命令零写入；repair 先生成计划与备份、需显式批准、幂等且可回滚；离线只让网络检查 skipped/degraded，不误报数据损坏。
+- [x] Doctor strict exit/status/severity 符合冻结契约，report/repair plan 无 raw sensitive detail；错误 precondition 拒绝 repair，重复 repair 和 rollback hashes 可验证。
 
 ### false-green 与质量门禁
 
-- [ ] 黄金安全 fixture 中 false-green = 0。
-- [ ] fail/blocked 候选不会进入可购买推荐。
-- [ ] 空白和部分档案 hidden component count = 0。
-- [ ] 活动 official facts 缺 hash/locator count = 0。
-- [ ] 全局 SKU 用户 paid/owned 字段 count = 0。
-- [ ] 通用 core 对 N6 import count = 0。
-- [ ] Agent/local evaluation hash mismatch count = 0。
-- [ ] 过期价格进入当前预算 count = 0。
-- [ ] 新增非 N6 adapter 需要修改核心 evaluator 的次数 = 0。
-- [ ] solver 可购买候选中的 `fail/安全 blocked/residual must` count = 0。
-- [ ] ranked solution missing/current-domain-mismatched promotion record count = 0。
-- [ ] what-if active-plan mutation count = 0。
-- [ ] user observation cross-plan leakage count = 0。
-- [ ] historical price used as current price count = 0。
-- [ ] job duplicate side effects count = 0。
-- [ ] portable import unresolved missing refs count = 0。
-- [ ] verified backup restore hash mismatch count = 0。
-- [ ] Doctor unapproved writes count = 0。
-- [ ] cross-runtime canonical hash mismatch count = 0。
-- [ ] stale adapter/model evaluation reused count = 0。
-- [ ] unconfirmed/stale observation used as fact count = 0。
-- [ ] deleted attachment bytes in new export count = 0。
-- [ ] stale worker commits count = 0；restored jobs auto-run count = 0。
-- [ ] duplicate target event after edit/restart/restore count = 0。
-- [ ] plaintext private-user matches in backup count = 0。
-- [ ] old-generation writes after restore count = 0；failed restore active pointer changes count = 0。
-- [ ] complete portable missing replay-required refs count = 0；silent import overwrite count = 0。
-- [ ] portable profile ambiguity count = 0；slim imported as exact replay count = 0。
-- [ ] Doctor raw sensitive detail count = 0；repair rollback hash mismatch count = 0。
-- [ ] partial build false completion count = 0；unrelated price refresh invalidated safety checkpoint count = 0。
+- [x] 黄金安全 fixture 中 false-green = 0。
+- [x] fail/blocked 候选不会进入可购买推荐。
+- [x] 空白和部分档案 hidden component count = 0。
+- [x] 活动 official facts 缺 hash/locator count = 0。
+- [x] 全局 SKU 用户 paid/owned 字段 count = 0。
+- [x] 通用 core 对 N6 import count = 0。
+- [x] Agent/local evaluation hash mismatch count = 0。
+- [x] 过期价格进入当前预算 count = 0。
+- [x] 新增非 N6 adapter 需要修改核心 evaluator 的次数 = 0。
+- [x] solver 可购买候选中的 `fail/安全 blocked/residual must` count = 0。
+- [x] ranked solution missing/current-domain-mismatched promotion record count = 0。
+- [x] what-if active-plan mutation count = 0。
+- [x] user observation cross-plan leakage count = 0。
+- [x] historical price used as current price count = 0。
+- [x] job duplicate side effects count = 0。
+- [x] portable import unresolved missing refs count = 0。
+- [x] verified backup restore hash mismatch count = 0。
+- [x] Doctor unapproved writes count = 0。
+- [x] cross-runtime canonical hash mismatch count = 0。
+- [x] stale adapter/model evaluation reused count = 0。
+- [x] unconfirmed/stale observation used as fact count = 0。
+- [x] deleted attachment bytes in new export count = 0。
+- [x] stale worker commits count = 0；restored jobs auto-run count = 0。
+- [x] duplicate target event after edit/restart/restore count = 0。
+- [x] plaintext private-user matches in backup count = 0。
+- [x] old-generation writes after restore count = 0；failed restore active pointer changes count = 0。
+- [x] complete portable missing replay-required refs count = 0；silent import overwrite count = 0。
+- [x] portable profile ambiguity count = 0；slim imported as exact replay count = 0。
+- [x] Doctor raw sensitive detail count = 0；repair rollback hash mismatch count = 0。
+- [x] partial build false completion count = 0；unrelated price refresh invalidated safety checkpoint count = 0。
 
 ### 完整验证
 
@@ -2629,16 +2699,16 @@ live network 验收使用明确的只读测试帐号/本地服务，失败不得
 只有全部满足时才将 v3 设为默认：
 
 - [ ] 所有 U0-U12 退出门禁通过；
-- [ ] V2 → V3 迁移和 rollback 在副本上演练成功；
+- [x] V2 → V3 迁移和 rollback 在副本上演练成功；
 - [ ] 至少四类黄金方案和未预置机箱 canary 通过；
-- [ ] 现有 N6 能力由通用 adapter 复现；
-- [ ] 本地部署重启后 plans/facts/evidence/prices/decisions 不丢失；
-- [ ] 本地部署重启后 attachments/observations/jobs/price history/targets/execution sessions 也不丢失，且无重复提醒/副作用；
-- [ ] `.buildsim` 往返、完整 backup → 空环境 restore → Doctor strict 演练成功，恢复后权威 hashes 一致；
-- [ ] complete portable 在缺少原始 runtime artifacts 的空安装离线精确重放；non-empty import 冲突策略、完整备份加密和 restore generation fencing 均通过；
-- [ ] 浏览器、离线、WebGL fallback、腐败数据和并发冲突测试通过；
-- [ ] README、README.zh-CN、ROADMAP、ARCHITECTURE、PROVENANCE 和系统说明已更新；
-- [ ] 最终执行报告列出已实现、未实现、限制、测试、迁移、回滚和数据安全。
+- [x] 现有 N6 能力由通用 adapter 复现；
+- [x] 本地部署重启后 plans/facts/evidence/prices/decisions 不丢失；
+- [x] 本地部署重启后 attachments/observations/jobs/price history/targets/execution sessions 也不丢失，且无重复提醒/副作用；
+- [x] `.buildsim` 往返、完整 backup → 空环境 restore → Doctor strict 演练成功，恢复后权威 hashes 一致；
+- [x] complete portable 在缺少原始 runtime artifacts 的空安装离线精确重放；non-empty import 冲突策略、完整备份加密和 restore generation fencing 均通过；
+- [x] 浏览器、离线、WebGL fallback、腐败数据和并发冲突测试通过；
+- [x] README、README.zh-CN、ROADMAP、ARCHITECTURE、PROVENANCE 和系统说明已更新；
+- [x] 最终执行报告列出已实现、未实现、限制、测试、迁移、回滚和数据安全。
 
 ### 旧路径删除策略
 
@@ -2655,6 +2725,19 @@ live network 验收使用明确的只读测试帐号/本地服务，失败不得
 
 - `feat(portability): add portable plans verified restore and doctor`
 - `test(platform): complete universal hardware migration and release gates`
+
+### U12 执行记录（2026-08-30）
+
+- 状态：进行中；软件实现与本地门禁通过，生产默认切换尚未批准。
+- 提交：本记录随本次本地 release-gate commit 提交；远程未推送。
+- 主要变更：portable/import plan、加密 full backup、验证/restore fencing、Doctor/repair、GC/retention、恢复任务隔离、V2→V3 方案迁移演练、Osaka release gate 和完整本地执行报告已落地。
+- 数据迁移：`tests/plan-v3-migration-rehearsal.test.ts` 2/2 证明 dry-run 零写、精确 manifest、外部加密备份、apply、归档 V2 保留与 rollback；真实部署 runtime 尚未执行 dry-run/apply。
+- 聚焦测试：U12 34 files / 105 tests 通过；U9 13/62、U10 20/46、U11 17/45 通过。
+- 全量测试：325 files / 1610 tests；默认沙箱内 3 项仅因禁止本机监听失败，精确回环复跑 2 files / 11 tests 通过。typecheck、三端 build、1033-file secret scan 与 diff-check 通过。
+- 浏览器测试：计划列出的 12 个本机页面脚本全部通过；未访问外部网络。
+- local smoke：隔离 `/tmp` runtime 上启动 built Price/Agent-disabled/Workspace 与静态本地搜索 fixture；创建/验证加密 full backup 后 strict Doctor 为 `healthy`/exit 0，临时状态已删除。
+- 未解决限制：三套未参与调参的 ATX/ITX/NAS 实物 holdout 缺失；N6 phase A/B 与跨产品发布 canary 尚未形成独立端到端证据；真实 runtime 迁移、远程推送、生产部署与部署后验证未执行。
+- 下一阶段前置条件：补齐 holdout 与 canary 证据，审阅并提交工作树；之后由用户明确批准远程推送和生产部署。
 
 ---
 

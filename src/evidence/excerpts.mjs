@@ -1,4 +1,5 @@
 import { Worker } from "node:worker_threads";
+import { evidenceSearchReasonForFailureCode } from "./search-outcome.mjs";
 
 const DOCUMENT_ID = /^doc-sha256-[a-f0-9]{64}$/;
 const PDF_MEDIA_TYPE = "application/pdf";
@@ -27,6 +28,7 @@ export class EvidenceExcerptError extends Error {
     this.name = "EvidenceExcerptError";
     this.code = code;
     this.status = status;
+    this.reason = evidenceSearchReasonForFailureCode(code);
     this.manualAction = manualAction;
   }
 }
@@ -70,6 +72,18 @@ function isTextMediaType(value) {
 function boundedOption(value, fallback, minimum) {
   if (!Number.isSafeInteger(value)) return fallback;
   return Math.min(fallback, Math.max(minimum, value));
+}
+
+function excerptLimits(options) {
+  return {
+    maxSourceBytes: boundedOption(options.maxSourceBytes, EVIDENCE_EXCERPT_LIMITS.maxSourceBytes, 1),
+    maxExtractedTextBytes: boundedOption(options.maxExtractedTextBytes, EVIDENCE_EXCERPT_LIMITS.maxExtractedTextBytes, 1),
+    maxPdfPagesWithoutSelection: boundedOption(options.maxPdfPagesWithoutSelection, EVIDENCE_EXCERPT_LIMITS.maxPdfPagesWithoutSelection, 1),
+    maxExcerptBytes: boundedOption(options.maxExcerptBytes, EVIDENCE_EXCERPT_LIMITS.maxExcerptBytes, 128),
+    maxOutputBytes: boundedOption(options.maxOutputBytes, EVIDENCE_EXCERPT_LIMITS.maxOutputBytes, 1_024),
+    pdfTimeoutMs: boundedOption(options.pdfTimeoutMs, EVIDENCE_EXCERPT_LIMITS.pdfTimeoutMs, 100),
+    ...(options.pdfWorkerUrl ? { pdfWorkerUrl: options.pdfWorkerUrl } : {}),
+  };
 }
 
 function decodedText(bytes) {
@@ -317,15 +331,7 @@ export async function extractEvidenceExcerpts(repository, documentId, value, opt
     throw new EvidenceExcerptError("evidence_excerpt_repository_invalid", "Evidence repository cannot provide immutable document bytes", 500);
   }
   const input = requestInput(value);
-  const limits = {
-    maxSourceBytes: boundedOption(options.maxSourceBytes, EVIDENCE_EXCERPT_LIMITS.maxSourceBytes, 1),
-    maxExtractedTextBytes: boundedOption(options.maxExtractedTextBytes, EVIDENCE_EXCERPT_LIMITS.maxExtractedTextBytes, 1),
-    maxPdfPagesWithoutSelection: boundedOption(options.maxPdfPagesWithoutSelection, EVIDENCE_EXCERPT_LIMITS.maxPdfPagesWithoutSelection, 1),
-    maxExcerptBytes: boundedOption(options.maxExcerptBytes, EVIDENCE_EXCERPT_LIMITS.maxExcerptBytes, 128),
-    maxOutputBytes: boundedOption(options.maxOutputBytes, EVIDENCE_EXCERPT_LIMITS.maxOutputBytes, 1_024),
-    pdfTimeoutMs: boundedOption(options.pdfTimeoutMs, EVIDENCE_EXCERPT_LIMITS.pdfTimeoutMs, 100),
-    ...(options.pdfWorkerUrl ? { pdfWorkerUrl: options.pdfWorkerUrl } : {}),
-  };
+  const limits = excerptLimits(options);
   const archived = await repository.getDocumentContent(documentId);
   if (!archived) throw new EvidenceExcerptError("not_found", "Evidence document was not found", 404);
   const { document, bytes } = archived;
@@ -384,5 +390,63 @@ export async function extractEvidenceExcerpts(repository, documentId, value, opt
     searchedPageCount: selected.pages.length,
     extractionMode,
     contentTrust: "untrusted-evidence-text",
+  }, matches.candidates, input.limit, matches.overflow, limits.maxExcerptBytes, limits.maxOutputBytes);
+}
+
+/**
+ * Searches a content-addressed OCR derivative without treating it as source
+ * authority. The caller must bind the derivative to the immutable PDF id/hash
+ * and artifact ref; only bounded excerpts leave this function.
+ */
+export function extractDerivedEvidenceExcerpts(source, value, options = {}) {
+  const input = requestInput(value);
+  const limits = excerptLimits(options);
+  if (!source || typeof source !== "object" || Array.isArray(source)
+    || Object.keys(source).some((key) => ![
+      "documentId", "contentHash", "mediaType", "sourceByteLength", "pages", "derivedArtifactRef", "derivedContentHash",
+    ].includes(key))
+    || !DOCUMENT_ID.test(String(source.documentId ?? ""))
+    || source.documentId !== `doc-sha256-${source.contentHash}`
+    || normalizedMediaType(source.mediaType) !== PDF_MEDIA_TYPE
+    || !Number.isSafeInteger(source.sourceByteLength) || source.sourceByteLength < 1 || source.sourceByteLength > limits.maxSourceBytes
+    || !/^sha256:[a-f0-9]{64}$/.test(String(source.derivedArtifactRef ?? ""))
+    || !/^[a-f0-9]{64}$/.test(String(source.derivedContentHash ?? ""))
+    || source.derivedArtifactRef !== `sha256:${source.derivedContentHash}`
+    || !Array.isArray(source.pages) || source.pages.length < 1 || source.pages.length > limits.maxPdfPagesWithoutSelection) {
+    throw new EvidenceExcerptError("evidence_ocr_derivative_invalid", "OCR derivative authority binding is invalid", 500);
+  }
+  const pages = source.pages.map((page, index) => {
+    if (!page || typeof page !== "object" || Array.isArray(page)
+      || Object.keys(page).some((key) => !["num", "text", "confidence"].includes(key))
+      || page.num !== index + 1 || typeof page.text !== "string"
+      || Buffer.byteLength(page.text, "utf8") > limits.maxExtractedTextBytes
+      || !Number.isFinite(page.confidence) || page.confidence < 0 || page.confidence > 1) {
+      throw new EvidenceExcerptError("evidence_ocr_derivative_invalid", "OCR derivative page is invalid", 500);
+    }
+    return { num: page.num, text: page.text };
+  });
+  const extractedBytes = pages.reduce((sum, page) => sum + Buffer.byteLength(page.text, "utf8"), 0);
+  if (extractedBytes > limits.maxExtractedTextBytes) {
+    throw new EvidenceExcerptError("evidence_excerpt_text_too_large", "OCR text exceeds the bounded processing limit", 413);
+  }
+  if (input.page !== undefined && input.page > pages.length) {
+    throw new EvidenceExcerptError("evidence_excerpt_page_out_of_range", `Requested page ${input.page} exceeds the document's ${pages.length} OCR page(s)`, 416);
+  }
+  const selected = input.page === undefined ? pages : [pages[input.page - 1]];
+  const matches = collectCandidates(selected, input.query);
+  return boundedResult({
+    schemaVersion: "1.0.0",
+    documentId: source.documentId,
+    contentHash: source.contentHash,
+    mediaType: PDF_MEDIA_TYPE,
+    sourceByteLength: source.sourceByteLength,
+    derivedArtifactRef: source.derivedArtifactRef,
+    derivedContentHash: source.derivedContentHash,
+    query: input.query,
+    ...(input.page === undefined ? {} : { requestedPage: input.page }),
+    totalPages: pages.length,
+    searchedPageCount: selected.length,
+    extractionMode: "pdf-local-ocr",
+    contentTrust: "untrusted-evidence-ocr",
   }, matches.candidates, input.limit, matches.overflow, limits.maxExcerptBytes, limits.maxOutputBytes);
 }

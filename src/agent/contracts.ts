@@ -1,4 +1,5 @@
 import type { BuildConfigDocument } from "../config/types";
+import type { ValidatedAgentWriteApprovalProof } from "./write-approval-authority";
 
 export const AGENT_CONTRACT_VERSION = "1.0.0" as const;
 
@@ -118,6 +119,8 @@ export interface AgentToolContext {
   buildConfig: BuildConfigDocument | null;
   signal: AbortSignal;
   approval?: AgentWriteApprovalEnvelope;
+  /** Server-minted, ephemeral proof that the durable envelope was verified. */
+  writeApprovalProof?: ValidatedAgentWriteApprovalProof;
 }
 
 export interface AgentToolResult {
@@ -148,7 +151,13 @@ export interface AgentSkillManifest {
   name: string;
   version: string;
   description: string;
+  /** Required tools: every name must exist in the active server registry. */
   allowedTools: string[];
+  /**
+   * Feature-gated tools. The loader adds only currently registered names to
+   * the effective allowedTools manifest and its definition hash.
+   */
+  optionalTools?: string[];
   readOnly: boolean;
   contextBudget: number;
   triggers: string[];
@@ -160,13 +169,36 @@ export interface LoadedAgentSkill {
   definitionHash: string;
 }
 
-export type AgentRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "limit_exceeded";
+export type AgentRunStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled" | "limit_exceeded";
+
+/**
+ * Public review projection for one provider-requested write. The server owns
+ * every binding and the nonce; the browser may only confirm this exact record.
+ */
+export interface AgentPendingWriteApproval {
+  contractVersion: typeof AGENT_CONTRACT_VERSION;
+  status: "pending";
+  approvalId: string;
+  nonce: string;
+  runId: string;
+  sessionId: string;
+  call: AgentToolCall;
+  toolTitle: string;
+  toolDefinitionHash: string;
+  inputHash: string;
+  idempotencyKey: string;
+  requestedAt: string;
+  expiresAt: string;
+  backup: { required: true; target: string };
+  rollback: { required: true; strategy: string };
+}
 
 export type AgentRunEvent =
   | { type: "run_status"; runId: string; status: AgentRunStatus; at: string }
   | { type: "skill_activated"; runId: string; skillId: string; definitionHash: string; at: string }
   | { type: "text_delta"; runId: string; text: string; at: string }
   | { type: "tool_call"; runId: string; call: AgentToolCall; toolDefinitionHash: string; at: string }
+  | { type: "approval_required"; runId: string; pending: AgentPendingWriteApproval; at: string }
   | { type: "tool_result"; runId: string; callId: string; toolName: string; result: AgentToolResult; at: string }
   | { type: "usage"; runId: string; provider: AgentProviderId; model: string; usage: ProviderUsage; billing?: ProviderBillingEstimate; at: string }
   | { type: "error"; runId: string; code: string; message: string; at: string };
@@ -195,6 +227,7 @@ export interface AgentWriteApprovalEnvelope {
   toolName: string;
   toolDefinitionHash: string;
   sessionId: string;
+  runId: string;
   inputHash: string;
   idempotencyKey: string;
   issuedAt: string;

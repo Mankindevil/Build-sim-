@@ -42,15 +42,34 @@ interface Envelope<T> { schemaVersion: "execution-repository-v1"; kind: "executi
 interface RollbackRecord { schemaVersion: "execution-rollback-v1"; kind: "execution-rollback"; checksum: string; payload: { executionSessionId: string; fromRevision: number; toRevision: number; previousHash: string; previous: StoredExecutionSession; createdAt: string; }; }
 export interface ExecutionRepositoryOptions { root?: string; runtimeRoot?: string; coordinator?: RuntimeCoordinator; now?: () => string; runtimeGeneration?: () => number; }
 export interface CreateExecutionSessionInput { session: ExecutionSession; procedure: BuildProcedure; dependencyContext: ProcedureDependencyContext; leaseToken: string; leaseExpiresAt: string; runtimeGeneration?: number; expectedHash?: string; maintenanceLeaseToken?: string; }
-export interface CommitExecutionSessionInput { session: ExecutionSession; procedure: BuildProcedure; dependencyContext: ProcedureDependencyContext; expectedRevision: number; expectedHash: string; leaseToken: string; runtimeGeneration: number; leaseExpiresAt?: string; maintenanceLeaseToken?: string; }
+export interface CommitExecutionSessionInput {
+  session: ExecutionSession;
+  procedure: BuildProcedure;
+  dependencyContext: ProcedureDependencyContext;
+  expectedRevision: number;
+  expectedHash: string;
+  leaseToken: string;
+  runtimeGeneration: number;
+  leaseExpiresAt?: string;
+  maintenanceLeaseToken?: string;
+  /** Runs inside the same coordinator writer before the first durable write. */
+  precommitAuthorizer?: (context: {
+    activeRoot: string;
+    runtimeGeneration: number;
+    existing: StoredExecutionSession;
+  }) => Promise<boolean>;
+}
 export interface RollbackExecutionSessionInput { expectedRevision: number; expectedHash: string; leaseToken: string; runtimeGeneration: number; leaseExpiresAt?: string; maintenanceLeaseToken?: string; }
 
 function digest(value: unknown): string { return createHash("sha256").update(canonicalJson(value)).digest("hex"); }
 function clone<T>(value: T): T { return structuredClone(value); }
 function iso(value: string): boolean { return Number.isFinite(Date.parse(value)); }
+function evaluatorAuthorityRefMatchesHash(ref: string, hash: string): boolean {
+  return ref === `sha256:${hash}` || ref === `evaluation-artifact:${hash}`;
+}
 function replayContext(session: ExecutionSession, procedure: BuildProcedure, dependencyContext: ProcedureDependencyContext): ExecutionReplayContext {
-  if (dependencyContext.evaluatorArtifactRef !== `sha256:${dependencyContext.evaluatorArtifactHash}`) {
-    throw new ExecutionRepositoryError("invalid_input", "execution evaluator artifact must be a content-addressed sha256 ref");
+  if (!evaluatorAuthorityRefMatchesHash(dependencyContext.evaluatorArtifactRef, dependencyContext.evaluatorArtifactHash)) {
+    throw new ExecutionRepositoryError("invalid_input", "execution evaluator authority ref must bind its exact content hash");
   }
   return {
     procedure: clone(procedure),
@@ -78,10 +97,10 @@ export class ExecutionRepository {
   private file(id: string): string { return this.fileAt(this.root, id); }
   private rollbackFileAt(repositoryRoot: string, id: string, revision: number): string { this.assertId(id); if (!Number.isInteger(revision) || revision < 0) throw new ExecutionRepositoryError("invalid_input", "execution rollback revision invalid"); return confined(repositoryRoot, "rollback", id, `${String(revision).padStart(12, "0")}.json`); }
   private async serial<T>(key: string, fn: () => Promise<T>): Promise<T> { const previous = this.queues.get(key) ?? Promise.resolve(); const current = previous.catch(() => undefined).then(fn); this.queues.set(key, current); try { return await current; } finally { if (this.queues.get(key) === current) this.queues.delete(key); } }
-  private async withRoot<T>(key: string, write: boolean, operation: (runtimeGeneration?: number) => Promise<T>, maintenanceLeaseToken?: string): Promise<T> {
-    const invoke = async (root: string, runtimeGeneration?: number) => { const previous = this.root; this.root = root; try { return await operation(runtimeGeneration); } finally { this.root = previous; } };
-    if (this.coordinator) { await this.coordinator.initialize(); if (write) return (await this.coordinator.withWrite(({ activeRoot, state }: { activeRoot: string; state: { runtimeGeneration: number } }) => invoke(confined(activeRoot, "execution-sessions"), state.runtimeGeneration), { maintenanceLeaseToken })).result as T; return (await this.coordinator.withConsistentSnapshot(({ activeRoot, state }: { activeRoot: string; state: { runtimeGeneration: number } }) => invoke(confined(activeRoot, "execution-sessions"), state.runtimeGeneration))).result as T; }
-    return withDirectoryLock(confined(this.root, ".locks", digest(key)), () => operation(undefined));
+  private async withRoot<T>(key: string, write: boolean, operation: (runtimeGeneration?: number, activeRoot?: string) => Promise<T>, maintenanceLeaseToken?: string): Promise<T> {
+    const invoke = async (root: string, runtimeGeneration?: number, activeRoot?: string) => { const previous = this.root; this.root = root; try { return await operation(runtimeGeneration, activeRoot); } finally { this.root = previous; } };
+    if (this.coordinator) { await this.coordinator.initialize(); if (write) return (await this.coordinator.withWrite(({ activeRoot, state }: { activeRoot: string; state: { runtimeGeneration: number } }) => invoke(confined(activeRoot, "execution-sessions"), state.runtimeGeneration, activeRoot), { maintenanceLeaseToken })).result as T; return (await this.coordinator.withConsistentSnapshot(({ activeRoot, state }: { activeRoot: string; state: { runtimeGeneration: number } }) => invoke(confined(activeRoot, "execution-sessions"), state.runtimeGeneration, activeRoot))).result as T; }
+    return withDirectoryLock(confined(this.root, ".locks", digest(key)), () => operation(undefined, undefined));
   }
   private async write(id: string, stored: StoredExecutionSession): Promise<void> { const file = this.file(id); const envelope: Envelope<StoredExecutionSession> = { schemaVersion: "execution-repository-v1", kind: "execution-session", checksum: digest(stored), payload: stored }; await atomicWriteJson(file, envelope); }
   private async writeRollback(previous: StoredExecutionSession, nextRevision: number): Promise<void> {
@@ -158,7 +177,7 @@ export class ExecutionRepository {
   async commit(id: string, input: CommitExecutionSessionInput): Promise<StoredExecutionSession> {
     this.assertId(id); this.assertSession(input.session, input.procedure, input.dependencyContext);
     if (id !== input.session.executionSessionId) throw new ExecutionRepositoryError("conflict", "execution commit id does not match the session id");
-    return this.withRoot(id, true, (coordinatorGeneration) => this.serial(id, async () => {
+    return this.withRoot(id, true, (coordinatorGeneration, activeRoot) => this.serial(id, async () => {
       const existing = await this.read(id);
       if (existing.revision !== input.expectedRevision || existing.recordHash !== input.expectedHash) throw new ExecutionRepositoryError("conflict", "execution revision/hash conflict");
       if (existing.leaseToken !== input.leaseToken || existing.runtimeGeneration !== input.runtimeGeneration || input.runtimeGeneration !== (coordinatorGeneration ?? this.generation())) throw new ExecutionRepositoryError("fenced", "stale execution lease or runtime generation cannot commit");
@@ -166,6 +185,12 @@ export class ExecutionRepository {
       if (!this.sameImmutableIdentity(existing.session, input.session)) throw new ExecutionRepositoryError("conflict", "execution immutable identity cannot change");
       this.assertSameReplayContext(existing, input.session, input.procedure, input.dependencyContext);
       if (existing.session.status !== "active" && input.session.status === "active") throw new ExecutionRepositoryError("conflict", "terminal execution session cannot return to active");
+      if (input.precommitAuthorizer) {
+        if (coordinatorGeneration === undefined || !activeRoot) throw new ExecutionRepositoryError("invalid_input", "execution precommit authority requires a runtime coordinator");
+        if (!await input.precommitAuthorizer({ activeRoot, runtimeGeneration: coordinatorGeneration, existing: this.public(existing) })) {
+          throw new ExecutionRepositoryError("conflict", "execution precommit authority changed");
+        }
+      }
       const leaseExpiresAt = input.leaseExpiresAt ?? existing.leaseExpiresAt;
       if (!iso(leaseExpiresAt) || Date.parse(leaseExpiresAt) <= Date.parse(this.now())) throw new ExecutionRepositoryError("invalid_input", "execution lease expiry must be in the future");
       if (Date.parse(leaseExpiresAt) < Date.parse(existing.leaseExpiresAt)) throw new ExecutionRepositoryError("conflict", "execution lease expiry cannot move backwards");
@@ -231,6 +256,12 @@ export class ExecutionRepository {
       for (const observationId of stored.session.results.flatMap((result) => result.observationIds ?? [])) {
         const edge = { fromRef, toRef: `observation:${observationId}`, necessity: "required_for_replay" as const };
         edgeByKey.set(canonicalJson(edge), edge);
+      }
+      for (const action of stored.session.destructiveActionConfirmations ?? []) {
+        for (const observationId of action.locatorObservationIds) {
+          const edge = { fromRef, toRef: `observation:${observationId}`, necessity: "required_for_replay" as const };
+          edgeByKey.set(canonicalJson(edge), edge);
+        }
       }
     }
     return {

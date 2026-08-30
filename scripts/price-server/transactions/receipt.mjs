@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
+import officialDomains from "../../../data/catalog/official-domains.json" with { type: "json" };
 import { requestDeepSeekOcr } from "./deepseek-ocr.mjs";
 
 const require = createRequire(import.meta.url);
-const officialDomains = require("../../../data/catalog/official-domains.json");
 const DEFAULT_MAX_BYTES = 5_000_000;
 const DEFAULT_MAX_PIXELS = 24_000_000;
 const DEFAULT_TIMEOUT_MS = 60_000;

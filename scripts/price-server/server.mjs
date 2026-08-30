@@ -59,6 +59,7 @@ import { activateOfficialRegistryRepository, activeOfficialRegistry, registryFor
 import { FileEvidenceRepository } from "../../src/evidence/repository.mjs";
 import { checkEvidencePostRequest, handleEvidenceRoute, matchesEvidenceEtag } from "../../src/evidence/http-routes.mjs";
 import { RuntimeCoordinator } from "../../src/runtime/coordinator.mjs";
+import packageMetadata from "../../package.json" with { type: "json" };
 
 const HOST = "127.0.0.1";
 const env = await loadEnv();
@@ -314,7 +315,7 @@ const server = http.createServer(async (req, res) => {
   const route = `${req.method} ${url.pathname}`;
 
   try {
-    if (route === "GET /api/price/health") return send(res, 200, { ok: true, port: PORT });
+    if (route === "GET /api/price/health") return send(res, 200, { ok: true, service: "build-sim-price", version: packageMetadata.version, port: PORT });
     if (url.pathname.startsWith("/api/evidence/")) {
       const rejected = req.method === "POST" ? checkEvidencePostRequest(req.headers) : null;
       if (rejected) return send(res, rejected.status, rejected.payload);

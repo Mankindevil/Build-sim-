@@ -15,6 +15,9 @@
         "sellerId": "seller-1",
         "sellerName": "Fixture JD seller",
         "sellerTier": "S1",
+        "sellerTierEvidenceRefs": [
+          "claim:fixture-seller-1-tier"
+        ],
         "condition": "new",
         "stockStatus": "in_stock",
         "priceCny": 3999,
@@ -36,6 +39,9 @@
         "sellerId": "seller-2",
         "sellerName": "Fixture Tmall seller",
         "sellerTier": "S2",
+        "sellerTierEvidenceRefs": [
+          "claim:fixture-seller-2-tier"
+        ],
         "condition": "new",
         "stockStatus": "seller_claimed",
         "priceCny": 4099,
@@ -57,6 +63,9 @@
         "sellerId": "seller-old",
         "sellerName": "Fixture historical seller",
         "sellerTier": "S2",
+        "sellerTierEvidenceRefs": [
+          "claim:fixture-seller-old-tier"
+        ],
         "condition": "new",
         "stockStatus": "unknown",
         "priceCny": 4599,

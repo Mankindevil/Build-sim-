@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   atomicWriteFile,
   atomicWriteJson,
+  canonicalJson,
   confined,
   ensurePrivateDirectory,
   listRegularFiles,

@@ -17,6 +17,14 @@ export interface JobHandlerContext {
   readonly payloadRef: string;
   heartbeat(progress?: BackgroundJob["progress"]): Promise<void>;
   checkpoint(checkpointRef: string, progress?: BackgroundJob["progress"]): Promise<void>;
+  /**
+   * Atomically releases this network job's active lease and pauses it without
+   * consuming an attempt. This method never resolves: it is dedicated worker
+   * control flow, not a retryable handler failure.
+   */
+  pauseOffline(progress?: BackgroundJob["progress"]): Promise<never>;
+  /** Release the lease into durable waiting_user state until an explicit review resumes it. */
+  pauseForUser(progress?: BackgroundJob["progress"]): Promise<never>;
   currentLease(): Readonly<JobLease>;
 }
 
@@ -36,7 +44,7 @@ export type WorkerRunResult =
   | { outcome: "succeeded"; job: BackgroundJob }
   | { outcome: "retry_scheduled" | "failed" | "dead_letter"; job: BackgroundJob }
   | { outcome: "fenced"; jobId: string }
-  | { outcome: "paused_offline" };
+  | { outcome: "paused_offline" | "waiting_user" };
 
 /** A deliberately redacted error suitable for durable job state. */
 export class JobHandlerError extends Error {
@@ -59,6 +67,20 @@ function normalizeHandlers(
   handlers: JobWorkerOptions["handlers"],
 ): ReadonlyMap<string, BackgroundJobHandler> {
   return handlers instanceof Map ? handlers : new Map(Object.entries(handlers));
+}
+
+class JobPausedOfflineSignal extends Error {
+  constructor() {
+    super("job paused offline");
+    this.name = "JobPausedOfflineSignal";
+  }
+}
+
+class JobWaitingForUserSignal extends Error {
+  constructor() {
+    super("job waiting for user");
+    this.name = "JobWaitingForUserSignal";
+  }
 }
 
 /**
@@ -116,6 +138,17 @@ export class DurableJobWorker {
       checkpoint: async (checkpointRef: string, progress?: BackgroundJob["progress"]) => {
         claimed = await this.repository.checkpoint(claimed.job.jobId, claimed.lease, checkpointRef, progress);
       },
+      pauseOffline: async (progress?: BackgroundJob["progress"]): Promise<never> => {
+        if (progress !== undefined) {
+          claimed = await this.repository.heartbeat(claimed.job.jobId, claimed.lease, { progress });
+        }
+        await this.repository.pauseOffline(claimed.job.jobId, claimed.lease);
+        throw new JobPausedOfflineSignal();
+      },
+      pauseForUser: async (progress?: BackgroundJob["progress"]): Promise<never> => {
+        await this.repository.pauseForUser(claimed.job.jobId, claimed.lease, progress);
+        throw new JobWaitingForUserSignal();
+      },
       currentLease: () => Object.freeze({ ...claimed.lease }),
     });
     try {
@@ -123,6 +156,8 @@ export class DurableJobWorker {
       const job = await this.repository.succeed(claimed.job.jobId, claimed.lease, result.resultRefs, result.resultCommitHash);
       return { outcome: "succeeded", job };
     } catch (error) {
+      if (error instanceof JobPausedOfflineSignal) return { outcome: "paused_offline" };
+      if (error instanceof JobWaitingForUserSignal) return { outcome: "waiting_user" };
       if (error instanceof JobRepositoryError && error.code === "fenced") return { outcome: "fenced", jobId: claimed.job.jobId };
       const failure = error instanceof JobHandlerError
         ? error

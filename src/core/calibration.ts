@@ -1,5 +1,4 @@
 import type { EvidenceLevel } from "./evidence";
-import calibrationJson from "../../data/cases/jonsbo-n6/calibration.json";
 
 /** Calibration can be captured manually without upgrading official/catalog evidence. */
 export type CalibrationEvidence = EvidenceLevel | "manual";
@@ -54,10 +53,6 @@ function tinyHash(value: unknown): string {
   return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
-export function loadCalibrationSnapshot(): CalibrationSnapshot {
-  return calibrationJson as CalibrationSnapshot;
-}
-
 /** Narrow a planning band only when both measured endpoints are present. */
 export function narrowPlanningRange(
   key: string,
@@ -73,7 +68,7 @@ export function narrowPlanningRange(
   return lo <= hi ? { lo, hi } : planning;
 }
 
-export function evaluateCalibration(snapshot = loadCalibrationSnapshot()): CalibrationEvaluation {
+export function evaluateCalibration(snapshot: CalibrationSnapshot): CalibrationEvaluation {
   const unknown: string[] = [];
   const measurements: [string, CalibrationMeasurement | undefined][] = [
     ["wallPowerW", snapshot.wallPowerW],

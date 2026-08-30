@@ -4,7 +4,7 @@
 
 Build Sim is an evidence-aware PC and NAS build simulator. It combines exact-SKU configuration, deterministic compatibility checks, spatial occupancy, cable routing, assembly planning, thermal and noise estimates, auditable price snapshots, governed official-catalog enrichment, and an optional provider-neutral AI agent in one browser application.
 
-The current `0.2.0-alpha` release focuses on the JONSBO N6 platform with the ASUS Pro WS W680M-ACE SE and Intel Core i5-14500 reference path. The architecture is designed for additional cases and desktop builds, but those profiles are not shipped yet.
+The current `0.2.0-alpha` worktree contains the locally verified U0-U11 universal-platform implementation. JONSBO N6 is now a regression adapter rather than the product boundary: the same manifest/runtime-model compiler also covers primitive ATX, Micro-ATX, and Mini-ITX layouts, while an unsupported case can enter a reviewable provisional-adapter workflow. U12 release work remains in progress: the production flags stay off until the required physical ATX/ITX/NAS holdouts, release canaries, migration review, and deployment approval are complete.
 
 > Build Sim is a planning tool, not manufacturer CAD, CFD, electrical certification, or a substitute for checking the latest manuals. Reconstructed geometry, estimated airflow, market candidates, OCR output, and AI responses remain visibly separate from official facts.
 
@@ -32,18 +32,19 @@ Build Sim is usable as a local alpha and is under active development.
 
 | Area | Current status |
 | --- | --- |
-| Deterministic build evaluation | Implemented and shared by the UI, Advice service, and Agent tools |
+| Progressive authoritative evaluation | Implemented for V2 rollback and V3 partial/complete plans; UI, Workspace, Agent, solver, and what-if consume the same locked snapshot |
 | Plan lifecycle workspace | Implemented: template or Agent blank initialization, autosave, duplicate, switch, immutable versions, restore, soft delete, and offline cache |
 | Plan-linked transactions and build tasks | Implemented with exact item links, stable task source references, reconciliation, and traceable checklist export |
 | Evidence-aware Three.js scene | Implemented with SVG fallback, findings, routing, dimensions, thermal planning overlays, and assembly workflow |
-| JONSBO N6 geometry, fit, wiring, routing, and assembly | Implemented for the current case profile |
-| Thermal, noise, power, and price planning | Implemented with explicit estimate/provenance boundaries |
+| Generic case adapters and provisional discovery | Implemented behind rollout flags; N6 plus ATX/mATX/Mini-ITX fixtures use the shared compiler |
+| Thermal, acoustics, power, price history, targets, and recommendations | Implemented with explicit evidence, interval, freshness, and purchase-eligibility boundaries |
 | Price and official-catalog service | Implemented as a loopback-only local service |
 | DeepSeek Advice and Agent adapters | Implemented; bounded live DeepSeek smoke has been verified |
 | Claude adapter | Protocol fixture verified; live provider behavior is not verified |
 | Governed catalog write | One approval-bound write tool is implemented; writes are disabled by default |
 | Public multi-user hosting | Not ready: authentication, tenancy, and application-level rate limiting are not included |
-| Full application container deployment | `deploy/osaka/` includes the Web, Price/Advice, Agent, and SearXNG Compose stack; Kubernetes manifests are not included |
+| Portability, backup/restore, durable jobs, and Doctor | Implemented and locally production-validated; release deployment remains approval-gated |
+| Full application container deployment | `deploy/osaka/` includes Web, Workspace, Price/Advice, Agent, and local search plus pre-deploy backup/Doctor gates; Kubernetes manifests are not included |
 | License | No `LICENSE` file is present yet; resolve this before advertising a public release |
 
 ## Platform capabilities
@@ -114,20 +115,22 @@ The current interface contains seven plan-scoped working areas:
 
 ```mermaid
 flowchart LR
-  B[Browser UI<br/>Vite static app] -->|deterministic local modules| E[BuildEvaluation]
+  B[Browser UI<br/>Vite static app] -->|target-only requests| W[Workspace authority<br/>127.0.0.1:5176]
   B -->|/api/price, /api/advice| P[Price / Catalog / Advice<br/>127.0.0.1:5174]
   B -->|/api/agent| A[Agent service<br/>127.0.0.1:5175]
-  B -->|/api/workspace| W[Workspace service<br/>127.0.0.1:5176]
-  A --> E
+  W --> E[Locked progressive evaluation<br/>facts + observations + artifacts + prices]
+  A -->|plan-scoped authority| W
   A -->|external read tools| P
-  P --> D[(Catalog, prices,<br/>drafts and audit data)]
+  P --> D[(Shared runtime generations<br/>catalog, prices, evidence, jobs)]
+  W --> D
+  A --> D
   P -. optional discovery .-> S[SearXNG<br/>127.0.0.1:8080]
   P -. optional provider .-> DS[DeepSeek API]
   A -. optional providers .-> DS
   A -. optional provider .-> C[Claude API]
 ```
 
-The frontend, price service, and Agent service are separate processes. During development, Vite proxies the API paths. In production, serve `dist/` as static files and proxy selected API routes to the two loopback services.
+The frontend, Workspace, Price/Advice, and Agent services are separate processes over one generation-fenced runtime. During development, Vite proxies the API paths. In production, serve `dist/` as static files and proxy selected API routes to the loopback services. The browser is a projection: it cannot supply fact, observation, artifact, approval, or evaluation hashes as authority.
 
 ## Requirements
 
@@ -573,6 +576,12 @@ See [`.env.example`](./.env.example) for the complete list. Important groups inc
 - `CATALOG_FETCH_*` and `CATALOG_PDF_OCR_*` limits cannot exceed code-defined bounds.
 - `CATALOG_PERSIST_ROOT` controls the persistence root; make it writable and back it up before enabling writes.
 
+### Universal-platform rollout controls
+
+The U-stage capabilities are independently gated and default to `false` in [`.env.example`](./.env.example). Enable only dependency-complete groups; the Workspace factory rejects invalid combinations rather than silently degrading authority. The principal gates are `BUILD_SIM_TOPOLOGY_V3_ENABLED`, `BUILD_SIM_FACT_GRAPH_ENABLED`, `BUILD_SIM_GENERIC_ADAPTERS_ENABLED`, `BUILD_SIM_PROGRESSIVE_EVALUATION_ENABLED`, `BUILD_SIM_SYSTEM_PROFILES_ENABLED`, `BUILD_SIM_SPATIAL_ROUTING_ENABLED`, `BUILD_SIM_THERMAL_ACOUSTIC_V3_ENABLED`, `BUILD_SIM_WHOLE_BUILD_SOLVER_ENABLED`, `BUILD_SIM_SCENARIO_WHAT_IF_ENABLED`, `BUILD_SIM_PRICE_HISTORY_ENABLED`, `BUILD_SIM_PRICE_TARGETS_ENABLED`, `BUILD_SIM_RECOMMENDATIONS_ENABLED`, `BUILD_SIM_PORTABILITY_ENABLED`, `BUILD_SIM_BACKUP_RESTORE_ENABLED`, and `BUILD_SIM_DOCTOR_REPAIR_ENABLED`.
+
+`BUILD_SIM_PRICE_NETWORK_ENABLED=false` and `BUILD_SIM_EVIDENCE_NETWORK_ENABLED=false` keep collection jobs paused while preserving their durable state. Generic-adapter rollback removes the provisional registration Tool and uses the isolated legacy reader without rewriting V3 data.
+
 ### Persistence
 
 | Path | Purpose | Git status |
@@ -582,6 +591,8 @@ See [`.env.example`](./.env.example) for the complete list. Important groups inc
 | `data/agent/audit/` | Hash-linked Agent run audit records | Ignored |
 | `data/audit/` | Advice and catalog operational records | Ignored |
 | `.cache/price-browser-profile/` | Marketplace browser profile | Ignored |
+| `runtime/generations/<n>/` | Active plans, facts, evidence, observations, prices, jobs, execution, artifacts, decisions, and indexes | Ignored |
+| `runtime/control/` | Active-generation pointer, leases, and migration control records | Ignored |
 
 Session history contains message and tool content because it supports conversation recovery. Audit files intentionally store hashes and structured metadata rather than copied prompts, model text, or secrets. Protect both paths as application data.
 
@@ -730,10 +741,13 @@ Browser acceptance checks require their referenced local services and a Playwrig
 
 ```bash
 npm run test:g1:browser
+npm run test:purchase-price:browser
 npm run test:g7:browser
+npm run test:u7:browser
 npm run test:workspace:browser
 npm run test:spatial:browser
 npm run test:agent-plan:browser
+npm run test:agent-initialization:browser
 npm run test:transactions:browser
 npm run test:build-tasks:browser
 npm run test:platform:browser
@@ -757,6 +771,17 @@ npm run price:search
 npm run price:refresh
 npm run price:fixture
 ```
+
+Release and recovery checks:
+
+```bash
+npm run runtime:migrate-plans-v3 -- --runtime-root <copy> --output <dry-run-report.json>
+BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:create -- --runtime-root <root> --output <outside-root.backup>
+BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:verify -- --runtime-root <root> --input <outside-root.backup>
+RUNTIME_ROOT=<root> npm run runtime:doctor -- --strict
+```
+
+Migration defaults to dry-run. Applying V2-to-V3 requires the exact reviewed source-manifest hash, a backup path outside the runtime root, and a verified encrypted backup. Never point rehearsal commands at the deployed runtime.
 
 ## Repository layout
 
@@ -788,7 +813,7 @@ legacy/v1/                 Frozen V1 reference
 
 ## Known limits and roadmap
 
-- Only the JONSBO N6 case profile is shipped.
+- The generic case compiler, registry, and provisional-adapter flow are implemented, but production rollout remains disabled until physical ATX/ITX/NAS holdouts and release canaries are recorded.
 - Planning geometry is not manufacturer CAD; thermal fields are not CFD.
 - Price collection depends on third-party pages, authentication, regional availability, and platform terms.
 - Transaction screenshot OCR uses the experimental public DeepSeek vision model by default; availability and pricing can change, and OCR output remains review-only. Self-hosted DeepSeek-OCR is optional and is not bundled in the Osaka Compose profile.
@@ -796,7 +821,9 @@ legacy/v1/                 Frozen V1 reference
 - Public authentication, authorization, tenancy, and application-level rate limiting are not implemented.
 - The legacy detail-panel markup/runtime remains behind an explicit browser adapter; PlanStore and BuildEvaluation are authoritative, but a full framework/template rewrite is intentionally deferred.
 - The Osaka Docker profile is single-host and deployment-specific; Kubernetes manifests and an automated public deployment pipeline are not included.
-- Price history series, measured calibration, product texture mapping, and broader hardware profiles remain future work.
+- Price history, targets, and governed recommendations are implemented; live market coverage still depends on the operator's approved local collectors and cannot be inferred from fixtures.
+- No repository evidence yet proves the required physical holdout measurements for clearance, minimum cable length, temperature intervals, and standardized hardware-acoustic intervals. This is a release blocker, not a software fallback.
+- Product texture mapping and broader measured case datasets remain future work; BoxGeometry and interval/blocked results remain the honest fallback.
 
 See [docs/ROADMAP.md](./docs/ROADMAP.md) for the evolving roadmap.
 

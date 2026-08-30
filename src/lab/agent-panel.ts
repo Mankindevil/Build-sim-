@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentRunAuditRecord, AgentRunEvent, AgentSession, ProviderModel } from "../agent/contracts";
+import type { AgentMessage, AgentPendingWriteApproval, AgentRunAuditRecord, AgentRunEvent, AgentSession, ProviderModel } from "../agent/contracts";
 import type { FieldProvenance } from "../catalog-search/types";
 import type { BuildConfigDocument } from "../config/types";
 import type { TopologyV3PatchOperation } from "../contracts/registries";
@@ -91,7 +91,11 @@ export interface AgentPanelOptions {
   eventSourceFactory?: (url: string) => EventStream;
 }
 
-export interface AgentPanelController { dispose(): void; }
+export interface AgentPanelController {
+  getSessionId(): string | null;
+  ensureSessionId(): Promise<string>;
+  dispose(): void;
+}
 
 function byId<T extends HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
@@ -168,6 +172,87 @@ function messageNode(role: "user" | "assistant" | "notice", content: string): HT
   body.textContent = content;
   row.append(label, body);
   return row;
+}
+
+function writeApprovalNode(
+  pending: AgentPendingWriteApproval,
+  onConfirm: (target: HTMLElement, state: HTMLElement) => Promise<void>,
+  onReject: (target: HTMLElement, state: HTMLElement) => Promise<void>,
+): HTMLElement {
+  const card = document.createElement("section");
+  card.className = "agent-write-approval";
+  card.dataset.agentWriteApproval = pending.approvalId;
+  card.dataset.state = "pending";
+  const heading = document.createElement("h4");
+  heading.textContent = `待批准写入 · ${pending.toolTitle}`;
+  const warning = document.createElement("p");
+  warning.textContent = "尚未执行任何写入。批准只适用于下面这一次、这组完全相同的输入。";
+  const bindings = document.createElement("dl");
+  for (const [label, value] of [
+    ["Tool", pending.call.name],
+    ["Run", pending.runId],
+    ["Session", pending.sessionId],
+    ["Input hash", pending.inputHash],
+    ["Definition", pending.toolDefinitionHash],
+    ["到期", pending.expiresAt],
+    ["备份", pending.backup.target],
+    ["回滚", pending.rollback.strategy],
+  ] as Array<[string, string]>) {
+    const term = document.createElement("dt"); term.textContent = label;
+    const detail = document.createElement("dd"); detail.textContent = value;
+    bindings.append(term, detail);
+  }
+  const exact = document.createElement("details");
+  const exactSummary = document.createElement("summary"); exactSummary.textContent = "查看 exact Tool 输入";
+  const exactInput = document.createElement("pre"); exactInput.textContent = JSON.stringify(pending.call.input, null, 2);
+  exact.append(exactSummary, exactInput);
+  const approval = document.createElement("input");
+  approval.type = "checkbox";
+  approval.dataset.agentWriteApprovalCheck = "";
+  const approvalLabel = document.createElement("label");
+  approvalLabel.append(approval, document.createTextNode("我已核对 Tool、输入和执行范围，并批准这一次写入"));
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.dataset.confirmAgentWrite = "";
+  confirm.textContent = "批准并继续同一运行";
+  confirm.disabled = true;
+  const reject = document.createElement("button");
+  reject.type = "button";
+  reject.dataset.rejectAgentWrite = "";
+  reject.textContent = "拒绝并取消运行";
+  const state = document.createElement("p");
+  state.dataset.agentWriteApprovalState = "";
+  state.textContent = "等待人工审批 · 零写入";
+  approval.addEventListener("change", () => { confirm.disabled = !approval.checked; });
+  confirm.addEventListener("click", async () => {
+    approval.disabled = true; confirm.disabled = true; reject.disabled = true;
+    state.textContent = "正在由服务端签发执行绑定批准并恢复同一运行…";
+    try {
+      await onConfirm(card, state);
+      card.dataset.state = "confirmed";
+      state.textContent = "已批准；同一 run 正在以原始 Tool 输入可靠重试。";
+    } catch (error) {
+      approval.disabled = false;
+      approval.checked = false;
+      reject.disabled = false;
+      state.textContent = `批准失败：${text((error as Error).message)}。没有执行写入，可重新核对。`;
+    }
+  });
+  reject.addEventListener("click", async () => {
+    approval.disabled = true; confirm.disabled = true; reject.disabled = true;
+    state.textContent = "正在拒绝该写入并终结运行…";
+    try {
+      await onReject(card, state);
+      card.dataset.state = "rejected";
+      state.textContent = "已拒绝；运行已取消，未执行写入。";
+    } catch (error) {
+      approval.disabled = false; reject.disabled = false;
+      confirm.disabled = !approval.checked;
+      state.textContent = `拒绝失败：${text((error as Error).message)}。写入仍未执行。`;
+    }
+  });
+  card.append(heading, warning, bindings, exact, approvalLabel, confirm, reject, state);
+  return card;
 }
 
 function welcomeNode(): HTMLElement {
@@ -631,6 +716,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
   let catalogReady = false;
   let boundContext: PlanAgentContext | null = null;
   const catalogReviewKeys = new Set<string>();
+  const writeApprovalKeys = new Set<string>();
 
   const currentContext = async () => await (options.getPlanContext?.() ?? null);
   const setContextCopy = (summaryText: string, detailText: string) => {
@@ -693,12 +779,21 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
         void refreshContextBadge();
         if (!options.acceptServerPlan) throw new Error("方案已写入，但浏览器无法安装服务端草稿；上下文保持停用。");
         await options.acceptServerPlan(result.plan);
-        const refreshed = await currentContext();
         const refreshedConfigHash = await hashPlanConfig(result.plan.draft.config);
-        if (!refreshed || refreshed.planId !== result.plan.id || refreshed.draftRevision !== result.plan.draftRevision
-          || refreshed.configHash !== refreshedConfigHash || refreshed.buildConfig.schemaVersion !== result.plan.draft.config.schemaVersion) {
-          throw new Error("方案已写入，但最新评估上下文尚未就绪；请刷新评估后继续。");
+        let refreshed: PlanAgentContext | null = null;
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          refreshed = await currentContext();
+          if (refreshed && refreshed.planId !== result.plan.id) break;
+          if (refreshed && refreshed.draftRevision === result.plan.draftRevision
+            && refreshed.configHash === refreshedConfigHash
+            && refreshed.buildConfig.schemaVersion === result.plan.draft.config.schemaVersion) break;
+          await new Promise((resolve) => setTimeout(resolve, 100));
         }
+        if (!refreshed) throw new Error("方案已写入，但最新评估上下文尚未就绪；请刷新评估后继续。");
+        if (refreshed.planId !== result.plan.id) throw new Error("方案已写入，但当前活动方案已经切换；请在新方案中继续。");
+        if (refreshed.draftRevision !== result.plan.draftRevision) throw new Error("方案已写入，但评估仍对应旧草稿修订；请等待重新检查完成。");
+        if (refreshed.configHash !== refreshedConfigHash) throw new Error("方案已写入，但评估配置与最新草稿不一致；请等待重新检查完成。");
+        if (refreshed.buildConfig.schemaVersion !== result.plan.draft.config.schemaVersion) throw new Error("方案已写入，但评估配置版本尚未同步；请刷新后继续。");
         target.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach((control) => { control.disabled = true; });
         target.querySelector<HTMLElement>("[data-proposal-state]")!.textContent = "修改已应用 · 已进入当前方案，尚未保存为检查点";
       }, (target) => {
@@ -793,6 +888,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
     events.replaceChildren();
     proposalHost.replaceChildren();
     catalogReviewKeys.clear();
+    writeApprovalKeys.clear();
     usage.textContent = "尚无用量记录";
     assistantBody = null;
     boundContext = null;
@@ -884,6 +980,30 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
       const data = parse<Extract<AgentRunEvent, { type: "tool_call" }>>(event);
       if (data) addEvent(`调用 Tool · ${data.call.name} · ${data.toolDefinitionHash.slice(0, 12)}`);
     });
+    source.addEventListener("approval_required", (event) => {
+      const data = parse<Extract<AgentRunEvent, { type: "approval_required" }>>(event);
+      if (!data || writeApprovalKeys.has(data.pending.approvalId)) return;
+      writeApprovalKeys.add(data.pending.approvalId);
+      const card = writeApprovalNode(
+        data.pending,
+        async () => {
+          await json(fetchImpl, `/runs/${encodeURIComponent(data.runId)}/approvals/${encodeURIComponent(data.pending.approvalId)}/confirm`, {
+            method: "POST",
+            body: JSON.stringify({ nonce: data.pending.nonce, approvedBy: "local-human" }),
+          });
+          setStatus("写入已批准，正在继续同一 Agent 运行…", "ok");
+        },
+        async () => {
+          await json(fetchImpl, `/runs/${encodeURIComponent(data.runId)}/approvals/${encodeURIComponent(data.pending.approvalId)}/reject`, {
+            method: "POST",
+            body: JSON.stringify({ nonce: data.pending.nonce }),
+          });
+          setStatus("已拒绝写入并取消本次运行", "warn");
+        },
+      );
+      proposalHost.prepend(card);
+      setStatus(`等待你审核写入 · ${data.pending.toolTitle}`, "warn");
+    });
     source.addEventListener("tool_result", (event) => {
       const data = parse<Extract<AgentRunEvent, { type: "tool_result" }>>(event);
       if (data) {
@@ -915,6 +1035,7 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
       const data = parse<Extract<AgentRunEvent, { type: "run_status" }>>(event);
       if (!data) return;
       if (["completed", "failed", "cancelled", "limit_exceeded"].includes(data.status)) void finish(data.status);
+      else if (data.status === "waiting_approval") setStatus("Agent 等待人工写入审批 · 尚未执行写入", "warn");
       else setStatus(`Agent 运行中 · ${data.status}`, "ok");
     });
   };
@@ -979,20 +1100,22 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
       if (!planContext && options.requirePlanContext?.()) throw new Error("当前方案评估上下文尚未就绪；没有启动 Agent run。");
       if (session && boundContext && planContext && boundContext.planId !== planContext.planId) clearConversation();
       const current = await createSession();
-      const agentContent = planContext ? planAgentContextEnvelope(content, planContext) : content;
       const idempotencyKey = planContext ? `context-${crypto.randomUUID()}` : undefined;
-      const contextAudit = planContext ? await workspaceJson<{ runId: string }>(fetchImpl, "/agent-context", {
+      const contextAudit = planContext ? await workspaceJson<{ runId: string; context: PlanAgentContext }>(fetchImpl, "/agent-context", {
         method: "POST",
         body: JSON.stringify({ sessionId: current.id, idempotencyKey, context: planContext }),
       }) : null;
-      if (planContext) addEvent(`方案上下文审计 · ${planContext.planId} r${planContext.draftRevision} · ${planContext.evaluationHash.slice(0, 12)}`);
+      const auditedContext = contextAudit?.context ?? null;
+      if (planContext && !auditedContext) throw new Error("方案上下文审计未返回服务端派生上下文");
+      const agentContent = auditedContext ? planAgentContextEnvelope(content, auditedContext) : content;
+      if (auditedContext) addEvent(`方案上下文审计 · ${auditedContext.planId} r${auditedContext.draftRevision} · ${auditedContext.evaluationHash.slice(0, 12)}`);
       const run = await json<{ runId: string }>(fetchImpl, `/sessions/${encodeURIComponent(current.id)}/messages`, {
         method: "POST",
-        body: JSON.stringify({ content: agentContent, buildConfig: planContext?.buildConfig ?? options.getBuildConfig(), ...(skill.value ? { skillId: skill.value } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) }),
+        body: JSON.stringify({ content: agentContent, buildConfig: auditedContext?.buildConfig ?? options.getBuildConfig(), ...(skill.value ? { skillId: skill.value } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) }),
       });
       if (contextAudit && run.runId !== contextAudit.runId) throw new Error("Agent run 与已审计方案上下文不一致");
-      if (planContext) {
-        boundContext = structuredClone(planContext);
+      if (auditedContext) {
+        boundContext = structuredClone(auditedContext);
         void refreshContextBadge();
       }
       activeRunId = run.runId;
@@ -1011,6 +1134,8 @@ export async function initAgentPanel(options: AgentPanelOptions): Promise<AgentP
   input.addEventListener("keydown", onInputKeydown);
   form.addEventListener("submit", onSubmit);
   return {
+    getSessionId: () => session?.id ?? null,
+    ensureSessionId: async () => (await createSession()).id,
     dispose() {
       stream?.close(); stream = null; activeRunId = null;
       unsubscribePlanContext();

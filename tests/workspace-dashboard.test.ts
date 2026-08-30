@@ -10,8 +10,58 @@ import type { BuildPlan } from "../src/plans/contracts";
 import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
 import type { BuildTaskStore } from "../src/plans/build-task-store";
 import type { BuildProgressController } from "../src/lab/build-progress";
+import { evaluateProgressiveCompatibility } from "../src/compatibility/engine";
+import { authoritativeEvaluationHash } from "../src/plans/evaluation";
+import {
+  progressiveInput,
+  progressivePriceSnapshot,
+  resolvedComponent,
+} from "./helpers/progressive-evaluation-fixture";
+import { createProductionSimulationInput } from "../src/simulation/production";
 
 describe("R3 workspace dashboard", () => {
+  it("persists an explicit standard workload and ambient range into the V3 SimulationInput", async () => {
+    const root = mountWorkspaceDom();
+    const { store } = await initializedStore();
+    const config = createEmptyBuildConfigV3("plan-12345678", "Thermal inputs", "2026-08-29T00:00:00.000Z");
+    const accepted = structuredClone(store.getState().activePlan!) as BuildPlan<BuildConfigDocument>;
+    accepted.name = config.name;
+    accepted.draft.config = config;
+    accepted.draftRevision += 1;
+    store.acceptServerPlan(accepted);
+    const router = new WorkspaceRouter();
+    const pages = mountWorkspacePages(root, store, router);
+    router.navigate("editor");
+    expect(root.querySelector<HTMLInputElement>("[data-v3-ambient-min]")?.value).toBe("20");
+    expect(root.querySelector<HTMLInputElement>("[data-v3-ambient-max]")?.value).toBe("30");
+    root.querySelector<HTMLSelectElement>("[data-v3-thermal-scenario]")!.value = "nas-scrub";
+    root.querySelector<HTMLInputElement>("[data-v3-ambient-min]")!.value = "22";
+    root.querySelector<HTMLInputElement>("[data-v3-ambient-max]")!.value = "28";
+    root.querySelector<HTMLButtonElement>("[data-v3-thermal-apply]")!.click();
+
+    const updated = store.getState().activePlan!.draft.config as BuildConfigDocument;
+    expect(updated).toMatchObject({
+      schemaVersion: "3.0.0",
+      requirementSpec: {
+        workloads: [{ metrics: expect.arrayContaining([
+          expect.objectContaining({ metricId: "thermal.scenario", value: "nas-scrub", confirmedByUser: true }),
+          expect.objectContaining({ metricId: "thermal.ambient", value: [22, 28], confirmedByUser: true }),
+        ]) }],
+      },
+    });
+    if (updated.schemaVersion !== "3.0.0") throw new TypeError("test requires BuildConfig V3");
+    const simulationInput = await createProductionSimulationInput({
+      config: updated,
+      simulationModelHash: "d".repeat(64),
+      caseInstanceOverrides: [],
+    });
+    expect(simulationInput.sourcedInput.input).toMatchObject({
+      workloadMetricRefs: ["requirement:planning-thermal-environment:thermal.ambient", "requirement:planning-thermal-environment:thermal.scenario"],
+      ambientC: { min: 22, max: 28 },
+    });
+    pages.dispose(); store.dispose();
+  });
+
   it("renders active, alternate and archived plans with explicit next actions", async () => {
     const root = mountWorkspaceDom();
     const archived = makePlan("plan-87654321", "归档方案");
@@ -128,7 +178,7 @@ describe("R3 workspace dashboard", () => {
       }
     }
     expect(root.textContent).toContain("V3 部分拓扑");
-    expect(root.textContent).toContain("暂不生成采购核准或整套价格结论");
+    expect(root.textContent).toContain("暂不生成采购核准；保留已知单项价格");
     expect(root.querySelector("[data-v3-evidence-partial]")?.textContent).toContain("已解析身份的组件实例");
     expect(root.querySelector<HTMLSelectElement>("[data-evidence-sku]")?.value).toBe("psu-aaaaaaaaaaaaaaaaaaaaaaaa");
     expect(root.querySelector("[data-v3-partial-editor]")).not.toBeNull();
@@ -152,6 +202,67 @@ describe("R3 workspace dashboard", () => {
     expect(root.querySelector<HTMLElement>("[data-v3-checklist-export-status]")?.textContent).toContain("已阻止调用旧版 V2 评估器");
     root.querySelector<HTMLButtonElement>('[data-evaluation-view="summary"]')!.click();
     expect(root.querySelector<HTMLElement>('[data-evaluation-detail="thermal"]')?.hidden).toBe(true);
+    pages.dispose(); store.dispose();
+  });
+
+  it("shows locked known prices, unknown instances, requirements, and local conclusions for an incomplete V3 plan", async () => {
+    const root = mountWorkspaceDom();
+    const { store } = await initializedStore();
+    const config = createEmptyBuildConfigV3("plan-12345678", "V3 渐进方案", "2026-08-28T12:00:00.000Z");
+    config.components = [
+      resolvedComponent("psu-aaaaaaaaaaaaaaaaaaaaaaaa", "psu", "psu.fixture.850w"),
+      {
+        instanceId: "memory-bbbbbbbbbbbbbbbbbbbb",
+        kind: "memory_module",
+        role: "system-memory",
+        state: "planned",
+        identity: { status: "unresolved", userText: "32GB ECC memory" },
+        source: "user",
+      },
+    ];
+    const accepted = structuredClone(store.getState().activePlan!) as BuildPlan<BuildConfigDocument>;
+    accepted.name = config.name;
+    accepted.draft.config = config;
+    accepted.draftRevision += 1;
+    store.acceptServerPlan(accepted);
+    const input = await progressiveInput(config, [], [], [], progressivePriceSnapshot([{
+      skuId: "psu.fixture.850w",
+      platform: "official",
+      priceCny: 899,
+      currency: "CNY",
+      listingUrl: "https://example.invalid/psu.fixture.850w",
+      match: "mpn",
+      evidence: "audited",
+      priceKind: "variant",
+      variantLabel: "850W",
+    }]));
+    const evaluation = await evaluateProgressiveCompatibility(input);
+    store.setEvaluationSnapshot({
+      schemaVersion: accepted.schemaVersion,
+      planId: accepted.id,
+      planVersionId: null,
+      draftRevision: accepted.draftRevision,
+      configHash: input.snapshotHashes.configHash,
+      evaluationHash: await authoritativeEvaluationHash(evaluation, input.evaluationLock),
+      evaluationLock: input.evaluationLock,
+      evaluatedAt: "2026-08-28T12:00:00.000Z",
+      evaluation,
+    });
+    const router = new WorkspaceRouter();
+    const pages = mountWorkspacePages(root, store, router);
+
+    expect(root.querySelector("[data-v3-progressive-evaluation]")?.textContent).toContain("局部规则");
+    expect(root.querySelector("[data-v3-thermal-acoustic]")?.textContent).toContain(evaluation.thermalAcousticEvaluation.workloadId);
+    expect(root.querySelector("[data-v3-thermal-acoustic]")?.textContent).toContain("规划热场插值，非 CFD、非实测");
+    expect(root.querySelector("[data-v3-thermal-acoustic]")?.textContent).toContain("标准化硬件声源结果，不代表房间或用户位置的实际噪音");
+    expect(root.querySelector("[data-v3-thermal-acoustic]")?.textContent).toContain("关键输入不足");
+    expect(root.querySelector("[data-v3-price-projection]")?.textContent).toContain("¥899");
+    expect(root.querySelector("[data-v3-price-projection]")?.textContent).toContain("1 项待补");
+    expect(root.querySelectorAll('[data-v3-price-projection] [data-price-status="known"]')).toHaveLength(1);
+    expect(root.querySelectorAll('[data-v3-price-projection] [data-price-status="unknown"]')).toHaveLength(1);
+    expect(root.querySelector("[data-v3-topology-bom]")?.textContent).toContain("psu.fixture.850w");
+    expect(root.querySelector("[data-purchase-gate]")?.textContent).not.toContain("整套可购买");
+    expect(root.querySelector("[data-purchase-gate]")?.textContent).toContain("暂不生成采购核准");
     pages.dispose(); store.dispose();
   });
 

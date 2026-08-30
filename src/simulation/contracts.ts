@@ -1,3 +1,6 @@
+import { hashContent } from "../hash";
+import type { LogicalLayoutSelection } from "../topology/contracts";
+
 export interface SimulationInput {
   workloadMetricRefs: string[];
   ambientC: { min: number; max: number };
@@ -28,6 +31,45 @@ export interface SimulationModelArtifact {
   assumptions: string[];
   coefficients: Record<string, number>;
   contentHash: string;
+}
+
+export interface SimulationLogicalLayoutClosure {
+  readonly logicalLayoutId: string;
+  readonly layoutHash: string;
+}
+
+export interface SimulationInputHashClosure {
+  readonly schemaVersion: "simulation-input-hash-closure-v1";
+  readonly sourcedInput: SourcedSimulationInput;
+  readonly logicalLayouts: readonly SimulationLogicalLayoutClosure[];
+  readonly contentHash: string;
+}
+
+const SIMULATION_INPUT_HASH_CLOSURE_FIELDS = ["schemaVersion", "sourcedInput", "logicalLayouts", "contentHash"] as const;
+
+export async function logicalLayoutSimulationHash(
+  layout: LogicalLayoutSelection,
+  physicalPathHashes: Readonly<Record<string, string>>,
+): Promise<string> {
+  const diskIds = [
+    ...layout.bootPoolDiskIds,
+    ...layout.vdevs.flatMap(({ diskInstanceIds }) => diskInstanceIds),
+    ...layout.spareDiskIds,
+  ];
+  if (!layout.layoutId || new Set(diskIds).size !== diskIds.length
+    || layout.vdevs.some((vdev) => !vdev.vdevId || vdev.diskInstanceIds.length === 0)
+    || Object.entries(physicalPathHashes).some(([diskId, value]) => !diskIds.includes(diskId) || !/^[a-f0-9]{64}$/.test(value))
+    || diskIds.some((diskId) => !/^[a-f0-9]{64}$/.test(physicalPathHashes[diskId] ?? ""))) {
+    throw new TypeError("simulation logical layout authority invalid");
+  }
+  const normalized = {
+    layoutId: layout.layoutId,
+    bootPoolDiskIds: [...layout.bootPoolDiskIds].sort(),
+    vdevs: [...layout.vdevs].map((vdev) => ({ ...vdev, diskInstanceIds: [...vdev.diskInstanceIds].sort() })).sort((left, right) => left.vdevId.localeCompare(right.vdevId)),
+    spareDiskIds: [...layout.spareDiskIds].sort(),
+    physicalPathHashes: Object.fromEntries(Object.entries(physicalPathHashes).sort(([left], [right]) => left.localeCompare(right))),
+  };
+  return hashContent(normalized, { domain: "simulation.logical-layout", schemaVersion: "1.0.0" });
 }
 
 const SIMULATION_INPUT_FIELDS = ["workloadMetricRefs", "ambientC", "fanPolicyId", "storageActivity", "placementIds", "routeIds", "modelVersion"] as const;
@@ -126,4 +168,82 @@ export function validateSimulationInputSources(value: unknown): string[] {
 /** Stable attribution helper for what-if: omitted fields are locked, not silently refreshed. */
 export function simulationInputChangedFields(before: SimulationInput, after: SimulationInput): string[] {
   return SIMULATION_INPUT_FIELDS.filter((field) => JSON.stringify(before[field]) !== JSON.stringify(after[field])).map((field) => `/${field}`);
+}
+
+/**
+ * Content-address the exact simulation closure. Price and scenario display
+ * metadata are intentionally not parameters; workload/environment/layout and
+ * model inputs are all explicit.
+ */
+export async function createSimulationInputHashClosure(
+  sourcedInput: SourcedSimulationInput,
+  logicalLayouts: readonly SimulationLogicalLayoutClosure[],
+): Promise<SimulationInputHashClosure> {
+  if (validateSimulationInputSources(sourcedInput).length > 0) throw new TypeError("simulation input hash closure source validation failed");
+  const normalizedInput: SourcedSimulationInput = {
+    input: {
+      ...structuredClone(sourcedInput.input),
+      workloadMetricRefs: [...sourcedInput.input.workloadMetricRefs].sort(),
+      storageActivity: [...sourcedInput.input.storageActivity].sort((left, right) => left.logicalLayoutId.localeCompare(right.logicalLayoutId)),
+      placementIds: [...sourcedInput.input.placementIds].sort(),
+      routeIds: [...sourcedInput.input.routeIds].sort(),
+    },
+    sources: [...structuredClone(sourcedInput.sources)].sort((left, right) => left.fieldPath.localeCompare(right.fieldPath)),
+  };
+  const normalizedLayouts = [...structuredClone(logicalLayouts)].sort((left, right) => left.logicalLayoutId.localeCompare(right.logicalLayoutId));
+  if (new Set(normalizedLayouts.map(({ logicalLayoutId }) => logicalLayoutId)).size !== normalizedLayouts.length
+    || normalizedLayouts.some(({ logicalLayoutId, layoutHash }) => !logicalLayoutId || !/^[a-f0-9]{64}$/.test(layoutHash))) {
+    throw new TypeError("simulation logical layout closure invalid");
+  }
+  for (const { logicalLayoutId } of normalizedInput.input.storageActivity) {
+    if (!normalizedLayouts.some((layout) => layout.logicalLayoutId === logicalLayoutId)) {
+      throw new TypeError("simulation activity lacks an exact logical layout hash");
+    }
+  }
+  const material = { schemaVersion: "simulation-input-hash-closure-v1" as const, sourcedInput: normalizedInput, logicalLayouts: normalizedLayouts };
+  return { ...material, contentHash: await hashContent(material, { domain: "simulation.input", schemaVersion: "1.0.0" }) };
+}
+
+/** Strict structural validation for persisted/replayed simulation input closures. */
+export function validateSimulationInputHashClosure(value: unknown): string[] {
+  try {
+    if (!isRecord(value)) return ["simulation input hash closure must be an object"];
+    const errors: string[] = [];
+    if (Object.keys(value).length !== SIMULATION_INPUT_HASH_CLOSURE_FIELDS.length
+      || Object.keys(value).some((key) => !(SIMULATION_INPUT_HASH_CLOSURE_FIELDS as readonly string[]).includes(key))) {
+      errors.push("simulation input hash closure fields invalid");
+    }
+    if (value.schemaVersion !== "simulation-input-hash-closure-v1") errors.push("simulation input hash closure schemaVersion invalid");
+    errors.push(...validateSimulationInputSources(value.sourcedInput));
+    if (!Array.isArray(value.logicalLayouts)
+      || value.logicalLayouts.some((layout) => !isRecord(layout)
+        || Object.keys(layout).length !== 2
+        || Object.keys(layout).some((key) => !["logicalLayoutId", "layoutHash"].includes(key))
+        || typeof layout.logicalLayoutId !== "string" || layout.logicalLayoutId.length === 0
+        || !isSha256Hex(layout.layoutHash))) errors.push("simulation logical layout closure invalid");
+    else {
+      const ids = value.logicalLayouts.map((layout) => (layout as { logicalLayoutId: string }).logicalLayoutId);
+      if (new Set(ids).size !== ids.length || ids.some((id, index) => index > 0 && ids[index - 1]! >= id)) {
+        errors.push("simulation logical layouts must be unique and canonical");
+      }
+      if (isRecord(value.sourcedInput) && isRecord(value.sourcedInput.input)
+        && Array.isArray(value.sourcedInput.input.storageActivity)) {
+        const activeIds = value.sourcedInput.input.storageActivity.flatMap((activity) => isRecord(activity)
+          && typeof activity.logicalLayoutId === "string" ? [activity.logicalLayoutId] : []);
+        if (activeIds.some((id) => !ids.includes(id))) errors.push("simulation activity lacks an exact logical layout hash");
+      }
+    }
+    if (!isSha256Hex(value.contentHash)) errors.push("simulation input hash closure contentHash invalid");
+    return errors;
+  } catch {
+    return ["simulation input hash closure validation failed"];
+  }
+}
+
+/** Recomputes canonical ordering and content identity; no caller-declared hash is trusted. */
+export async function verifySimulationInputHashClosure(value: unknown): Promise<boolean> {
+  if (validateSimulationInputHashClosure(value).length > 0) return false;
+  const closure = value as unknown as SimulationInputHashClosure;
+  const rebuilt = await createSimulationInputHashClosure(closure.sourcedInput, closure.logicalLayouts);
+  return JSON.stringify(rebuilt) === JSON.stringify(closure);
 }

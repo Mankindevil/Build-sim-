@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "case-adapter-fixture-matrix-v1",
+  "cases": [
+    {
+      "fixtureId": "northwind-atx-tower",
+      "vendorId": "northwind",
+      "skuId": "fixture.case.northwind-atx-tower",
+      "adapterId": "adapter.fixture.northwind-atx-tower",
+      "revision": "A",
+      "layout": "atx-tower",
+      "motherboardStandardId": "mount.motherboard.atx",
+      "envelopeMm": [230, 480, 500],
+      "driveBayCount": 2,
+      "backplane": false
+    },
+    {
+      "fixtureId": "northwind-matx-compact",
+      "vendorId": "northwind",
+      "skuId": "fixture.case.northwind-matx-compact",
+      "adapterId": "adapter.fixture.northwind-matx-compact",
+      "revision": "B",
+      "layout": "matx-compact-tower",
+      "motherboardStandardId": "mount.motherboard.micro-atx",
+      "envelopeMm": [205, 390, 410],
+      "driveBayCount": 2,
+      "backplane": false
+    },
+    {
+      "fixtureId": "contoso-itx-sandwich",
+      "vendorId": "contoso",
+      "skuId": "fixture.case.contoso-itx-sandwich",
+      "adapterId": "adapter.fixture.contoso-itx-sandwich",
+      "revision": "1",
+      "layout": "mini-itx-sandwich",
+      "motherboardStandardId": "mount.motherboard.mini-itx",
+      "envelopeMm": [175, 285, 330],
+      "driveBayCount": 1,
+      "backplane": false
+    },
+    {
+      "fixtureId": "contoso-nas-backplane",
+      "vendorId": "contoso",
+      "skuId": "fixture.case.contoso-nas-backplane",
+      "adapterId": "adapter.fixture.contoso-nas-backplane",
+      "revision": "2",
+      "layout": "nas-horizontal-backplane",
+      "motherboardStandardId": "mount.motherboard.mini-itx",
+      "envelopeMm": [270, 220, 340],
+      "driveBayCount": 6,
+      "backplane": true
+    }
+  ]
+}

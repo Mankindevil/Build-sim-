@@ -14,8 +14,26 @@ import type { BuildProgressController, BuildProgressItem, BuildProgressSummary }
 import { BUILD_STAGE_LABELS } from "./build-progress";
 import { mountEvidencePanel, type EvidencePanelServices } from "./evidence-panel";
 import { WorkspaceRouter, type WorkspaceRoute } from "./workspace-router";
-import type { BuildConfigV3 } from "../topology/contracts";
+import { createEmptyBuildConfigV3, type BuildConfigV3 } from "../topology/contracts";
+import {
+  isProgressiveBuildEvaluation,
+  type ProgressiveBuildEvaluation,
+} from "../compatibility/contracts";
 import "./workspace-pages.css";
+import { renderSystemPanel } from "./system-panel";
+import { mountSystemExecutionPanel, type SystemExecutionPanelController } from "./system-execution-panel";
+import { withRecommendedSystem } from "../system-profiles/defaults";
+import { STANDARD_THERMAL_SCENARIOS } from "../thermal/scenarios";
+import type { AnsweredWorkloadRequirement, RequirementMetric, RequirementSpec } from "../requirements/contracts";
+import { mountGovernedPricePanel } from "./governed-price-panel";
+import { mountGovernedRecommendationPanel } from "./governed-recommendation-panel";
+import { mountRequirementsPanel } from "./requirements-panel";
+import { mountSolverPanel } from "./solver-panel";
+import { mountScenarioCompare } from "./scenario-compare";
+import { mountJobStatusPanel } from "./job-status";
+import { mountBackupPanel } from "./backup-panel";
+import { mountDoctorPanel } from "./doctor-panel";
+import { mountPortabilityPanel } from "./portability-panel";
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
@@ -58,6 +76,66 @@ function evaluationSummary(evaluation: BuildEvaluation | null): { bad: number; w
     unknown: evaluation.price.unknownSkuIds.length + (evaluation.price.unresolvedRequirements?.length ?? 0),
     priceComplete: evaluation.price.complete !== false,
   };
+}
+
+function progressiveEvaluation(state: PlanStoreState): ProgressiveBuildEvaluation | null {
+  const evaluation = state.evaluationSnapshot?.evaluation;
+  return evaluation && isProgressiveBuildEvaluation(evaluation) ? evaluation : null;
+}
+
+function formatRange(value: { lo: number; hi: number } | null, unit: string): string {
+  return value ? `${value.lo.toFixed(1)}–${value.hi.toFixed(1)} ${unit}` : "关键输入不足";
+}
+
+export function progressiveThermalAcousticMarkup(evaluation: ProgressiveBuildEvaluation | null): string {
+  if (!evaluation) {
+    return `<section data-v3-thermal-acoustic data-level="warn"><h3>热与硬件声学</h3><p>等待当前方案的锁定仿真回执。</p></section>`;
+  }
+  const result = evaluation.thermalAcousticEvaluation;
+  const thermal = result.thermal;
+  const acoustic = result.acoustic;
+  const level = thermal.verdict === "fail" || acoustic.verdict === "fail" ? "bad"
+    : thermal.verdict === "blocked" || acoustic.verdict === "blocked" ? "warn" : "ok";
+  const fans = thermal.airflow.fanOperatingPoints.map((point) => `<li><strong>${escapeHtml(point.edgeId)}</strong><span>${formatRange(point.rpm, "RPM")} · ${formatRange(point.airflowCfm, "CFM")}</span><small>${escapeHtml(point.evidence)} · ${point.sourceRefs.map(escapeHtml).join(" · ")}</small></li>`).join("");
+  const contributions = acoustic.contributions.map((source) => `<li><strong>${escapeHtml(source.componentInstanceId)}</strong><span>${formatRange(source.soundPressureDbaAt1M, "dBA @ 1m")}</span><small>${Math.round(source.shareOfUpperEnergy * 100)}% 上界声能 · ${escapeHtml(source.evidence)} · ${source.sourceRefs.map(escapeHtml).join(" · ")}</small></li>`).join("");
+  const assumptions = [...new Set([...thermal.assumptions, ...thermal.airflow.assumptions, ...acoustic.assumptions])]
+    .map((assumption) => `<li>${escapeHtml(assumption)}</li>`).join("");
+  const blockedReasons = [...new Set([...thermal.blockedReasonCodes, ...acoustic.blockedReasonCodes])]
+    .map((reason) => `<li>${escapeHtml(reason)}</li>`).join("");
+  const appliedObservations = [...result.calibration.appliedThermalObservationIds, ...result.calibration.appliedAcousticObservationIds]
+    .map((id) => `<li>${escapeHtml(id)}</li>`).join("");
+  return `<section data-v3-thermal-acoustic data-level="${level}"><header><div><small>锁定 SimulationInput</small><h3>热与硬件声学</h3><p>工作负载 ${escapeHtml(result.workloadId)} · 输入 ${escapeHtml(result.simulationInputHash)}</p></div></header><dl><div><dt>环境温度</dt><dd>${formatRange(thermal.ambientC, "°C")}</dd></div><div><dt>最高器件温度</dt><dd>${formatRange(thermal.peakTemperatureC, "°C")}</dd></div><div><dt>硬件声压</dt><dd>${formatRange(acoustic.totalDba, "dBA @ 1m")}</dd></div><div><dt>声学等级</dt><dd>${escapeHtml(acoustic.level)}</dd></div><div><dt>测试方法</dt><dd>${escapeHtml(acoustic.testMethodId)}</dd></div></dl><div><h4>风扇工作点</h4><ul>${fans || "<li>暂无可比较的风扇曲线</li>"}</ul></div><div><h4>主要硬件声源</h4><ul>${contributions || "<li>暂无能够归一化到相同条件的硬件声源</li>"}</ul></div>${blockedReasons ? `<div><h4>仍需补充</h4><ul>${blockedReasons}</ul></div>` : ""}${assumptions ? `<div><h4>模型假设</h4><ul>${assumptions}</ul></div>` : ""}${appliedObservations ? `<div><h4>当前方案校准记录</h4><ul>${appliedObservations}</ul></div>` : ""}<p>${escapeHtml(thermal.displayNotice)}</p><p>${escapeHtml(acoustic.displayNotice)}</p></section>`;
+}
+
+function progressiveEvaluationMarkup(evaluation: ProgressiveBuildEvaluation | null): string {
+  if (!evaluation) {
+    return `<article class="workspace-evaluation-decision" data-level="warn" data-v3-partial-evaluation><header><div><small>V3 权威评估</small><h2>正在等待当前拓扑的评估回执</h2><p>不会用旧方案或浏览器本地结果填充兼容结论。</p></div><button type="button" data-route-action="editor">查看拓扑</button></header></article>`;
+  }
+  const failed = evaluation.decisions.filter(({ verdict }) => verdict === "fail");
+  const blocked = evaluation.decisions.filter(({ verdict }) => verdict === "blocked");
+  const evaluated = evaluation.ruleEvaluations.filter(({ verdict }) => verdict === "pass" || verdict === "fail");
+  const unresolvedRequirements = evaluation.requirementAllocation.satisfactions.filter(({ status }) => status !== "satisfied");
+  const level = failed.length ? "bad" : blocked.length ? "warn" : "ok";
+  const headline = failed.length
+    ? `已发现 ${failed.length} 个局部不兼容`
+    : evaluated.length ? `已完成 ${evaluated.length} 条局部规则` : "当前输入仍不足以形成局部结论";
+  return `<article class="workspace-evaluation-decision" data-level="${level}" data-v3-progressive-evaluation><header><div><small>渐进兼容评估</small><h2>${headline}</h2><p>只报告当前证据足够的规则；未知域保持 unknown，不代表整机已可购买。</p></div><button type="button" data-route-action="editor">继续补全</button></header><dl><div><dt>已评估规则</dt><dd>${evaluated.length}</dd></div><div><dt>局部失败</dt><dd>${failed.length}</dd></div><div><dt>证据阻断</dt><dd>${blocked.length}</dd></div><div><dt>未满足需求</dt><dd>${unresolvedRequirements.length}</dd></div><div><dt>已知价格</dt><dd>${formatCny(evaluation.priceProjection.knownSubtotalCny)}</dd></div><div><dt>价格待补</dt><dd>${evaluation.priceProjection.unknownInstanceIds.length} 项</dd></div></dl></article>${progressiveThermalAcousticMarkup(evaluation)}`;
+}
+
+function progressivePriceMarkup(evaluation: ProgressiveBuildEvaluation | null): string {
+  if (!evaluation) return `<strong>当前价格回执尚不可用</strong><p>不会读取旧版采购总价。</p>`;
+  const known = evaluation.priceProjection.lines.filter((line) => line.status === "known");
+  const unknown = evaluation.priceProjection.lines.filter((line) => line.status === "unknown");
+  const rows = evaluation.priceProjection.lines.map((line) => line.status === "known"
+    ? `<li data-price-status="known"><span>${escapeHtml(line.instanceId)} · ${escapeHtml(line.skuId)}</span><strong>${formatCny(line.priceCny)}</strong><small>${escapeHtml(line.platform)} · 快照 ${escapeHtml(evaluation.priceProjection.asOf)}</small></li>`
+    : `<li data-price-status="unknown"><span>${escapeHtml(line.instanceId)}${"skuId" in line ? ` · ${escapeHtml(line.skuId)}` : ""}</span><strong>价格待确认</strong><small>${line.reason === "identity_unresolved" ? "组件身份尚未解析" : "没有精确版本的已审核报价"}</small></li>`).join("");
+  return `<section data-v3-price-projection><header><div><strong>当前已知单项价格</strong><p>来自本次评估锁定的价格快照；仅作已知小计，不是整套采购核准。</p></div><span>${formatCny(evaluation.priceProjection.knownSubtotalCny)} · ${unknown.length} 项待补</span></header><ul>${rows || "<li><span>当前拓扑还没有组件实例</span></li>"}</ul><small>快照 ${escapeHtml(evaluation.priceProjection.snapshotId)} · ${known.length} 项已知</small></section>`;
+}
+
+function progressiveBomMarkup(evaluation: ProgressiveBuildEvaluation | null): string {
+  if (!evaluation) return `<strong>当前拓扑回执尚不可用</strong><p>不会复用旧版部件清单。</p>`;
+  const rows = evaluation.topologyBom.map((line) => `<li><span>${escapeHtml(topologyKindLabel(line.kind))} · ${escapeHtml(line.instanceId)}</span><strong>${line.identityStatus === "resolved" ? escapeHtml(line.skuId) : "身份待解析"}</strong></li>`).join("");
+  return `<section data-v3-topology-bom><strong>当前拓扑实例</strong><p>仅由 V3 topology 派生，不补出未存在的 GPU、硬盘、风扇或线材。</p><ul>${rows || "<li><span>尚未加入组件</span></li>"}</ul></section>`;
 }
 
 function optionMarkup(sourceId: string, selected: string): string {
@@ -116,6 +194,16 @@ function v3PartialEditorMarkup(config: BuildConfigV3): string {
   const requirementSummary = requirements
     ? `工作负载 ${requirements.workloads.length} 项 · 约束 ${requirements.constraints.length} 项${requirements.budget ? " · 已记录预算意向" : " · 预算待补"}`
     : "尚未填写需求规格";
+  const actionableWorkload = requirements?.workloads.find((workload) => workload.state === undefined || workload.state === "answered");
+  const scenarioMetric = actionableWorkload?.metrics.find((metric) => metric.metricId === "thermal.scenario" && (metric.state === undefined || metric.state === "answered"));
+  const ambientMetric = actionableWorkload?.metrics.find((metric) => metric.metricId === "thermal.ambient" && (metric.state === undefined || metric.state === "answered"));
+  const selectedScenario = scenarioMetric && "value" in scenarioMetric && typeof scenarioMetric.value === "string" ? scenarioMetric.value : "";
+  const ambient = ambientMetric && "value" in ambientMetric
+    ? ambientMetric.operator === "eq" && typeof ambientMetric.value === "number"
+      ? [ambientMetric.value, ambientMetric.value]
+      : ambientMetric.operator === "between" && Array.isArray(ambientMetric.value) ? ambientMetric.value : [20, 30]
+    : [20, 30];
+  const scenarioOptions = STANDARD_THERMAL_SCENARIOS.map(({ scenarioId, label }) => `<option value="${scenarioId}"${scenarioId === selectedScenario ? " selected" : ""}>${escapeHtml(label)}</option>`).join("");
   const componentRows = config.components.length
     ? config.components.map((component) => {
       const identity = component.identity.status === "resolved"
@@ -126,8 +214,72 @@ function v3PartialEditorMarkup(config: BuildConfigV3): string {
     : "<li>尚未添加任何组件实例。</li>";
   return `<section class="workspace-editor-group" data-v3-partial-editor><header><span>V3</span><div><h3>部分拓扑方案</h3><p>这是按组件实例保存的 V3 方案，不会把未知内容套成旧版下拉选择。</p></div></header>
     <div class="workspace-empty" data-v3-partial-status><strong>兼容性、价格、物理布局和接线仍待确认</strong><p>当前已解析 ${resolved.length} 个实例，另有 ${unresolved.length} 个实例尚未解析；这些数量不代表可购买的完整清单。</p><button type="button" data-route-action="agent">让 Agent 逐步补全方案</button></div>
+    <section data-system-profile-panel></section>
     <div class="workspace-field-grid"><article class="workspace-editor-field"><strong>需求</strong><p>${escapeHtml(requirementSummary)}</p></article><article class="workspace-editor-field"><strong>拓扑边</strong><p>放置 ${config.placements.length} 条 · 连接 ${config.connections.length} 条 · 逻辑布局 ${config.logicalLayouts.length} 个</p></article><article class="workspace-editor-field"><strong>明确不需要的角色</strong><p>${config.roleDecisions.length ? `${config.roleDecisions.length} 项已记录` : "尚未记录"}</p></article></div>
+    <section class="workspace-editor-group" data-v3-thermal-inputs><header><span>热噪</span><div><h3>工作负载与环境</h3><p>默认环境为 20–30°C；只有你确认的情景和区间才会替换默认假设并进入 SimulationInput 哈希。</p></div></header><div class="workspace-field-grid">${field("标准工作负载", "thermal.scenario", `<select data-v3-thermal-scenario><option value=""${selectedScenario ? "" : " selected"}>尚未确认（使用宽泛规划默认）</option>${scenarioOptions}</select>`, "请选择最接近的标准情景；系统不会根据 SKU 档次猜负载。", "当前 RequirementSpec")}${field("最低环境温度", "thermal.ambient.min", `<input type="number" min="-20" max="60" step="0.5" data-v3-ambient-min value="${Number(ambient[0])}">`, "与最高温度一起形成规划区间。", "当前 RequirementSpec")}${field("最高环境温度", "thermal.ambient.max", `<input type="number" min="-20" max="60" step="0.5" data-v3-ambient-max value="${Number(ambient[1])}">`, "区间会直接进入锁定仿真输入。", "当前 RequirementSpec")}</div><button type="button" data-v3-thermal-apply>应用热噪输入</button><p data-v3-thermal-error role="alert"></p></section>
     <section class="workspace-editor-group"><header><span>实例</span><div><h3>当前组件拓扑</h3><p>已解析实例可在下方“官方证据”中按实例选择；未解析项不会伪装成具体型号。</p></div></header><ul class="workspace-v3-component-list">${componentRows}</ul></section></section>`;
+}
+
+function withV3ThermalInputs(config: BuildConfigV3, scenarioId: string, ambientMin: number, ambientMax: number): BuildConfigV3 {
+  if (!Number.isFinite(ambientMin) || !Number.isFinite(ambientMax) || ambientMin < -20 || ambientMax > 60 || ambientMin > ambientMax) {
+    throw new TypeError("环境温度必须是 -20–60°C 内的有效区间");
+  }
+  if (scenarioId && !STANDARD_THERMAL_SCENARIOS.some((scenario) => scenario.scenarioId === scenarioId)) {
+    throw new TypeError("标准工作负载无效");
+  }
+  const next = structuredClone(config);
+  const spec: RequirementSpec = next.requirementSpec ?? {
+    requirementSpecId: `requirements-${next.id}`,
+    schemaVersion: "1.0.0",
+    workloads: [],
+    constraints: [],
+  };
+  let index = spec.workloads.findIndex((workload) => workload.state === undefined || workload.state === "answered");
+  if (index < 0) {
+    spec.workloads.push({
+      workloadId: "planning-thermal-environment",
+      state: "answered",
+      name: "Planning thermal environment",
+      source: "user",
+      confirmedByUser: true,
+      evidenceOrBenchmarkRefs: [],
+      metrics: [],
+    });
+    index = spec.workloads.length - 1;
+  }
+  const current = spec.workloads[index]!;
+  const metrics: RequirementMetric[] = current.metrics.filter(({ metricId }) => metricId !== "thermal.scenario" && metricId !== "thermal.ambient");
+  if (scenarioId) metrics.push({
+    metricId: "thermal.scenario",
+    operator: "eq",
+    value: scenarioId,
+    priority: "must",
+    state: "answered",
+    source: "user",
+    confirmedByUser: true,
+  });
+  metrics.push({
+    metricId: "thermal.ambient",
+    operator: "between",
+    value: [ambientMin, ambientMax],
+    unitId: "celsius",
+    priority: "must",
+    state: "answered",
+    source: "user",
+    confirmedByUser: true,
+  });
+  const workload: AnsweredWorkloadRequirement = {
+    workloadId: current.workloadId,
+    state: "answered",
+    name: "name" in current ? current.name : "Planning thermal environment",
+    source: "user",
+    confirmedByUser: true,
+    evidenceOrBenchmarkRefs: "evidenceOrBenchmarkRefs" in current ? current.evidenceOrBenchmarkRefs : [],
+    metrics,
+  };
+  spec.workloads[index] = workload;
+  next.requirementSpec = spec;
+  return next;
 }
 
 function editorMarkup(config: BuildConfigDocument, planName: string, catalog: SkuCatalog): string {
@@ -183,8 +335,15 @@ function updateConfigField(config: BuildConfig, path: string, value: string): vo
     }
   }
   else if (path === "selection.secondaryPsuId") {
-    if (value) config.selection.secondaryPsuId = value;
-    else delete config.selection.secondaryPsuId;
+    if (value) {
+      config.selection.secondaryPsuId = value;
+      config.selection.psuTopology = "dual";
+      config.selection.dualStart ??= "sync";
+    } else {
+      delete config.selection.secondaryPsuId;
+      if (config.selection.psuTopology === "dual") config.selection.psuTopology = "auto";
+      delete config.selection.dualStart;
+    }
   }
   else if (path === "selection.dualStart") config.selection.dualStart = value as NonNullable<BuildConfig["selection"]["dualStart"]>;
   else if (path === "selection.coolerId") config.selection.coolerId = value;
@@ -378,7 +537,34 @@ export interface WorkspacePagesController {
   dispose(): void;
 }
 
-export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router: WorkspaceRouter, taskStore?: BuildTaskStore, progress?: BuildProgressController, getCatalog: () => SkuCatalog = loadBundledCatalog, evidenceServices?: EvidencePanelServices): WorkspacePagesController {
+export interface WorkspaceCreationCapabilities {
+  readonly topologyV3Enabled: boolean;
+  readonly systemProfilesEnabled: boolean;
+  readonly userObservationsEnabled?: boolean;
+  readonly buildExecutionV3Enabled?: boolean;
+  readonly storageLayoutEnabled?: boolean;
+  readonly priceHistoryEnabled?: boolean;
+  readonly priceTargetsEnabled?: boolean;
+  readonly recommendationsEnabled?: boolean;
+  readonly wholeBuildSolverEnabled?: boolean;
+  readonly scenarioWhatIfEnabled?: boolean;
+  readonly jobCenterEnabled?: boolean;
+  readonly backupRestoreEnabled?: boolean;
+  readonly doctorEnabled?: boolean;
+  readonly portabilityEnabled?: boolean;
+}
+
+export function mountWorkspacePages(
+  root: HTMLElement,
+  store: PlanStore,
+  router: WorkspaceRouter,
+  taskStore?: BuildTaskStore,
+  progress?: BuildProgressController,
+  getCatalog: () => SkuCatalog = loadBundledCatalog,
+  evidenceServices?: EvidencePanelServices,
+  systemExecutionServices?: { readonly fetchImpl?: typeof fetch },
+  creationCapabilities: WorkspaceCreationCapabilities = { topologyV3Enabled: false, systemProfilesEnabled: false },
+): WorkspacePagesController {
   const host = document.createElement("main");
   host.className = "workspace-pages";
   host.innerHTML = `
@@ -387,10 +573,16 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
       <div class="workspace-dashboard-current" data-current-plan></div>
       <section class="workspace-progress-panel"><div class="workspace-section-head"><div><p>全部部件进度</p><h2>每一件硬件都看得见</h2></div><button type="button" data-route-action="build">查看装机任务</button></div><div data-workspace-progress-summary></div><div data-workspace-progress-items></div></section>
       <section><div class="workspace-section-head"><div><p>我的方案</p><h2>方案列表</h2></div><input type="search" data-plan-search placeholder="搜索方案名称" aria-label="搜索方案名称"></div><div class="workspace-plan-grid" data-plan-grid></div></section>
+      <section data-backup-panel hidden aria-label="完整备份"></section>
+      <section data-portability-panel hidden aria-label="单方案便携导入导出"></section>
+      <section data-doctor-panel hidden aria-label="运行环境诊断"></section>
     </section>
     <section id="workspace-page-editor" data-workspace-page="editor" hidden aria-labelledby="workspace-editor-title">
       <header class="workspace-page-head"><div><p>第 2 步 · 选择硬件</p><h1 id="workspace-editor-title">先说需求，再选配置</h1><span>每个选择都说明影响；修改后会立即重新检查兼容、功耗、散热和预算。</span></div><div><button type="button" data-undo>撤销</button><button type="button" data-redo>恢复</button><button type="button" data-open-history>版本记录</button><button type="button" data-open-save>保存这一版</button></div></header>
       <div class="workspace-guide-callout"><strong>不确定怎么选？</strong><span>保持推荐值，或打开“问问助手”描述预算、用途和安静程度。</span><button type="button" data-route-action="agent">请助手帮我选</button></div>
+      <section data-requirements-panel hidden aria-label="渐进需求向导"></section>
+      <section data-solver-panel hidden aria-label="整机自动求解"></section>
+      <section data-scenario-compare hidden aria-label="What-if 情景比较"></section>
       <div class="workspace-impact" data-impact aria-live="polite"></div>
       <div class="workspace-editor-layout"><aside><label>快速查找<input type="search" data-editor-search placeholder="例如：电源、风扇、硬盘"></label><nav class="workspace-editor-toc" aria-label="配置步骤"><a href="#editor-platform">1. 基础平台</a><a href="#editor-power">2. 供电散热</a><a href="#editor-airflow">3. 机箱风扇</a><a href="#editor-storage">4. 存储</a><a href="#editor-expansion">5. 显卡内存</a><a href="#editor-evidence">官方证据</a></nav></aside><div data-editor-fields></div></div>
       <section class="workspace-plan-evidence" id="editor-evidence" data-plan-evidence-panel aria-label="方案官方证据"></section>
@@ -411,12 +603,16 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
       <div class="workspace-purchase-gate" data-purchase-gate aria-live="polite"></div>
       <section data-purchase-content></section>
       <div class="workspace-empty" data-v3-purchase-content hidden><strong>V3 部分拓扑尚无采购清单</strong><p>不会复用上一版的 BOM、订单或总价；先补全实例身份与评估。</p></div>
+      <section class="workspace-governed-price-panel" data-governed-price-panel hidden aria-label="当前全新价格与历史"></section>
+      <section class="workspace-governed-recommendation-panel" data-governed-recommendation-panel hidden aria-label="整机三档推荐"></section>
       <details class="workspace-market-details"><summary>查看市场行情与配件价格</summary><div data-purchase-market></div></details>
     </section>
     <section id="workspace-page-build" data-workspace-page="build" hidden aria-labelledby="workspace-build-title">
       <header class="workspace-page-head"><div><p>第 6 步 · 开始装机</p><h1 id="workspace-build-title">按顺序做，少返工</h1><span>采购、安装、接线和开机检查共用同一套任务状态。</span></div><button type="button" data-export-saved-checklist>导出离线清单</button></header>
       <section data-build-parts></section>
       <div class="workspace-empty" data-v3-build-parts hidden><strong>V3 部分拓扑尚无装机部件清单</strong><p>不会显示同一方案旧版本留下的部件进度或装机任务。</p></div>
+      <section data-system-execution-panel hidden></section>
+      <section data-job-status-panel hidden aria-label="后台任务中心"></section>
       <div class="workspace-task-summary" data-task-summary aria-live="polite"></div>
       <nav class="workspace-subnav" aria-label="装机任务阶段"><button type="button" data-task-filter="all" aria-pressed="true">全部任务</button><button type="button" data-task-filter="purchase" aria-pressed="false">采购准备</button><button type="button" data-task-filter="assembly" aria-pressed="false">安装部件</button><button type="button" data-task-filter="wiring" aria-pressed="false">连接线材</button><button type="button" data-task-filter="verification" aria-pressed="false">开机检查</button></nav>
       <div class="workspace-task-board" data-task-board></div>
@@ -449,10 +645,77 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   const historyDialog = host.querySelector<HTMLDialogElement>("[data-history-dialog]")!;
   const taskSummaryHost = host.querySelector<HTMLElement>("[data-task-summary]")!;
   const taskBoard = host.querySelector<HTMLElement>("[data-task-board]")!;
+  const governedPricePanel = mountGovernedPricePanel(host.querySelector<HTMLElement>("[data-governed-price-panel]")!, {
+    enabled: creationCapabilities.priceHistoryEnabled === true,
+    targetsEnabled: creationCapabilities.priceTargetsEnabled === true,
+    getAuthority: () => {
+      const current = store.getState();
+      const priceSnapshotHash = current.evaluationSnapshot?.evaluationLock?.snapshotHashes.priceSnapshotHash;
+      return isBuildConfigV3(current.activePlan?.draft.config) && current.activePlan && priceSnapshotHash
+        ? { planId: current.activePlan.id, expectedPriceSnapshotHash: priceSnapshotHash }
+        : null;
+    },
+    subscribe: (listener) => store.subscribe(() => listener()),
+    ...(systemExecutionServices?.fetchImpl ? { fetchImpl: systemExecutionServices.fetchImpl } : {}),
+  });
+  const governedRecommendationPanel = mountGovernedRecommendationPanel(host.querySelector<HTMLElement>("[data-governed-recommendation-panel]")!, {
+    enabled: creationCapabilities.recommendationsEnabled === true,
+    getPlanId: () => store.getState().activePlan?.id ?? null,
+    subscribe: (listener) => store.subscribe(() => listener()),
+    ...(systemExecutionServices?.fetchImpl ? { fetchImpl: systemExecutionServices.fetchImpl } : {}),
+  });
+  const requirementsPanel = mountRequirementsPanel(host.querySelector<HTMLElement>("[data-requirements-panel]")!, store);
+  const solverPanel = mountSolverPanel(host.querySelector<HTMLElement>("[data-solver-panel]")!, {
+    enabled: creationCapabilities.wholeBuildSolverEnabled === true,
+    getState: () => store.getState(),
+    subscribe: (listener) => store.subscribe(() => listener()),
+    ...(systemExecutionServices?.fetchImpl ? { fetchImpl: systemExecutionServices.fetchImpl } : {}),
+    openAgent(prompt) {
+      const input = document.getElementById("agent-input") as HTMLTextAreaElement | null;
+      if (input) input.value = prompt;
+      router.navigate("agent");
+      input?.focus();
+    },
+  });
+  const scenarioCompare = mountScenarioCompare(host.querySelector<HTMLElement>("[data-scenario-compare]")!, {
+    enabled: creationCapabilities.scenarioWhatIfEnabled === true,
+    store,
+    ...(systemExecutionServices?.fetchImpl ? { fetchImpl: systemExecutionServices.fetchImpl } : {}),
+  });
+  const jobStatusPanel = mountJobStatusPanel(host.querySelector<HTMLElement>("[data-job-status-panel]")!, {
+    enabled: creationCapabilities.jobCenterEnabled === true,
+    getPlanId: () => store.getState().activePlan?.id ?? null,
+    subscribe: (listener) => store.subscribe(() => listener()),
+    ...(systemExecutionServices?.fetchImpl ? { fetchImpl: systemExecutionServices.fetchImpl } : {}),
+  });
+  const backupPanel = mountBackupPanel(host.querySelector<HTMLElement>("[data-backup-panel]")!, {
+    enabled: creationCapabilities.backupRestoreEnabled === true,
+    ...(systemExecutionServices?.fetchImpl ? { fetchImpl: systemExecutionServices.fetchImpl } : {}),
+  });
+  const doctorPanel = mountDoctorPanel(host.querySelector<HTMLElement>("[data-doctor-panel]")!, {
+    enabled: creationCapabilities.doctorEnabled === true,
+    ...(systemExecutionServices?.fetchImpl ? { fetchImpl: systemExecutionServices.fetchImpl } : {}),
+  });
+  const portabilityPanel = mountPortabilityPanel(host.querySelector<HTMLElement>("[data-portability-panel]")!, {
+    enabled: creationCapabilities.portabilityEnabled === true,
+    getPlanId: () => store.getState().activePlan?.id ?? null,
+    subscribe: (listener) => store.subscribe(() => listener()),
+    ...(systemExecutionServices?.fetchImpl ? { fetchImpl: systemExecutionServices.fetchImpl } : {}),
+    onImported: async (planId) => { await store.initialize(); await store.activate(planId); },
+  });
   const evidenceHost = host.querySelector<HTMLElement>("[data-plan-evidence-panel]")!;
   const evidencePanel = evidenceServices
     ? mountEvidencePanel(evidenceHost, store, getCatalog, evidenceServices)
     : mountEvidencePanel(evidenceHost, store, getCatalog);
+  let systemExecutionPanel: SystemExecutionPanelController | null = null;
+  const ensureSystemExecutionPanel = () => {
+    if (systemExecutionPanel || !systemExecutionServices || creationCapabilities.buildExecutionV3Enabled !== true) return;
+    systemExecutionPanel = mountSystemExecutionPanel(host.querySelector<HTMLElement>("[data-system-execution-panel]")!, {
+      getState: () => store.getState(),
+      subscribePlan: (listener) => store.subscribe(() => listener()),
+      ...(systemExecutionServices.fetchImpl ? { fetchImpl: systemExecutionServices.fetchImpl } : {}),
+    });
+  };
   const currentTasks = () => taskState.planId === state.activePlan?.id ? taskState.tasks : [];
   const currentTaskSummary = () => summarizeBuildTasks(currentTasks());
 
@@ -496,7 +759,10 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
 
   const renderProgress = () => {
     if (isBuildConfigV3(state.activePlan?.draft.config)) {
-      host.querySelector<HTMLElement>("[data-workspace-progress-summary]")!.innerHTML = `<div class="workspace-empty" data-v3-partial-progress><p>V3 部分拓扑尚未生成采购状态、价格或部件进度。</p></div>`;
+      const progressive = progressiveEvaluation(state);
+      host.querySelector<HTMLElement>("[data-workspace-progress-summary]")!.innerHTML = progressive
+        ? `<div data-v3-partial-progress><strong>${formatCny(progressive.priceProjection.knownSubtotalCny)}</strong><span>当前已知价格 · ${progressive.priceProjection.unknownInstanceIds.length} 项待补</span></div>`
+        : `<div class="workspace-empty" data-v3-partial-progress><p>V3 当前拓扑尚未取得受治理的价格与部件进度回执。</p></div>`;
       host.querySelector<HTMLElement>("[data-workspace-progress-items]")!.innerHTML = "";
       return;
     }
@@ -521,7 +787,10 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
 
   const renderImpact = () => {
     if (isBuildConfigV3(state.activePlan?.draft.config)) {
-      impact.innerHTML = `<article data-level="warn"><small>方案状态</small><strong>V3 部分拓扑</strong></article><article><small>兼容性</small><strong>尚未评估</strong></article><article><small>价格</small><strong>尚未估算</strong></article><article><small>物理与接线</small><strong>尚未评估</strong></article>`;
+      const progressive = progressiveEvaluation(state);
+      const evaluated = progressive?.ruleEvaluations.filter(({ verdict }) => verdict === "pass" || verdict === "fail").length ?? 0;
+      const failed = progressive?.decisions.filter(({ verdict }) => verdict === "fail").length ?? 0;
+      impact.innerHTML = `<article data-level="${failed ? "bad" : "warn"}"><small>方案状态</small><strong>V3 渐进评估</strong></article><article><small>局部兼容</small><strong>${progressive ? `${evaluated} 条已评估${failed ? ` · ${failed} 条失败` : ""}` : "等待回执"}</strong></article><article><small>已知价格</small><strong>${progressive ? formatCny(progressive.priceProjection.knownSubtotalCny) : "等待回执"}</strong></article><article><small>仍待补价格</small><strong>${progressive ? `${progressive.priceProjection.unknownInstanceIds.length} 项` : "未知"}</strong></article>`;
       return;
     }
     const current = evaluationSummary(state.evaluation);
@@ -534,9 +803,10 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
 
   const renderPurchaseGate = () => {
     if (isBuildConfigV3(state.activePlan?.draft.config)) {
+      const progressive = progressiveEvaluation(state);
       const gate = host.querySelector<HTMLElement>("[data-purchase-gate]")!;
       gate.dataset.level = "warn";
-      gate.innerHTML = `<div data-v3-partial-purchase><small>V3 部分拓扑</small><strong>暂不生成采购核准或整套价格结论</strong><p>已解析的组件身份仍需分别核对价格、兼容性、物理位置和接线；未解析实例不能购买。</p></div><button type="button" data-route-action="editor">查看拓扑并让 Agent 补全</button>`;
+      gate.innerHTML = `<div data-v3-partial-purchase><small>V3 渐进结果</small><strong>暂不生成采购核准；保留已知单项价格</strong><p>${progressive ? `当前已知小计 ${formatCny(progressive.priceProjection.knownSubtotalCny)}，另有 ${progressive.priceProjection.unknownInstanceIds.length} 项价格待补。` : "当前评估回执尚不可用。"} 未满足需求和 unknown 域不能按整机可购买处理。</p></div><button type="button" data-route-action="editor">查看拓扑并继续补全</button>`;
       return;
     }
     const summary = evaluationSummary(state.evaluation);
@@ -559,6 +829,7 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     const active = state.activePlan;
     const config = active?.draft.config as BuildConfigDocument | undefined;
     const v3Partial = isBuildConfigV3(config);
+    const progressive = v3Partial ? progressiveEvaluation(state) : null;
     const evalSummary = evaluationSummary(state.evaluation);
     const incomplete = state.evaluation?.readiness.status === "incomplete";
     const findings = state.evaluation ? evaluationGuideItems(state.evaluation).slice(0, 3) : [];
@@ -571,22 +842,43 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     const preferences = intent?.preferences ?? [];
     const goalCopy = active ? [intent?.useCase ?? active.metadata.useCase ?? "用途待补充", intent?.budgetCny ?? active.metadata.budgetCny ? `预算 ${formatCny(intent?.budgetCny ?? active.metadata.budgetCny)}` : "预算待补充", ...preferences.slice(0, 2)].map(escapeHtml).join(" · ") : "";
     const health = v3Partial && config
-      ? `<dl><div><dt>方案状态</dt><dd>部分拓扑</dd></div><div><dt>已解析实例</dt><dd>${config.components.filter((item) => item.identity.status === "resolved").length}</dd></div><div><dt>待解析实例</dt><dd>${config.components.filter((item) => item.identity.status === "unresolved").length}</dd></div><div><dt>兼容性与价格</dt><dd>待评估</dd></div></dl>`
+      ? `<dl><div><dt>方案状态</dt><dd>${progressive ? "渐进评估" : "等待回执"}</dd></div><div><dt>已解析实例</dt><dd>${config.components.filter((item) => item.identity.status === "resolved").length}</dd></div><div><dt>待解析实例</dt><dd>${config.components.filter((item) => item.identity.status === "unresolved").length}</dd></div><div><dt>已知价格</dt><dd>${progressive ? formatCny(progressive.priceProjection.knownSubtotalCny) : "待评估"}</dd></div></dl>`
       : `<dl><div><dt>必须解决</dt><dd data-level="${evalSummary.bad ? "bad" : "ok"}">${evalSummary.bad}</dd></div><div><dt>建议确认</dt><dd>${evalSummary.warn}</dd></div><div><dt>预算参考</dt><dd>${formatCny(active?.metadata.budgetCny ?? evalSummary.budget)}</dd></div><div><dt>下一步任务</dt><dd>${taskSummary.next.length}</dd></div></dl>`;
     const priority = v3Partial
-      ? "<li data-level=warn><span>待补全</span><p>V3 部分拓扑尚未得到兼容性、价格、物理布局或接线结论。</p></li>"
+      ? progressive
+        ? progressive.decisions.filter(({ verdict }) => verdict === "fail" || verdict === "blocked").slice(0, 3).map((decision) => `<li data-level="${decision.verdict === "fail" ? "bad" : "warn"}"><span>${decision.verdict === "fail" ? "局部失败" : "证据阻断"}</span><p>${escapeHtml(decision.message)}</p></li>`).join("") || "<li data-level=warn><span>待补全</span><p>已显示可评估的局部结论；其余域保持 unknown。</p></li>"
+        : "<li data-level=warn><span>等待回执</span><p>当前拓扑尚未取得受治理的渐进评估。</p></li>"
       : findings.map((finding) => `<li data-level="${finding.verdict}"><span>${finding.verdict === "bad" ? "必须" : "提醒"}</span><p>${escapeHtml(finding.title)}</p>${state.evaluation ? guideActionMarkup(state.evaluation, finding) : ""}</li>`).join("") || "<li class=workspace-all-clear><p>目前没有阻断或警告，可以继续下一步。</p></li>";
     currentHost.innerHTML = active ? `<article class="workspace-next-card"><div class="workspace-next-copy"><p>建议下一步</p><h2>${escapeHtml(nextTitle)}</h2><span>${escapeHtml(nextDescription)}</span><button data-route-action="${nextRoute}">${escapeHtml(nextAction)} →</button></div><div class="workspace-plan-health"><div><small>当前方案</small><strong>${escapeHtml(active.name)}</strong><span>${active.activeVersionId ? "已有保存检查点" : "还没有保存检查点"}</span><p>${goalCopy}</p></div>${health}</div><div class="workspace-next-details"><div><h3>最先关注</h3><ul>${priority}</ul></div><div class="workspace-quick-actions"><button data-route-action="editor">继续编辑</button><button data-route-action="evaluation">查看完整检查</button><button data-route-action="spatial">打开 3D</button><button data-route-action="purchases">记录一笔购买</button><button data-route-action="agent">问问助手</button></div></div></article>` : `<article class="workspace-empty"><h2>从第一套方案开始</h2><p>告诉我们用途、预算和对噪音的要求，再一步步完成装机。</p><button data-open-create>新建装机方案</button></article>`;
     grid.innerHTML = state.plans.filter((plan) => plan.name.toLowerCase().includes(search.toLowerCase())).map((plan) => `<article data-plan-card="${escapeHtml(plan.id)}"${plan.id === active?.id ? " data-active=true" : ""}><div><small>${plan.status === "archived" ? "已归档" : plan.id === active?.id ? "正在进行" : "其他方案"}</small><h3>${escapeHtml(plan.name)}</h3><p>${plan.activeVersionId ? "已有保存检查点" : "还没有保存检查点"}</p><span>${formatDate(plan.updatedAt)} · ${plan.dirty ? "有新修改" : "已保存"}</span></div><footer>${plan.status === "archived" ? `<button data-restore-plan="${escapeHtml(plan.id)}">恢复方案</button>` : `<button data-activate-plan="${escapeHtml(plan.id)}">打开方案</button>`}<button data-delete-plan="${escapeHtml(plan.id)}">移入回收区</button></footer></article>`).join("") || `<div class="workspace-empty"><p>没有匹配的方案。</p></div>`;
     if (active) {
       const signature = `${active.id}:${active.draftRevision}:${state.localRevision}`;
-      if (signature !== editorPlanSignature) { editorPlanSignature = signature; fields.innerHTML = editorMarkup(active.draft.config as BuildConfigDocument, active.name, getCatalog()); }
+      if (signature !== editorPlanSignature) {
+        editorPlanSignature = signature;
+        fields.innerHTML = editorMarkup(active.draft.config as BuildConfigDocument, active.name, getCatalog());
+        if (v3Partial) {
+          const systemHost = fields.querySelector<HTMLElement>("[data-system-profile-panel]");
+          if (systemHost) renderSystemPanel(systemHost, config, {
+            evaluation: progressive,
+            onSelect(selection) {
+              const current: unknown = store.getState().activePlan?.draft.config;
+              if (!isBuildConfigV3(current)) return;
+              store.replaceDraft({ ...structuredClone(current), system: selection } as never);
+            },
+            onLayoutsChange(logicalLayouts) {
+              const current: unknown = store.getState().activePlan?.draft.config;
+              if (!isBuildConfigV3(current)) return;
+              store.replaceDraft({ ...structuredClone(current), logicalLayouts } as never);
+            },
+          });
+        }
+      }
     } else fields.innerHTML = `<div class="workspace-empty">请选择或创建方案。</div>`;
     host.querySelector<HTMLButtonElement>("[data-undo]")!.disabled = !state.canUndo;
     host.querySelector<HTMLButtonElement>("[data-redo]")!.disabled = !state.canRedo;
     renderImpact();
     host.querySelector<HTMLElement>("[data-evaluation-guidance]")!.innerHTML = v3Partial
-      ? `<article class="workspace-evaluation-decision" data-level="warn" data-v3-partial-evaluation><header><div><small>V3 部分拓扑</small><h2>尚不能给出购买或兼容性结论</h2><p>兼容性、功耗、温度、噪音、价格、物理布局与接线都仍待评估；请逐步补全实例与证据。</p></div><button type="button" data-route-action="editor">查看拓扑</button></header></article>`
+      ? progressiveEvaluationMarkup(progressive)
       : evaluationGuideMarkup(state.evaluation);
     const purchaseContent = host.querySelector<HTMLElement>("[data-purchase-content]")!;
     const v3PurchaseContent = host.querySelector<HTMLElement>("[data-v3-purchase-content]")!;
@@ -598,6 +890,10 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     marketDetails.hidden = v3Partial;
     buildParts.hidden = v3Partial;
     v3BuildParts.hidden = !v3Partial;
+    if (v3Partial) {
+      v3PurchaseContent.innerHTML = progressivePriceMarkup(progressive);
+      v3BuildParts.innerHTML = progressiveBomMarkup(progressive);
+    }
     setLegacyV2SurfacesVisible(v3Partial);
     renderTasks();
     renderProgress();
@@ -633,12 +929,30 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
   const unsubscribeRoute = router.subscribe((route) => {
     for (const page of host.querySelectorAll<HTMLElement>("[data-workspace-page]")) page.hidden = page.dataset.workspacePage !== route;
     if (route === "evaluation") setEvaluationView("summary");
+    // Saved-version procedure replay can validate a large immutable closure.
+    // Do not perform that work while the user is creating/editing plans; the
+    // execution surface owns it and loads it only when first opened.
+    if (route === "build") ensureSystemExecutionPanel();
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
   });
 
   host.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
+    if (target.closest("[data-v3-thermal-apply]")) {
+      const current = state.activePlan?.draft.config;
+      const error = host.querySelector<HTMLElement>("[data-v3-thermal-error]");
+      if (!isBuildConfigV3(current)) return;
+      try {
+        const scenarioId = host.querySelector<HTMLSelectElement>("[data-v3-thermal-scenario]")?.value ?? "";
+        const ambientMin = Number(host.querySelector<HTMLInputElement>("[data-v3-ambient-min]")?.value);
+        const ambientMax = Number(host.querySelector<HTMLInputElement>("[data-v3-ambient-max]")?.value);
+        store.replaceDraft(withV3ThermalInputs(current, scenarioId, ambientMin, ambientMax) as never);
+      } catch (cause) {
+        if (error) error.textContent = cause instanceof Error ? cause.message : "无法应用热噪输入";
+      }
+      return;
+    }
     const route = target.closest<HTMLElement>("[data-route-action]")?.dataset.routeAction;
     if (route) router.navigate(route as WorkspaceRoute);
     const evaluationView = target.closest<HTMLElement>("[data-evaluation-view]")?.dataset.evaluationView;
@@ -764,8 +1078,19 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
         await store.create(name, parseConfig(await file.text()));
       } else {
         const timestamp = new Date().toISOString();
-        const config = mode === "template" ? createDefaultN6Config("new-plan", timestamp) : createEmptyBuildConfig("new-plan", timestamp);
         const useCase = host.querySelector<HTMLSelectElement>("[data-create-use-case]")!.value;
+        let config: BuildConfigDocument;
+        if (mode === "template") config = createDefaultN6Config("new-plan", timestamp);
+        else if (creationCapabilities.topologyV3Enabled) {
+          const v3 = createEmptyBuildConfigV3("new-plan", name, timestamp);
+          v3.intent = {
+            state: "answered",
+            value: useCase === "家庭存储 / NAS" ? "nas" : useCase === "AI / 创作" ? "workstation" : "pc",
+            source: "user",
+            confirmedByUser: true,
+          };
+          config = creationCapabilities.systemProfilesEnabled ? withRecommendedSystem(v3).config : v3;
+        } else config = createEmptyBuildConfig("new-plan", timestamp);
         const rawBudget = host.querySelector<HTMLInputElement>("[data-create-budget]")!.value.trim();
         const budgetCny = rawBudget ? Math.max(0, Number(rawBudget) || 0) : null;
         const location = host.querySelector<HTMLSelectElement>("[data-create-location]")!.value;
@@ -802,6 +1127,15 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
     }
     const control = (event.target as HTMLElement).closest<HTMLInputElement | HTMLSelectElement>("[data-config-field]");
     if (!control) return;
+    if (control.dataset.configField === "selection.psuTopology" && control.value === "dual") {
+      const current = state.activePlan?.draft.config;
+      if (current?.schemaVersion === "2.0.0" && !current.selection.secondaryPsuId) {
+        control.value = current.selection.psuTopology;
+        impact.innerHTML = '<article data-level="warn"><strong>先选择第二颗电源</strong><span>选定具体 PSU 后会一次性切换到双电源并启用同步启动，避免保存不完整配置。</span></article>';
+        fields.querySelector<HTMLSelectElement>('[data-config-field="selection.secondaryPsuId"]')?.focus();
+        return;
+      }
+    }
     if (control.dataset.configField === "caseId") {
       const current = state.activePlan?.draft.config;
       const nextCaseId = control.value;
@@ -838,6 +1172,6 @@ export function mountWorkspacePages(root: HTMLElement, store: PlanStore, router:
       render(state);
       evidencePanel.refreshCatalog();
     },
-    dispose() { unsubscribeStore(); unsubscribeTasks(); unsubscribeProgress(); unsubscribeRoute(); evidencePanel.dispose(); host.remove(); },
+    dispose() { unsubscribeStore(); unsubscribeTasks(); unsubscribeProgress(); unsubscribeRoute(); requirementsPanel.dispose(); solverPanel.dispose(); scenarioCompare.dispose(); jobStatusPanel.dispose(); backupPanel.dispose(); portabilityPanel.dispose(); doctorPanel.dispose(); governedPricePanel.dispose(); governedRecommendationPanel.dispose(); evidencePanel.dispose(); systemExecutionPanel?.dispose(); host.remove(); },
   };
 }

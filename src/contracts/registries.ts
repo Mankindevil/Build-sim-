@@ -54,6 +54,7 @@ export const METRIC_REGISTRY = deepFreeze({
   "physical.case_volume": { valueType: "number", unitIds: ["liter"], operators: ["lte", "between"] },
   "physical.gpu_length": { valueType: "number", unitIds: ["mm"], operators: ["lte", "between"] },
   "thermal.ambient": { valueType: "number", unitIds: ["celsius"], operators: ["eq", "between"] },
+  "thermal.scenario": { valueType: "string", unitIds: [], operators: ["eq"] },
   "acoustics.noise": { valueType: "number", unitIds: ["dba"], operators: ["lte", "between"] },
   "platform.operating_system": { valueType: "string_set", unitIds: [], operators: ["includes"] },
 } as const satisfies Record<string, MetricDefinition>);
@@ -102,6 +103,7 @@ export const FACET_REGISTRY = deepFreeze({
   "pcie.lane_sharing": { valueType: "string_set", unitIds: [], operators: ["includes"] },
   "storage.interface": { valueType: "string", unitIds: [], operators: ["eq"] },
   "storage.boot_support": { valueType: "boolean", unitIds: [], operators: ["eq"] },
+  "storage.capacity_bytes": { valueType: "number", unitIds: ["byte"], operators: ["gte", "lte", "between"] },
   "storage.recording_technology": { valueType: "string", unitIds: [], operators: ["eq"] },
   "hba.mode": { valueType: "string", unitIds: [], operators: ["eq"] },
   "cooling.fan_mounts": { valueType: "string_set", unitIds: [], operators: ["includes"] },
@@ -114,6 +116,15 @@ export const FACET_REGISTRY = deepFreeze({
   "thermal.curve_refs": { valueType: "string_set", unitIds: [], operators: ["includes"] },
   "acoustic.curve_refs": { valueType: "string_set", unitIds: [], operators: ["includes"] },
   "package.contents": { valueType: "string_set", unitIds: [], operators: ["includes"] },
+  /** Governed assembly-resource vocabulary shared by RequirementNode and package supplies. */
+  "resource.kind": { valueType: "string", unitIds: [], operators: ["eq"] },
+  "cable.connector_standard": { valueType: "string_set", unitIds: [], operators: ["includes"] },
+  "fastener.thread": { valueType: "string", unitIds: [], operators: ["eq"] },
+  "fastener.length_mm": { valueType: "number", unitIds: ["mm"], operators: ["eq", "gte", "lte", "between"] },
+  "fastener.head": { valueType: "string", unitIds: [], operators: ["eq"] },
+  "tool.drive": { valueType: "string", unitIds: [], operators: ["eq"] },
+  "consumable.type": { valueType: "string", unitIds: [], operators: ["eq"] },
+  "accessory.standard": { valueType: "string", unitIds: [], operators: ["eq"] },
   "acoustic.noise_class": { valueType: "string", unitIds: [], operators: ["eq"] },
 } as const satisfies Record<string, FacetDefinition>);
 
@@ -138,11 +149,31 @@ export const UNIT_REGISTRY = deepFreeze({
   liter: { dimension: "volume-liter", canonicalUnitId: "liter", scale: 1 },
   score: { dimension: "benchmark-specific-score", canonicalUnitId: "score", scale: 1 },
   percent: { dimension: "ratio-percent", canonicalUnitId: "percent", scale: 1 },
+  a: { dimension: "electric-current", canonicalUnitId: "a", scale: 1 },
+  byte: { dimension: "byte-count", canonicalUnitId: "byte", scale: 1 },
+  tbw: { dimension: "storage-endurance-tbw", canonicalUnitId: "tbw", scale: 1 },
+  degree: { dimension: "plane-angle", canonicalUnitId: "degree", scale: 1 },
+  rpm: { dimension: "rotational-speed", canonicalUnitId: "rpm", scale: 1 },
 } as const);
 
 export const OBSERVATION_FIELD_REGISTRY = deepFreeze({
-  "physical.clearance": { valueType: "number", unitIds: ["mm"], subjectKinds: ["placement", "connection", "mount"], uncertainty: "required" },
+  "physical.clearance": { valueType: "number", unitIds: ["mm"], subjectKinds: ["placement", "connection", "mount", "port"], uncertainty: "required" },
   "physical.component_length": { valueType: "number", unitIds: ["mm"], subjectKinds: ["instance"], uncertainty: "required" },
+  "case.envelope.width": { valueType: "number", unitIds: ["mm"], subjectKinds: ["instance"], uncertainty: "required" },
+  "case.envelope.height": { valueType: "number", unitIds: ["mm"], subjectKinds: ["instance"], uncertainty: "required" },
+  "case.envelope.depth": { valueType: "number", unitIds: ["mm"], subjectKinds: ["instance"], uncertainty: "required" },
+  "case.anchor.x": { valueType: "number", unitIds: ["mm"], subjectKinds: ["mount", "port"], uncertainty: "required" },
+  "case.anchor.y": { valueType: "number", unitIds: ["mm"], subjectKinds: ["mount", "port"], uncertainty: "required" },
+  "case.anchor.z": { valueType: "number", unitIds: ["mm"], subjectKinds: ["mount", "port"], uncertainty: "required" },
+  "case.routing.width": { valueType: "number", unitIds: ["mm"], subjectKinds: ["mount", "port", "connection"], uncertainty: "required" },
+  "case.routing.height": { valueType: "number", unitIds: ["mm"], subjectKinds: ["mount", "port", "connection"], uncertainty: "required" },
+  "case.routing.depth": { valueType: "number", unitIds: ["mm"], subjectKinds: ["mount", "port", "connection"], uncertainty: "required" },
+  "case.pose.x": { valueType: "number", unitIds: ["mm"], subjectKinds: ["placement", "mount", "port"], uncertainty: "required" },
+  "case.pose.y": { valueType: "number", unitIds: ["mm"], subjectKinds: ["placement", "mount", "port"], uncertainty: "required" },
+  "case.pose.z": { valueType: "number", unitIds: ["mm"], subjectKinds: ["placement", "mount", "port"], uncertainty: "required" },
+  "case.pose.roll": { valueType: "number", unitIds: ["degree"], subjectKinds: ["placement", "mount", "port"], uncertainty: "required" },
+  "case.pose.pitch": { valueType: "number", unitIds: ["degree"], subjectKinds: ["placement", "mount", "port"], uncertainty: "required" },
+  "case.pose.yaw": { valueType: "number", unitIds: ["degree"], subjectKinds: ["placement", "mount", "port"], uncertainty: "required" },
   "identity.serial_number": { valueType: "string", unitIds: [], subjectKinds: ["instance"], uncertainty: "not_applicable" },
   "firmware.bios_version": { valueType: "string", unitIds: [], subjectKinds: ["firmware_instance"], uncertainty: "not_applicable" },
   "port.presence": { valueType: "boolean", unitIds: [], subjectKinds: ["port"], uncertainty: "not_applicable" },
@@ -151,6 +182,12 @@ export const OBSERVATION_FIELD_REGISTRY = deepFreeze({
   "storage.disk_locator": { valueType: "string", unitIds: [], subjectKinds: ["instance", "placement", "port"], uncertainty: "not_applicable" },
   "boot.result": { valueType: "string", unitIds: [], subjectKinds: ["plan"], uncertainty: "not_applicable" },
   "package.item_count": { valueType: "number", unitIds: ["count"], subjectKinds: ["instance"], uncertainty: "optional" },
+  "assembly.resource_assertion_hash": { valueType: "string", unitIds: [], subjectKinds: ["instance"], uncertainty: "not_applicable" },
+  "assembly.check_assertion_hash": { valueType: "string", unitIds: [], subjectKinds: ["instance"], uncertainty: "not_applicable" },
+  "thermal.ambient_temperature": { valueType: "number", unitIds: ["celsius"], subjectKinds: ["plan"], uncertainty: "required" },
+  "thermal.fan_rpm": { valueType: "number", unitIds: ["rpm"], subjectKinds: ["instance"], uncertainty: "required" },
+  "thermal.component_temperature": { valueType: "number", unitIds: ["celsius"], subjectKinds: ["instance"], uncertainty: "required" },
+  "acoustics.sound_pressure": { valueType: "number", unitIds: ["dba"], subjectKinds: ["instance"], uncertainty: "required" },
 } as const satisfies Record<string, ObservationFieldDefinition>);
 
 /** Stable physical instance kinds. Logical pools/vdevs deliberately do not appear here. */
@@ -246,7 +283,7 @@ const ELECTRICAL_SAFETY_FACETS = new Set<FacetId>([
   "io.port_types", "io.header_types", "io.endpoint_ids",
   "gpu.power_connectors", "psu.capacity", "psu.connectors",
   "power.source_type", "power.load", "power.cable_families",
-  "cooling.pump_header", "package.contents",
+  "cooling.pump_header", "package.contents", "cable.connector_standard",
 ]);
 
 const BOOT_FACETS = new Set<FacetId>([
@@ -255,7 +292,7 @@ const BOOT_FACETS = new Set<FacetId>([
   "motherboard.bios_version", "motherboard.bios_upgrade_methods", "motherboard.display_outputs",
   "motherboard.supported_operating_systems", "memory.type", "memory.capacity",
   "pcie.lane_count", "pcie.slot_types", "pcie.lane_sharing",
-  "storage.interface", "storage.boot_support", "hba.mode",
+  "storage.interface", "storage.boot_support", "storage.capacity_bytes", "hba.mode",
   "firmware.version", "firmware.upgrade_path_refs",
   "driver.supported_operating_systems", "driver.package_versions",
 ]);
@@ -268,6 +305,8 @@ const OBSERVATIONAL_PASS_FACETS = new Set<FacetId>([
   "physical.width", "physical.height", "physical.depth", "mount.point_ids",
   "case.side_panel", "case.gpu_max_length", "case.cpu_cooler_max_height",
   "gpu.length", "gpu.slot_width", "cooling.fan_mounts", "cooling.radiator_support",
+  "resource.kind", "fastener.thread", "fastener.length_mm", "fastener.head",
+  "tool.drive", "consumable.type", "accessory.standard",
   ...INFORMATIONAL_FACETS,
 ]);
 
@@ -333,7 +372,25 @@ export const HARDWARE_ADAPTER_REGISTRY = deepFreeze({
   "adapter.catalog.generic": {
     adapterId: "adapter.catalog.generic", adapterVersion: "1.0.0", contractVersion: "hardware-adapter-v1",
     componentKindIds: ["case", "motherboard", "cpu", "memory_module", "gpu", "psu", "cpu_cooler", "aio", "radiator", "pump", "case_fan", "fan_rgb_hub", "storage_drive", "hba", "raid_controller", "storage_expander", "backplane", "nic", "capture_card", "expansion_board", "pcie_card", "cable", "adapter", "bracket"],
-    emittedFacetIds: Object.keys(FACET_REGISTRY) as FacetId[],
+    // v1.0.0 is a persisted adapter contract. U6 resource/allocation facets
+    // are governed vocabulary for package manifests and RequirementNode, not
+    // newly claimed outputs of this frozen catalog adapter version.
+    emittedFacetIds: [
+      "identity.category", "identity.manufacturer", "identity.model", "identity.revision",
+      "physical.width", "physical.height", "physical.depth", "mount.standard", "mount.point_ids",
+      "cpu.socket", "motherboard.cpu_socket", "motherboard.chipset", "motherboard.memory_type",
+      "motherboard.memory_slot_count", "motherboard.memory_population_rules", "motherboard.form_factor",
+      "motherboard.bios_version", "motherboard.bios_upgrade_methods", "motherboard.display_outputs",
+      "motherboard.supported_operating_systems", "memory.type", "memory.capacity", "io.port_types",
+      "io.header_types", "io.endpoint_ids", "case.motherboard_form_factors", "case.side_panel",
+      "case.gpu_max_length", "case.cpu_cooler_max_height", "gpu.length", "gpu.slot_width",
+      "gpu.power_connectors", "psu.capacity", "psu.connectors", "power.source_type", "power.load",
+      "power.cable_families", "pcie.lane_count", "pcie.slot_types", "pcie.lane_sharing",
+      "storage.interface", "storage.boot_support", "storage.recording_technology", "hba.mode",
+      "cooling.fan_mounts", "cooling.radiator_support", "cooling.pump_header", "firmware.version",
+      "firmware.upgrade_path_refs", "driver.supported_operating_systems", "driver.package_versions",
+      "thermal.curve_refs", "acoustic.curve_refs", "package.contents", "acoustic.noise_class",
+    ],
     safetyClass: "electrical_safety", sourcePolicy: "official_required",
   },
 } as const satisfies Record<string, HardwareAdapterManifest>);

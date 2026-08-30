@@ -2,6 +2,7 @@ import { isSha256Hex } from "../hash";
 import { resolveAuthoritativeContext, type AuthoritativeResolver } from "../contracts/trusted-context";
 import { canProjectUserObservation, type UserObservation } from "../observations/contracts";
 import type { EvaluationDecision, FacetPredicate } from "../requirements/contracts";
+import { validateDestructiveActionPlanShapeRuntime } from "./destructive-action-runtime.mjs";
 export type { LogicalLayoutSelection } from "../topology/contracts";
 
 export interface StorageLayoutEvaluation {
@@ -12,6 +13,10 @@ export interface StorageLayoutEvaluation {
     vdevId: string;
     estimatedUsableBytes: { min: number; max: number };
     faultTolerance: { diskFailures: number; conditions: string[] };
+    diskInstanceIds?: string[];
+    mixedCapacityLossBytes?: number;
+    controllerPaths?: Array<{ diskInstanceId: string; controllerInstanceId: string; controllerPortId: string; transport: string }>;
+    resilverRisks?: string[];
   }>;
   hbaAndPathDecisionIds: string[];
   expansionOptions: Array<{
@@ -23,6 +28,8 @@ export interface StorageLayoutEvaluation {
   }>;
   decisions: EvaluationDecision[];
   assumptions: string[];
+  spareDiskIds?: string[];
+  helpRefs?: string[];
 }
 
 export type DestructiveActionPlan =
@@ -94,35 +101,36 @@ export function validateStorageLayoutEvaluation(value: StorageLayoutEvaluation):
   if (!isSha256Hex(value.layoutSelectionHash) || !value.systemProfileId) errors.push("storage evaluation identity/hash invalid");
   if (![value.usableBytes.min, value.usableBytes.max].every(Number.isFinite) || value.usableBytes.min < 0 || value.usableBytes.max < value.usableBytes.min) errors.push("usableBytes interval invalid");
   if (value.vdevResults.some((result) => !result.vdevId || ![result.estimatedUsableBytes.min, result.estimatedUsableBytes.max].every(Number.isFinite) || result.estimatedUsableBytes.min < 0 || result.estimatedUsableBytes.max < result.estimatedUsableBytes.min || !Number.isInteger(result.faultTolerance.diskFailures) || result.faultTolerance.diskFailures < 0 || result.faultTolerance.conditions.length === 0)) errors.push("vdev result interval/fault tolerance invalid");
+  if (value.vdevResults.some((result) => result.diskInstanceIds !== undefined && (new Set(result.diskInstanceIds).size !== result.diskInstanceIds.length || result.diskInstanceIds.some((id) => !id)))) errors.push("vdev disk instance IDs invalid");
+  if (value.vdevResults.some((result) => result.mixedCapacityLossBytes !== undefined && (!Number.isFinite(result.mixedCapacityLossBytes) || result.mixedCapacityLossBytes < 0))) errors.push("vdev mixed-capacity loss invalid");
+  if (value.vdevResults.some((result) => result.controllerPaths !== undefined && (new Set(result.controllerPaths.map((path) => `${path.controllerInstanceId}:${path.controllerPortId}`)).size !== result.controllerPaths.length || result.controllerPaths.some((path) => !path.diskInstanceId || !path.controllerInstanceId || !path.controllerPortId || !path.transport)))) errors.push("vdev controller paths invalid");
+  if (value.vdevResults.some((result) => result.resilverRisks !== undefined && (result.resilverRisks.length === 0 || result.resilverRisks.some((risk) => !risk)))) errors.push("vdev resilver risks invalid");
   if (new Set(value.vdevResults.map((result) => result.vdevId)).size !== value.vdevResults.length) errors.push("storage evaluation vdevId must be unique");
   if (new Set(value.hbaAndPathDecisionIds).size !== value.hbaAndPathDecisionIds.length || value.hbaAndPathDecisionIds.some((id) => !id)) errors.push("HBA/path decision IDs invalid");
   if (value.expansionOptions.some((option) => !option.optionId || !Number.isInteger(option.requiredInstanceCount) || option.requiredInstanceCount <= 0 || option.riskDecisionIds.length === 0)) errors.push("expansion option requirements/risks invalid");
   if (new Set(value.expansionOptions.map((option) => option.optionId)).size !== value.expansionOptions.length) errors.push("expansion optionId must be unique");
   if (value.decisions.some((decision) => decision.domain !== "storage")) errors.push("storage evaluation may only contain storage decisions");
   if (new Set(value.decisions.map((decision) => decision.decisionId)).size !== value.decisions.length) errors.push("storage decisionId must be unique");
+  if (value.spareDiskIds !== undefined && (new Set(value.spareDiskIds).size !== value.spareDiskIds.length || value.spareDiskIds.some((id) => !id))) errors.push("spare disk IDs invalid");
+  if (value.helpRefs !== undefined && (new Set(value.helpRefs).size !== value.helpRefs.length || value.helpRefs.some((ref) => !ref.startsWith("help.storage.")))) errors.push("storage help refs invalid");
   return errors;
 }
 
 /** Confirmation is valid only for the exact safety hash and one unique locator per disk. */
+export function validateDestructiveActionPlanShape(value: unknown): string[] {
+  return validateDestructiveActionPlanShapeRuntime(value);
+}
+
 export function validateDestructiveActionPlan(value: unknown, context?: DestructiveActionValidationContext): string[] {
-  if (!isRecord(value)) return ["destructive action must be an object"];
+  const errors = validateDestructiveActionPlanShape(value);
+  if (!isRecord(value)) return errors;
   const plan = value as unknown as DestructiveActionPlan;
-  const errors: string[] = [];
-  const allowed = ["actionId", "diskInstanceIds", "locatorObservationIds", "inputPlanId", "inputPlanVersionId", "inputConfigHash", "inputPlanRevisionHash", "inputProcedureSafetyHash", "confirmation", "confirmationAt"];
-  if (Object.keys(value).some((key) => !allowed.includes(key))) errors.push("destructive action contains unknown fields");
-  if (!plan.inputPlanId || !plan.inputPlanVersionId) errors.push("destructive action plan identity missing");
-  if (plan.confirmation !== "required" && plan.confirmation !== "confirmed") errors.push("destructive action confirmation state invalid");
-  if (!plan.actionId || !Array.isArray(plan.diskInstanceIds) || plan.diskInstanceIds.length === 0 || plan.diskInstanceIds.some((id) => !id) || new Set(plan.diskInstanceIds).size !== plan.diskInstanceIds.length) errors.push("destructive action requires unique disk instances");
-  if (!Array.isArray(plan.locatorObservationIds) || !Array.isArray(plan.diskInstanceIds) || plan.locatorObservationIds.length !== plan.diskInstanceIds.length || plan.locatorObservationIds.some((id) => !id) || new Set(plan.locatorObservationIds).size !== plan.locatorObservationIds.length) errors.push("every disk requires one unique locator observation");
-  if (!isSha256Hex(plan.inputConfigHash) || !isSha256Hex(plan.inputPlanRevisionHash) || !isSha256Hex(plan.inputProcedureSafetyHash)) errors.push("destructive action plan/config/safety hashes invalid");
   if (!context) return [...errors, "destructive action requires current plan/config/revision and disk locator context"];
   if (!isSha256Hex(context.currentConfigHash) || !isSha256Hex(context.currentPlanRevisionHash) || !isSha256Hex(context.currentProcedureSafetyHash)
     || !context.currentPlanId || !context.currentPlanVersionId || !isRecord(context.diskRevisionHashes)
     || typeof context.diskLocatorObservations?.get !== "function") errors.push("destructive action validation context invalid");
   if (plan.inputPlanId !== context.currentPlanId || plan.inputPlanVersionId !== context.currentPlanVersionId || plan.inputConfigHash !== context.currentConfigHash || plan.inputPlanRevisionHash !== context.currentPlanRevisionHash) errors.push("destructive action confirmation is stale for the current plan/config/revision");
   if (plan.confirmation === "confirmed" && plan.inputProcedureSafetyHash !== context.currentProcedureSafetyHash) errors.push("destructive confirmation is stale for the current procedureSafetyHash");
-  if (plan.confirmation === "confirmed" && (typeof plan.confirmationAt !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(plan.confirmationAt) || !Number.isFinite(Date.parse(plan.confirmationAt)))) errors.push("destructive confirmation timestamp invalid");
-  if (plan.confirmation === "required" && "confirmationAt" in value) errors.push("unconfirmed destructive action cannot carry confirmationAt");
   if (Array.isArray(plan.diskInstanceIds) && Array.isArray(plan.locatorObservationIds) && typeof context.diskLocatorObservations?.get === "function") {
     for (const [index, diskInstanceId] of plan.diskInstanceIds.entries()) {
       const observation = context.diskLocatorObservations.get(diskInstanceId);

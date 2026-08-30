@@ -55,6 +55,11 @@ function identityFromSku(sku) {
     ...(sku.mpn ? { mpn: sku.mpn } : {}),
     category: sku.category,
     skuId: sku.id,
+    familyId: sku.familyId ?? sku.id,
+    modelId: sku.modelId ?? sku.model,
+    variantId: sku.variantId ?? sku.id,
+    ...(sku.revision ? { revision: sku.revision } : {}),
+    ...(sku.region ? { region: sku.region } : {}),
     basis: "governed-sku-user-asserted",
   };
 }
@@ -64,7 +69,8 @@ function assertedIdentity(value, brand) {
   const input = inputObject(value);
   const assertedBrand = boundedText(input.brand, "identity.brand", { required: true, max: 120 });
   if (assertedBrand.toLocaleLowerCase() !== brand.toLocaleLowerCase()) throw new EvidenceHttpError("identity_brand_mismatch", "Identity brand does not match the governed official URL", 409);
-  if (input.model !== undefined || input.mpn !== undefined || input.category !== undefined || input.skuId !== undefined) {
+  if (["model", "mpn", "category", "skuId", "familyId", "modelId", "variantId", "revision", "region"]
+    .some((field) => input[field] !== undefined)) {
     throw new EvidenceHttpError("ungoverned_product_identity", "Precise product identity requires an exact governed skuId", 422);
   }
   return { brand, basis: "official-domain-only" };

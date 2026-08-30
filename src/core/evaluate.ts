@@ -4,34 +4,34 @@ import type { SkuCatalog } from "../sku/types";
 import { requireSku } from "../sku/catalog";
 import { evaluateOccupancy, type EngineFinding, type EngineResult } from "./engine";
 import {
-  buildN6Occupancy,
-  conflictMarkerParts,
-  n6DomainFindings,
-} from "../adapters/jonsbo-n6/occupancy";
-import type { GeometryEnv } from "../adapters/jonsbo-n6/geometry";
-import { N6_DECK_Y, buildN6Geometry } from "../adapters/jonsbo-n6/geometry";
-import { buildN6Routing, type N6Routing } from "../adapters/jonsbo-n6/routing";
-import { buildN6Assembly } from "../adapters/jonsbo-n6/assembly";
+  DEFAULT_CASE_RUNTIME_ADAPTER_REGISTRY,
+  CaseRuntimeAdapterRegistry,
+  caseRuntimeResolution,
+  type CaseRuntimeAdapter,
+  type CaseRuntimeEnvironmentInput,
+  type CaseRuntimeFans,
+  type CaseRuntimeGpuOverride,
+  type CaseRuntimeRouting,
+  type CaseRuntimeResolution,
+  type CaseRuntimeLookupIdentity,
+} from "../adapters/runtime";
 import type { AssemblyPlan } from "./assembly";
 import type { PlacedPart } from "./geometry";
 import { buildFieldBounds, type FieldBounds } from "./thermal-field";
-import { planN6Wiring } from "../wiring/plan";
 import type { WiringPlan } from "../wiring/types";
 import { buildSataPorts, needsHba } from "./policy";
 import {
   PLANNING_THETA,
   computeThermal,
-  leftFanMountAvailable,
   type ComponentInput,
   type FanGroupInput,
   type FanMode,
   type Range,
   type ThermalResult,
 } from "./thermal";
-import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
-import { caseCapabilities, n6PowerProfile } from "./capabilities";
-import { evaluatePhysicalConstraints, PHYSICAL_RULESET_VERSION, type PhysicalEvaluation } from "./physical";
-import { evaluateCalibration, type CalibrationEvaluation } from "./calibration";
+import { PHYSICAL_RULESET_VERSION, type PhysicalEvaluation } from "./physical";
+import type { CalibrationEvaluation } from "./calibration";
+import { validateCaseInstanceOverrides, type CaseInstanceOverrides } from "../adapters/instance-overrides";
 
 /**
  * User-side knobs the SKU catalog cannot supply: ambient, fan policy, which fan
@@ -62,9 +62,23 @@ export interface ThermalEnv {
   /** Keep the chipset x4 envelope in the model before an HBA is bought. */
   reserveHbaSlot?: boolean;
   /** User-entered card envelope for the lab's "custom GPU" path (no SKU exists). */
-  gpuOverride?: GeometryEnv["gpuOverride"];
+  gpuOverride?: CaseRuntimeGpuOverride | null | undefined;
   /** The exact power object used to build this thermal input, preventing a second estimate. */
   power?: PowerEvaluation;
+}
+
+export interface CaseEvaluationRuntimeInput {
+  registry?: CaseRuntimeAdapterRegistry;
+  /** Exact identity from the locked adapter/catalog artifact. */
+  caseIdentity?: CaseRuntimeLookupIdentity;
+  /** Explicit compatibility seam for V2 configs; fails closed if variants exist. */
+  legacySkuFallback?: boolean;
+  /** Root-resolved, immutable plan/instance override input; never read globally. */
+  instanceOverrides?: Readonly<CaseInstanceOverrides>;
+  /** Multi-instance/V3 caller seam; the selected instance is resolved by exact key. */
+  instanceOverridesByInstanceId?: Readonly<Record<string, Readonly<CaseInstanceOverrides>>>;
+  /** Exact case component instance receiving overrides. */
+  caseInstanceId?: string;
 }
 
 export interface PsuLoad {
@@ -161,17 +175,10 @@ export interface NoiseEvaluation {
  * Which fan mounts are populated is already in `ThermalEnv.fans`, so the geometry
  * model reads the same field rather than keeping a second copy that could drift.
  */
-export function geometryEnvFrom(env?: Pick<ThermalEnv, "fans"> & Partial<ThermalEnv>): GeometryEnv {
-  if (!env) return {};
+export function geometryEnvFrom(env?: Pick<ThermalEnv, "fans"> & Partial<ThermalEnv>): CaseRuntimeEnvironmentInput {
+  if (!env) return { fans: {} };
   return {
-    frontFans: env.fans.front ? (env.fans.front.size === 140 ? "140x2" : "120x2") : "none",
-    frontFanCount: env.fans.front?.count ?? 0,
-    rearFan: Boolean(env.fans.rear?.count),
-    rearFanCount: env.fans.rear?.count ?? 0,
-    driveFans: Boolean(env.fans.left?.count),
-    driveFanCount: env.fans.left?.count ?? 0,
-    sideFans: Boolean(env.fans.right?.count),
-    sideFanCount: env.fans.right?.count ?? 0,
+    fans: env.fans,
     ...(env.reserveHbaSlot ? { reserveHbaSlot: true } : {}),
     ...(env.gpuOverride ? { gpuOverride: env.gpuOverride } : {}),
   };
@@ -179,6 +186,8 @@ export function geometryEnvFrom(env?: Pick<ThermalEnv, "fans"> & Partial<Thermal
 
 export interface BuildEvaluation {
   config: BuildConfig;
+  /** Exact case adapter identity plus per-domain ready/blocked state. */
+  caseRuntime: CaseRuntimeResolution;
   /** Incomplete drafts are valid workspace state, but never masquerade as a full case evaluation. */
   readiness: BuildReadiness;
   occupancy: EngineResult;
@@ -188,7 +197,7 @@ export interface BuildEvaluation {
   /** The millimetre geometry every consumer shares — preview, collisions, heat field. */
   geometry: PlacedPart[];
   /** Cable runs resolved over that geometry: ports, polylines, required lengths. */
-  routing: N6Routing;
+  routing: CaseRuntimeRouting;
   /** Assembly order derived from the mounting tree, install corridors and cables. */
   assembly: AssemblyPlan;
   /** Present only when the caller supplies airflow inputs. */
@@ -207,38 +216,15 @@ export interface BuildEvaluation {
   calibration: CalibrationEvaluation;
 }
 
-/** Exclude mount rows that cannot physically contribute to this evaluation. */
-function effectiveGenericCaseFanGroups(config: BuildConfig, catalog?: SkuCatalog): CaseFanGroupSelection[] {
-  if (config.caseId !== n6Profile.caseId) return [];
-  const groups = config.selection.fanGroups ?? [];
-  return groups.filter((found) => {
-    if (catalog) {
-      const mount = caseCapabilities(config.caseId)?.fanMounts.find((entry) => entry.id === found.mountId);
-      const max = mount?.maxCountBySize[found.sizeMm];
-      if (!mount || !mount.supportedSizes.includes(found.sizeMm) || max === undefined || found.count < 1 || found.count > max) return false;
-      if (found.mountId === "left" && (config.selection.psuTopology === "bottom" || config.selection.psuTopology === "dual")) return false;
-      if (found.mountId === "rear" && !isSfx(config.selection.psuId, catalog) && (config.selection.psuTopology === "auto" || config.selection.psuTopology === "dual")) return false;
-      if (found.mountId === "front" && isSfx(config.selection.psuId, catalog) && (config.selection.psuTopology === "auto" || config.selection.psuTopology === "dual")) return false;
-      const cooler = catalog.skus.find((sku) => sku.id === config.selection.coolerId);
-      if (found.mountId === "front" && cooler?.attrs?.fitHint === "front240") return false;
-    }
-    return true;
-  });
-}
-
-/** Translate reviewed case mounts (and a reviewed AIO's bundled fans) into N6 airflow zones. */
-export function configuredFanGroups(config: BuildConfig, catalog?: SkuCatalog): ThermalEnv["fans"] {
-  const groups = effectiveGenericCaseFanGroups(config, catalog);
-  if (config.caseId !== n6Profile.caseId) return {};
-  const group = (mountId: string): FanGroupInput | null => {
-    const found = groups.find((entry) => entry.mountId === mountId);
-    return found ? { size: found.sizeMm, count: found.count } : null;
-  };
-  const fans: ThermalEnv["fans"] = { front: group("front"), rear: group("rear"), left: group("left"), right: group("right") };
-  const cooler = catalog?.skus.find((sku) => sku.id === config.selection.coolerId);
-  if (cooler?.attrs?.type === "aio" && cooler.attrs.radiatorMm === 240) fans.front = { size: 120, count: 2 };
-  if (cooler?.attrs?.type === "aio" && cooler.attrs.radiatorMm === 120) fans.rear = { size: 120, count: 1 };
-  return fans;
+/** Resolve only the selected, registered case; absence never borrows another case's mounts. */
+export function configuredFanGroups(
+  config: BuildConfig,
+  catalog?: SkuCatalog,
+  registry: CaseRuntimeAdapterRegistry = DEFAULT_CASE_RUNTIME_ADAPTER_REGISTRY,
+  identity?: CaseRuntimeLookupIdentity,
+): ThermalEnv["fans"] {
+  const adapter = identity?.skuId === config.caseId ? registry.resolveExact(identity) : registry.resolveLegacySku(config.caseId);
+  return adapter?.configuredFanGroups(config, catalog) ?? {};
 }
 
 function isSfx(psuId: string, catalog: SkuCatalog): boolean {
@@ -275,8 +261,13 @@ export function derivePower(
   config: BuildConfig,
   catalog: SkuCatalog,
   env: Partial<Pick<ThermalEnv, "workload" | "cpuPl1W" | "cpuPl2W" | "fans">> = {},
+  registry: CaseRuntimeAdapterRegistry = DEFAULT_CASE_RUNTIME_ADAPTER_REGISTRY,
+  identity?: CaseRuntimeLookupIdentity,
 ): PowerEvaluation {
-  const profile = n6PowerProfile();
+  const adapter = identity?.skuId === config.caseId ? registry.resolveExact(identity) : registry.resolveLegacySku(config.caseId);
+  if (!adapter) throw new Error(`case runtime adapter unavailable: ${config.caseId}`);
+  const profile = adapter.powerProfile;
+  const defaults = adapter.defaults;
   const workload: Workload = env.workload ?? "idle";
   const unknown: string[] = [];
   const base = profile.boardBaseW;
@@ -294,9 +285,10 @@ export function derivePower(
 
   const cpu = catalog.skus.find((sku) => sku.id === config.cpuId);
   const gpu = catalog.skus.find((sku) => sku.id === config.selection.gpuId);
-  const disk = catalog.skus.find((sku) => sku.id === (config.selection.diskSkuId ?? n6Profile.defaults.diskSkuId));
-  const hbaId = config.selection.hbaSkuId ?? n6Profile.hba.defaultSkuId;
-  const hba = catalog.skus.find((sku) => sku.id === hbaId);
+  const diskId = config.selection.diskSkuId ?? defaults.diskSkuId;
+  const disk = diskId ? catalog.skus.find((sku) => sku.id === diskId) : undefined;
+  const hbaId = config.selection.hbaSkuId ?? defaults.hbaSkuId;
+  const hba = hbaId ? catalog.skus.find((sku) => sku.id === hbaId) : undefined;
   const cpuIdle = profile.cpuIdleW;
   const cpuRead = profile.cpuReadW;
   const cpuQuickSync = profile.cpuQuickSyncW;
@@ -311,7 +303,7 @@ export function derivePower(
     : null;
   const hbaW = needsHba(config.selection, buildSataPorts(catalog, config)) || config.selection.hbaMode === "always" ? numericAttr(hba, "tdpW") ?? hba?.power.tdpW ?? profile.hbaW : 0;
   const diskEach = workload === "idle" ? disk?.power.idleW ?? null : disk?.power.maxOperatingW ?? null;
-  const hddW = diskEach === null ? null : diskEach * config.selection.diskCount;
+  const hddW = config.selection.diskCount === 0 ? 0 : diskEach === null ? null : diskEach * config.selection.diskCount;
   if (cpuW === null) unknown.push("cpu.power");
   if (gpuW === null) unknown.push("gpu.power");
   if (diskEach === null && config.selection.diskCount > 0) unknown.push("storage.power");
@@ -324,8 +316,9 @@ export function derivePower(
   const driveDcW = dual ? sumNullable([hddW, 2]) : 0;
   const dcW = sumNullable([mainDcW, driveDcW]);
   const mainPsu = catalog.skus.find((sku) => sku.id === config.selection.psuId);
+  const secondaryPsuId = config.selection.secondaryPsuId ?? defaults.secondaryPsuSkuId;
   const secondaryPsu = dual
-    ? catalog.skus.find((sku) => sku.id === (config.selection.secondaryPsuId ?? n6Profile.defaults.secondaryPsuSkuId))
+    ? catalog.skus.find((sku) => sku.id === secondaryPsuId)
     : undefined;
   const psuLoad = (sku: typeof mainPsu, role: PsuLoad["role"], chamber: PsuLoad["chamber"], dc: number | null): PsuLoad => {
     const capacityW = sku?.power.ratedW ?? null;
@@ -343,7 +336,8 @@ export function derivePower(
   if (dual) psus.push(psuLoad(secondaryPsu, "secondary", "lower", driveDcW));
   const wallW = sumNullable(psus.map((load) => load.wallW));
   const psuWasteW = sumNullable(psus.map((load) => load.wasteHeatW));
-  const pathologicalDiskW = disk?.attrs?.startup12vPeakA && typeof disk.attrs.startup12vPeakA === "number" ? disk.attrs.startup12vPeakA * 12 * config.selection.diskCount : null;
+  const pathologicalDiskW = config.selection.diskCount === 0 ? 0
+    : disk?.attrs?.startup12vPeakA && typeof disk.attrs.startup12vPeakA === "number" ? disk.attrs.startup12vPeakA * 12 * config.selection.diskCount : null;
   const pathologicalGpuW = gpu?.power.tgpW ?? null;
   const pathologicalDcW = sumNullable([base, fanW, cpuPl2, pathologicalGpuW, hbaW, dual ? 0 : pathologicalDiskW]);
   const pathologicalDriveW = dual ? sumNullable([pathologicalDiskW, 2]) : 0;
@@ -388,9 +382,9 @@ export function derivePower(
   };
 }
 
-function deriveFanProcurementRequirements(config: BuildConfig, catalog: SkuCatalog): UnresolvedProcurementRequirement[] {
-  const mounts = new Map((caseCapabilities(config.caseId)?.fanMounts ?? []).map((mount) => [mount.id, mount]));
-  return effectiveGenericCaseFanGroups(config, catalog).map((group) => {
+function deriveFanProcurementRequirements(config: BuildConfig, catalog: SkuCatalog, adapter: CaseRuntimeAdapter): UnresolvedProcurementRequirement[] {
+  const mounts = new Map(adapter.capabilities.fanMounts.map((mount) => [mount.id, mount]));
+  return adapter.effectiveFanSelections(config, catalog).map((group) => {
     const mount = mounts.get(group.mountId);
     return {
       id: `case-fan:${group.mountId}:${group.sizeMm}mm:${group.count}`,
@@ -459,75 +453,18 @@ function deriveNoise(config: BuildConfig, catalog: SkuCatalog): NoiseEvaluation 
   };
 }
 
-export function deriveBom(config: BuildConfig, catalog: SkuCatalog): BuildLineItem[] {
-  const d = n6Profile.defaults;
-  const items: BuildLineItem[] = [
-    { skuId: config.caseId, qty: 1, bucket: "owned" },
-    { skuId: config.boardId, qty: 1, bucket: "owned" },
-    { skuId: config.cpuId, qty: 1, bucket: "owned" },
-    { skuId: d.ownedNvmeSkuId, qty: d.ownedNvmeQty, bucket: "owned" },
-    { skuId: config.selection.psuId, qty: 1, bucket: "buy_now" },
-    { skuId: config.selection.coolerId, qty: 1, bucket: "buy_now" },
-    { skuId: config.selection.memoryId, qty: 1, bucket: "buy_now" },
-  ];
-
-  if (config.selection.gpuId !== "gpu.none") {
-    items.push({ skuId: config.selection.gpuId, qty: 1, bucket: "upgrade_later" });
-  }
-
-  const diskSku = config.selection.diskSkuId ?? d.diskSkuId;
-  if (config.selection.diskCount > 0) {
-    items.push({ skuId: diskSku, qty: config.selection.diskCount, bucket: "buy_now" });
-  }
-
-  if (config.selection.boot === "bay") {
-    items.push({ skuId: d.bootBaySkuId, qty: 1, bucket: "buy_now" });
-  }
-
-  const hbaNeeded = needsHba(config.selection, buildSataPorts(catalog, config));
-  if (hbaNeeded) {
-    items.push({
-      skuId: config.selection.hbaSkuId ?? n6Profile.hba.defaultSkuId,
-      qty: 1,
-      bucket: "buy_now",
-    });
-  }
-
-  // Data cables come from the wiring plan so the BOM cannot disagree with the
-  // checklist about how many breakouts the chosen port mix actually needs.
-  const checklist = planN6Wiring(config, catalog).checklist;
-  const qtyOf = (id: string): number => checklist.find((c) => c.id === id)?.requiredQty ?? 0;
-  const slimQty = qtyOf("slimsas-breakout");
-  if (slimQty > 0) items.push({ skuId: d.slimsasCableSkuId, qty: slimQty, bucket: "buy_now" });
-  const minisasQty = qtyOf("hba-minisas");
-  if (minisasQty > 0) {
-    items.push({ skuId: "accessory.minisas-hd-4xsata", qty: minisasQty, bucket: "buy_now" });
-  }
-
-  if (config.selection.psuTopology === "dual") {
-    items.push({
-      skuId: config.selection.secondaryPsuId ?? d.secondaryPsuSkuId,
-      qty: 1,
-      bucket: "optional",
-    });
-    if (config.selection.dualStart === "sync") {
-      items.push({ skuId: d.dualSyncSkuId, qty: 1, bucket: "buy_now" });
-    }
-  }
-
-  if (config.bom.length > 0) {
-    const byId = new Map(items.map((i) => [i.skuId, i]));
-    for (const line of config.bom) {
-      byId.set(line.skuId, line);
-    }
-    return [...byId.values()];
-  }
-
-  for (const line of items) requireSku(catalog, line.skuId);
-  return items;
+export function deriveBom(
+  config: BuildConfig,
+  catalog: SkuCatalog,
+  registry: CaseRuntimeAdapterRegistry = DEFAULT_CASE_RUNTIME_ADAPTER_REGISTRY,
+  identity?: CaseRuntimeLookupIdentity,
+): BuildLineItem[] {
+  const adapter = identity?.skuId === config.caseId ? registry.resolveExact(identity) : registry.resolveLegacySku(config.caseId);
+  if (!adapter) throw new Error(`case runtime adapter unavailable: ${config.caseId}`);
+  return adapter.deriveBom(config, catalog);
 }
 
-function memoryCoolerFindings(config: BuildConfig, catalog: SkuCatalog): EngineFinding[] {
+function memoryCoolerFindings(config: BuildConfig, catalog: SkuCatalog, adapter: CaseRuntimeAdapter): EngineFinding[] {
   const findings: EngineFinding[] = [];
   let cooler;
   let memory;
@@ -551,11 +488,12 @@ function memoryCoolerFindings(config: BuildConfig, catalog: SkuCatalog): EngineF
   }
 
   if (memory.attrs?.xmp) {
+    const cpu = catalog.skus.find((sku) => sku.id === config.cpuId);
     findings.push({
       id: "mem.xmp-overclock",
       verdict: "warn",
       evidence: memory.attrs?.qvl ? "official" : "unknown",
-      message: `${memory.name}: XMP above i5-14500 JEDEC DDR5-4800; QVL listing does not guarantee rated speed`,
+      message: `${memory.name}: XMP exceeds ${cpu?.name ?? config.cpuId} JEDEC baseline; QVL listing does not guarantee rated speed`,
       related: [memory.id],
     });
   }
@@ -583,11 +521,12 @@ function memoryCoolerFindings(config: BuildConfig, catalog: SkuCatalog): EngineF
   }
 
   if (fit === "tight" && !psuSfx) {
-    findings.push({
+    const limit = adapter.capabilities.coolerLimits.overheadAtxMm;
+    if (limit !== null) findings.push({
       id: "cooler.at-65mm-ceiling",
       verdict: "warn",
       evidence: "inferred",
-      message: `${cooler.name} sits at the N6 ${n6Profile.coolerLimits.overheadAtxMm}mm cooler ceiling with no ATX intake margin`,
+      message: `${cooler.name} sits at the registered ${limit}mm cooler ceiling with no ATX intake margin`,
       related: [cooler.id],
     });
   }
@@ -595,28 +534,30 @@ function memoryCoolerFindings(config: BuildConfig, catalog: SkuCatalog): EngineF
   return findings;
 }
 
-function psuLengthFindings(config: BuildConfig, catalog: SkuCatalog): EngineFinding[] {
+function psuLengthFindings(config: BuildConfig, catalog: SkuCatalog, adapter: CaseRuntimeAdapter): EngineFinding[] {
   const findings: EngineFinding[] = [];
+  const atxLimit = adapter.capabilities.psuLimits.atxMaxLengthMm;
+  const sfxLimit = adapter.capabilities.psuLimits.sfxMaxLengthMm;
   const check = (psuId: string) => {
     try {
       const psu = requireSku(catalog, psuId);
       const form = psu.attrs?.form;
       const len = psu.dims.lengthMm;
-      if (form === "ATX" && typeof len === "number" && len > n6Profile.psuLimits.atxMaxLengthMm) {
+      if (form === "ATX" && typeof len === "number" && atxLimit !== null && len > atxLimit) {
         findings.push({
           id: `psu.atx-too-long:${psuId}`,
           verdict: "bad",
           evidence: "official",
-          message: `${psu.name} length ${len}mm exceeds N6 ATX max ${n6Profile.psuLimits.atxMaxLengthMm}mm`,
+          message: `${psu.name} length ${len}mm exceeds the registered ATX max ${atxLimit}mm`,
           related: [psuId],
         });
       }
-      if (form === "SFX" && typeof len === "number" && len > n6Profile.psuLimits.sfxMaxLengthMm) {
+      if (form === "SFX" && typeof len === "number" && sfxLimit !== null && len > sfxLimit) {
         findings.push({
           id: `psu.sfx-too-long:${psuId}`,
           verdict: "bad",
           evidence: "official",
-          message: `${psu.name} length ${len}mm exceeds N6 SFX max ${n6Profile.psuLimits.sfxMaxLengthMm}mm`,
+          message: `${psu.name} length ${len}mm exceeds the registered SFX max ${sfxLimit}mm`,
           related: [psuId],
         });
       }
@@ -629,7 +570,7 @@ function psuLengthFindings(config: BuildConfig, catalog: SkuCatalog): EngineFind
   return findings;
 }
 
-function gpuHbaFindings(config: BuildConfig, catalog: SkuCatalog): EngineFinding[] {
+function gpuHbaFindings(config: BuildConfig, catalog: SkuCatalog, adapter: CaseRuntimeAdapter): EngineFinding[] {
   const findings: EngineFinding[] = [];
   if (config.selection.gpuId === "gpu.none") return findings;
   let gpu;
@@ -645,17 +586,15 @@ function gpuHbaFindings(config: BuildConfig, catalog: SkuCatalog): EngineFinding
     // With the x16 slot taken by the GPU, an x8 HBA has only the chipset x4 slot
     // left. Whether that slot is open-ended is not in our board data, and an x8
     // card cannot enter a closed x4 slot — so this is a check, not a verdict.
-    const width = Number(
-      catalog.skus.find((s) => s.id === (config.selection.hbaSkuId ?? n6Profile.hba.defaultSkuId))
-        ?.attrs?.["pcieWidth"],
-    );
+    const hbaSkuId = config.selection.hbaSkuId ?? adapter.defaults.hbaSkuId;
+    const width = Number(catalog.skus.find((sku) => sku.id === hbaSkuId)?.attrs?.["pcieWidth"]);
     if (Number.isFinite(width) && width > 4) {
       findings.push({
         id: "hba.slot-width",
         verdict: "warn",
         evidence: "unknown",
         message: `显卡占用 x16 后，x${width} 的 HBA 只剩芯片组 x4 槽可用；该槽是否为开放式（免挡板尾端）我们没有确认过，闭口 x4 槽插不进 x${width} 卡。装机前先看板卡实物或改用 x4 卡。`,
-        related: [config.selection.hbaSkuId ?? n6Profile.hba.defaultSkuId, "pcie.slot2"],
+        related: [hbaSkuId ?? "hba.unresolved", "pcie.slot2"],
       });
     }
   }
@@ -671,12 +610,14 @@ function gpuHbaFindings(config: BuildConfig, catalog: SkuCatalog): EngineFinding
   }
 
   const len = gpu.dims.lengthMm ?? null;
-  if (len !== null && len > n6Profile.gpuLimits.planningMinMm) {
+  const planningMin = adapter.capabilities.gpuLimits.planningMinMm;
+  const publishedMax = adapter.capabilities.gpuLimits.publishedMaxMm;
+  if (len !== null && planningMin !== null && len > planningMin) {
     findings.push({
       id: "gpu.length-band",
       verdict: "warn",
       evidence: "inferred",
-      message: `${gpu.name} length ${len}mm is above the softer N6 ${n6Profile.gpuLimits.planningMinMm}mm planning band; ${n6Profile.gpuLimits.publishedMaxMm}mm is the published upper endpoint without endpoint mapping`,
+      message: `${gpu.name} length ${len}mm is above the registered ${planningMin}mm planning band${publishedMax === null ? "" : `; ${publishedMax}mm is the published upper endpoint without endpoint mapping`}`,
       related: [gpu.id],
     });
   }
@@ -786,6 +727,7 @@ function runThermal(
   catalog: SkuCatalog,
   env: ThermalEnv,
   psuInLowerChamber: boolean,
+  adapter: CaseRuntimeAdapter,
 ): ThermalResult {
   const disk = config.selection.diskSkuId
     ? catalog.skus.find((s) => s.id === config.selection.diskSkuId)
@@ -799,6 +741,7 @@ function runThermal(
   const eff = Number(psu?.attrs?.["cybeneticsEfficiency"] ?? psu?.attrs?.["planningEfficiency"]);
 
   return computeThermal({
+    profile: adapter.thermalProfile!,
     components: componentInputs(
       config,
       catalog,
@@ -807,8 +750,7 @@ function runThermal(
     ),
     ambientC: env.ambientC,
     fanMode: env.fanMode,
-    // A left-side fan cannot draw air through a bracket that is no longer there.
-    fans: leftFanMountAvailable(psuInLowerChamber) ? env.fans : { ...env.fans, left: null },
+    fans: adapter.thermalFans(config, env.fans),
     diskCount: config.selection.diskCount,
     diskWattsEach: diskW!,
     diskEvidence: disk?.power?.evidence ?? "unknown",
@@ -834,7 +776,13 @@ const MISSING_LABELS: Record<string, string> = {
   "selection.diskSkuId": "数据硬盘型号",
 };
 
-function incompleteEvaluation(config: BuildConfig, catalog: SkuCatalog, readiness: BuildReadiness): BuildEvaluation {
+function incompleteEvaluation(
+  config: BuildConfig,
+  catalog: SkuCatalog,
+  readiness: BuildReadiness,
+  adapter: CaseRuntimeAdapter | null = null,
+  spatialHash: string | null = null,
+): BuildEvaluation {
   const findings: EngineFinding[] = readiness.missing.map((path) => ({
     id: `config.missing:${path}`,
     verdict: "bad",
@@ -888,7 +836,7 @@ function incompleteEvaluation(config: BuildConfig, catalog: SkuCatalog, readines
     unknown: ["wallPowerW", "smartTemperatureC", "cpuTemperatureC", "gpuTemperatureC", "noiseDba", "fanCurve"], provenance: [], narrowedRanges: {}, hash: "unavailable",
   };
   return {
-    config, readiness,
+    config, caseRuntime: caseRuntimeResolution(adapter, config.caseId, spatialHash), readiness,
     occupancy: { verdict: "bad", findings, conflicts: [] },
     wiring, findings, bom: [], geometry: [], routing: { cables: [], ports: [], findings: [] }, assembly: { steps: [], constraints: [], findings: [] },
     power, price: derivePrice([], catalog), noise: { totalDba: null, evidence: "unknown", parts: {}, unknown: ["方案尚未完整"] }, physical, calibration,
@@ -899,30 +847,90 @@ export function evaluateBuild(
   config: BuildConfig,
   catalog: SkuCatalog,
   env?: ThermalEnv,
+  runtimeInput: CaseRuntimeAdapterRegistry | CaseEvaluationRuntimeInput = DEFAULT_CASE_RUNTIME_ADAPTER_REGISTRY,
 ): BuildEvaluation {
-  const readiness = buildReadiness(config, catalog);
-  if (readiness.status === "incomplete") return incompleteEvaluation(config, catalog, readiness);
-  const fans = configuredFanGroups(config, catalog);
+  const runtime: CaseEvaluationRuntimeInput = runtimeInput instanceof CaseRuntimeAdapterRegistry
+    ? { registry: runtimeInput, legacySkuFallback: true }
+    : runtimeInput;
+  const registry = runtime.registry ?? DEFAULT_CASE_RUNTIME_ADAPTER_REGISTRY;
+  if (runtime.caseIdentity && runtime.caseIdentity.skuId !== config.caseId) throw new TypeError("case runtime identity does not match selected case SKU");
+  const adapter = runtime.caseIdentity
+    ? registry.resolveExact(runtime.caseIdentity)
+    : runtime.legacySkuFallback === true ? registry.resolveLegacySku(config.caseId) : null;
+  if (runtime.instanceOverrides && runtime.instanceOverridesByInstanceId) {
+    throw new TypeError("case runtime accepts either one instance override or an instance override map, not both");
+  }
+  if (runtime.instanceOverridesByInstanceId && !runtime.caseInstanceId) {
+    throw new TypeError("case runtime instance override map requires an exact caseInstanceId");
+  }
+  for (const [instanceId, entry] of Object.entries(runtime.instanceOverridesByInstanceId ?? {})) {
+    if (entry.instanceId !== instanceId) throw new TypeError("case runtime instance override map key mismatch");
+  }
+  const instanceOverrides = runtime.caseInstanceId
+    ? runtime.instanceOverridesByInstanceId?.[runtime.caseInstanceId] ?? runtime.instanceOverrides
+    : runtime.instanceOverrides;
+  if (instanceOverrides) {
+    const errors = validateCaseInstanceOverrides(instanceOverrides);
+    if (errors.length) throw new TypeError(`case instance overrides invalid: ${errors.join("; ")}`);
+    if (!adapter || instanceOverrides.planId !== config.id
+      || !runtime.caseInstanceId
+      || instanceOverrides.instanceId !== runtime.caseInstanceId
+      || instanceOverrides.baseManifestHash !== adapter.identity.manifestHash
+      || !adapter.identity.projectionHash
+      || instanceOverrides.baseProjectionHash !== adapter.identity.projectionHash) {
+      throw new TypeError("case instance overrides do not match the exact plan/manifest/projection runtime");
+    }
+  }
+  const spatialHash = instanceOverrides?.spatialHash ?? null;
+  const baseReadiness = buildReadiness(config, catalog, adapter?.capabilities ?? null);
+  const missing = [...baseReadiness.missing];
+  const readiness: BuildReadiness = { status: missing.length ? "incomplete" : "ready", missing };
+  if (readiness.status === "incomplete") return incompleteEvaluation(config, catalog, readiness, adapter, spatialHash);
+  // A ready evaluation can only exist with the exact selected runtime adapter.
+  if (!adapter) return incompleteEvaluation(config, catalog, { status: "incomplete", missing: ["case.adapter"] });
+  const fans = adapter.configuredFanGroups(config, catalog);
   const resolvedEnv = env ? { ...env, fanMode: config.selection.fanMode ?? "balanced", fans } : undefined;
-  const power = resolvedEnv?.power ?? derivePower(config, catalog, { ...(resolvedEnv ?? {}), fans });
+  const power = resolvedEnv?.power ?? derivePower(config, catalog, { ...(resolvedEnv ?? {}), fans }, registry, adapter.identity);
   const thermalEnv = resolvedEnv ? { ...resolvedEnv, power, loads: resolvedEnv.loads ?? power.loads } : undefined;
-  const geomEnv = geometryEnvFrom(resolvedEnv ?? { fans });
-  const geometry = buildN6Geometry(config, catalog, geomEnv);
-  const occupancyModel = buildN6Occupancy(config, catalog, geomEnv);
+  const geometryInput = geometryEnvFrom(resolvedEnv ?? { fans });
+  if (instanceOverrides) geometryInput.instanceOverrides = instanceOverrides;
+  const geomEnv = adapter.geometryEnvironment(geometryInput);
+  const geometry = adapter.buildGeometry(config, catalog, geomEnv);
+  const occupancyModel = adapter.buildOccupancy(config, catalog, geomEnv);
+  const legacyReplayOnly = adapter.authorityStatus === "legacy_unverified";
+  const replayAuthorityFinding: EngineFinding[] = legacyReplayOnly ? [{
+    id: "case-runtime.authority:legacy-unverified",
+    verdict: "warn",
+    evidence: "unknown",
+    message: "当前机箱运行时模型仅用于旧版确定性重放；它没有逐字段事实/推导绑定，因此可展示几何、接线与装配结果，但不能据此给出安全通过结论。",
+    related: [config.caseId, adapter.adapterId],
+  }] : [];
   const extra: EngineFinding[] = [
-    ...n6DomainFindings(config),
-    ...memoryCoolerFindings(config, catalog),
-    ...psuLengthFindings(config, catalog),
-    ...gpuHbaFindings(config, catalog),
-    ...validateConfig(config, catalog)
+    ...replayAuthorityFinding,
+    ...adapter.domainFindings(config, catalog),
+    ...memoryCoolerFindings(config, catalog, adapter),
+    ...psuLengthFindings(config, catalog, adapter),
+    ...gpuHbaFindings(config, catalog, adapter),
+    ...validateConfig(config, catalog, { caseCapabilities: adapter.capabilities })
       .filter((issue) => issue.verdict === "bad" && issue.path.startsWith("selection.fan"))
       .map((issue, index): EngineFinding => ({ id: `fan.config:${index}:${issue.path}`, verdict: "bad", evidence: "official", message: issue.message, related: [config.caseId, issue.path] })),
   ];
 
   const occupancy = evaluateOccupancy(occupancyModel, extra);
-  const wiring = planN6Wiring(config, catalog);
-  const bom = deriveBom(config, catalog);
-  const unresolvedFanRequirements = deriveFanProcurementRequirements(config, catalog);
+  const plannedWiring = adapter.planWiring(config, catalog);
+  const wiring: WiringPlan = legacyReplayOnly && plannedWiring.backplaneHarness.verdict === "ok"
+    ? {
+      ...plannedWiring,
+      backplaneHarness: {
+        ...plannedWiring.backplaneHarness,
+        verdict: "unknown",
+        evidence: "unknown",
+        notes: [...plannedWiring.backplaneHarness.notes, "legacy_unverified runtime 不能单独支撑电气安全通过。"],
+      },
+    }
+    : plannedWiring;
+  const bom = adapter.deriveBom(config, catalog);
+  const unresolvedFanRequirements = deriveFanProcurementRequirements(config, catalog, adapter);
   const fanProcurementFindings: EngineFinding[] = unresolvedFanRequirements.map((requirement) => ({
     id: `procurement.unresolved:${requirement.id}`,
     verdict: "warn",
@@ -950,21 +958,21 @@ export function evaluateBuild(
     related: [harness.feedPsuId, config.selection.diskSkuId ?? config.caseId],
   };
 
-  const psuInLowerChamber =
-    config.selection.psuTopology === "bottom" || config.selection.psuTopology === "dual";
+  const psuInLowerChamber = adapter.psuInLowerChamber(config);
   const bottomPsuFindings: EngineFinding[] = [];
-  if (psuInLowerChamber) {
-    const m = n6Profile.fanMounts;
+  const lowerPolicy = adapter.lowerChamberPolicy;
+  if (psuInLowerChamber && lowerPolicy) {
     bottomPsuFindings.push({
       id: "psu.bottom-removes-left-fan-bracket",
       verdict: "warn",
       evidence: "official",
-      message: `下置 SFX 按手册 §8.1 取下左侧风扇架，而 §14 的左侧 ${m.left.size}mm×${m.left.count} 风扇位就在这块支架上：机箱 ${m.left.count + m.right.count} 个侧风扇位只剩右侧 ${m.right.count} 个，且下置电源与盘仓同处下层腔体。`,
+      message: lowerPolicy.effectDescription,
       related: [config.selection.psuId, config.caseId],
     });
   }
 
-  const diskForThermal = catalog.skus.find((sku) => sku.id === (config.selection.diskSkuId ?? n6Profile.defaults.diskSkuId));
+  const diskForThermalId = config.selection.diskSkuId ?? adapter.defaults.diskSkuId;
+  const diskForThermal = catalog.skus.find((sku) => sku.id === diskForThermalId);
   const diskWattsForThermal = thermalEnv?.workload === "idle" ? diskForThermal?.power.idleW : diskForThermal?.power.maxOperatingW;
   const lowerPsuId = config.selection.psuTopology === "dual"
     ? config.selection.secondaryPsuId
@@ -979,7 +987,14 @@ export function evaluateBuild(
       Number.isFinite(efficiencyForThermal) &&
       efficiencyForThermal > 0,
   );
-  const thermal = thermalInputsKnown ? runThermal(config, catalog, thermalEnv!, psuInLowerChamber) : undefined;
+  const thermalDomainReady = adapter.domains.thermal.status === "ready" && adapter.thermalDeckY !== undefined;
+  const computedThermal = thermalInputsKnown && thermalDomainReady ? runThermal(config, catalog, thermalEnv!, psuInLowerChamber, adapter) : undefined;
+  const thermal = computedThermal && legacyReplayOnly ? {
+    ...computedThermal,
+    evidence: "unknown" as const,
+    assumptions: computedThermal.assumptions.map((assumption) => ({ ...assumption, evidence: "unknown" as const })),
+    notes: [...computedThermal.notes, "legacy_unverified runtime 的热模型仅供重放，不能支撑安全通过。"],
+  } : computedThermal;
   const thermalFindings: EngineFinding[] = [];
   if (thermalEnv && !thermalInputsKnown) {
     thermalFindings.push({
@@ -987,17 +1002,27 @@ export function evaluateBuild(
       verdict: "warn",
       evidence: "unknown",
       message: "温度模型缺少盘功耗或 PSU 效率事实；温度与废热保持 unknown，不使用默认数值填充。",
-      related: [config.selection.diskSkuId ?? n6Profile.defaults.diskSkuId, config.selection.psuId],
+      related: [diskForThermalId ?? config.caseId, config.selection.psuId],
+    });
+  }
+  if (thermalEnv && !thermalDomainReady) {
+    thermalFindings.push({
+      id: "case-runtime.blocked:thermal",
+      verdict: "warn",
+      evidence: "unknown",
+      message: `当前机箱 thermal 域被 adapter 阻断：${adapter.domains.thermal.reasonCodes.join(", ")}`,
+      related: [config.caseId, adapter.adapterId],
     });
   }
   if (thermal && thermalEnv) {
-    const requestedLeftFans = config.selection.fanGroups?.find((group) => group.mountId === "left")?.count ?? 0;
-    if (psuInLowerChamber && requestedLeftFans > 0) {
+    const unavailableMountId = lowerPolicy?.fanMountId;
+    const requestedUnavailableFans = config.selection.fanGroups?.find((group) => group.mountId === unavailableMountId)?.count ?? 0;
+    if (psuInLowerChamber && unavailableMountId && requestedUnavailableFans > 0) {
       thermalFindings.push({
         id: "thermal.left-fan-mount-conflict",
         verdict: "bad",
         evidence: "official",
-        message: `配置里请求安装左侧 ${requestedLeftFans} 个风扇，但下置电源已按 §8.1 拆掉那块支架——两者不能同时成立，评估未计入该风量。`,
+        message: `配置里请求安装 ${unavailableMountId} 风扇位 ${requestedUnavailableFans} 个风扇，但当前电源拓扑使该安装位不可用，评估未计入该风量。`,
         related: [config.selection.psuId, config.caseId],
       });
     }
@@ -1022,12 +1047,12 @@ export function evaluateBuild(
 
   // Routing runs after wiring and geometry because it needs both: the electrical
   // plan says which cables exist, the geometry says where their ends are.
-  const routing = buildN6Routing(geometry, wiring, catalog);
+  const routing = adapter.buildRouting(geometry, wiring, catalog);
   // Order comes last: it is a statement about the geometry and the cables, and
   // it cannot be derived before both of them exist.
-  const assembly = buildN6Assembly(geometry, routing.cables);
-  const physical = evaluatePhysicalConstraints(config, catalog, geometry, routing, wiring);
-  const calibration = evaluateCalibration();
+  const assembly = adapter.buildAssembly(geometry, routing.cables);
+  const physical = adapter.evaluatePhysical(config, catalog, geometry, routing, wiring);
+  const calibration = adapter.evaluateCalibration(config);
 
   const findings = [
     ...occupancy.findings,
@@ -1056,10 +1081,18 @@ export function evaluateBuild(
         related: [config.selection.psuId, config.cpuId],
       }),
     ),
-  ];
+  ].map((finding): EngineFinding => legacyReplayOnly && finding.verdict === "ok"
+    ? {
+      ...finding,
+      verdict: "warn",
+      evidence: "unknown",
+      message: `${finding.message}（legacy_unverified runtime：该通过项降级为待确认。）`,
+    }
+    : finding);
 
   return {
     config,
+    caseRuntime: caseRuntimeResolution(adapter, config.caseId, spatialHash),
     readiness,
     occupancy,
     wiring,
@@ -1067,7 +1100,7 @@ export function evaluateBuild(
     bom,
     // Conflict markers ride along with the geometry so the preview can only ever
     // draw the volume the engine actually objected to.
-    geometry: [...geometry, ...conflictMarkerParts(geometry, occupancy.conflicts)],
+    geometry: [...geometry, ...adapter.conflictMarkerParts(geometry, occupancy.conflicts)],
     routing,
     assembly,
     power,
@@ -1076,7 +1109,7 @@ export function evaluateBuild(
     physical,
     calibration,
     ...(thermal
-      ? { thermal, heatField: buildFieldBounds(geometry, thermal, N6_DECK_Y) }
+      ? { thermal, heatField: buildFieldBounds(geometry, thermal, adapter.thermalDeckY!) }
       : {}),
   };
 }

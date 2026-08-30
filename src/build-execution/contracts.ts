@@ -2,14 +2,17 @@ import { DOMAIN_HASH_FIELDS, isSha256Hex, type DomainHashes } from "../hash";
 import { validateFacetPredicate, validateFirmwareSettingValue, type FirmwareSettingId } from "../contracts/registries";
 import { resolveAuthoritativeContext, type AuthoritativeResolver } from "../contracts/trusted-context";
 import {
-  validateRequirementNode,
-  validateRequirementSatisfaction,
   validateSafetyCheckpointRecord,
   type FacetPredicate,
   type RequirementNode,
   type RequirementSatisfaction,
   type SafetyCheckpointRecord,
 } from "../requirements/contracts";
+import {
+  validateRequirementNodeRuntime,
+  validateRequirementSatisfactionRuntime,
+} from "../requirements/runtime.mjs";
+import { validateDestructiveActionPlanShape, type DestructiveActionPlan } from "../storage/contracts";
 
 export interface BundleItem {
   bundleItemId: string;
@@ -76,6 +79,8 @@ export interface ExecutionSession {
   status: "active" | "completed" | "stale" | "abandoned";
   staleReason?: string;
   results: BuildStepResult[];
+  /** Only separately confirmed, exact-disk actions are persisted here. */
+  destructiveActionConfirmations?: DestructiveActionPlan[];
 }
 
 /** Derived projection only. It is never accepted as mutable plan input. */
@@ -154,7 +159,14 @@ export interface ReadinessInputs {
 }
 
 /** Expected values are supplied by the governed evaluator/artifact repository. */
+export type EvaluatorArtifactAuthorityRef = `sha256:${string}` | `evaluation-artifact:${string}`;
+
 export interface ProcedureDependencyContext {
+  /**
+   * Legacy callers may still carry a repository-local identifier while the
+   * durable ExecutionRepository only accepts one of the content-addressed
+   * EvaluatorArtifactAuthorityRef forms.
+   */
   evaluatorArtifactRef: string;
   evaluatorArtifactHash: string;
   evaluatorVersion: string;
@@ -185,6 +197,72 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+function readinessInputErrors(input: ReadinessInputs): string[] {
+  const errors: string[] = [];
+  const requirementIds = input.requirementNodes.map(({ requirementId }) => requirementId);
+  if (new Set(requirementIds).size !== requirementIds.length) errors.push("requirementNodes IDs must be unique");
+  const requirementById = new Map(input.requirementNodes.map((requirement) => [requirement.requirementId, requirement]));
+  input.requirementNodes.forEach((requirement, index) => {
+    errors.push(...validateRequirementNodeRuntime(requirement).map((error) => `requirementNodes.${index}: ${error}`));
+  });
+
+  const checkpointIds = input.checkpointRecords.map(({ checkpointId }) => checkpointId);
+  if (new Set(checkpointIds).size !== checkpointIds.length) errors.push("checkpointRecords checkpointId values must be globally unique");
+  const expectedHashes = input.checkpointContext.expectedDependencyHashes;
+  if (!isSha256Hex(input.checkpointContext.procedureSafetyHash)
+    || !input.checkpointContext.planVersionId || !input.checkpointContext.procedureId
+    || !isRecord(expectedHashes)
+    || Object.values(expectedHashes).some((hash) => !isSha256Hex(hash))) {
+    errors.push("readiness checkpoint context invalid");
+  }
+  const validCheckpoints: SafetyCheckpointRecord[] = [];
+  input.checkpointRecords.forEach((checkpoint, index) => {
+    const requirement = requirementById.get(checkpoint.requirementId) ?? {
+      requirementId: checkpoint.requirementId,
+      kind: "user_decision" as const,
+      predicates: [],
+      quantity: 1,
+      criticality: "safety" as const,
+      producedBy: { ruleId: "checkpoint", ruleVersion: "1", instanceIds: [] },
+      evidenceRefs: [],
+    };
+    const expectedDependencyHash = isRecord(expectedHashes)
+      ? expectedHashes[checkpoint.checkpointId] : undefined;
+    const checkpointErrors = typeof expectedDependencyHash === "string"
+      ? validateSafetyCheckpointRecord(checkpoint, requirement, {
+        planVersionId: input.checkpointContext.planVersionId,
+        procedureId: input.checkpointContext.procedureId,
+        expectedDependencyHash,
+        expectedProcedureSafetyHash: input.checkpointContext.procedureSafetyHash,
+      })
+      : ["safety checkpoint dependency authority missing"];
+    errors.push(...checkpointErrors.map((error) => `checkpointRecords.${index}: ${error}`));
+    if (checkpointErrors.length === 0) validCheckpoints.push(checkpoint);
+  });
+
+  const satisfactionIds = input.satisfactions.map(({ requirementId }) => requirementId);
+  if (new Set(satisfactionIds).size !== satisfactionIds.length
+    || satisfactionIds.length !== requirementIds.length
+    || requirementIds.some((requirementId) => !satisfactionIds.includes(requirementId))) {
+    errors.push("satisfactions must contain exactly one entry per requirement");
+  }
+  input.satisfactions.forEach((satisfaction, index) => {
+    const requirement = requirementById.get(satisfaction.requirementId);
+    if (requirement === undefined) errors.push(`satisfactions.${index}: requirement missing from authoritative inputs`);
+    else errors.push(...validateRequirementSatisfactionRuntime(requirement, satisfaction, validCheckpoints)
+      .map((error) => `satisfactions.${index}: ${error}`));
+  });
+
+  const requiredGroups = ["assembly", "power", "post", "systemInstall", "workload", "destructive"] as const;
+  for (const group of requiredGroups) {
+    const ids = input.requiredCheckpointIds[group];
+    if (!isStringArray(ids) || ids.some((id) => id.length === 0) || new Set(ids).size !== ids.length) {
+      errors.push(`requiredCheckpointIds.${group} invalid`);
+    }
+  }
+  return errors;
+}
+
 export function validateBundleItem(value: unknown): string[] {
   if (!isRecord(value)) return ["bundle item must be an object"];
   const item = value as unknown as BundleItem;
@@ -210,6 +288,8 @@ export function validateAssemblyRequirement(value: unknown): string[] {
 
 /** A pure derivation contract: callers supply requirements/checkpoints, never readiness booleans. */
 export function deriveBuildReadiness(input: ReadinessInputs): BuildReadiness {
+  const inputErrors = readinessInputErrors(input);
+  if (inputErrors.length > 0) throw new TypeError(`Invalid build readiness inputs: ${inputErrors.join("; ")}`);
   const openById = new Map(input.satisfactions.map((item) => [item.requirementId, item.status !== "satisfied"]));
   const hasOpenBefore = (stages: readonly NonNullable<RequirementNode["requiredBefore"]>[]) => input.requirementNodes.some((node) => stages.includes(node.requiredBefore as NonNullable<RequirementNode["requiredBefore"]>) && openById.get(node.requirementId) !== false);
   const requirementById = new Map(input.requirementNodes.map((node) => [node.requirementId, node]));
@@ -264,36 +344,7 @@ export async function deriveBuildReadinessAuthoritatively(
   if (!input || !Array.isArray(input.requirementNodes) || !Array.isArray(input.satisfactions)
     || !Array.isArray(input.checkpointRecords) || !isRecord(input.checkpointContext)
     || !isRecord(input.requiredCheckpointIds)) return { errors: ["readiness authoritative inputs invalid"] };
-  const errors: string[] = [];
-  const requirementById = new Map(input.requirementNodes.map((requirement) => [requirement.requirementId, requirement]));
-  input.requirementNodes.forEach((requirement, index) => errors.push(...validateRequirementNode(requirement).map((error) => `requirementNodes.${index}: ${error}`)));
-  input.satisfactions.forEach((satisfaction, index) => {
-    const requirement = requirementById.get(satisfaction.requirementId);
-    if (!requirement) errors.push(`satisfactions.${index}: requirement missing from authoritative inputs`);
-    else {
-      const checkpoint = input.checkpointRecords.find((item) => item.requirementId === requirement.requirementId);
-      const expectedDependencyHash = checkpoint === undefined ? undefined : input.checkpointContext.expectedDependencyHashes[checkpoint.checkpointId];
-      errors.push(...validateRequirementSatisfaction(
-        requirement,
-        satisfaction,
-        checkpoint,
-        checkpoint && expectedDependencyHash ? {
-          planVersionId: input.checkpointContext.planVersionId,
-          procedureId: input.checkpointContext.procedureId,
-          expectedDependencyHash,
-          expectedProcedureSafetyHash: input.checkpointContext.procedureSafetyHash,
-        } : undefined,
-      ).map((error) => `satisfactions.${index}: ${error}`));
-    }
-  });
-  const requiredGroups = ["assembly", "power", "post", "systemInstall", "workload", "destructive"] as const;
-  for (const group of requiredGroups) {
-    const ids = input.requiredCheckpointIds[group];
-    if (!isStringArray(ids) || new Set(ids).size !== ids.length) errors.push(`requiredCheckpointIds.${group} invalid`);
-  }
-  if (!isSha256Hex(input.checkpointContext.procedureSafetyHash)
-    || !input.checkpointContext.planVersionId || !input.checkpointContext.procedureId
-    || !isRecord(input.checkpointContext.expectedDependencyHashes)) errors.push("readiness checkpoint context invalid");
+  const errors = readinessInputErrors(input);
   if (errors.length > 0) return { errors };
   return { readiness: deriveBuildReadiness(input), errors: [] };
 }
@@ -384,12 +435,26 @@ export function validateExecutionSession(sessionValue: unknown, procedureValue: 
   const session = sessionValue as unknown as ExecutionSession;
   const procedure = procedureValue as unknown as BuildProcedure;
   const errors: string[] = [];
-  if (Object.keys(sessionValue).some((key) => !["executionSessionId", "planVersionId", "procedureId", "evaluationHash", "procedureSafetyHash", "status", "staleReason", "results"].includes(key))) errors.push("execution session contains unknown fields");
+  if (Object.keys(sessionValue).some((key) => !["executionSessionId", "planVersionId", "procedureId", "evaluationHash", "procedureSafetyHash", "status", "staleReason", "results", "destructiveActionConfirmations"].includes(key))) errors.push("execution session contains unknown fields");
   if (!session.executionSessionId || !session.planVersionId || !isSha256Hex(session.evaluationHash) || !isSha256Hex(session.procedureSafetyHash)) errors.push("session identity/hashes invalid");
   if (!["active", "completed", "stale", "abandoned"].includes(String(session.status))) errors.push("execution session status invalid");
   if (session.procedureId !== procedure.procedureId) errors.push("session procedureId mismatch");
   if (session.procedureSafetyHash !== procedure.procedureSafetyHash) errors.push("session procedureSafetyHash mismatch");
   const stepById = new Map(procedure.steps.map((step) => [step.stepId, step]));
+  if (session.destructiveActionConfirmations !== undefined) {
+    if (!Array.isArray(session.destructiveActionConfirmations)) errors.push("destructiveActionConfirmations must be an array");
+    else {
+      const actionIds = session.destructiveActionConfirmations.map(({ actionId }) => actionId);
+      if (new Set(actionIds).size !== actionIds.length) errors.push("destructive action confirmation IDs must be unique");
+      for (const action of session.destructiveActionConfirmations) {
+        errors.push(...validateDestructiveActionPlanShape(action).map((entry) => `${action.actionId || "destructive-action"}: ${entry}`));
+        if (action.confirmation !== "confirmed") errors.push(`${action.actionId}: persisted destructive action must be confirmed`);
+        if (action.inputPlanVersionId !== session.planVersionId || action.inputProcedureSafetyHash !== session.procedureSafetyHash) {
+          errors.push(`${action.actionId}: destructive action differs from session version/safety authority`);
+        }
+      }
+    }
+  }
   const seen = new Set<string>();
   for (const result of session.results) {
     if (Object.keys(result).some((key) => !["stepId", "result", "at", "actor", "confirmedAgainstDependencyHash", "note", "observationIds"].includes(key))) errors.push(`${result.stepId}: result contains unknown fields`);

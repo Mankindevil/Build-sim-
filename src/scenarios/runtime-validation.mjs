@@ -2,6 +2,10 @@ import { readFile } from "node:fs/promises";
 import { confined, sha256Json } from "../runtime/fs.mjs";
 import { hashPlanConfigRuntime, validatePlanConfigRuntime } from "../plans/canonical-runtime.mjs";
 import { validateResolvedV3CatalogBindingsRuntime } from "../config/v3-catalog-runtime.mjs";
+import { FileArtifactRepository } from "../artifacts/repository.mjs";
+import {
+  validateSolverWhatIfArtifactRuntime,
+} from "../solver/runtime-validation.mjs";
 
 const ENVELOPE_VERSION = "scenario-repository-envelope-v1";
 const SCHEMA_VERSION = "1.0.0";
@@ -17,7 +21,7 @@ const FIRMWARE_SETTINGS = Object.freeze({
   ecc: ["enabled", "disabled", "auto"],
 });
 const METRIC_IDS = new Set(["budget.total", "service.horizon", "performance.cpu.multicore", "performance.gpu.frame_rate", "memory.capacity", "storage.usable_capacity", "storage.concurrent_disk_count", "network.throughput", "power.capacity", "physical.case_volume", "physical.gpu_length", "thermal.ambient", "acoustics.noise", "platform.operating_system"]);
-const FACET_IDS = new Set(["identity.category", "identity.manufacturer", "identity.model", "identity.revision", "physical.width", "physical.height", "physical.depth", "mount.standard", "mount.point_ids", "cpu.socket", "motherboard.cpu_socket", "motherboard.chipset", "motherboard.memory_type", "motherboard.memory_slot_count", "motherboard.memory_population_rules", "motherboard.form_factor", "motherboard.bios_version", "motherboard.bios_upgrade_methods", "motherboard.display_outputs", "motherboard.supported_operating_systems", "memory.type", "memory.capacity", "io.port_types", "io.header_types", "io.endpoint_ids", "case.motherboard_form_factors", "case.side_panel", "case.gpu_max_length", "case.cpu_cooler_max_height", "gpu.length", "gpu.slot_width", "gpu.power_connectors", "psu.capacity", "psu.connectors", "power.source_type", "power.load", "power.cable_families", "pcie.lane_count", "pcie.slot_types", "pcie.lane_sharing", "storage.interface", "storage.boot_support", "storage.recording_technology", "hba.mode", "cooling.fan_mounts", "cooling.radiator_support", "cooling.pump_header", "firmware.version", "firmware.upgrade_path_refs", "driver.supported_operating_systems", "driver.package_versions", "thermal.curve_refs", "acoustic.curve_refs", "package.contents", "acoustic.noise_class"]);
+const FACET_IDS = new Set(["identity.category", "identity.manufacturer", "identity.model", "identity.revision", "physical.width", "physical.height", "physical.depth", "mount.standard", "mount.point_ids", "cpu.socket", "motherboard.cpu_socket", "motherboard.chipset", "motherboard.memory_type", "motherboard.memory_slot_count", "motherboard.memory_population_rules", "motherboard.form_factor", "motherboard.bios_version", "motherboard.bios_upgrade_methods", "motherboard.display_outputs", "motherboard.supported_operating_systems", "memory.type", "memory.capacity", "io.port_types", "io.header_types", "io.endpoint_ids", "case.motherboard_form_factors", "case.side_panel", "case.gpu_max_length", "case.cpu_cooler_max_height", "gpu.length", "gpu.slot_width", "gpu.power_connectors", "psu.capacity", "psu.connectors", "power.source_type", "power.load", "power.cable_families", "pcie.lane_count", "pcie.slot_types", "pcie.lane_sharing", "storage.interface", "storage.boot_support", "storage.capacity_bytes", "storage.recording_technology", "hba.mode", "cooling.fan_mounts", "cooling.radiator_support", "cooling.pump_header", "firmware.version", "firmware.upgrade_path_refs", "driver.supported_operating_systems", "driver.package_versions", "thermal.curve_refs", "acoustic.curve_refs", "package.contents", "resource.kind", "cable.connector_standard", "fastener.thread", "fastener.length_mm", "fastener.head", "tool.drive", "consumable.type", "accessory.standard", "acoustic.noise_class"]);
 const COLLECTIONS = Object.freeze({
   config: { parent: false, fields: ["name", "intent", "requirementSpec", "requirementBudget", "requirementHorizonYears", "system", "notes"] },
   components: { parent: false, fields: ["kind", "role", "state", "identity"] },
@@ -441,9 +445,29 @@ function branch(record, id, context) {
   return value;
 }
 
+function authoritativeResult(record, id) {
+  const value = envelopePayload(record, "result");
+  invariant(exact(value, ["schemaVersion", "result", "authority"])
+    && value.schemaVersion === "scenario-authoritative-result-v1"
+    && exact(value.authority, ["artifactRef", "artifact"]) && REF.test(String(value.authority.artifactRef ?? ""))
+    && validateSolverWhatIfArtifactRuntime(value.authority.artifact).length === 0
+    && exact(value.result, [
+      "schemaVersion", "createdAt", "scenarioId", "beforeConfigHash", "afterConfigHash", "patchHash",
+      "beforeEvaluationHash", "afterEvaluationHash", "decisionDiffRef", "domainDiffRefs", "snapshotAttribution",
+    ]) && value.result.schemaVersion === SCHEMA_VERSION && value.result.scenarioId === id
+    && ID.test(value.result.scenarioId) && iso(value.result.createdAt)
+    && [value.result.beforeConfigHash, value.result.afterConfigHash, value.result.patchHash,
+      value.result.beforeEvaluationHash, value.result.afterEvaluationHash].every((hash) => SHA256.test(String(hash ?? "")))
+    && REF.test(String(value.result.decisionDiffRef ?? ""))
+    && Array.isArray(value.result.domainDiffRefs) && value.result.domainDiffRefs.every((ref) => REF.test(String(ref)))
+    && ["same_snapshots", "refreshed"].includes(value.result.snapshotAttribution),
+  "persisted scenario result authority is unavailable or invalid");
+  return value;
+}
+
 /** Strict production authority scanner. It does not mutate or initialize. */
 export async function validateScenarioRuntimeRecords(records, context, activeRoot, catalog) {
-  const families = new Map(); const branches = new Map(); const snapshots = new Map();
+  const families = new Map(); const branches = new Map(); const results = new Map(); const snapshots = new Map();
   for (const record of records) {
     const snapshotMatch = /^snapshots\/(snapshot-set-[a-f0-9]{64})\.json$/.exec(record.rootLogicalPath);
     if (snapshotMatch) {
@@ -466,7 +490,7 @@ export async function validateScenarioRuntimeRecords(records, context, activeRoo
     invariant(match && record.rootLogicalPath.endsWith(".json"), "scenarios repository contains an unrecognized authority path");
     if (match[1] === "families") families.set(match[2], family(record, match[2], context));
     else if (match[1] === "branches") branches.set(match[2], branch(record, match[2], context));
-    else throw new Error("persisted scenario result authority is unavailable until the governed replay verifier is installed");
+    else results.set(match[2], authoritativeResult(record, match[2]));
   }
   for (const familyValue of families.values()) {
     const expected = createScenarioSnapshotSetManifest(familyValue.baseSnapshotHashes);
@@ -508,5 +532,40 @@ export async function validateScenarioRuntimeRecords(records, context, activeRoo
       "scenario branch materialized resolved identity is not proven by the active merged catalog");
     invariant(hashPlanConfigRuntime(materialized) === branchValue.materializedConfigHash,
       "scenario branch materialized config hash is forged or stale");
+  }
+  invariant(results.size === 0 || activeRoot, "scenario result requires its active-root solver artifact authority");
+  if (activeRoot) {
+    const artifactRoot = confined(activeRoot, "artifacts");
+    const artifacts = new FileArtifactRepository({ root: artifactRoot });
+    for (const [scenarioId, record] of results) {
+      const familyValue = families.get(record.authority.artifact.familyId);
+      const branchValue = branches.get(scenarioId);
+      invariant(familyValue && branchValue && branchValue.familyId === familyValue.familyId,
+        "scenario result family/branch authority is missing");
+      const artifact = record.authority.artifact;
+      const result = record.result;
+      invariant(artifact.scenarioId === scenarioId && artifact.familyId === familyValue.familyId
+        && artifact.basePlanVersionId === familyValue.basePlanVersionId
+        && artifact.baseConfigHash === familyValue.baseConfigHash
+        && artifact.afterConfigHash === branchValue.materializedConfigHash
+        && sha256Json(artifact.baseSnapshotHashes) === sha256Json(familyValue.baseSnapshotHashes)
+        && result.createdAt === artifact.createdAt && result.beforeConfigHash === artifact.baseConfigHash
+        && result.afterConfigHash === artifact.afterConfigHash && result.patchHash === branchValue.patchHash
+        && result.beforeEvaluationHash === artifact.beforeEvaluationHash
+        && result.afterEvaluationHash === artifact.afterEvaluationHash
+        && result.decisionDiffRef === artifact.decisionDiffRef
+        && sha256Json(result.domainDiffRefs) === sha256Json(artifact.domainDiffRefs)
+        && result.snapshotAttribution === artifact.snapshotAttribution,
+      "scenario result does not bind its exact family/branch/materialization");
+      const stored = await artifacts.getAt(artifactRoot, record.authority.artifactRef, { initialize: false });
+      invariant(stored && stored.record.kind === "solver-what-if-result"
+        && stored.record.mediaType === "application/vnd.buildsim.solver+json"
+        && sha256Json(JSON.parse(Buffer.from(stored.bytes).toString("utf8"))) === sha256Json(artifact),
+      "scenario result solver artifact authority is missing or mismatched");
+      const ref = `scenario-result:${scenarioId}`;
+      context.nodes.push(ref); context.pointers.push(ref);
+      context.edges.push({ fromRef: ref, toRef: `scenario-branch:${scenarioId}`, necessity: "required_for_replay" });
+      context.edges.push({ fromRef: ref, toRef: record.authority.artifactRef, necessity: "required_for_replay" });
+    }
   }
 }

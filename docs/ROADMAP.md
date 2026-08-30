@@ -1,9 +1,9 @@
 # Roadmap
 
-> Status note: the universal hardware platform plan below is a contract and
-> execution roadmap, not a claim that the capabilities are deployed. U0 freezes
-> schemas, boundaries, fixtures, and feature-flag defaults; it does not turn on
-> the implementation.
+> Status note (2026-08-30): U0-U11 are implemented and locally verified in the
+> current worktree. U12 release engineering is in progress. Production flags,
+> remote push, and deployment remain gated until physical holdouts, canaries,
+> migration review, and explicit deployment approval are complete.
 
 The authoritative plan is [Universal Hardware Platform Follow Plan](./superpowers/plans/2026-08-27-universal-hardware-platform-follow-plan.md).
 It replaces the former “additional case adapters are unscheduled” position.
@@ -37,28 +37,33 @@ JONSBO N6 remains the first regression adapter, not the product boundary.
 | Build execution | Stable sourceRef tasks reconciled from BOM/assembly/wiring/findings; saved-version checklist hashes |
 | Quality gates | Full lifecycle E2E, desktop/tablet/mobile screenshots, offline/corruption/failure tests, accessibility, cleanup and performance budgets |
 
-## U0 contract freeze (verified contracts; runtime capabilities remain gated)
+## Universal platform implementation status
 
-| Deliverable | Status |
+| Stage | State | Evidence class |
+|---|---|---|
+| U0 contracts and flags | Complete | Frozen contracts, registries, cross-runtime hash vectors, architecture gates |
+| U1 runtime foundation | Complete | Generation coordinator, durable repositories/jobs, backup SPI, Doctor |
+| U2 topology and plans | Complete | BuildConfig V3, requirements, scenarios, logical layout, V2 reader/migration |
+| U3 facts and observations | Complete | Claims/facts/snapshots, reversible updates, conflict and evaluation locks |
+| U4 evidence ladder | Complete | Official/third-party/inference/attachment jobs and durable approval |
+| U5 adapters and capabilities | Complete | Generic manifests/runtime models, package supply, standards, provisional flow |
+| U6 compatibility and solver | Complete | Progressive domains, requirement allocation, bounded solver and what-if |
+| U7 systems and execution | Complete | Windows/Linux/TrueNAS profiles, firmware path, first boot, storage layout |
+| U8 spatial and assembly | Complete | Generic geometry/routing/tolerance/electrical checks and procedures |
+| U9 simulation | Complete | Workload-driven thermal intervals and standardized hardware acoustics |
+| U10 price and recommendation | Complete | Durable observations/history/targets and purchase-eligible whole-build ranking |
+| U11 unified experience | Complete | Requirements, solver, what-if, attachments, execution, jobs, portability, Doctor UI |
+| U12 release gates | In progress | Software gates are green locally; physical holdouts, release canaries and deployment remain |
+
+## Remaining before production-default rollout
+
+| Track | Required evidence |
 |---|---|
-| 4.0–4.12 contract documents, registries, trusted resolver gates, and patch boundaries | Frozen and contract-tested in `docs/architecture/` and `src/` |
-| Golden vectors and universal fixtures | Frozen; seven formal domains match in Node and Chromium, with offline catalog/fact closure |
-| Feature flags | Present and default off until the corresponding U-stage exits |
-
-U0 is complete only when the contract, fixtures, tests, hashes, and baseline
-evidence described by the authoritative plan exist. A document in this section
-must not be read as proof that runtime repositories, a solver, durable jobs,
-portable import, or Doctor already exist.
-
-## Next up
-
-| Track | State |
-|---|---|
-| Part rotation | Every geometry box is axis-aligned today. Angled cards and cable bend radius need θ before routing verdicts can be more than `warn` |
-| Install corridors | Only five part families declare a travel (`assembly.json`); trays, PSUs and the board have none, so nothing orders around them. Each addition needs a stated basis, not a guessed millimetre |
-| Channel capacity | Cable cross-section vs. waypoint aperture, and minimum bend radius: both need wire gauge and vendor bend limits the catalog does not carry (see the routing spec's deferred section) |
-| Legacy shell reduction | Continue extracting the remaining detail-panel template only after the current uncommitted UI work is integrated; do not risk silently dropping working controls |
-| Public hosting | Authentication, tenancy, application rate limiting, backup/restore automation, and deployment-specific hardening remain prerequisites |
+| Physical holdouts | Independent ATX, ITX, and NAS measurements for clearance, required cable length, temperature interval, and standardized hardware-acoustic interval |
+| Release canaries | Recorded N6 partial/complete and non-N6 blank-plan flows, including worker restart and portable/full-restore round trips |
+| Migration | Operator-reviewed V2→V3 dry-run manifest, verified external backup, apply report, post-migration diffs, and rollback rehearsal on a copy |
+| Deployment | Full local report, clean reviewed commit, explicit remote/deploy approval, release-gate Compose profile, post-deploy health/evaluation/persistence/Doctor checks |
+| Public hosting | Authentication, tenancy, application rate limiting, and deployment-specific policy remain outside the U0-U12 local/single-user product scope |
 
 ## V2.1 (superseded by the U plan where overlapping)
 

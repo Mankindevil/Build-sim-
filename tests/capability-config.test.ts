@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config/types";
 import { buildReadiness, validateConfig } from "../src/config/validate";
-import { caseCapabilities, n6CaseCapabilities, n6PowerProfile, boardCapabilities, orderedFanMounts } from "../src/core/capabilities";
+import { caseCapabilities, boardCapabilities, orderedFanMounts } from "../src/core/capabilities";
+import { N6_CASE_RUNTIME_ADAPTER } from "../src/adapters/jonsbo-n6/assembly";
 import { derivePower, evaluateBuild } from "../src/core/evaluate";
 import { createEmptyBuildConfig } from "../src/plans/default-plan";
 import { loadBundledCatalog, loadRawCatalog } from "../src/sku/catalog";
@@ -16,7 +17,7 @@ const catalog = loadBundledCatalog();
 
 describe("G2 capability and configuration facts", () => {
   it("exposes case and board capabilities from the profile/catalog", () => {
-    const n6 = n6CaseCapabilities();
+    const n6 = structuredClone(N6_CASE_RUNTIME_ADAPTER.capabilities);
     const board = boardCapabilities(catalog, "board.asus-w680m-ace-se");
     expect(n6.trayCount).toBe(9);
     expect(n6.backplane.sataPowerInlets + n6.backplane.molexInlets).toBe(4);
@@ -30,7 +31,7 @@ describe("G2 capability and configuration facts", () => {
   });
 
   it("keeps profile power facts centralized and typed", () => {
-    const profile = n6PowerProfile();
+    const profile = structuredClone(N6_CASE_RUNTIME_ADAPTER.powerProfile);
     expect(profile.boardBaseW).toBe(23);
     expect(profile.driveSpinUpExtraW).toBe(31.2);
     expect(profile.source).toContain("planning profile");

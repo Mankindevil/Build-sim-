@@ -1,0 +1,229 @@
+{
+  "schemaVersion": "evidence-vendor-fixture-matrix-v1",
+  "fixtures": [
+    {
+      "fixtureId": "asus-motherboard-rev-1-1",
+      "pageKind": "manual",
+      "sourceUrl": "https://www.asus.com/supportonly/pro-ws-w680-ace-ipmi/helpdesk_manual/",
+      "subject": {
+        "brand": "ASUS",
+        "category": "motherboard",
+        "skuId": "motherboard.asus-pro-ws-w680-ace-ipmi",
+        "familyId": "motherboard.asus-pro-ws-w680",
+        "modelId": "asus-pro-ws-w680-ace-ipmi",
+        "variantId": "asus-pro-ws-w680-ace-ipmi-global",
+        "revision": "1.1",
+        "region": "global"
+      },
+      "requestedFieldIds": [
+        "motherboard.cpu_socket",
+        "firmware.cpu_support",
+        "compatibility.qvl_entry",
+        "firmware.upgrade_method",
+        "package.fastener_count",
+        "package.tool_required",
+        "io.port_topology",
+        "thermal.fan_curve"
+      ],
+      "pages": [
+        "Product Model: asus-pro-ws-w680-ace-ipmi\nProduct Variant: asus-pro-ws-w680-ace-ipmi-global\nProduct Revision: 1.1\nProduct Region: global\nCPU Socket: LGA1700\nCPU Support: cpuSkuId=cpu.intel-xeon-e-2488;boardRevision=1.1;region=global;sinceVersion=1402\nQVL Entry: componentSkuId=memory.corsair-cmk32gx5m2b6000c30;boardRevision=1.1;region=global;sinceVersion=1402;status=qualified\nBIOS Upgrade Methods: uefi,flashback\nFastener Count: fastenerId=m2-ssd-screw;quantity=2\nTool Required: toolId=phillips-2;required=true\nPort Topology: endpointId=sata-1;connectorType=sata-7pin;location=internal;controllerId=w680-chipset;pathId=sata-channel-1;quantity=1\nFan Curve: curveId=chassis-fan-1;input=temperature_c;output=duty_percent;points=30:20,50:50,70:100"
+      ],
+      "expected": [
+        { "fieldId": "motherboard.cpu_socket", "value": "LGA1700" },
+        { "fieldId": "firmware.cpu_support", "value": { "cpuSkuId": "cpu.intel-xeon-e-2488", "boardRevision": "1.1", "region": "global", "sinceVersion": "1402" } },
+        { "fieldId": "compatibility.qvl_entry", "value": { "componentSkuId": "memory.corsair-cmk32gx5m2b6000c30", "boardRevision": "1.1", "region": "global", "sinceVersion": "1402", "status": "qualified" } },
+        { "fieldId": "firmware.upgrade_method", "value": ["flashback", "uefi"] },
+        { "fieldId": "package.fastener_count", "value": { "fastenerId": "m2-ssd-screw", "quantity": 2 } },
+        { "fieldId": "package.tool_required", "value": { "toolId": "phillips-2", "required": true } },
+        { "fieldId": "io.port_topology", "value": { "endpointId": "sata-1", "connectorType": "sata-7pin", "location": "internal", "controllerId": "w680-chipset", "pathId": "sata-channel-1", "quantity": 1 } },
+        { "fieldId": "thermal.fan_curve", "value": { "curveId": "chassis-fan-1", "input": "temperature_c", "output": "duty_percent", "points": [{ "input": 30, "output": 20 }, { "input": 50, "output": 50 }, { "input": 70, "output": 100 }] } }
+      ]
+    },
+    {
+      "fixtureId": "intel-cpu-b0",
+      "pageKind": "technical_specification",
+      "sourceUrl": "https://www.intel.com/content/www/us/en/products/sku/236773/specifications.html",
+      "subject": {
+        "brand": "Intel",
+        "category": "cpu",
+        "skuId": "cpu.intel-core-i9-14900k",
+        "familyId": "cpu.intel-core-14th-gen",
+        "modelId": "intel-core-i9-14900k",
+        "variantId": "intel-core-i9-14900k-boxed",
+        "revision": "b0",
+        "region": "global"
+      },
+      "requestedFieldIds": ["cpu.socket", "package.contents", "power.load"],
+      "pages": [
+        "Product Model: intel-core-i9-14900k\nProduct Variant: intel-core-i9-14900k-boxed\nProduct Revision: b0\nProduct Region: global\nCPU Socket: FCLGA1700\nPackage Contents: processor,thermal-solution-not-included\nMaximum Turbo Power: 253"
+      ],
+      "expected": [
+        { "fieldId": "cpu.socket", "value": "FCLGA1700" },
+        { "fieldId": "package.contents", "value": ["processor", "thermal-solution-not-included"] },
+        { "fieldId": "power.load", "value": 253, "unit": "w" }
+      ]
+    },
+    {
+      "fixtureId": "samsung-990-pro-2tb",
+      "pageKind": "technical_specification",
+      "sourceUrl": "https://semiconductor.samsung.com/consumer-storage/internal-ssd/990-pro/",
+      "subject": {
+        "brand": "Samsung",
+        "category": "storage",
+        "skuId": "storage.samsung-990-pro-2tb",
+        "familyId": "storage.samsung-990-pro",
+        "modelId": "samsung-990-pro-2tb",
+        "variantId": "mz-v9p2t0bw",
+        "revision": "1b2qjxg7",
+        "region": "global"
+      },
+      "requestedFieldIds": [
+        "storage.interface",
+        "storage.logical_sector_size",
+        "storage.physical_sector_size",
+        "storage.recording_technology",
+        "storage.endurance_tbw"
+      ],
+      "pages": [
+        "Product Model: samsung-990-pro-2tb\nProduct Variant: mz-v9p2t0bw\nProduct Revision: 1b2qjxg7\nProduct Region: global\nStorage Interface: pcie-4.0-x4\nLogical Sector Size: 512\nPhysical Sector Size: 4096\nRecording Technology: tlc\nEndurance TBW: 1200"
+      ],
+      "expected": [
+        { "fieldId": "storage.interface", "value": "pcie-4.0-x4" },
+        { "fieldId": "storage.logical_sector_size", "value": 512, "unit": "byte" },
+        { "fieldId": "storage.physical_sector_size", "value": 4096, "unit": "byte" },
+        { "fieldId": "storage.recording_technology", "value": "tlc" },
+        { "fieldId": "storage.endurance_tbw", "value": 1200, "unit": "tbw" }
+      ]
+    },
+    {
+      "fixtureId": "seasonic-prime-tx-1000-r2",
+      "pageKind": "manual",
+      "sourceUrl": "https://seasonic.com/prime-tx/",
+      "subject": {
+        "brand": "Seasonic",
+        "category": "psu",
+        "skuId": "psu.seasonic-prime-tx-1000",
+        "familyId": "psu.seasonic-prime-tx",
+        "modelId": "seasonic-prime-tx-1000",
+        "variantId": "ssr-1000tr",
+        "revision": "r2",
+        "region": "global"
+      },
+      "requestedFieldIds": ["psu.capacity", "psu.connectors", "power.cable_families", "package.cable_count", "psu.pinout"],
+      "pages": [
+        "Product Model: seasonic-prime-tx-1000\nProduct Variant: ssr-1000tr\nProduct Revision: r2\nProduct Region: global\nPSU Capacity: 1000\nPSU Connectors: atx-24pin,eps-8pin,pcie-8pin,sata-power\nCable Families: seasonic-prime-type-3\nCable Count: cableId=eps-8pin-cable;connectorFamily=eps-8pin;quantity=2\nPSU Pinout: connectorFamily=seasonic-prime-type-3;revision=r2;pinCount=18;pinMapHash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "expected": [
+        { "fieldId": "psu.capacity", "value": 1000, "unit": "w" },
+        { "fieldId": "psu.connectors", "value": ["atx-24pin", "eps-8pin", "pcie-8pin", "sata-power"] },
+        { "fieldId": "power.cable_families", "value": ["seasonic-prime-type-3"] },
+        { "fieldId": "package.cable_count", "value": { "cableId": "eps-8pin-cable", "connectorFamily": "eps-8pin", "quantity": 2 } },
+        { "fieldId": "psu.pinout", "value": { "connectorFamily": "seasonic-prime-type-3", "revision": "r2", "pinCount": 18, "pinMapHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } }
+      ]
+    },
+    {
+      "fixtureId": "seagate-exos-x18-sn04",
+      "pageKind": "technical_specification",
+      "sourceUrl": "https://www.seagate.com/products/enterprise-drives/exos-x/x18/",
+      "subject": {
+        "brand": "Seagate",
+        "category": "storage",
+        "skuId": "storage.seagate-exos-x18-18tb",
+        "familyId": "storage.seagate-exos-x18",
+        "modelId": "seagate-exos-x18-18tb",
+        "variantId": "st18000nm000j",
+        "revision": "sn04",
+        "region": "global"
+      },
+      "requestedFieldIds": ["storage.interface", "storage.logical_sector_size", "storage.physical_sector_size", "storage.recording_technology"],
+      "pages": [
+        "Product Model: seagate-exos-x18-18tb\nProduct Variant: st18000nm000j\nProduct Revision: sn04\nProduct Region: global\nStorage Interface: sata-6gbps\nLogical Sector Size: 512\nPhysical Sector Size: 4096\nRecording Technology: cmr"
+      ],
+      "expected": [
+        { "fieldId": "storage.interface", "value": "sata-6gbps" },
+        { "fieldId": "storage.logical_sector_size", "value": 512, "unit": "byte" },
+        { "fieldId": "storage.physical_sector_size", "value": 4096, "unit": "byte" },
+        { "fieldId": "storage.recording_technology", "value": "cmr" }
+      ]
+    },
+    {
+      "fixtureId": "corsair-nautilus-360-rs-a1",
+      "pageKind": "manual",
+      "sourceUrl": "https://www.corsair.com/us/en/explorer/diy-builder/cpu-coolers/nautilus-360-rs/",
+      "subject": {
+        "brand": "Corsair",
+        "category": "cooler",
+        "skuId": "cooler.corsair-nautilus-360-rs",
+        "familyId": "cooler.corsair-nautilus-rs",
+        "modelId": "corsair-nautilus-360-rs",
+        "variantId": "cw-9060093-ww",
+        "revision": "a1",
+        "region": "global"
+      },
+      "requestedFieldIds": ["package.contents", "package.fastener_count", "package.tool_required", "thermal.fan_curve", "cooling.fan_mounts"],
+      "pages": [
+        "Product Model: corsair-nautilus-360-rs\nProduct Variant: cw-9060093-ww\nProduct Revision: a1\nProduct Region: global\nPackage Contents: radiator,pump-block,rs120-fan,mounting-kit\nFastener Count: fastenerId=fan-radiator-screw;quantity=12\nTool Required: toolId=phillips-2;required=true\nFan Curve: curveId=rs120-balanced;input=temperature_c;output=duty_percent;points=25:20,45:45,70:100\nFan Mounts: 120mm-x3"
+      ],
+      "expected": [
+        { "fieldId": "package.contents", "value": ["mounting-kit", "pump-block", "radiator", "rs120-fan"] },
+        { "fieldId": "package.fastener_count", "value": { "fastenerId": "fan-radiator-screw", "quantity": 12 } },
+        { "fieldId": "package.tool_required", "value": { "toolId": "phillips-2", "required": true } },
+        { "fieldId": "thermal.fan_curve", "value": { "curveId": "rs120-balanced", "input": "temperature_c", "output": "duty_percent", "points": [{ "input": 25, "output": 20 }, { "input": 45, "output": 45 }, { "input": 70, "output": 100 }] } },
+        { "fieldId": "cooling.fan_mounts", "value": ["120mm-x3"] }
+      ]
+    },
+    {
+      "fixtureId": "broadcom-9500-8i-p20",
+      "pageKind": "support",
+      "sourceUrl": "https://www.broadcom.com/products/storage/host-bus-adapters/sas-nvme-9500-8i",
+      "subject": {
+        "brand": "Broadcom",
+        "category": "hba",
+        "skuId": "hba.broadcom-9500-8i",
+        "familyId": "hba.broadcom-9500",
+        "modelId": "broadcom-9500-8i",
+        "variantId": "05-50077-00",
+        "revision": "p20",
+        "region": "global"
+      },
+      "requestedFieldIds": ["hba.mode", "io.port_topology", "firmware.upgrade_method"],
+      "pages": [
+        "Product Model: broadcom-9500-8i\nProduct Variant: 05-50077-00\nProduct Revision: p20\nProduct Region: global\nHBA Mode: it\nPort Topology: endpointId=sff8654-1;connectorType=sff-8654-4i;location=internal;controllerId=sas3916;pathId=phy-0-3;quantity=1\nFirmware Upgrade Methods: in_os"
+      ],
+      "expected": [
+        { "fieldId": "hba.mode", "value": "it" },
+        { "fieldId": "io.port_topology", "value": { "endpointId": "sff8654-1", "connectorType": "sff-8654-4i", "location": "internal", "controllerId": "sas3916", "pathId": "phy-0-3", "quantity": 1 } },
+        { "fieldId": "firmware.upgrade_method", "value": ["in_os"] }
+      ]
+    },
+    {
+      "fixtureId": "truenas-scale-25-04",
+      "pageKind": "support",
+      "sourceUrl": "https://www.truenas.com/docs/scale/25.04/gettingstarted/scalehardwareguide/",
+      "subject": {
+        "brand": "TrueNAS",
+        "category": "system",
+        "skuId": "system.truenas-scale.25.04",
+        "familyId": "system.truenas-scale",
+        "modelId": "truenas-scale",
+        "variantId": "community-edition",
+        "revision": "25.04",
+        "region": "global"
+      },
+      "requestedFieldIds": ["system.requirement"],
+      "pages": [
+        "Product Model: truenas-scale\nProduct Variant: community-edition\nProduct Revision: 25.04\nProduct Region: global\nSystem Requirement: systemProfileId=system.truenas-scale;releaseId=system-release.truenas-scale.25.04;requirementId=memory.minimum;operator=gte;valueType=number;value=8;unit=gib",
+        "System Requirement: systemProfileId=system.truenas-scale;releaseId=system-release.truenas-scale.25.04;requirementId=hba.mode;operator=eq;valueType=string;value=it"
+      ],
+      "expected": [
+        { "fieldId": "system.requirement", "value": { "systemProfileId": "system.truenas-scale", "releaseId": "system-release.truenas-scale.25.04", "requirementId": "memory.minimum", "operator": "gte", "valueType": "number", "value": 8, "unit": "gib" } },
+        { "fieldId": "system.requirement", "value": { "systemProfileId": "system.truenas-scale", "releaseId": "system-release.truenas-scale.25.04", "requirementId": "hba.mode", "operator": "eq", "valueType": "string", "value": "it" } }
+      ]
+    }
+  ],
+  "negativePages": [
+    { "kind": "captcha", "expectedReason": "official_access_blocked", "text": "CAPTCHA — verify you are human before continuing." },
+    { "kind": "error", "expectedReason": "official_parse_failed", "text": "Error 503 — service unavailable." },
+    { "kind": "series", "expectedReason": "official_identity_unresolved", "text": "ASUS workstation motherboard series overview. Choose a model to continue." }
+  ]
+}

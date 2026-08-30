@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -7,8 +6,29 @@ import { fileURLToPath } from "node:url";
 import { RuntimeCoordinator } from "../../../src/runtime/coordinator.mjs";
 import { confined } from "../../../src/runtime/fs.mjs";
 
-const registryJson = createRequire(import.meta.url)("../../../data/catalog/official-domains.json");
-export const OFFICIAL_DOMAIN_SEED_PATH = fileURLToPath(new URL("../../../data/catalog/official-domains.json", import.meta.url));
+function resolveBundledOfficialSeedPath() {
+  const candidates = [
+    // Source execution.
+    fileURLToPath(new URL("../../../data/catalog/official-domains.json", import.meta.url)),
+    // Vite SSR output at dist-workspace/workspace-server.js.
+    fileURLToPath(new URL("../data/catalog/official-domains.json", import.meta.url)),
+    // Explicit project-root launch fallback used by production service units.
+    path.resolve(process.cwd(), "data/catalog/official-domains.json"),
+  ];
+  for (const candidate of [...new Set(candidates)]) {
+    try {
+      JSON.parse(readFileSync(candidate, "utf8"));
+      return candidate;
+    } catch {
+      // Try the next frozen deployment layout; no network or mutable overlay
+      // is accepted as a substitute for the bundled seed.
+    }
+  }
+  throw new Error("bundled official domain seed is unavailable");
+}
+
+export const OFFICIAL_DOMAIN_SEED_PATH = resolveBundledOfficialSeedPath();
+const registryJson = JSON.parse(readFileSync(OFFICIAL_DOMAIN_SEED_PATH, "utf8"));
 const TRUST = new Set(["trusted", "proposed", "rejected"]);
 const SOURCES = new Set(["seed", "catalog-provenance", "agent-proposal", "manual"]);
 const PUBLIC_SUFFIXES = new Set(["com", "net", "org", "edu", "gov", "jp", "co.jp", "cn", "co.uk"]);

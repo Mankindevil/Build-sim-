@@ -1,6 +1,7 @@
 import { isSha256Hex, isSnapshotHashes, type SnapshotHashes } from "../hash";
 import { resolveAuthoritativeContext, type AuthoritativeResolver } from "../contracts/trusted-context";
 import type { EvaluationDecision } from "../requirements/contracts";
+import { validatePersistedSolverCandidateRuntime } from "./runtime-validation.mjs";
 
 export interface DomainCoverage {
   domain: EvaluationDecision["domain"];
@@ -20,6 +21,11 @@ export interface SolverCandidate {
   buildConfigHash: string;
   inputHashes: SnapshotHashes;
   evaluationHash: string;
+  /** Authoritative evaluator receipt and its separately persisted coverage. */
+  evaluationReceiptRef?: string;
+  coverageArtifactRef?: string;
+  /** Immutable semantic candidate artifact (required for U6 persisted output). */
+  candidateArtifactRef?: string;
   candidateKind: "feasibility_candidate";
   domainCoverage: DomainCoverage[];
   residualRequirementIds: string[];
@@ -98,6 +104,8 @@ export interface SolveResult {
   unsatisfiedHardConstraintIds: string[];
   irreducibleConflictSets: string[][];
   searchSummaryRef: string;
+  /** Inclusive deterministic assignment ranges that were not evaluated. */
+  unexploredRanges?: Array<{ start: number; end: number }>;
 }
 
 export interface RankedSolution {
@@ -121,21 +129,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isPortableSolverText(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 256
+    && value === value.normalize("NFC") && !/[\s\u0000-\u001f\u007f-\u009f]/u.test(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, required: readonly string[]): boolean {
+  return Object.keys(value).sort().join("\0") === [...required].sort().join("\0");
+}
+
 export function validateSolveRequest(value: unknown): string[] {
   if (!isRecord(value)) return ["solve request must be an object"];
   const request = value as Partial<SolveRequest> & Record<string, unknown>;
   const errors: string[] = [];
-  if (!request.basePlanVersionId || !request.requirementSpecId) errors.push("solve request identity fields missing");
+  if (!hasExactKeys(request, ["basePlanVersionId", "baseConfigHash", "baseSnapshotHashes", "lockedInstanceIds", "requirementSpecId", "limits"])) {
+    errors.push("solve request fields invalid");
+  }
+  if (!isPortableSolverText(request.basePlanVersionId) || !isPortableSolverText(request.requirementSpecId)) errors.push("solve request identity fields missing");
   if (!isSha256Hex(request.baseConfigHash)) errors.push("baseConfigHash invalid");
   if (!isSnapshotHashes(request.baseSnapshotHashes)) errors.push("baseSnapshotHashes invalid");
   if (isSnapshotHashes(request.baseSnapshotHashes) && request.baseSnapshotHashes.configHash !== request.baseConfigHash) errors.push("baseSnapshotHashes.configHash must match baseConfigHash");
   if (!isRecord(request.limits)) errors.push("solve limits must be an object");
   else {
+    if (!hasExactKeys(request.limits, ["maxEvaluations", "maxDurationMs", "maxCandidatesPerRequirement"])) errors.push("solve limits fields invalid");
     if (!positiveInteger(request.limits.maxEvaluations as number)) errors.push("maxEvaluations must be a positive integer");
     if (!positiveInteger(request.limits.maxDurationMs as number)) errors.push("maxDurationMs must be a positive integer");
     if (!positiveInteger(request.limits.maxCandidatesPerRequirement as number)) errors.push("maxCandidatesPerRequirement must be a positive integer");
   }
-  if (!Array.isArray(request.lockedInstanceIds) || request.lockedInstanceIds.some((id) => typeof id !== "string" || !id) || new Set(request.lockedInstanceIds).size !== request.lockedInstanceIds.length) errors.push("lockedInstanceIds must be unique non-empty strings");
+  if (!Array.isArray(request.lockedInstanceIds) || request.lockedInstanceIds.some((id) => !isPortableSolverText(id))
+    || new Set(request.lockedInstanceIds).size !== request.lockedInstanceIds.length
+    || request.lockedInstanceIds.some((id, index) => index > 0 && request.lockedInstanceIds![index - 1]! >= id)) {
+    errors.push("lockedInstanceIds must be unique non-empty strings");
+  }
   return errors;
 }
 
@@ -143,10 +168,24 @@ export function validateSolverCandidate(value: unknown): string[] {
   if (!isRecord(value)) return ["candidate must be an object"];
   const candidate = value as unknown as SolverCandidate;
   const errors: string[] = [];
+  const allowed = new Set([
+    "candidateId", "requirementSpecId", "basePlanVersionId", "baseConfigHash", "candidateConfigRef", "operationsRef",
+    "buildConfigHash", "inputHashes", "evaluationHash", "evaluationReceiptRef", "coverageArtifactRef", "candidateArtifactRef",
+    "candidateKind", "domainCoverage", "residualRequirementIds", "excludedReasonIds",
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) errors.push("candidate contains unknown fields");
   if (!candidate.candidateId || !candidate.requirementSpecId || !candidate.basePlanVersionId || !candidate.candidateConfigRef || !candidate.operationsRef) errors.push("candidate identity/reference fields missing");
   if (candidate.candidateKind !== "feasibility_candidate") errors.push("solver may only emit feasibility_candidate records");
   for (const [field, value] of [["baseConfigHash", candidate.baseConfigHash], ["buildConfigHash", candidate.buildConfigHash], ["evaluationHash", candidate.evaluationHash]] as const) {
     if (!isSha256Hex(value)) errors.push(`${field} invalid`);
+  }
+  const authorityRefs = [candidate.evaluationReceiptRef, candidate.coverageArtifactRef];
+  if (authorityRefs.some((ref) => ref !== undefined) && authorityRefs.some((ref) => typeof ref !== "string" || !/^sha256:[a-f0-9]{64}$/.test(ref))) {
+    errors.push("candidate evaluator receipt/coverage refs must be paired content-addressed authority");
+  }
+  if (candidate.candidateArtifactRef !== undefined && !/^sha256:[a-f0-9]{64}$/.test(candidate.candidateArtifactRef)) errors.push("candidate artifact ref invalid");
+  if (candidate.evaluationReceiptRef !== undefined && candidate.coverageArtifactRef !== undefined && candidate.candidateArtifactRef !== undefined) {
+    errors.push(...validatePersistedSolverCandidateRuntime(candidate).map((error) => `persisted candidate: ${error}`));
   }
   if (!isSnapshotHashes(candidate.inputHashes)) errors.push("candidate input hashes invalid");
   if (isSnapshotHashes(candidate.inputHashes) && candidate.inputHashes.configHash !== candidate.buildConfigHash) errors.push("candidate input configHash must match buildConfigHash");
@@ -174,7 +213,9 @@ export function validateCandidatePromotion(
   if (!isRecord(candidate) || !isRecord(promotion)) return [...errors, "promotion and candidate must be objects"];
   if (!promotion.promotionRecordId || !promotion.createdAt || !Number.isFinite(Date.parse(promotion.createdAt))) errors.push("promotion identity/timestamp invalid");
   if (promotion.candidateId !== candidate.candidateId || promotion.candidateBuildConfigHash !== candidate.buildConfigHash) errors.push("promotion does not identify the candidate config");
-  if (!context || context.policy !== PURCHASE_ELIGIBILITY_POLICY) return [...errors, "promotion requires the governed purchase eligibility policy context"];
+  if (!context || context.policy !== PURCHASE_ELIGIBILITY_POLICY) {
+    return [...errors, "promotion requires the governed purchase eligibility policy context"];
+  }
   const currentCoverage = Array.isArray(context.coverage) ? context.coverage : [];
   const currentInputHashes = context.currentInputHashes;
   if (!isSha256Hex(promotion.candidateBuildConfigHash) || !isSha256Hex(promotion.coverageHash) || !isSha256Hex(context.coverageHash)) errors.push("promotion hashes invalid");
@@ -253,6 +294,14 @@ export function validateSolveResult(result: SolveResult, unsatProof?: UnsatProof
   if (unsatProof?.kind === "formal" && (!unsatProof.proofArtifactRef || !unsatProof.proofSystemVersion)) errors.push("formal proof provenance invalid");
   if (result.status !== "unsat_proven" && unsatProof) errors.push("only unsat_proven may carry an unsat proof");
   if ((result.status === "feasible_complete" || result.status === "feasible_partial") && result.candidates.length === 0) errors.push("feasible result requires at least one candidate");
+  if (result.unexploredRanges !== undefined) {
+    if (!Array.isArray(result.unexploredRanges)
+      || result.unexploredRanges.some((range) => !Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || range.start < 0 || range.end < range.start)
+      || result.unexploredRanges.some((range, index) => index > 0 && range.start <= result.unexploredRanges![index - 1]!.end)) {
+      errors.push("solve result unexplored ranges must be sorted, disjoint inclusive integer ranges");
+    }
+    if (result.status !== "feasible_partial" && result.status !== "blocked_inputs" && result.unexploredRanges.length > 0) errors.push("only incomplete search results may retain unexplored ranges");
+  }
   if ((result.status === "feasible_complete" || result.status === "feasible_partial") && result.unsatisfiedHardConstraintIds.length > 0) errors.push("feasible result cannot retain unsatisfied hard constraints");
   if (result.status === "blocked_inputs" && result.unsatisfiedHardConstraintIds.length === 0) errors.push("blocked_inputs must identify blocking inputs or constraints");
   if (result.status === "blocked_inputs" && result.candidates.length > 0) errors.push("blocked_inputs cannot contain candidates built from guessed inputs");

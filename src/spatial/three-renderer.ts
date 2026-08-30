@@ -110,7 +110,7 @@ export function createThreeSpatialRenderer(options: ThreeSpatialOptions): ThreeS
   renderer.setPixelRatio(Math.min(globalThis.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.domElement.tabIndex = 0;
-  renderer.domElement.setAttribute("aria-label", "可交互 N6 3D 场景；拖动旋转，右键平移，滚轮缩放，点击选择部件，Esc 清空选择");
+  renderer.domElement.setAttribute("aria-label", "可交互机箱 3D 场景；拖动旋转，右键平移，滚轮缩放，点击选择部件，Esc 清空选择");
   options.host.replaceChildren(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -227,8 +227,42 @@ export function createThreeSpatialRenderer(options: ThreeSpatialOptions): ThreeS
     disposeGroup(routeGroup); disposeGroup(dimensionGroup); disposeGroup(thermalGroup);
     for (const route of overlays.routes) {
       const color = route.verdict === "bad" ? 0xef4c5b : route.verdict === "warn" ? 0xe4a53e : route.kind === "power" ? 0xf06d6d : 0x4f9ee8;
+      if (route.toleranceMm !== null && route.toleranceMm > 0 && route.points.length >= 2) {
+        const curve = new THREE.CatmullRomCurve3(route.points.map((point) => new THREE.Vector3(...point)), false, "centripetal");
+        const band = new THREE.Mesh(
+          new THREE.TubeGeometry(curve, Math.max(2, route.points.length * 6), route.toleranceMm, 8, false),
+          new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.13, depthWrite: false }),
+        );
+        band.name = `tolerance:${route.id}`;
+        band.userData.routeId = route.id;
+        routeGroup.add(band);
+      }
       const line = lineObject(route.points, color, !route.pathAvailable || route.evidence === "unknown");
       line.name = route.id; line.userData.routeId = route.id; routeGroup.add(line);
+      for (const [index, alternative] of route.alternativePaths.entries()) {
+        const alternativeLine = lineObject(alternative, 0x8b97a5, true);
+        alternativeLine.name = `alternative:${route.id}:${index}`;
+        alternativeLine.userData.routeId = route.id;
+        routeGroup.add(alternativeLine);
+      }
+      for (const [index, marker] of route.endpointDirections.entries()) {
+        const direction = new THREE.Vector3(...marker.direction);
+        if (direction.lengthSq() <= 0.000001) continue;
+        const arrow = new THREE.ArrowHelper(direction.normalize(), new THREE.Vector3(...marker.at), 20, color, 7, 4);
+        arrow.name = `direction:${route.id}:${index}`;
+        arrow.userData.routeId = route.id;
+        routeGroup.add(arrow);
+      }
+      for (const [index, point] of route.blockedPoints.entries()) {
+        const marker = new THREE.Mesh(
+          new THREE.SphereGeometry(5, 12, 8),
+          new THREE.MeshBasicMaterial({ color: 0xef4c5b, transparent: true, opacity: 0.9 }),
+        );
+        marker.position.set(...point);
+        marker.name = `blocked:${route.id}:${index}`;
+        marker.userData.routeId = route.id;
+        routeGroup.add(marker);
+      }
     }
     for (const dimension of overlays.dimensions) {
       const color = dimension.evidence === "official" ? 0x4f9ee8 : dimension.evidence === "standard" ? 0x42b88d : dimension.evidence === "inferred" ? 0xe4a53e : 0x8b97a5;

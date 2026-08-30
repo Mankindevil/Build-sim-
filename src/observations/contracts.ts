@@ -16,6 +16,13 @@ export interface ObservationUncertainty {
   max?: number;
 }
 
+export interface ObservationMeasurementContext {
+  workloadId: string;
+  testMethodId?: string;
+  referenceDistanceM?: number;
+  rpm?: { lo: number; hi: number };
+}
+
 /** A plan-scoped user claim; `stale` is deliberately not a persisted status. */
 export interface UserObservation {
   observationId: string;
@@ -25,6 +32,7 @@ export interface UserObservation {
   value: unknown;
   unit?: UnitId;
   uncertainty?: ObservationUncertainty;
+  measurementContext?: ObservationMeasurementContext;
   method: "measurement" | "photo" | "label" | "visual_confirmation" | "user_assertion";
   attachmentRefs: string[];
   confirmedByUser: boolean;
@@ -44,6 +52,12 @@ export interface UserObservationSnapshot {
   snapshotId: string;
   planId: string;
   observationIds: string[];
+  /**
+   * New snapshots pin the immutable repository record for every member.  It
+   * remains optional solely so an already-written U1 snapshot can be read and
+   * migrated without changing its content address.
+   */
+  observationRecordHashes?: Record<string, string>;
   createdAt: string;
   contentHash: string;
 }
@@ -85,6 +99,23 @@ function validUncertainty(value: unknown, observedValue: unknown): boolean {
   return true;
 }
 
+function validMeasurementContext(fieldId: unknown, value: unknown): boolean {
+  if (fieldId === "thermal.ambient_temperature") return value === undefined;
+  if (!["thermal.fan_rpm", "thermal.component_temperature", "acoustics.sound_pressure"].includes(String(fieldId))) {
+    return value === undefined;
+  }
+  if (!isRecord(value) || typeof value.workloadId !== "string" || value.workloadId.length === 0) return false;
+  if (fieldId !== "acoustics.sound_pressure") {
+    return Object.keys(value).length === 1;
+  }
+  if (Object.keys(value).length !== 4 || typeof value.testMethodId !== "string" || value.testMethodId.length === 0
+    || typeof value.referenceDistanceM !== "number" || !Number.isFinite(value.referenceDistanceM) || value.referenceDistanceM <= 0
+    || !isRecord(value.rpm) || Object.keys(value.rpm).length !== 2
+    || typeof value.rpm.lo !== "number" || !Number.isFinite(value.rpm.lo) || value.rpm.lo < 0
+    || typeof value.rpm.hi !== "number" || !Number.isFinite(value.rpm.hi) || value.rpm.hi < value.rpm.lo) return false;
+  return true;
+}
+
 function isIsoTimestamp(value: unknown): value is string {
   return typeof value === "string"
     && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
@@ -116,7 +147,7 @@ export function validateUserObservation(value: unknown): string[] {
   if (!isRecord(value)) return ["user observation must be an object"];
   const errors: string[] = [];
   const allowed = [
-    "observationId", "planId", "subjectRef", "fieldId", "value", "unit", "uncertainty", "method", "attachmentRefs",
+    "observationId", "planId", "subjectRef", "fieldId", "value", "unit", "uncertainty", "measurementContext", "method", "attachmentRefs",
     "confirmedByUser", "observedAgainstConfigHash", "subjectRevisionHash", "capturedAt", "validatedAt", "invalidatedAt",
     "invalidationReason", "status", "supersedesObservationId", "contentHash",
   ];
@@ -135,6 +166,7 @@ export function validateUserObservation(value: unknown): string[] {
     errors.push(...validateObservationFieldValue(value.fieldId, value.value, value.unit, subjectKind(subject), value.uncertainty !== undefined));
   }
   if (value.uncertainty !== undefined && !validUncertainty(value.uncertainty, value.value)) errors.push("uncertainty invalid");
+  if (!validMeasurementContext(value.fieldId, value.measurementContext)) errors.push("measurementContext invalid for observation fieldId");
   if (!["measurement", "photo", "label", "visual_confirmation", "user_assertion"].includes(String(value.method))) errors.push("method invalid");
   if (!Array.isArray(value.attachmentRefs) || value.attachmentRefs.some((ref) => typeof ref !== "string" || ref.length === 0)) errors.push("attachmentRefs invalid");
   else if (new Set(value.attachmentRefs).size !== value.attachmentRefs.length) errors.push("attachmentRefs contains duplicates");
@@ -155,7 +187,10 @@ export function validateUserObservation(value: unknown): string[] {
   if (value.invalidationReason !== undefined && typeof value.invalidatedAt !== "string") errors.push("invalidation reason requires invalidatedAt");
   if (value.supersedesObservationId !== undefined) {
     if (typeof value.supersedesObservationId !== "string" || value.supersedesObservationId.length === 0) errors.push("supersedesObservationId invalid");
-    if (value.status !== "active") errors.push("only an active replacement observation may declare supersedesObservationId");
+    // A retraction is also an immutable successor.  It intentionally uses the
+    // same one-successor link as an active replacement, so a withdrawn proposal
+    // cannot remain current merely because no mutable row was edited in place.
+    if (value.status !== "active" && value.status !== "retracted") errors.push("only an active replacement observation may declare supersedesObservationId");
     if (value.supersedesObservationId === value.observationId) errors.push("observation cannot supersede itself");
   }
   return errors;
@@ -164,7 +199,6 @@ export function validateUserObservation(value: unknown): string[] {
 export function observationLifecycle(observation: UserObservation, context: ObservationProjectionContext): ObservationLifecycle {
   if (observation.status !== "active") return observation.status;
   if (observation.planId !== context.planId || !context.subjectExists || observation.invalidatedAt !== undefined
-    || observation.observedAgainstConfigHash !== context.currentConfigHash
     || observation.subjectRevisionHash !== context.currentSubjectRevisionHash) return "stale";
   return "active";
 }
@@ -178,13 +212,23 @@ export function canProjectUserObservation(observation: UserObservation, context:
 export function validateUserObservationSnapshot(value: unknown): string[] {
   if (!isRecord(value)) return ["user observation snapshot must be an object"];
   const errors: string[] = [];
-  const allowed = ["schemaVersion", "snapshotId", "planId", "observationIds", "createdAt", "contentHash"];
+  const allowed = ["schemaVersion", "snapshotId", "planId", "observationIds", "observationRecordHashes", "createdAt", "contentHash"];
   if (Object.keys(value).some((key) => !allowed.includes(key))) errors.push("user observation snapshot contains unknown fields");
   if (value.schemaVersion !== "user-observation-snapshot-v1") errors.push("user observation snapshot schemaVersion invalid");
   for (const field of ["snapshotId", "planId"] as const) if (typeof value[field] !== "string" || value[field].length === 0) errors.push(`user observation snapshot ${field} invalid`);
   if (!isIsoTimestamp(value.createdAt)) errors.push("user observation snapshot createdAt invalid");
   if (!Array.isArray(value.observationIds) || value.observationIds.some((id) => typeof id !== "string" || id.length === 0)) errors.push("user observation snapshot observationIds invalid");
   else if (new Set(value.observationIds).size !== value.observationIds.length) errors.push("user observation snapshot contains duplicate observation IDs");
+  if (value.observationRecordHashes !== undefined) {
+    if (!isRecord(value.observationRecordHashes)) {
+      errors.push("user observation snapshot observationRecordHashes invalid");
+    } else {
+      const ids = Array.isArray(value.observationIds) ? value.observationIds.filter((id): id is string => typeof id === "string") : [];
+      const declaredIds = Object.keys(value.observationRecordHashes).sort();
+      if (declaredIds.length !== ids.length || declaredIds.some((id, index) => id !== [...ids].sort()[index])) errors.push("user observation snapshot record hash closure invalid");
+      if (Object.values(value.observationRecordHashes).some((hash) => !isSha256Hex(hash))) errors.push("user observation snapshot observation record hash invalid");
+    }
+  }
   if (!isSha256Hex(value.contentHash)) errors.push("user observation snapshot contentHash must be sha256");
   return errors;
 }

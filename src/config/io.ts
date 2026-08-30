@@ -14,6 +14,26 @@ export function topologyV3Enabled(environment: Record<string, string | undefined
   throw new Error(`${TOPOLOGY_V3_FEATURE_FLAG} must be true or false`);
 }
 
+export function factGraphEnabled(environment: Record<string, string | undefined>): boolean {
+  const name = "BUILD_SIM_FACT_GRAPH_ENABLED";
+  const raw = environment[name];
+  if (raw === undefined || raw === "") return false;
+  const value = raw.toLowerCase();
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  throw new Error(`${name} must be true or false`);
+}
+
+export function agentInferenceEnabled(environment: Record<string, string | undefined>): boolean {
+  const name = "BUILD_SIM_AGENT_INFERENCE_ENABLED";
+  const raw = environment[name];
+  if (raw === undefined || raw === "") return false;
+  const value = raw.toLowerCase();
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  throw new Error(`${name} must be true or false`);
+}
+
 /** Reads V3 only behind its explicit flag; flag-off deployments may supply the immutable V2 bytes. */
 export function readConfigDocument(raw: string, options: {
   environment: Record<string, string | undefined>;
@@ -28,6 +48,7 @@ export function readConfigDocument(raw: string, options: {
 export function createConfig(partial: {
   id: string;
   name: string;
+  caseId: string;
   selection: BuildSelection;
   bom?: BuildLineItem[];
   notes?: string[];
@@ -37,7 +58,7 @@ export function createConfig(partial: {
     id: partial.id,
     name: partial.name,
     updatedAt: new Date().toISOString().slice(0, 10),
-    caseId: "case.jonsbo-n6",
+    caseId: partial.caseId,
     boardId: "board.asus-w680m-ace-se",
     cpuId: "cpu.i5-14500",
     selection: partial.selection,

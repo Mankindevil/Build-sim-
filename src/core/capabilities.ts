@@ -1,5 +1,9 @@
 import type { SkuCatalog } from "../sku/types";
-import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
+import {
+  DEFAULT_CASE_RUNTIME_ADAPTER_REGISTRY,
+  type CaseRuntimeAdapterRegistry,
+  type CaseRuntimeLookupIdentity,
+} from "../adapters/runtime";
 
 export interface FanMountCapability {
   /** Adapter-issued id; other cases may expose top/bottom or split zones. */
@@ -19,11 +23,11 @@ export interface CaseCapabilities {
   caseId: string;
   trayCount: number;
   backplane: { sataPowerInlets: number; molexInlets: number; evidence: "official" | "standard" | "inferred" | "unknown" };
-  /** Ordered, case-specific mounts. Core/UI code must not assume N6 positions. */
+  /** Ordered, case-specific mounts. Core/UI code must not assume fixed positions. */
   fanMounts: FanMountCapability[];
-  psuLimits: { atxMaxLengthMm: number; sfxMaxLengthMm: number };
-  coolerLimits: { overheadAtxMm: number; openTopMm: number };
-  gpuLimits: { planningMinMm: number; publishedMaxMm: number };
+  psuLimits: { atxMaxLengthMm: number | null; sfxMaxLengthMm: number | null };
+  coolerLimits: { overheadAtxMm: number | null; openTopMm: number | null };
+  gpuLimits: { planningMinMm: number | null; publishedMaxMm: number | null };
 }
 
 export interface BoardCapabilities {
@@ -64,34 +68,14 @@ export interface ThermalProfile {
   evidence: "official" | "standard" | "inferred" | "unknown";
 }
 
-export function n6CaseCapabilities(): CaseCapabilities {
-  const p = n6Profile;
-  const evidence = (value: unknown): FanMountCapability["evidence"] =>
-    value === "official" || value === "standard" || value === "inferred" || value === "unknown" ? value : "inferred";
-  const fanSize = (value: unknown): 120 | 140 => value === 140 ? 140 : 120;
-  return {
-    caseId: p.caseId,
-    trayCount: p.trayCount,
-    backplane: {
-      sataPowerInlets: p.backplanePower.connectors.sataPower,
-      molexInlets: p.backplanePower.connectors.molex,
-      evidence: evidence(p.backplanePower.evidence),
-    },
-    fanMounts: [
-      { id: "front", label: "前部进风", size: fanSize(p.fanMounts.front.altSize), count: p.fanMounts.front.altCount, supportedSizes: [120, 140], maxCountBySize: { 120: p.fanMounts.front.count, 140: p.fanMounts.front.altCount }, direction: "intake", chamber: "upper", evidence: evidence(p.fanMounts.evidence), source: p.fanMounts.source },
-      { id: "rear", label: "后部排风", size: fanSize(p.fanMounts.rear.size), count: p.fanMounts.rear.count, supportedSizes: [120], maxCountBySize: { 120: p.fanMounts.rear.count }, direction: "exhaust", chamber: "upper", evidence: evidence(p.fanMounts.evidence), source: p.fanMounts.source },
-      { id: "left", label: "左侧盘区进风", size: fanSize(p.fanMounts.left.size), count: p.fanMounts.left.count, supportedSizes: [120], maxCountBySize: { 120: p.fanMounts.left.count }, direction: "intake", chamber: "lower", evidence: evidence(p.fanMounts.evidence), source: p.fanMounts.source },
-      { id: "right", label: "右侧 GPU / HBA 进风", size: fanSize(p.fanMounts.right.size), count: p.fanMounts.right.count, supportedSizes: [120], maxCountBySize: { 120: p.fanMounts.right.count }, direction: "intake", chamber: "upper", evidence: evidence(p.fanMounts.evidence), source: p.fanMounts.source },
-    ],
-    psuLimits: p.psuLimits,
-    coolerLimits: p.coolerLimits,
-    gpuLimits: p.gpuLimits,
-  };
-}
-
-/** Explicit registry boundary: an unknown case never inherits N6 capabilities. */
-export function caseCapabilities(caseId: string): CaseCapabilities | null {
-  return caseId === n6Profile.caseId ? n6CaseCapabilities() : null;
+/** Explicit registry boundary: an unknown case never inherits another adapter's capabilities. */
+export function caseCapabilities(
+  caseId: string,
+  registry: CaseRuntimeAdapterRegistry = DEFAULT_CASE_RUNTIME_ADAPTER_REGISTRY,
+  identity?: CaseRuntimeLookupIdentity,
+): CaseCapabilities | null {
+  const adapter = identity?.skuId === caseId ? registry.resolveExact(identity) : registry.resolveLegacySku(caseId);
+  return adapter ? structuredClone(adapter.capabilities) : null;
 }
 
 export function orderedFanMounts(capabilities: CaseCapabilities): FanMountCapability[] {
@@ -122,25 +106,6 @@ export function boardCapabilities(catalog: SkuCatalog, boardId: string): BoardCa
   };
 }
 
-export function n6PowerProfile(): PowerProfile {
-  const p = n6Profile.powerProfile;
-  const numberOrNull = (value: unknown): number | null => typeof value === "number" && Number.isFinite(value) ? value : null;
-  return {
-    boardBaseW: numberOrNull(p?.boardBaseW),
-    fanBaseW: numberOrNull(p?.fanBaseW),
-    fan120W: numberOrNull(p?.fan120W),
-    fan140W: numberOrNull(p?.fan140W),
-    dualSyncW: numberOrNull(p?.dualSyncW),
-    cpuIdleW: numberOrNull(p?.cpuIdleW),
-    cpuReadW: numberOrNull(p?.cpuReadW),
-    cpuQuickSyncW: numberOrNull(p?.cpuQuickSyncW),
-    hbaW: numberOrNull(p?.hbaW),
-    driveSpinUpExtraW: numberOrNull(p?.driveSpinUpExtraW),
-    evidence: p?.evidence === "official" || p?.evidence === "standard" || p?.evidence === "inferred" || p?.evidence === "unknown" ? p.evidence : p?.evidence === "planning" ? "inferred" : "unknown",
-    source: typeof p?.source === "string" ? p.source : "unknown",
-  };
-}
-
 export const WORKLOAD_PROFILES: WorkloadProfile[] = [
   { id: "idle", label: "待机", evidence: "inferred" },
   { id: "work", label: "常规工作", evidence: "inferred" },
@@ -150,11 +115,3 @@ export const WORKLOAD_PROFILES: WorkloadProfile[] = [
   { id: "ai", label: "GPU / AI", evidence: "inferred" },
   { id: "combined", label: "CPU + GPU + 硬盘同时负载", evidence: "inferred" },
 ];
-
-export const THERMAL_PROFILE: ThermalProfile = {
-  airDensityKgM3: n6Profile.thermalProfile.airDensityKgM3,
-  airCpJPerKgK: n6Profile.thermalProfile.airCpJPerKgK,
-  systemDerate: n6Profile.thermalProfile.systemDerate,
-  passiveCfm: n6Profile.thermalProfile.passiveCfm,
-  evidence: n6Profile.thermalProfile.evidence === "official" || n6Profile.thermalProfile.evidence === "standard" || n6Profile.thermalProfile.evidence === "inferred" || n6Profile.thermalProfile.evidence === "unknown" ? n6Profile.thermalProfile.evidence : "unknown",
-};

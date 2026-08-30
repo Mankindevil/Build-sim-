@@ -8,6 +8,7 @@ import { atomicWriteJson, confined, sha256Json, withDirectoryLock } from "../run
 import {
   validateUserObservation,
   validateUserObservationSnapshot,
+  type ObservationProjectionContext,
   type UserObservation,
   type UserObservationSnapshot,
 } from "./contracts";
@@ -28,12 +29,70 @@ interface StoredObservation { schemaVersion: "observation-repository-v1"; revisi
 interface Supersession { schemaVersion: "observation-supersession-v1"; planId: string; supersededObservationId: string; replacementObservationId: string; createdAt: string; contentHash: string; }
 interface Envelope<T> { schemaVersion: "observation-repository-v1"; kind: "observation" | "supersession" | "snapshot"; checksum: string; payload: T; }
 interface Journal<T = unknown> { schemaVersion: "observation-journal-v1"; kind: "transaction"; checksum: string; payload: { transactionId: string; operation: "observation-create" | "snapshot-create"; planId: string; authorityId: string; authority: T; supersession?: Supersession; state: "prepared" | "committed"; createdAt: string; }; }
-export interface ObservationRepositoryOptions { root?: string; runtimeRoot?: string; coordinator?: RuntimeCoordinator; now?: () => string; id?: (prefix: "observation" | "snapshot") => string; attachments: AttachmentClosureLookup; }
+export type ObservationProjectionContextResolver = (observation: UserObservation, activeRoot?: string) => ObservationProjectionContext | Promise<ObservationProjectionContext>;
+export interface ObservationRepositoryOptions {
+  root?: string;
+  runtimeRoot?: string;
+  coordinator?: RuntimeCoordinator;
+  now?: () => string;
+  id?: (prefix: "observation" | "snapshot") => string;
+  attachments: AttachmentClosureLookup;
+  /** Production callers inject current plan/subject bindings before snapshotting. */
+  projectionContextForObservation?: ObservationProjectionContextResolver;
+}
+export interface ResolvedObservationRepositoryRecord {
+  recordHash: string;
+  observation: UserObservation;
+  projectionContext: ObservationProjectionContext;
+  attachmentClosureVerified: true;
+}
+export interface ResolvedObservationRepositorySnapshotClosure {
+  snapshot: UserObservationSnapshot;
+  observations: ResolvedObservationRepositoryRecord[];
+}
 export interface PutObservationInput { observation: UserObservation; expectedRevision?: number; expectedHash?: string; maintenanceLeaseToken?: string; }
+export interface ObservationTransitionInput {
+  planId: string;
+  /** Immutable source record that is being replaced. */
+  observationId: string;
+  /** CAS against the source StoredObservation.recordHash. */
+  expectedHash: string;
+  /** Optional deterministic ID for retries; otherwise the repository allocates one. */
+  replacementObservationId?: string;
+  maintenanceLeaseToken?: string;
+}
+export interface ActivateObservationInput extends ObservationTransitionInput {
+  context: ObservationProjectionContext;
+  validatedAt?: string;
+}
+export interface RetractObservationInput extends ObservationTransitionInput {
+  /** Current binding is checked for plan/shape, but stale records may be retracted. */
+  context: ObservationProjectionContext;
+}
+export interface InvalidateObservationInput extends ObservationTransitionInput {
+  /** Invalidating a stale record is valid, so this need not equal the source hashes. */
+  context: ObservationProjectionContext;
+  invalidationReason: string;
+  invalidatedAt?: string;
+}
+export interface SupersedeObservationInput extends ObservationTransitionInput {
+  context: ObservationProjectionContext;
+  /** The replacement's domain fields. Repository-owned identity/link/hash fields are ignored. */
+  replacement: Omit<UserObservation, "observationId" | "planId" | "supersedesObservationId" | "contentHash">;
+}
+export interface CreateObservationSnapshotOptions {
+  observationIds?: string[];
+  /** Use for a single-subject snapshot. */
+  context?: ObservationProjectionContext;
+  /** Required for a heterogeneous plan when checking current subject revisions. */
+  resolveProjectionContext?: ObservationProjectionContextResolver;
+  maintenanceLeaseToken?: string;
+}
 
 function digest(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function clone<T>(value: T): T { return structuredClone(value); }
 function observationHash(observation: UserObservation): string { const { contentHash: _ignored, ...rest } = observation; return digest(canonicalJson(rest)); }
+function recordHash(observation: UserObservation): string { return digest(canonicalJson(observation)); }
 
 /** Plan-scoped immutable observation log. A supersession is a separate append-only event. */
 export class ObservationRepository {
@@ -41,19 +100,26 @@ export class ObservationRepository {
   private readonly coordinator: RuntimeCoordinator | undefined;
   private readonly now: () => string;
   private readonly id: (prefix: "observation" | "snapshot") => string;
+  private readonly hasExplicitIdFactory: boolean;
   private readonly attachments: AttachmentClosureLookup;
+  private readonly projectionContextForObservation: ObservationProjectionContextResolver | undefined;
   private readonly queues = new Map<string, Promise<unknown>>();
 
   constructor(options: ObservationRepositoryOptions) {
+    if (options.root !== undefined && options.coordinator !== undefined) {
+      throw new ObservationRepositoryError("invalid_input", "observation root and RuntimeCoordinator cannot be combined");
+    }
     this.root = path.resolve(options.root ?? "runtime/observations"); this.coordinator = options.root ? undefined : options.coordinator ?? new RuntimeCoordinator({ root: options.runtimeRoot, now: options.now }); this.now = options.now ?? (() => new Date().toISOString());
-    this.id = options.id ?? ((prefix) => `${prefix}-${randomUUID()}`); this.attachments = options.attachments;
+    this.id = options.id ?? ((prefix) => `${prefix}-${randomUUID()}`); this.hasExplicitIdFactory = options.id !== undefined; this.attachments = options.attachments;
+    this.projectionContextForObservation = options.projectionContextForObservation;
   }
   private assert(value: string, label: string): void { if (!SAFE_ID.test(value)) throw new ObservationRepositoryError("invalid_input", `${label} invalid`); }
   private planRootAt(repositoryRoot: string, planId: string): string { this.assert(planId, "plan id"); return confined(repositoryRoot, "plans", planId); }
   private planRoot(planId: string): string { return this.planRootAt(this.root, planId); }
   private observationFileAt(repositoryRoot: string, planId: string, id: string): string { this.assert(id, "observation id"); return confined(this.planRootAt(repositoryRoot, planId), "records", `${id}.json`); }
   private observationFile(planId: string, id: string): string { return this.observationFileAt(this.root, planId, id); }
-  private supersessionFile(planId: string, replacementId: string): string { this.assert(replacementId, "observation id"); return path.join(this.planRoot(planId), "supersessions", `${replacementId}.json`); }
+  private supersessionFileAt(repositoryRoot: string, planId: string, replacementId: string): string { this.assert(replacementId, "observation id"); return confined(this.planRootAt(repositoryRoot, planId), "supersessions", `${replacementId}.json`); }
+  private supersessionFile(planId: string, replacementId: string): string { return this.supersessionFileAt(this.root, planId, replacementId); }
   private snapshotFile(planId: string, id: string): string { this.assert(id, "snapshot id"); return path.join(this.planRoot(planId), "snapshots", `${id}.json`); }
   private journalFile(planId: string, transactionId: string): string { this.assert(planId, "plan id"); this.assert(transactionId, "transaction id"); return confined(this.root, "journal", planId, `${transactionId}.json`); }
   private async serial<T>(key: string, fn: () => Promise<T>): Promise<T> { const previous = this.queues.get(key) ?? Promise.resolve(); const current = previous.catch(() => undefined).then(fn); this.queues.set(key, current); try { return await current; } finally { if (this.queues.get(key) === current) this.queues.delete(key); } }
@@ -97,17 +163,137 @@ export class ObservationRepository {
   }
   private async readStoredAt(repositoryRoot: string, planId: string, id: string): Promise<StoredObservation> {
     const stored = await this.read<StoredObservation>(this.observationFileAt(repositoryRoot, planId, id), "observation");
-    if (stored.schemaVersion !== "observation-repository-v1" || !Number.isInteger(stored.revision) || stored.revision !== 0 || !SHA256.test(stored.recordHash) || validateUserObservation(stored.observation).length || stored.observation.planId !== planId || stored.recordHash !== digest(canonicalJson(stored.observation))) throw new ObservationRepositoryError("corrupt_data", "observation record integrity invalid");
+    if (stored.schemaVersion !== "observation-repository-v1" || !Number.isInteger(stored.revision) || stored.revision !== 0 || !SHA256.test(stored.recordHash) || validateUserObservation(stored.observation).length || stored.observation.planId !== planId || stored.observation.observationId !== id || stored.recordHash !== recordHash(stored.observation)) throw new ObservationRepositoryError("corrupt_data", "observation record integrity invalid");
     if (stored.observation.contentHash !== observationHash(stored.observation)) throw new ObservationRepositoryError("corrupt_data", "observation content hash invalid");
     return stored;
   }
   private async readStored(planId: string, id: string): Promise<StoredObservation> { return this.readStoredAt(this.root, planId, id); }
-  private async ensureAttachmentClosure(observation: UserObservation, activeRoot?: string): Promise<void> {
+  private async readSupersessionAt(repositoryRoot: string, planId: string, replacementObservationId: string): Promise<Supersession> {
+    const supersession = await this.read<Supersession>(this.supersessionFileAt(repositoryRoot, planId, replacementObservationId), "supersession");
+    const base = {
+      schemaVersion: "observation-supersession-v1" as const,
+      planId: supersession.planId,
+      supersededObservationId: supersession.supersededObservationId,
+      replacementObservationId: supersession.replacementObservationId,
+      createdAt: supersession.createdAt,
+    };
+    if (supersession.schemaVersion !== base.schemaVersion || supersession.planId !== planId
+      || supersession.replacementObservationId !== replacementObservationId
+      || !SAFE_ID.test(supersession.supersededObservationId)
+      || !Number.isFinite(Date.parse(supersession.createdAt))
+      || !SHA256.test(supersession.contentHash)
+      || supersession.contentHash !== digest(canonicalJson(base))) {
+      throw new ObservationRepositoryError("corrupt_data", "observation supersession integrity invalid");
+    }
+    return supersession;
+  }
+  private async hasAttachmentClosure(observation: UserObservation, activeRoot?: string): Promise<boolean> {
     if (activeRoot && typeof this.attachments.hasAvailableAtRoot !== "function") throw new ObservationRepositoryError("invalid_input", "coordinated attachment closure lookup is unavailable");
     const checks = await Promise.all(observation.attachmentRefs.map((id) => activeRoot
       ? this.attachments.hasAvailableAtRoot!(activeRoot, id, observation.planId)
       : this.attachments.hasAvailable(id, observation.planId)));
-    if (checks.some((found) => !found)) throw new ObservationRepositoryError("invalid_input", "observation attachment closure is incomplete or cross-plan");
+    return checks.every(Boolean);
+  }
+
+  private async ensureAttachmentClosure(observation: UserObservation, activeRoot?: string): Promise<void> {
+    if (!await this.hasAttachmentClosure(observation, activeRoot)) {
+      throw new ObservationRepositoryError("invalid_input", "observation attachment closure is incomplete or cross-plan");
+    }
+  }
+
+  private assertProjectionContext(observation: UserObservation, context: ObservationProjectionContext, requireCurrent: boolean, requireCapturedConfig = false): void {
+    if (!context || typeof context !== "object" || context.planId !== observation.planId
+      || typeof context.subjectExists !== "boolean" || !SHA256.test(context.currentConfigHash)
+      || !SHA256.test(context.currentSubjectRevisionHash)) {
+      throw new ObservationRepositoryError("invalid_input", "observation projection context is invalid or cross-plan");
+    }
+    // Activation verifies that the proposal is bound to the live plan/subject
+    // before changing it to active; it cannot use canProjectUserObservation
+    // because proposals are deliberately not projectable yet.
+    // observedAgainstConfigHash remains the immutable capture/audit binding.
+    // Freshness is governed by the resolved typed subject revision so an
+    // unrelated plan edit does not invalidate every observation in the plan.
+    if (requireCurrent && (!context.subjectExists || observation.invalidatedAt !== undefined
+      || observation.subjectRevisionHash !== context.currentSubjectRevisionHash)) {
+      throw new ObservationRepositoryError("conflict", "observation is not active for the current plan/config/subject revision");
+    }
+    // A proposal/replacement becoming active is a new assertion, so it must
+    // bind the exact configuration it was captured against.  Existing active
+    // observations remain scoped to their typed subject revision above.
+    if (requireCapturedConfig && observation.observedAgainstConfigHash !== context.currentConfigHash) {
+      throw new ObservationRepositoryError("conflict", "observation was captured against a stale plan configuration");
+    }
+  }
+
+  private async contextForSnapshot(observation: UserObservation, options: CreateObservationSnapshotOptions, activeRoot?: string): Promise<ObservationProjectionContext> {
+    const resolver = options.resolveProjectionContext ?? this.projectionContextForObservation;
+    if (resolver) return resolver(clone(observation), activeRoot);
+    if (options.context) return clone(options.context);
+    // U1 exposed createSnapshot(planId) without a plan resolver. Keep that API
+    // readable for legacy data, but make its compatibility context explicit;
+    // production callers supply a resolver tied to current plan state.
+    return {
+      planId: observation.planId,
+      subjectExists: true,
+      currentConfigHash: observation.observedAgainstConfigHash,
+      currentSubjectRevisionHash: observation.subjectRevisionHash,
+    };
+  }
+
+  private currentObservationIds(observations: readonly UserObservation[]): Set<string> {
+    const byId = new Map(observations.map((observation) => [observation.observationId, observation]));
+    if (byId.size !== observations.length) throw new ObservationRepositoryError("corrupt_data", "observation records contain duplicate identities");
+    const replaced = new Set<string>();
+    for (const observation of observations) {
+      if (!observation.supersedesObservationId) continue;
+      const source = byId.get(observation.supersedesObservationId);
+      if (!source) throw new ObservationRepositoryError("corrupt_data", "observation supersession source is missing");
+      if (source.fieldId !== observation.fieldId || canonicalJson(source.subjectRef) !== canonicalJson(observation.subjectRef)) {
+        throw new ObservationRepositoryError("corrupt_data", "observation supersession crosses a subject or field");
+      }
+      if (replaced.has(observation.supersedesObservationId)) throw new ObservationRepositoryError("corrupt_data", "observation supersession has multiple replacements");
+      replaced.add(observation.supersedesObservationId);
+    }
+    return new Set(observations.filter((observation) => !replaced.has(observation.observationId)).map((observation) => observation.observationId));
+  }
+
+  private successor(
+    source: UserObservation,
+    replacementObservationId: string,
+    patch: Partial<UserObservation>,
+    clear: readonly ("validatedAt" | "invalidatedAt" | "invalidationReason")[] = [],
+  ): UserObservation {
+    this.assert(replacementObservationId, "replacement observation id");
+    const candidate = {
+      ...clone(source),
+      ...clone(patch),
+      observationId: replacementObservationId,
+      planId: source.planId,
+      supersedesObservationId: source.observationId,
+    } as UserObservation;
+    for (const field of clear) delete candidate[field];
+    // Undefined fields must be absent from the canonical immutable record, not
+    // merely present with an undefined JavaScript value.
+    if (candidate.validatedAt === undefined) delete candidate.validatedAt;
+    if (candidate.invalidatedAt === undefined) delete candidate.invalidatedAt;
+    if (candidate.invalidationReason === undefined) delete candidate.invalidationReason;
+    const { contentHash: _ignored, ...withoutContentHash } = candidate;
+    return { ...withoutContentHash, contentHash: digest(canonicalJson(withoutContentHash)) } as UserObservation;
+  }
+
+  private async persistAtRoot(observation: UserObservation, supersession?: Supersession): Promise<UserObservation> {
+    const stored: StoredObservation = { schemaVersion: "observation-repository-v1", revision: 0, recordHash: recordHash(observation), observation };
+    const transactionId = `observation-${observation.observationId}-${this.now().replace(/[^0-9A-Za-z]/g, "")}`;
+    const journalPayload = { transactionId, operation: "observation-create" as const, planId: observation.planId, authorityId: observation.observationId, authority: stored, ...(supersession ? { supersession } : {}), state: "prepared" as const, createdAt: this.now() };
+    await this.writeJournal({ schemaVersion: "observation-journal-v1", kind: "transaction", checksum: digest(canonicalJson(journalPayload)), payload: journalPayload });
+    await this.write(this.observationFile(observation.planId, observation.observationId), { schemaVersion: "observation-repository-v1", kind: "observation", checksum: digest(canonicalJson(stored)), payload: stored });
+    // This is a derived index. The replacement record remains authoritative if
+    // a process stops between these two atomic renames, so recovery cannot
+    // create a dangling reference to a missing observation.
+    if (supersession) await this.write(this.supersessionFile(observation.planId, observation.observationId), { schemaVersion: "observation-repository-v1", kind: "supersession", checksum: digest(canonicalJson(supersession)), payload: supersession });
+    const committedPayload = { ...journalPayload, state: "committed" as const };
+    await this.writeJournal({ schemaVersion: "observation-journal-v1", kind: "transaction", checksum: digest(canonicalJson(committedPayload)), payload: committedPayload });
+    return clone(observation);
   }
 
   async put(input: PutObservationInput): Promise<UserObservation> {
@@ -125,71 +311,225 @@ export class ObservationRepository {
       try {
         const existing = await this.readStored(observation.planId, observation.observationId);
         if (input.expectedHash !== undefined && input.expectedHash !== existing.recordHash) throw new ObservationRepositoryError("conflict", "observation expected hash mismatch");
-        if (existing.recordHash !== digest(canonicalJson(observation))) throw new ObservationRepositoryError("conflict", "immutable observation id already exists with different content");
+        if (existing.recordHash !== recordHash(observation)) throw new ObservationRepositoryError("conflict", "immutable observation id already exists with different content");
         return clone(existing.observation);
       } catch (error) { if (!(error instanceof ObservationRepositoryError) || error.code !== "not_found") throw error; }
-      if (input.expectedHash !== undefined && input.expectedHash !== digest(canonicalJson(observation))) throw new ObservationRepositoryError("conflict", "observation expected hash mismatch");
+      if (input.expectedHash !== undefined && input.expectedHash !== recordHash(observation)) throw new ObservationRepositoryError("conflict", "observation expected hash mismatch");
       let supersession: Supersession | undefined;
       if (observation.supersedesObservationId) {
         const old = await this.readStored(observation.planId, observation.supersedesObservationId);
-        if (old.observation.status !== "active") throw new ObservationRepositoryError("conflict", "only an active observation can be superseded");
-        const alreadyReplaced = (await this.listAtRoot(observation.planId)).some((item) => item.supersedesObservationId === old.observation.observationId);
-        if (alreadyReplaced) throw new ObservationRepositoryError("conflict", "observation already has an immutable replacement");
+        if (old.observation.status !== "active" || observation.status !== "active") throw new ObservationRepositoryError("conflict", "legacy put only permits an active observation replacement");
+        if (!this.currentObservationIds(await this.listAtRoot(observation.planId)).has(old.observation.observationId)) throw new ObservationRepositoryError("conflict", "observation already has an immutable replacement");
         const eventBase = { schemaVersion: "observation-supersession-v1" as const, planId: observation.planId, supersededObservationId: old.observation.observationId, replacementObservationId: observation.observationId, createdAt: this.now() };
         supersession = { ...eventBase, contentHash: digest(canonicalJson(eventBase)) };
       }
-      const stored: StoredObservation = { schemaVersion: "observation-repository-v1", revision: 0, recordHash: digest(canonicalJson(observation)), observation };
-      const transactionId = `observation-${observation.observationId}-${this.now().replace(/[^0-9A-Za-z]/g, "")}`;
-      const journalPayload = { transactionId, operation: "observation-create" as const, planId: observation.planId, authorityId: observation.observationId, authority: stored, ...(supersession ? { supersession } : {}), state: "prepared" as const, createdAt: this.now() };
-      await this.writeJournal({ schemaVersion: "observation-journal-v1", kind: "transaction", checksum: digest(canonicalJson(journalPayload)), payload: journalPayload });
-      await this.write(this.observationFile(observation.planId, observation.observationId), { schemaVersion: "observation-repository-v1", kind: "observation", checksum: digest(canonicalJson(stored)), payload: stored });
-      // This is a derived index. The replacement record remains authoritative if
-      // a process stops between these two atomic renames, so recovery cannot
-      // create a dangling reference to a missing observation.
-      if (supersession) await this.write(this.supersessionFile(observation.planId, observation.observationId), { schemaVersion: "observation-repository-v1", kind: "supersession", checksum: digest(canonicalJson(supersession)), payload: supersession });
-      const committedPayload = { ...journalPayload, state: "committed" as const };
-      await this.writeJournal({ schemaVersion: "observation-journal-v1", kind: "transaction", checksum: digest(canonicalJson(committedPayload)), payload: committedPayload });
-      return clone(observation);
+      return this.persistAtRoot(observation, supersession);
     }), input.maintenanceLeaseToken);
   }
 
-  async get(planId: string, observationId: string): Promise<UserObservation> { return this.withRoot(`plan:${planId}`, false, async () => clone((await this.readStored(planId, observationId)).observation)); }
-  private async listAtRoot(planId: string): Promise<UserObservation[]> {
-    const directory = path.join(this.planRoot(planId), "records"); let entries: import("node:fs").Dirent[]; try { entries = await readdir(directory, { withFileTypes: true }); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
-    if (entries.some((entry) => entry.isSymbolicLink())) throw new ObservationRepositoryError("corrupt_data", "observation listing contains a symlink");
-    const values = await Promise.all(entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json")).map((entry) => entry.name).sort().map((name) => this.readStored(planId, name.slice(0, -5))));
-    return values.map((item) => clone(item.observation));
+  private async transition(
+    input: ObservationTransitionInput & { context: ObservationProjectionContext },
+    sourceStatuses: readonly UserObservation["status"][],
+    requireCurrentContext: boolean,
+    requireCapturedConfig: boolean,
+    requireAttachmentClosure: boolean,
+    build: (source: UserObservation, replacementObservationId: string) => UserObservation,
+  ): Promise<UserObservation> {
+    this.assert(input.planId, "plan id"); this.assert(input.observationId, "observation id");
+    if (!SHA256.test(input.expectedHash)) throw new ObservationRepositoryError("invalid_input", "observation transition expected hash invalid");
+    if (input.replacementObservationId !== undefined) this.assert(input.replacementObservationId, "replacement observation id");
+    return this.withRoot(`plan:${input.planId}`, true, (activeRoot) => this.serial(`plan:${input.planId}`, async () => {
+      await this.recoverJournals(input.planId);
+      const source = await this.readStored(input.planId, input.observationId);
+      if (source.recordHash !== input.expectedHash) throw new ObservationRepositoryError("conflict", "observation transition expected hash mismatch");
+      if (!sourceStatuses.includes(source.observation.status)) throw new ObservationRepositoryError("conflict", "observation lifecycle transition is not allowed from the source status");
+      // A configured repository resolver is the production authority. The
+      // transition payload context is retained only for U1-compatible
+      // standalone callers and never overrides that resolver.
+      const context = this.projectionContextForObservation
+        ? await this.projectionContextForObservation(clone(source.observation), activeRoot)
+        : input.context;
+      this.assertProjectionContext(source.observation, context, requireCurrentContext, requireCapturedConfig && source.observation.status === "proposed");
+      const replacementObservationId = input.replacementObservationId ?? this.id("observation");
+      const replacement = build(clone(source.observation), replacementObservationId);
+      if (validateUserObservation(replacement).length) throw new ObservationRepositoryError("invalid_input", validateUserObservation(replacement).join("; "));
+      if (replacement.contentHash !== observationHash(replacement)) throw new ObservationRepositoryError("invalid_input", "replacement observation content hash mismatch");
+      if (replacement.planId !== input.planId || replacement.supersedesObservationId !== source.observation.observationId
+        || replacement.fieldId !== source.observation.fieldId || canonicalJson(replacement.subjectRef) !== canonicalJson(source.observation.subjectRef)) {
+        throw new ObservationRepositoryError("invalid_input", "replacement observation identity/link is invalid");
+      }
+      if (requireCapturedConfig) this.assertProjectionContext(replacement, context, true, true);
+      try {
+        const existing = await this.readStored(input.planId, replacementObservationId);
+        if (existing.recordHash !== recordHash(replacement)) throw new ObservationRepositoryError("conflict", "replacement observation id already exists with different content");
+        return clone(existing.observation);
+      } catch (error) { if (!(error instanceof ObservationRepositoryError) || error.code !== "not_found") throw error; }
+      const all = await this.listAtRoot(input.planId);
+      if (!this.currentObservationIds(all).has(source.observation.observationId)) throw new ObservationRepositoryError("conflict", "observation already has an immutable replacement");
+      if (requireAttachmentClosure) await this.ensureAttachmentClosure(replacement, activeRoot);
+      const eventBase = { schemaVersion: "observation-supersession-v1" as const, planId: input.planId, supersededObservationId: source.observation.observationId, replacementObservationId, createdAt: this.now() };
+      const supersession: Supersession = { ...eventBase, contentHash: digest(canonicalJson(eventBase)) };
+      return this.persistAtRoot(replacement, supersession);
+    }), input.maintenanceLeaseToken);
   }
+
+  /** Confirm a proposal by appending an active successor under source-hash CAS. */
+  async activate(input: ActivateObservationInput): Promise<UserObservation> {
+    return this.transition(input, ["proposed"], true, true, true, (source, replacementObservationId) => this.successor(source, replacementObservationId, {
+      status: "active",
+      confirmedByUser: true,
+      validatedAt: input.validatedAt ?? this.now(),
+    }, ["invalidatedAt", "invalidationReason"]));
+  }
+
+  /** Withdraw a proposal or current observation without mutating audit history. */
+  async retract(input: RetractObservationInput): Promise<UserObservation> {
+    return this.transition(input, ["proposed", "active"], false, false, false, (source, replacementObservationId) => this.successor(source, replacementObservationId, {
+      status: "retracted",
+    }, ["invalidatedAt", "invalidationReason"]));
+  }
+
+  /** Mark an active observation stale/invalid while retaining its immutable source and reason. */
+  async invalidate(input: InvalidateObservationInput): Promise<UserObservation> {
+    if (typeof input.invalidationReason !== "string" || input.invalidationReason.trim().length === 0) throw new ObservationRepositoryError("invalid_input", "observation invalidation reason is required");
+    return this.transition(input, ["active"], false, false, false, (source, replacementObservationId) => {
+      if (source.invalidatedAt !== undefined) throw new ObservationRepositoryError("conflict", "observation is already invalidated");
+      return this.successor(source, replacementObservationId, {
+        status: "active",
+        invalidatedAt: input.invalidatedAt ?? this.now(),
+        invalidationReason: input.invalidationReason.trim(),
+      });
+    });
+  }
+
+  /** Replace an active/current observation with a new active measurement under source-hash CAS. */
+  async supersede(input: SupersedeObservationInput): Promise<UserObservation> {
+    return this.transition(input, ["active"], true, true, true, (source, replacementObservationId) => {
+      const replacement = clone(input.replacement) as Partial<UserObservation>;
+      delete replacement.observationId; delete replacement.planId; delete replacement.supersedesObservationId; delete replacement.contentHash;
+      return this.successor(source, replacementObservationId, {
+        ...replacement,
+        status: "active",
+      }, ["invalidatedAt", "invalidationReason"]);
+    });
+  }
+
+  async get(planId: string, observationId: string): Promise<UserObservation> { return this.withRoot(`plan:${planId}`, false, async () => clone((await this.readStored(planId, observationId)).observation)); }
+
+  private async resolveForFactAtRepositoryRoot(repositoryRoot: string, activeRoot: string | undefined, planId: string, observationId: string): Promise<{ observation: UserObservation; context: ObservationProjectionContext } | null> {
+    // Fact projection has no legacy mode: without a plan-owned context resolver
+    // this repository cannot prove config/subject freshness, so it fails closed.
+    if (!this.projectionContextForObservation) return null;
+    let stored: StoredObservation;
+    try { stored = await this.readStoredAt(repositoryRoot, planId, observationId); }
+    catch (error) { if (error instanceof ObservationRepositoryError && error.code === "not_found") return null; throw error; }
+    const all = await this.listStoredAt(repositoryRoot, planId);
+    if (!this.currentObservationIds(all.map((entry) => entry.observation)).has(observationId)
+      || stored.observation.status !== "active" || stored.observation.invalidatedAt !== undefined) return null;
+    const context = await this.projectionContextForObservation(clone(stored.observation), activeRoot);
+    try { this.assertProjectionContext(stored.observation, context, true); }
+    catch (error) { if (error instanceof ObservationRepositoryError && error.code === "conflict") return null; throw error; }
+    if (!await this.hasAttachmentClosure(stored.observation, activeRoot)) return null;
+    return { observation: clone(stored.observation), context: clone(context) };
+  }
+
+  /**
+   * Strict authority adapter for FactRepository. Unlike get(), this never
+   * returns a superseded, stale, invalidated, or attachment-incomplete record.
+   */
+  async resolveForFact(planId: string, observationId: string): Promise<{ observation: UserObservation; context: ObservationProjectionContext } | null> {
+    return this.withRoot(`plan:${planId}`, false, (activeRoot) => this.resolveForFactAtRepositoryRoot(this.root, activeRoot, planId, observationId));
+  }
+
+  /** Read-only variant for a FactRepository already inside the coordinator barrier. */
+  async resolveForFactAtRoot(activeRoot: string, planId: string, observationId: string): Promise<{ observation: UserObservation; context: ObservationProjectionContext } | null> {
+    return this.resolveForFactAtRepositoryRoot(confined(activeRoot, "observations"), activeRoot, planId, observationId);
+  }
+
+  private async listStoredAt(repositoryRoot: string, planId: string): Promise<StoredObservation[]> {
+    const directory = confined(this.planRootAt(repositoryRoot, planId), "records"); let entries: import("node:fs").Dirent[]; try { entries = await readdir(directory, { withFileTypes: true }); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    if (entries.some((entry) => entry.isSymbolicLink())) throw new ObservationRepositoryError("corrupt_data", "observation listing contains a symlink");
+    return Promise.all(entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json")).map((entry) => entry.name).sort().map((name) => this.readStoredAt(repositoryRoot, planId, name.slice(0, -5))));
+  }
+  private async listStoredAtRoot(planId: string): Promise<StoredObservation[]> { return this.listStoredAt(this.root, planId); }
+  private async listAtRoot(planId: string): Promise<UserObservation[]> { return (await this.listStoredAtRoot(planId)).map((item) => clone(item.observation)); }
   async list(planId: string): Promise<UserObservation[]> { return this.withRoot(`plan:${planId}`, false, () => this.listAtRoot(planId)); }
   private async listSupersessionsAtRoot(planId: string): Promise<Supersession[]> {
     const directory = path.join(this.planRoot(planId), "supersessions"); let entries: import("node:fs").Dirent[]; try { entries = await readdir(directory, { withFileTypes: true }); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
     if (entries.some((entry) => entry.isSymbolicLink())) throw new ObservationRepositoryError("corrupt_data", "observation supersession listing contains a symlink");
-    return Promise.all(entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json")).map((entry) => entry.name).sort().map((name) => this.read<Supersession>(path.join(directory, name), "supersession")));
+    return Promise.all(entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json")).map((entry) => entry.name).sort().map((name) => this.readSupersessionAt(this.root, planId, name.slice(0, -5))));
   }
   async listSupersessions(planId: string): Promise<Supersession[]> { return this.withRoot(`plan:${planId}`, false, () => this.listSupersessionsAtRoot(planId)); }
   /** Current projection; source records remain unchanged in immutable history. */
   async listCurrent(planId: string): Promise<UserObservation[]> {
     const all = await this.list(planId);
-    const superseded = new Set(all.flatMap((item) => item.supersedesObservationId ? [item.supersedesObservationId] : []));
-    return all.filter((item) => !superseded.has(item.observationId));
+    const current = this.currentObservationIds(all);
+    return all.filter((item) => current.has(item.observationId));
   }
-  async createSnapshot(planId: string, observationIds?: string[]): Promise<UserObservationSnapshot> {
-    return this.withRoot(`plan:${planId}`, true, async () => {
-    await this.recoverJournals(planId);
-    const all = await this.listAtRoot(planId); const ids = observationIds ? [...observationIds] : all.map((item) => item.observationId);
-    if (new Set(ids).size !== ids.length || ids.some((id) => !all.some((item) => item.observationId === id))) throw new ObservationRepositoryError("invalid_input", "snapshot observation closure invalid");
-    const snapshotId = this.id("snapshot"); this.assert(snapshotId, "snapshot id");
-    const candidate = { schemaVersion: "user-observation-snapshot-v1" as const, snapshotId, planId, observationIds: ids, createdAt: this.now() };
-    const snapshot: UserObservationSnapshot = { ...candidate, contentHash: await hashContent(candidate, { domain: "user-observation-snapshot", schemaVersion: "user-observation-snapshot-v1" }) };
-    if (validateUserObservationSnapshot(snapshot).length) throw new ObservationRepositoryError("invalid_input", "snapshot invalid");
-    const transactionId = `snapshot-${snapshot.snapshotId}`;
-    const journalPayload = { transactionId, operation: "snapshot-create" as const, planId, authorityId: snapshot.snapshotId, authority: snapshot, state: "prepared" as const, createdAt: this.now() };
-    await this.writeJournal({ schemaVersion: "observation-journal-v1", kind: "transaction", checksum: digest(canonicalJson(journalPayload)), payload: journalPayload });
-    await this.write(this.snapshotFile(planId, snapshotId), { schemaVersion: "observation-repository-v1", kind: "snapshot", checksum: digest(canonicalJson(snapshot)), payload: snapshot });
-    const committedPayload = { ...journalPayload, state: "committed" as const };
-    await this.writeJournal({ schemaVersion: "observation-journal-v1", kind: "transaction", checksum: digest(canonicalJson(committedPayload)), payload: committedPayload });
-    return clone(snapshot);
-    });
+  async createSnapshot(planId: string, observationIdsOrOptions?: string[] | CreateObservationSnapshotOptions): Promise<UserObservationSnapshot> {
+    this.assert(planId, "plan id");
+    const options: CreateObservationSnapshotOptions = Array.isArray(observationIdsOrOptions)
+      ? { observationIds: observationIdsOrOptions }
+      : observationIdsOrOptions ?? {};
+    const explicitSelection = options.observationIds !== undefined;
+    return this.withRoot(`plan:${planId}`, true, async (activeRoot) => {
+      await this.recoverJournals(planId);
+      const stored = await this.listStoredAtRoot(planId);
+      const byId = new Map(stored.map((entry) => [entry.observation.observationId, entry]));
+      const currentIds = this.currentObservationIds(stored.map((entry) => entry.observation));
+      const requestedIds = options.observationIds ? [...options.observationIds] : [...currentIds];
+      if (new Set(requestedIds).size !== requestedIds.length || requestedIds.some((id) => !byId.has(id))) {
+        throw new ObservationRepositoryError("invalid_input", "snapshot observation closure invalid");
+      }
+      const selected: StoredObservation[] = [];
+      for (const observationId of requestedIds.sort()) {
+        const entry = byId.get(observationId)!;
+        let projectable = currentIds.has(observationId) && entry.observation.status === "active" && entry.observation.invalidatedAt === undefined;
+        if (projectable) {
+          try {
+            const context = await this.contextForSnapshot(entry.observation, options, activeRoot);
+            this.assertProjectionContext(entry.observation, context, true);
+          } catch (error) {
+            if (!(error instanceof ObservationRepositoryError) || error.code !== "conflict") throw error;
+            projectable = false;
+          }
+        }
+        if (projectable) projectable = await this.hasAttachmentClosure(entry.observation, activeRoot);
+        if (!projectable) {
+          if (explicitSelection) throw new ObservationRepositoryError("invalid_input", "snapshot only accepts active/current observations with an attachment closure");
+          continue;
+        }
+        selected.push(entry);
+      }
+      const observationIds = selected.map((entry) => entry.observation.observationId).sort();
+      const observationRecordHashes = Object.fromEntries(selected
+        .sort((left, right) => left.observation.observationId.localeCompare(right.observation.observationId))
+        .map((entry) => [entry.observation.observationId, entry.recordHash]));
+      const closure = { schemaVersion: "user-observation-snapshot-v1" as const, planId, observationIds, observationRecordHashes };
+      // The frozen user-observation snapshot hash domain also commits this
+      // closure preimage; no unregistered ad-hoc hash domain is permitted.
+      const closureHash = await hashContent(closure, { domain: "user-observation-snapshot", schemaVersion: "user-observation-snapshot-v1" });
+      const snapshotId = this.hasExplicitIdFactory ? this.id("snapshot") : `snapshot-${closureHash}`;
+      this.assert(snapshotId, "snapshot id");
+      try {
+        const existing = await this.readSnapshotAt(this.root, planId, snapshotId);
+        if (canonicalJson({ planId: existing.planId, observationIds: existing.observationIds, observationRecordHashes: existing.observationRecordHashes ?? null })
+          !== canonicalJson({ planId, observationIds, observationRecordHashes })) {
+          throw new ObservationRepositoryError("conflict", "content-addressed snapshot id already exists with different closure");
+        }
+        return clone(existing);
+      } catch (error) { if (!(error instanceof ObservationRepositoryError) || error.code !== "not_found") throw error; }
+      const candidate = { ...closure, snapshotId, createdAt: this.now() };
+      const snapshot: UserObservationSnapshot = { ...candidate, contentHash: await hashContent(candidate, { domain: "user-observation-snapshot", schemaVersion: "user-observation-snapshot-v1" }) };
+      if (validateUserObservationSnapshot(snapshot).length) throw new ObservationRepositoryError("invalid_input", "snapshot invalid");
+      const transactionId = `snapshot-${snapshot.snapshotId}`;
+      const journalPayload = { transactionId, operation: "snapshot-create" as const, planId, authorityId: snapshot.snapshotId, authority: snapshot, state: "prepared" as const, createdAt: this.now() };
+      await this.writeJournal({ schemaVersion: "observation-journal-v1", kind: "transaction", checksum: digest(canonicalJson(journalPayload)), payload: journalPayload });
+      await this.write(this.snapshotFile(planId, snapshotId), { schemaVersion: "observation-repository-v1", kind: "snapshot", checksum: digest(canonicalJson(snapshot)), payload: snapshot });
+      const committedPayload = { ...journalPayload, state: "committed" as const };
+      await this.writeJournal({ schemaVersion: "observation-journal-v1", kind: "transaction", checksum: digest(canonicalJson(committedPayload)), payload: committedPayload });
+      return clone(snapshot);
+    }, options.maintenanceLeaseToken);
   }
 
   private async readSnapshotAt(repositoryRoot: string, planId: string, snapshotId: string): Promise<UserObservationSnapshot> {
@@ -199,6 +539,153 @@ export class ObservationRepository {
     const expected = await hashContent(base, { domain: "user-observation-snapshot", schemaVersion: "user-observation-snapshot-v1" });
     if (snapshot.contentHash !== expected) throw new ObservationRepositoryError("corrupt_data", "observation snapshot content hash invalid");
     return snapshot;
+  }
+
+  async getSnapshot(planId: string, snapshotId: string): Promise<UserObservationSnapshot> {
+    this.assert(planId, "plan id");
+    this.assert(snapshotId, "snapshot id");
+    return this.withRoot(`plan:${planId}`, false, () => this.readSnapshotAt(this.root, planId, snapshotId));
+  }
+
+  /** Read-only closure lookup for a caller already holding the shared generation barrier. */
+  async getSnapshotAtRoot(activeRoot: string, planId: string, snapshotId: string): Promise<UserObservationSnapshot | null> {
+    try { return await this.readSnapshotAt(confined(activeRoot, "observations"), planId, snapshotId); }
+    catch (error) { if (error instanceof ObservationRepositoryError && error.code === "not_found") return null; throw error; }
+  }
+
+  /** Lock verifier that checks every record and attachment, not only the snapshot's self-hash. */
+  async verifySnapshotClosureAtRoot(
+    activeRoot: string,
+    planId: string,
+    snapshotId: string,
+    expectedConfigHash: string,
+  ): Promise<boolean> {
+    try {
+      const repositoryRoot = confined(activeRoot, "observations");
+      const snapshot = await this.readSnapshotAt(repositoryRoot, planId, snapshotId);
+      for (const observationId of snapshot.observationIds) {
+        const stored = await this.readStoredAt(repositoryRoot, planId, observationId);
+        if (snapshot.observationRecordHashes?.[observationId] !== stored.recordHash
+          || stored.observation.planId !== planId
+          || stored.observation.observedAgainstConfigHash !== expectedConfigHash
+          || stored.observation.status !== "active" || !stored.observation.confirmedByUser
+          || stored.observation.validatedAt === undefined || stored.observation.invalidatedAt !== undefined
+          || !await this.hasAttachmentClosure(stored.observation, activeRoot)) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Resolves the exact active/current/attachment-complete payload closure without reacquiring the runtime barrier. */
+  async getSnapshotClosureAtRoot(
+    activeRoot: string,
+    planId: string,
+    snapshotId: string,
+    resolveProjectionContext?: ObservationProjectionContextResolver,
+  ): Promise<ResolvedObservationRepositorySnapshotClosure | null> {
+    const repositoryRoot = confined(activeRoot, "observations");
+    try {
+      const snapshot = await this.readSnapshotAt(repositoryRoot, planId, snapshotId);
+      const observations: ResolvedObservationRepositoryRecord[] = [];
+      for (const observationId of snapshot.observationIds) {
+        const stored = await this.readStoredAt(repositoryRoot, planId, observationId);
+        if (snapshot.observationRecordHashes?.[observationId] !== stored.recordHash
+          || stored.observation.status !== "active" || !stored.observation.confirmedByUser
+          || stored.observation.validatedAt === undefined || stored.observation.invalidatedAt !== undefined) {
+          throw new ObservationRepositoryError("corrupt_data", "observation snapshot contains a non-projectable record");
+        }
+        const projectionContext = resolveProjectionContext
+          ? await resolveProjectionContext(clone(stored.observation), activeRoot)
+          : await this.contextForSnapshot(stored.observation, {}, activeRoot);
+        this.assertProjectionContext(stored.observation, projectionContext, true);
+        if (!await this.hasAttachmentClosure(stored.observation, activeRoot)) {
+          throw new ObservationRepositoryError("corrupt_data", "observation snapshot attachment closure is unavailable");
+        }
+        observations.push({
+          recordHash: stored.recordHash,
+          observation: clone(stored.observation),
+          projectionContext: clone(projectionContext),
+          attachmentClosureVerified: true,
+        });
+      }
+      return { snapshot: clone(snapshot), observations };
+    } catch (error) {
+      if (error instanceof ObservationRepositoryError && error.code === "not_found") return null;
+      throw error;
+    }
+  }
+
+  /**
+   * Current-head variant for live instance overrides and other non-historical
+   * projections. Historical snapshots remain readable for audit/replay, but a
+   * superseded or retracted member cannot be reused as current plan evidence.
+   */
+  async getCurrentSnapshotClosureAtRoot(
+    activeRoot: string,
+    planId: string,
+    snapshotId: string,
+    resolveProjectionContext?: ObservationProjectionContextResolver,
+  ): Promise<ResolvedObservationRepositorySnapshotClosure | null> {
+    const repositoryRoot = confined(activeRoot, "observations");
+    const closure = await this.getSnapshotClosureAtRoot(activeRoot, planId, snapshotId, resolveProjectionContext);
+    if (!closure) return null;
+    const currentIds = this.currentObservationIds(
+      (await this.listStoredAt(repositoryRoot, planId)).map((entry) => entry.observation),
+    );
+    return closure.snapshot.observationIds.every((observationId) => currentIds.has(observationId))
+      ? closure
+      : null;
+  }
+
+  /** Root-bound snapshot writer for the authoritative evaluation transaction. */
+  async createCurrentSnapshotClosureAtRoot(
+    activeRoot: string,
+    planId: string,
+    resolveProjectionContext?: ObservationProjectionContextResolver,
+  ): Promise<ResolvedObservationRepositorySnapshotClosure> {
+    const resolver = resolveProjectionContext ?? this.projectionContextForObservation;
+    if (!resolver || !this.attachments.hasAvailableAtRoot) {
+      throw new ObservationRepositoryError("invalid_input", "coordinated observation snapshot authority is unavailable");
+    }
+    const local = new ObservationRepository({
+      root: confined(activeRoot, "observations"),
+      now: this.now,
+      attachments: { hasAvailable: (attachmentId, ownerPlanId) => this.attachments.hasAvailableAtRoot!(activeRoot, attachmentId, ownerPlanId) },
+      projectionContextForObservation: (observation) => resolver(observation, activeRoot),
+    });
+    const snapshot = await local.createSnapshot(planId);
+    const closure = await this.getSnapshotClosureAtRoot(activeRoot, planId, snapshot.snapshotId, resolver);
+    if (!closure) throw new ObservationRepositoryError("corrupt_data", "new observation snapshot closure disappeared");
+    return closure;
+  }
+
+  /**
+   * Creates the canonical empty plan snapshot while already holding the
+   * runtime barrier. Rollout-disabled current evaluations use this authority
+   * instead of silently inheriting previously active observations. Historical
+   * pinned snapshots remain readable through getSnapshotClosureAtRoot.
+   */
+  async createEmptySnapshotClosureAtRoot(
+    activeRoot: string,
+    planId: string,
+    resolveProjectionContext?: ObservationProjectionContextResolver,
+  ): Promise<ResolvedObservationRepositorySnapshotClosure> {
+    const resolver = resolveProjectionContext ?? this.projectionContextForObservation;
+    if (!resolver || !this.attachments.hasAvailableAtRoot) {
+      throw new ObservationRepositoryError("invalid_input", "coordinated observation snapshot authority is unavailable");
+    }
+    const local = new ObservationRepository({
+      root: confined(activeRoot, "observations"),
+      now: this.now,
+      attachments: { hasAvailable: (attachmentId, ownerPlanId) => this.attachments.hasAvailableAtRoot!(activeRoot, attachmentId, ownerPlanId) },
+      projectionContextForObservation: (observation) => resolver(observation, activeRoot),
+    });
+    const snapshot = await local.createSnapshot(planId, { observationIds: [] });
+    const closure = await this.getSnapshotClosureAtRoot(activeRoot, planId, snapshot.snapshotId, resolver);
+    if (!closure) throw new ObservationRepositoryError("corrupt_data", "new empty observation snapshot closure disappeared");
+    return closure;
   }
 
   /** Called inside RuntimeCoordinator.withConsistentSnapshot; never reacquires it or writes. */
@@ -233,16 +720,80 @@ export class ObservationRepository {
         }
       }
     }
+    const recordsByPlan = new Map<string, Map<string, StoredObservation>>();
+    const observationOwners = new Map<string, string>();
+    for (const record of records) {
+      const planRecords = recordsByPlan.get(record.observation.planId) ?? new Map<string, StoredObservation>();
+      if (planRecords.has(record.observation.observationId)) throw new ObservationRepositoryError("corrupt_data", "observation snapshot has duplicate records in a plan");
+      planRecords.set(record.observation.observationId, record); recordsByPlan.set(record.observation.planId, planRecords);
+      const owner = observationOwners.get(record.observation.observationId);
+      if (owner !== undefined && owner !== record.observation.planId) throw new ObservationRepositoryError("corrupt_data", "observation identity is reused across plans");
+      observationOwners.set(record.observation.observationId, record.observation.planId);
+    }
+    const supersessions: Supersession[] = [];
+    const expectedSupersessionKeys = new Set<string>();
+    for (const record of records) {
+      if (!record.observation.supersedesObservationId) continue;
+      const event = await this.readSupersessionAt(repositoryRoot, record.observation.planId, record.observation.observationId);
+      if (event.supersededObservationId !== record.observation.supersedesObservationId) {
+        throw new ObservationRepositoryError("corrupt_data", "observation supersession index does not match its immutable replacement");
+      }
+      const key = `${record.observation.planId}\u0000${record.observation.observationId}`;
+      expectedSupersessionKeys.add(key); supersessions.push(event);
+    }
+    for (const planId of recordsByPlan.keys()) {
+      const directory = confined(this.planRootAt(repositoryRoot, planId), "supersessions");
+      let entries: import("node:fs").Dirent[];
+      try { entries = await readdir(directory, { withFileTypes: true }); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") entries = []; else throw error; }
+      if (entries.some((entry) => entry.isSymbolicLink())) throw new ObservationRepositoryError("corrupt_data", "observation supersession directory contains a symlink");
+      for (const entry of entries.filter((candidate) => candidate.isFile() && candidate.name.endsWith(".json"))) {
+        const replacementObservationId = entry.name.slice(0, -5);
+        if (!SAFE_ID.test(replacementObservationId) || !expectedSupersessionKeys.has(`${planId}\u0000${replacementObservationId}`)) {
+          throw new ObservationRepositoryError("corrupt_data", "observation supersession index is orphaned");
+        }
+      }
+    }
+    const snapshotOwners = new Map<string, string>();
+    for (const snapshot of snapshots) {
+      const owner = snapshotOwners.get(snapshot.snapshotId);
+      if (owner !== undefined && owner !== snapshot.planId) throw new ObservationRepositoryError("corrupt_data", "observation snapshot identity is reused across plans");
+      snapshotOwners.set(snapshot.snapshotId, snapshot.planId);
+      const planRecords = recordsByPlan.get(snapshot.planId) ?? new Map<string, StoredObservation>();
+      for (const observationId of snapshot.observationIds) {
+        const record = planRecords.get(observationId);
+        if (!record) throw new ObservationRepositoryError("corrupt_data", "observation snapshot member is missing or cross-plan");
+        if (snapshot.observationRecordHashes && snapshot.observationRecordHashes[observationId] !== record.recordHash) {
+          throw new ObservationRepositoryError("corrupt_data", "observation snapshot member hash no longer matches its immutable record");
+        }
+      }
+    }
+    const activeCurrent = new Set<string>();
+    for (const [planId, planRecords] of recordsByPlan) {
+      const currentIds = this.currentObservationIds([...planRecords.values()].map((record) => record.observation));
+      for (const observationId of currentIds) {
+        const observation = planRecords.get(observationId)!.observation;
+        if (observation.status === "active" && observation.invalidatedAt === undefined) activeCurrent.add(`${planId}\u0000${observationId}`);
+      }
+    }
     const observationNodes = records.map((record) => `observation:${record.observation.observationId}`);
     const snapshotNodes = snapshots.map((snapshot) => `observation-snapshot:${snapshot.snapshotId}`);
-    const edges = [
-      ...records.flatMap((record) => record.observation.attachmentRefs.map((id) => ({ fromRef: `observation:${record.observation.observationId}`, toRef: `attachment:${id}`, necessity: "required_for_replay" as const }))),
-      ...snapshots.flatMap((snapshot) => snapshot.observationIds.map((id) => ({ fromRef: `observation-snapshot:${snapshot.snapshotId}`, toRef: `observation:${id}`, necessity: "required_for_replay" as const }))),
-    ].sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
+    const activeAttachmentEdges = records
+      .filter((record) => activeCurrent.has(`${record.observation.planId}\u0000${record.observation.observationId}`))
+      .flatMap((record) => record.observation.attachmentRefs.map((id) => ({ fromRef: `observation:${record.observation.observationId}`, toRef: `attachment:${id}`, necessity: "required_for_replay" as const })));
+    const snapshotEdges = snapshots.flatMap((snapshot) => snapshot.observationIds.map((id) => ({ fromRef: `observation-snapshot:${snapshot.snapshotId}`, toRef: `observation:${id}`, necessity: "required_for_replay" as const })));
+    const supersessionLinks = supersessions
+      .map((event) => ({ planId: event.planId, supersededObservationId: event.supersededObservationId, replacementObservationId: event.replacementObservationId, contentHash: event.contentHash }))
+      .sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
+    const edges = [...activeAttachmentEdges, ...snapshotEdges].sort((left, right) => canonicalJson(left).localeCompare(canonicalJson(right)));
     return {
       providerId: "observations",
-      revision: records.length + snapshots.length,
-      manifestHash: sha256Json({ records: records.map((record) => ({ id: record.observation.observationId, recordHash: record.recordHash })), snapshots: snapshots.map((snapshot) => ({ id: snapshot.snapshotId, contentHash: snapshot.contentHash })) }),
+      revision: records.length + snapshots.length + supersessionLinks.length,
+      manifestHash: sha256Json({
+        records: records.map((record) => ({ planId: record.observation.planId, id: record.observation.observationId, recordHash: record.recordHash })),
+        snapshots: snapshots.map((snapshot) => ({ planId: snapshot.planId, id: snapshot.snapshotId, contentHash: snapshot.contentHash, observationRecordHashes: snapshot.observationRecordHashes ?? null })),
+        supersessionLinks,
+      }),
       snapshotPointers: snapshotNodes.sort(),
       nodes: [...new Set([...observationNodes, ...snapshotNodes])].sort(),
       edges,

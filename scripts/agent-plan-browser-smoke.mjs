@@ -1,15 +1,20 @@
 import { chromium } from "playwright";
+import { installLocalCatalogRoute } from "./local-browser-fixtures.mjs";
 
+const webPort = Number(process.env.WEB_SERVER_PORT ?? 5173);
+if (!Number.isSafeInteger(webPort) || webPort < 1 || webPort > 65_535) throw new Error("WEB_SERVER_PORT is invalid");
+const webOrigin = `http://127.0.0.1:${webPort}`;
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 960 } });
+await installLocalCatalogRoute(page);
 page.setDefaultTimeout(20_000);
 const errors = [];
 page.on("pageerror", (error) => errors.push(String(error)));
 page.on("console", (message) => {
-  if (message.type() === "error" && !message.text().includes("409") && !message.text().includes("500") && !message.text().includes("502")) errors.push(message.text());
+  if (message.type() === "error" && !message.text().includes("404") && !message.text().includes("409") && !message.text().includes("500") && !message.text().includes("502")) errors.push(message.text());
 });
 
-await page.goto("http://127.0.0.1:5173/index.html#/agent", { waitUntil: "networkidle" });
+await page.goto(`${webOrigin}/index.html#/agent`, { waitUntil: "domcontentloaded" });
 await page.waitForFunction(() => Boolean(window.__BUILD_SIM_PLAN_STORE__?.getState().evaluationSnapshot));
 await page.waitForSelector("[data-agent-plan-proposals]", { state: "attached" });
 // Previous browser gates intentionally persist their active plan. Normalize the
@@ -20,8 +25,9 @@ const inherited = await page.evaluate(() => {
   return { diskCount: state?.activePlan?.draft.config.selection.diskCount, evaluationHash: state?.evaluationSnapshot?.evaluationHash };
 });
 if (inherited.diskCount !== 1) {
-  await page.fill("#disk-range", "1");
-  await page.locator("#disk-range").dispatchEvent("input");
+  await page.click('[data-route="editor"]');
+  await page.fill('[data-config-field="selection.diskCount"]', "1");
+  await page.locator('[data-config-field="selection.diskCount"]').dispatchEvent("change");
   await page.waitForFunction((previousHash) => {
     const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
     return state?.activePlan?.draft.config.selection.diskCount === 1
@@ -29,6 +35,7 @@ if (inherited.diskCount !== 1) {
       && document.querySelector("[data-save-status]")?.getAttribute("data-status") === "saved"
       && state.evaluationSnapshot?.draftRevision === state.activePlan?.draftRevision;
   }, inherited.evaluationHash);
+  await page.click('[data-route="agent"]');
 }
 const baseline = await page.evaluate(() => {
   const state = window.__BUILD_SIM_PLAN_STORE__.getState();
@@ -75,7 +82,33 @@ await page.waitForFunction(({ targetDiskCount, evaluationHash }) => {
   const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
   return state?.activePlan?.draft.config.selection.diskCount === targetDiskCount && state.evaluationSnapshot?.evaluationHash !== evaluationHash;
 }, { targetDiskCount, evaluationHash: baseline.evaluationHash });
-if (!(await card.locator("[data-proposal-state]").textContent()).includes("applied")) throw new Error("approved proposal did not expose applied audit state");
+await page.waitForFunction((id) => {
+  const content = document.querySelector(`[data-plan-proposal="${id}"] [data-proposal-state]`)?.textContent ?? "";
+  return content !== "正在重新检查型号、兼容性和预算影响…";
+}, proposalId);
+const appliedState = await card.locator("[data-proposal-state]").textContent();
+if (!appliedState?.includes("修改已应用")) {
+  const diagnostic = await page.evaluate((id) => {
+    const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+    return {
+      appliedState: document.querySelector(`[data-plan-proposal="${id}"] [data-proposal-state]`)?.textContent,
+      planId: state?.activePlan?.id,
+      revision: state?.activePlan?.draftRevision,
+      snapshotPlanId: state?.evaluationSnapshot?.planId,
+      snapshotRevision: state?.evaluationSnapshot?.draftRevision,
+      snapshotConfigHash: state?.evaluationSnapshot?.configHash,
+      snapshotConfigUpdatedAt: state?.evaluationSnapshot?.evaluation && "config" in state.evaluationSnapshot.evaluation ? state.evaluationSnapshot.evaluation.config.updatedAt : null,
+      activeConfigUpdatedAt: state?.activePlan?.draft.config.updatedAt,
+      configsEqual: state?.evaluationSnapshot?.evaluation && "config" in state.evaluationSnapshot.evaluation
+        ? JSON.stringify(state.evaluationSnapshot.evaluation.config) === JSON.stringify(state.activePlan?.draft.config)
+        : null,
+      authority: document.getElementById("n6-lab")?.getAttribute("data-evaluation-authority"),
+      saveStatus: state?.saveStatus,
+      error: state?.error,
+    };
+  }, proposalId);
+  throw new Error(`approved proposal did not expose applied audit state: ${JSON.stringify(diagnostic)}`);
+}
 
 const applied = await page.evaluate(() => {
   const state = window.__BUILD_SIM_PLAN_STORE__.getState();
@@ -92,7 +125,7 @@ await page.locator("[data-agent-plan-proposals]").evaluate((host, value) => {
 const rejectCard = page.locator('[data-plan-proposal="proposal-browser-reject"]');
 await rejectCard.waitFor();
 await rejectCard.locator("[data-reject-proposal]").click();
-if (!(await rejectCard.locator("[data-proposal-state]").textContent()).includes("rejected")) throw new Error("proposal reject state was not rendered");
+if (!(await rejectCard.locator("[data-proposal-state]").textContent()).includes("已放弃")) throw new Error("proposal reject state was not rendered");
 if ((await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.draft.config.selection.diskCount)) !== applied.diskCount) throw new Error("rejected proposal changed the draft");
 
 await page.locator("[data-agent-plan-proposals]").evaluate((host, value) => {

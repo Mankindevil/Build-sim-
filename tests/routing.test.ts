@@ -15,7 +15,7 @@ import {
 import { containsBox, distanceMm, segmentHitsBox, type PlacedPart, type Vec3 } from "../src/core/geometry";
 import { N6_ENVELOPE_BOX, buildN6Geometry } from "../src/adapters/jonsbo-n6/geometry";
 import { buildN6Routing } from "../src/adapters/jonsbo-n6/routing";
-import { planN6Wiring } from "../src/wiring/plan";
+import { planN6Wiring } from "../src/adapters/jonsbo-n6/assembly";
 import { loadRawCatalog } from "../src/sku/catalog";
 import type { BuildConfig } from "../src/config/types";
 import baseline from "../data/configs/baseline-atx-1hdd.json";

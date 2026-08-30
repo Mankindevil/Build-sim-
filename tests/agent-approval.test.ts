@@ -16,6 +16,7 @@ function approval(registry: AgentToolRegistry, sessionId: string, input: unknown
     toolName: "enrich_official_catalog",
     toolDefinitionHash: registry.definitionHash("enrich_official_catalog"),
     sessionId,
+    runId: "run-fixture-0001",
     inputHash: agentAuditHash(input),
     idempotencyKey: "catalog-enrich-fixture-0001",
     issuedAt,
@@ -33,7 +34,7 @@ function context(value?: AgentWriteApprovalEnvelope): AgentToolContext {
 }
 
 describe("C6 approval-bound catalog write Tool", () => {
-  it("requires exact approval binding and replays successful idempotency without another write", async () => {
+  it("rejects missing, mismatched, and caller-fabricated raw approval envelopes", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
       calls.push({ url, body: JSON.parse(String(init?.body)) });
@@ -46,13 +47,12 @@ describe("C6 approval-bound catalog write Tool", () => {
       const valid = approval(registry, "session-fixture-0001", input);
       const mismatched = { ...valid, inputHash: "b".repeat(64) };
       expect((await registry.dispatch("enrich_official_catalog", input, context(mismatched))).result).toMatchObject({ ok: false, errorCode: "approval_mismatch" });
-      expect((await registry.dispatch("enrich_official_catalog", input, context(valid))).result).toMatchObject({ ok: true, content: { status: "accepted" } });
-      expect((await registry.dispatch("enrich_official_catalog", input, context(valid))).result).toMatchObject({ ok: true, content: { status: "accepted" } });
-      expect(calls).toEqual([{ url: "http://127.0.0.1:6174/api/catalog/candidates/catalog-candidate-fixture/enrich", body: { expectedHash: "a".repeat(64) } }]);
+      expect((await registry.dispatch("enrich_official_catalog", input, context(valid))).result).toMatchObject({ ok: false, errorCode: "approval_invalid" });
+      expect(calls).toEqual([]);
     } finally { vi.unstubAllGlobals(); }
   });
 
-  it("keeps the approval token out of provider/session messages while orchestrating the Tool", async () => {
+  it("rejects caller approvals before a provider turn or session write", async () => {
     const requests: ProviderTurnRequest[] = [];
     const input = { candidateId: "catalog-candidate-runtime", expectedHash: "c".repeat(64) };
     const provider: ProviderAdapter = {
@@ -94,11 +94,13 @@ describe("C6 approval-bound catalog write Tool", () => {
       const runtime = new AgentRuntime([provider], store, { toolRegistry: registry, skillLoader });
       const session = await runtime.createSession();
       const envelope = approval(registry, session.id, input, { approvalId: "approval-runtime-0001", idempotencyKey: "catalog-enrich-runtime-0001" });
-      const run = await runtime.startRun(session.id, { content: "对已检查候选生成目录草稿", skillId: "catalog-write-fixture", approvals: [envelope] });
-      await runtime.waitForRun(run.runId);
-      expect(runtime.getRun(run.runId).status).toBe("completed");
-      expect(JSON.stringify((await runtime.getSession(session.id)).messages)).not.toContain(envelope.approvalToken);
-      expect(JSON.stringify(requests)).not.toContain(envelope.approvalToken);
+      await expect(runtime.startRun(session.id, {
+        content: "对已检查候选生成目录草稿",
+        skillId: "catalog-write-fixture",
+        approvals: [envelope],
+      } as never)).rejects.toMatchObject({ code: "caller_approvals_forbidden" });
+      expect(requests).toHaveLength(0);
+      expect((await runtime.getSession(session.id)).messages).toEqual([]);
     } finally { vi.unstubAllGlobals(); }
   });
 });

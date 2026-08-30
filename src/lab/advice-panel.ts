@@ -88,7 +88,7 @@ export function initAdvicePanel(args: { getInput: () => BuildAdviceInput | null 
   const showFacts = (): BuildAdviceInput | null => {
     const input = args.getInput();
     if (!input) {
-      deterministic.innerHTML = "<p class=\"text-muted\">V3 渐进方案尚未接入统一建议求解器；兼容性、价格、空间、接线、供电和散热保持 unknown，不复用旧版 V2 结论。</p>";
+      deterministic.innerHTML = "<p class=\"text-muted\">受治理评估尚未就绪，或当前 V3 渐进方案尚未接入统一建议求解器；兼容性、价格、空间、接线、供电和散热保持 unknown，不复用浏览器旧版 V2 结论。</p>";
       return null;
     }
     deterministic.innerHTML = deterministicHtml(input);
@@ -102,8 +102,8 @@ export function initAdvicePanel(args: { getInput: () => BuildAdviceInput | null 
       const base = showFacts();
       if (!base) {
         status.dataset.level = "warn";
-        status.textContent = "V3 建议求解尚未就绪；请使用 Agent 逐项补全需求与拓扑。";
-        output.innerHTML = "<p>当前不会生成兼容性或采购建议，也不会回退到旧版 V2 评估。</p>";
+        status.textContent = "受治理建议输入尚未就绪；请先恢复权威评估，或使用 Agent 逐项补全需求与拓扑。";
+        output.innerHTML = "<p>当前不会生成兼容性或采购建议，也不会回退到浏览器旧版 V2 评估。</p>";
         return;
       }
       const input = { ...base, requestId: requestId() };

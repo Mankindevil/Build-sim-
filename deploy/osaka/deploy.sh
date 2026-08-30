@@ -42,6 +42,10 @@ COMPOSE_FILE="$APP_DIR/deploy/osaka/compose.yaml"
 [[ -f "$COMPOSE_FILE" ]] || { printf 'Compose file not found: %s\n' "$COMPOSE_FILE" >&2; exit 1; }
 [[ -f "$APP_DIR/.env.remote" ]] || { printf 'Missing deployment environment: %s/.env.remote\n' "$APP_DIR" >&2; exit 1; }
 [[ -d "$APP_DIR/runtime" ]] || { printf 'Missing persistent runtime directory: %s/runtime\n' "$APP_DIR" >&2; exit 1; }
+grep -q '^BUILDSIM_BACKUP_PASSWORD=' "$APP_DIR/.env.remote" \
+  || { printf '%s\n' "Missing BUILDSIM_BACKUP_PASSWORD in .env.remote." >&2; exit 1; }
+mkdir -p "$APP_DIR/deploy-backups"
+chmod 700 "$APP_DIR/deploy-backups"
 git rev-parse --is-inside-work-tree >/dev/null
 
 if docker info >/dev/null 2>&1; then
@@ -115,13 +119,18 @@ fi
 
 RELEASE_STARTED=1
 "${COMPOSE[@]}" build
+BACKUP_NAME="predeploy-${PREVIOUS_SHA}-$(date -u +%Y%m%dT%H%M%SZ).backup"
+"${COMPOSE[@]}" run --rm --no-deps release-gate \
+  node scripts/backup/create.mjs --runtime-root /app/runtime --output "/app/deploy-backups/$BACKUP_NAME"
+"${COMPOSE[@]}" run --rm --no-deps release-gate \
+  node scripts/backup/verify.mjs --runtime-root /app/runtime --input "/app/deploy-backups/$BACKUP_NAME"
 "${COMPOSE[@]}" up -d --force-recreate
 
 healthcheck() {
   curl --fail --silent --show-error --output /dev/null http://127.0.0.1:15176/healthz \
     && curl --fail --silent --show-error --output /dev/null http://127.0.0.1:5174/api/price/health \
     && curl --fail --silent --show-error --output /dev/null http://127.0.0.1:5175/api/agent/health \
-    && curl --fail --silent --show-error --output /dev/null http://127.0.0.1:5176/api/workspace/plans \
+    && curl --fail --silent --show-error --output /dev/null http://127.0.0.1:5176/api/workspace/health \
     && curl --fail --silent --show-error --output /dev/null http://127.0.0.1:18080/
 }
 
@@ -140,7 +149,10 @@ if ((healthy == 0)); then
   false
 fi
 
+"${COMPOSE[@]}" run --rm --no-deps release-gate \
+  node scripts/doctor.mjs --runtime-root /app/runtime --strict
+
 "${COMPOSE[@]}" ps
 RELEASE_STARTED=0
 trap - ERR INT TERM
-printf 'Deployment succeeded: %s\n' "$TARGET_SHA"
+printf 'Deployment succeeded: %s (verified backup: %s)\n' "$TARGET_SHA" "$BACKUP_NAME"

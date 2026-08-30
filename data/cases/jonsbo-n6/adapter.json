@@ -1,0 +1,160 @@
+{
+  "schemaVersion": "case-adapter-seed-v1",
+  "snapshotCreatedAt": "2026-08-28T00:00:00.000Z",
+  "evidenceSources": [
+    {
+      "evidenceSourceId": "jonsbo.n6.migration-identity",
+      "authority": "third_party",
+      "subject": {"skuId":"case.jonsbo-n6","familyId":"case.jonsbo-n-series","modelId":"jonsbo-n6","variantId":"jonsbo-n6-global","revision":"vendor-unversioned","region":"global"},
+      "documentId": "doc-sha256-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "documentSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "captureId": "capture-sha256-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "retrievedAt": "2026-08-28T00:00:00.000Z",
+      "factLocators": [{"factId":"fact.case.jonsbo-n6.identity.revision","locator":{"section":"Migration scope: vendor publishes no hardware revision"}}]
+    },
+    {
+      "evidenceSourceId": "jonsbo.n6.official-manual",
+      "authority": "official",
+      "subject": {"skuId":"case.jonsbo-n6","familyId":"case.jonsbo-n-series","modelId":"jonsbo-n6","variantId":"jonsbo-n6-global","revision":"vendor-unversioned","region":"global"},
+      "documentId": "doc-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "documentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "captureId": "capture-sha256-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "retrievedAt": "2026-08-28T00:00:00.000Z",
+      "factLocators": [
+      {"factId":"fact.case.jonsbo-n6.width","locator":{"page":2,"section":"Specifications"}},
+      {"factId":"fact.case.jonsbo-n6.height","locator":{"page":2,"section":"Specifications"}},
+      {"factId":"fact.case.jonsbo-n6.depth","locator":{"page":2,"section":"Specifications"}},
+      {"factId":"fact.case.jonsbo-n6.mounts","locator":{"section":"Installation sections"}},
+      {"factId":"fact.case.jonsbo-n6.form-factors","locator":{"page":2,"section":"Motherboard support"}},
+      {"factId":"fact.case.jonsbo-n6.gpu-max","locator":{"page":2,"section":"GPU clearance"}},
+      {"factId":"fact.case.jonsbo-n6.fan-mounts","locator":{"page":15,"section":"Fan installation"}},
+      {"factId":"fact.case.jonsbo-n6.radiators","locator":{"page":15,"section":"Radiator installation"}},
+      {"factId":"fact.case.jonsbo-n6.backplane-port","locator":{"page":14,"section":"Backplane power"}},
+      {"factId":"fact.case.jonsbo-n6.cable-families","locator":{"page":14,"section":"Backplane power"}},
+      {"factId":"fact.case.jonsbo-n6.package.contents","locator":{"page":9,"section":"Bottom PSU rack"}},
+        {"factId":"fact.case.jonsbo-n6.package.fasteners","locator":{"page":14,"section":"Left fan bracket fasteners"}}
+      ]
+    }
+  ],
+  "manifest": {
+    "schemaVersion": "case-adapter-manifest-v1",
+    "adapterId": "adapter.case.jonsbo-n6",
+    "adapterVersion": "1.0.0",
+    "identity": {
+      "skuId": "case.jonsbo-n6",
+      "region": "global",
+      "revision": "vendor-unversioned",
+      "identityFactIds": ["fact.case.jonsbo-n6.identity.revision"]
+    },
+    "capabilityBindings": [
+      {"facetId":"identity.revision","sourceFactIds":["fact.case.jonsbo-n6.identity.revision"]},
+      {"facetId":"physical.width","sourceFactIds":["fact.case.jonsbo-n6.width"]},
+      {"facetId":"physical.height","sourceFactIds":["fact.case.jonsbo-n6.height"]},
+      {"facetId":"physical.depth","sourceFactIds":["fact.case.jonsbo-n6.depth"]},
+      {"facetId":"mount.point_ids","sourceFactIds":["fact.case.jonsbo-n6.mounts"]},
+      {"facetId":"case.motherboard_form_factors","sourceFactIds":["fact.case.jonsbo-n6.form-factors"]},
+      {"facetId":"case.gpu_max_length","sourceFactIds":["fact.case.jonsbo-n6.gpu-max"]},
+      {"facetId":"cooling.fan_mounts","sourceFactIds":["fact.case.jonsbo-n6.fan-mounts"]},
+      {"facetId":"cooling.radiator_support","sourceFactIds":["fact.case.jonsbo-n6.radiators"]},
+      {"facetId":"power.cable_families","sourceFactIds":["fact.case.jonsbo-n6.cable-families"]},
+      {"facetId":"package.contents","sourceFactIds":["fact.case.jonsbo-n6.package.contents"]}
+    ],
+    "geometry": {
+      "envelope": {
+        "nodeId":"case.envelope","centerMm":[0,0,0],"sizeMm":[305,318,353],
+        "binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.width","fact.case.jonsbo-n6.height","fact.case.jonsbo-n6.depth"],"derivationIds":[],"uncertaintyMm":0}
+      },
+      "interiorSpaces": [
+        {
+          "nodeId":"space.upper","centerMm":[0,68,0],"sizeMm":[299,176,347],
+          "binding":{"status":"provisional","sourceFactIds":["fact.case.jonsbo-n6.width","fact.case.jonsbo-n6.height","fact.case.jonsbo-n6.depth"],"derivationIds":["derive.n6.upper-chamber-from-manual-sections"],"uncertaintyMm":8}
+        },
+        {
+          "nodeId":"space.lower","centerMm":[0,-89,0],"sizeMm":[299,124,347],
+          "binding":{"status":"provisional","sourceFactIds":["fact.case.jonsbo-n6.width","fact.case.jonsbo-n6.height","fact.case.jonsbo-n6.depth"],"derivationIds":["derive.n6.lower-chamber-from-drive-and-fan-envelope"],"uncertaintyMm":8}
+        }
+      ],
+      "forbiddenZones": [{
+        "nodeId":"forbidden.left-fan-bracket-when-bottom-psu","centerMm":[-151,-90,0],"sizeMm":[3,126,272],
+        "binding":{"status":"provisional","sourceFactIds":["fact.case.jonsbo-n6.mounts"],"derivationIds":["derive.n6.left-bracket-planning-envelope"],"uncertaintyMm":10}
+      }],
+      "serviceCorridors": [
+        {
+          "nodeId":"corridor.cable-area-a","centerMm":[-141,30,108],"sizeMm":[22,100,136],
+          "binding":{"status":"provisional","sourceFactIds":["fact.case.jonsbo-n6.cable-families"],"derivationIds":["derive.n6.manual-area-a-planning-section"],"uncertaintyMm":10}
+        },
+        {
+          "nodeId":"corridor.cable-area-b","centerMm":[141,30,30],"sizeMm":[22,100,180],
+          "binding":{"status":"provisional","sourceFactIds":["fact.case.jonsbo-n6.cable-families"],"derivationIds":["derive.n6.manual-area-b-planning-section"],"uncertaintyMm":10}
+        }
+      ]
+    },
+    "mounts": [
+      {"mountId":"mount.board.matx","kind":"motherboard","standardIds":["mount.motherboard.micro-atx"],"quantity":1,"location":"upper","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.psu.rear-atx","kind":"psu","standardIds":["mount.psu.atx"],"quantity":1,"location":"upper-rear","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.psu.front-sfx","kind":"psu","standardIds":["mount.psu.sfx"],"quantity":1,"location":"upper-front","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.psu.bottom-sfx","kind":"psu","standardIds":["mount.psu.sfx","accessory.bottom-psu-rack"],"quantity":1,"location":"lower-left","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.mounts","fact.case.jonsbo-n6.package.contents"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.drive.hot-swap","kind":"drive","standardIds":["mount.drive.3.5","mount.drive.2.5"],"quantity":9,"location":"lower-front","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.fan.front","kind":"fan","standardIds":["mount.fan.120","mount.fan.140"],"quantity":2,"location":"front","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.fan-mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.fan.left","kind":"fan","standardIds":["mount.fan.120"],"quantity":2,"location":"lower-left","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.fan-mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.fan.right","kind":"fan","standardIds":["mount.fan.120"],"quantity":2,"location":"right","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.fan-mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.fan.rear","kind":"fan","standardIds":["mount.fan.120"],"quantity":1,"location":"rear","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.fan-mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.radiator.front-240","kind":"radiator","standardIds":["mount.radiator.240"],"quantity":1,"location":"front","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.radiators"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.backplane.9bay","kind":"backplane","standardIds":["mount.backplane.9bay-sata"],"quantity":1,"location":"lower","binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.backplane-port"],"derivationIds":[],"uncertaintyMm":0}}
+    ],
+    "ports": [{
+      "portId":"port.backplane.power","connectorStandardId":"power.backplane.sata-or-pata","direction":"input","quantity":4,"anchorMm":[0,-139,-9],
+      "binding":{"status":"provisional","sourceFactIds":["fact.case.jonsbo-n6.backplane-port"],"derivationIds":["derive.n6.backplane-power-anchor"],"uncertaintyMm":8}
+    }],
+    "routingZones": [
+      {
+        "zoneId":"route.area-a","kind":"channel","centerMm":[-141,30,108],"sizeMm":[22,100,136],"connectsToZoneIds":["route.backplane"],
+        "binding":{"status":"provisional","sourceFactIds":["fact.case.jonsbo-n6.cable-families"],"derivationIds":["derive.n6.route-area-a"],"uncertaintyMm":10}
+      },
+      {
+        "zoneId":"route.backplane","kind":"free","centerMm":[0,-132,20],"sizeMm":[250,40,60],"connectsToZoneIds":["route.area-a"],
+        "binding":{"status":"provisional","sourceFactIds":["fact.case.jonsbo-n6.backplane-port"],"derivationIds":["derive.n6.route-backplane-access"],"uncertaintyMm":10}
+      }
+    ],
+    "assemblyConstraints": [{
+      "constraintId":"constraint.remove-left-bracket-before-backplane-power","beforeActionId":"remove.left-fan-bracket","afterActionId":"connect.backplane-power",
+      "binding":{"status":"verified","sourceFactIds":["fact.case.jonsbo-n6.backplane-port"],"derivationIds":[],"uncertaintyMm":0}
+    }],
+    "bundleItems": [
+      {
+        "schemaVersion":"bundle-item-v1","bundleItemId":"bundle.n6.bottom-psu-rack","ownerSkuId":"case.jonsbo-n6","kind":"bracket",
+        "specification":[{"facetId":"resource.kind","value":"bracket"},{"facetId":"accessory.standard","value":"accessory.bottom-psu-rack"}],"quantity":1,"region":"global","revision":"vendor-unversioned",
+        "variantScopeFactIds":["fact.case.jonsbo-n6.identity.revision"],"evidenceFactIds":["fact.case.jonsbo-n6.package.contents"]
+      },
+      {
+        "schemaVersion":"bundle-item-v1","bundleItemId":"bundle.n6.left-bracket-fasteners","ownerSkuId":"case.jonsbo-n6","kind":"fastener",
+        "specification":[{"facetId":"resource.kind","value":"fastener"}],"quantity":4,"region":"global","revision":"vendor-unversioned",
+        "variantScopeFactIds":["fact.case.jonsbo-n6.identity.revision"],"evidenceFactIds":["fact.case.jonsbo-n6.package.fasteners"]
+      }
+    ],
+    "resourcePatterns": [{
+      "schemaVersion":"assembly-resource-pattern-v1","patternId":"pattern.n6.backplane-power","mountStandardIds":["mount.backplane.9bay-sata"],
+      "needs":[
+        {"needTemplateId":"four-power-leads","kind":"cable","specification":[{"facetId":"cable.connector_standard","operator":"includes","value":"power.backplane.sata-or-pata"}],"quantity":4,"criticality":"safety","requiredBefore":"pre_power"},
+        {"needTemplateId":"left-bracket-fasteners","kind":"fastener","specification":[{"facetId":"resource.kind","operator":"eq","value":"fastener"}],"quantity":4,"criticality":"normal","requiredBefore":"assembly"}
+      ],
+      "evidenceFactIds":["fact.case.jonsbo-n6.backplane-port","fact.case.jonsbo-n6.package.fasteners"]
+    }],
+    "sourceRefs":["data/cases/jonsbo-n6/profile.json","data/cases/jonsbo-n6/geometry.json","data/cases/jonsbo-n6/routing.json","data/cases/jonsbo-n6/assembly.json"]
+  },
+  "factInputs": [
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.identity.revision","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"identity.revision","value":"vendor-unversioned","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.width","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"physical.width","value":305,"unit":"mm","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.height","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"physical.height","value":318,"unit":"mm","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.depth","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"physical.depth","value":353,"unit":"mm","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.mounts","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"mount.point_ids","value":["mount.board.matx","mount.psu.rear-atx","mount.psu.front-sfx","mount.psu.bottom-sfx","mount.drive.hot-swap","mount.fan.front","mount.fan.left","mount.fan.right","mount.fan.rear","mount.radiator.front-240"],"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.form-factors","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"case.motherboard_form_factors","value":["micro-atx","mini-itx"],"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.gpu-max","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"case.gpu_max_length","value":320,"unit":"mm","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.fan-mounts","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"cooling.fan_mounts","value":["front-2x120","front-2x140","left-2x120","right-2x120","rear-1x120"],"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.radiators","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"cooling.radiator_support","value":["front-240"],"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.backplane-port","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"io.port_topology","value":{"endpointId":"port.backplane.power","connectorType":"power.backplane.sata-or-pata","location":"internal","controllerId":"backplane.n6","pathId":"path.backplane.power","quantity":4},"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.cable-families","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"power.cable_families","value":["sata-power","pata-power"],"scope":"revision","authority":"official","safetyClass":"electrical_safety","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.package.contents","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"package.contents","value":["bundle.n6.bottom-psu-rack","bundle.n6.left-bracket-fasteners"],"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.case.jonsbo-n6.package.fasteners","subject":{"kind":"product","skuId":"case.jonsbo-n6","revision":"vendor-unversioned","region":"global"},"field":"package.fastener_count","value":{"fastenerId":"fastener.left-fan-bracket","quantity":4},"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"}
+  ]
+}

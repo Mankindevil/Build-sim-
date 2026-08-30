@@ -1,4 +1,4 @@
-import type { BuildConfig } from "../../src/config/types";
+import type { BuildConfig, BuildConfigDocument } from "../../src/config/types";
 import type { WorkspacePlanApi } from "../../src/plans/client";
 import { PlanStore } from "../../src/plans/client-store";
 import { PLAN_SCHEMA_VERSION, type BuildPlan, type BuildPlanSummary, type PlanVersion } from "../../src/plans/contracts";
@@ -8,6 +8,7 @@ export class MemoryStorage {
   readonly values = new Map<string, string>();
   getItem(key: string) { return this.values.get(key) ?? null; }
   setItem(key: string, value: string) { this.values.set(key, value); }
+  removeItem(key: string) { this.values.delete(key); }
 }
 
 export function makePlan(id: string, name = id, diskCount = 1): BuildPlan {
@@ -35,9 +36,13 @@ export function makeWorkspaceApi(initialPlans: BuildPlan[], initialVersions: Pla
     versions: initialVersions.map((version) => structuredClone(version)),
     async list() { return this.plans.map((plan) => ({ schemaVersion: plan.schemaVersion, id: plan.id, name: plan.name, status: plan.status, updatedAt: plan.updatedAt, activeVersionId: plan.activeVersionId, draftRevision: plan.draftRevision, dirty: plan.draft.dirty, ...(plan.metadata.initialization ? { initializationStatus: plan.metadata.initialization.status } : {}) } satisfies BuildPlanSummary)); },
     async get(id: string) { return structuredClone(this.plans.find((plan) => plan.id === id)!); },
-    async create(input: { name: string; config: BuildConfig; metadata?: BuildPlan["metadata"] }) {
-      const created = makePlan(`plan-${String(this.plans.length + 10).padStart(8, "0")}`, input.name, input.config.selection.diskCount);
-      created.draft.config = structuredClone(input.config);
+    async create(input: { name: string; config: BuildConfigDocument; metadata?: BuildPlan["metadata"] }) {
+      const created = makePlan(
+        `plan-${String(this.plans.length + 10).padStart(8, "0")}`,
+        input.name,
+        input.config.schemaVersion === "2.0.0" ? input.config.selection.diskCount : 1,
+      );
+      created.draft.config = structuredClone(input.config) as BuildConfig;
       created.draft.config.id = created.id;
       created.draft.config.name = input.name;
       created.activeVersionId = null;

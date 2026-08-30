@@ -1,0 +1,133 @@
+{
+  "schemaVersion": "case-adapter-seed-v1",
+  "snapshotCreatedAt": "2026-08-28T00:00:00.000Z",
+  "evidenceSources": [{
+    "evidenceSourceId": "fixture.atx-builder.official-manual",
+    "authority": "official",
+    "subject": {"skuId":"fixture.case.atx-builder-v1","familyId":"fixture.case.atx-builder","modelId":"atx-builder","variantId":"atx-builder-v1","revision":"A","region":"fixture"},
+    "documentId": "doc-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "documentSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "captureId": "capture-sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "retrievedAt": "2026-08-28T00:00:00.000Z",
+    "factLocators": [
+      {"factId":"fact.fixture.case.identity.revision","locator":{"section":"Identity"}},
+      {"factId":"fact.fixture.case.width","locator":{"section":"Dimensions"}},
+      {"factId":"fact.fixture.case.height","locator":{"section":"Dimensions"}},
+      {"factId":"fact.fixture.case.depth","locator":{"section":"Dimensions"}},
+      {"factId":"fact.fixture.case.mounts","locator":{"section":"Mounts"}},
+      {"factId":"fact.fixture.case.form-factors","locator":{"section":"Motherboard support"}},
+      {"factId":"fact.fixture.case.gpu-max","locator":{"section":"Clearance"}},
+      {"factId":"fact.fixture.case.cooler-max","locator":{"section":"Clearance"}},
+      {"factId":"fact.fixture.case.fan-mounts","locator":{"section":"Cooling"}},
+      {"factId":"fact.fixture.case.radiators","locator":{"section":"Cooling"}},
+      {"factId":"fact.fixture.case.cable-families","locator":{"section":"Cable routing"}},
+      {"factId":"fact.fixture.case.front-port","locator":{"section":"Front I/O"}},
+      {"factId":"fact.fixture.case.package.contents","locator":{"section":"Package contents"}},
+      {"factId":"fact.fixture.case.package.fasteners","locator":{"section":"Package fasteners"}},
+      {"factId":"fact.fixture.case.tool-required","locator":{"section":"Required tools"}},
+      {"factId":"fact.fixture.case.package.cable","locator":{"section":"Package cables"}}
+    ]
+  }],
+  "manifest": {
+    "schemaVersion": "case-adapter-manifest-v1",
+    "adapterId": "adapter.fixture.atx-builder-v1",
+    "adapterVersion": "1.0.0",
+    "identity": {
+      "skuId": "fixture.case.atx-builder-v1",
+      "region": "fixture",
+      "revision": "A",
+      "identityFactIds": ["fact.fixture.case.identity.revision"]
+    },
+    "capabilityBindings": [
+      {"facetId":"identity.revision","sourceFactIds":["fact.fixture.case.identity.revision"]},
+      {"facetId":"physical.width","sourceFactIds":["fact.fixture.case.width"]},
+      {"facetId":"physical.height","sourceFactIds":["fact.fixture.case.height"]},
+      {"facetId":"physical.depth","sourceFactIds":["fact.fixture.case.depth"]},
+      {"facetId":"mount.point_ids","sourceFactIds":["fact.fixture.case.mounts"]},
+      {"facetId":"case.motherboard_form_factors","sourceFactIds":["fact.fixture.case.form-factors"]},
+      {"facetId":"case.gpu_max_length","sourceFactIds":["fact.fixture.case.gpu-max"]},
+      {"facetId":"case.cpu_cooler_max_height","sourceFactIds":["fact.fixture.case.cooler-max"]},
+      {"facetId":"cooling.fan_mounts","sourceFactIds":["fact.fixture.case.fan-mounts"]},
+      {"facetId":"cooling.radiator_support","sourceFactIds":["fact.fixture.case.radiators"]},
+      {"facetId":"power.cable_families","sourceFactIds":["fact.fixture.case.cable-families"]},
+      {"facetId":"package.contents","sourceFactIds":["fact.fixture.case.package.contents"]}
+    ],
+    "geometry": {
+      "envelope": {
+        "nodeId":"case.envelope","centerMm":[0,0,0],"sizeMm":[230,480,500],
+        "binding":{"status":"verified","sourceFactIds":["fact.fixture.case.width","fact.fixture.case.height","fact.fixture.case.depth"],"derivationIds":[],"uncertaintyMm":0}
+      },
+      "interiorSpaces": [{
+        "nodeId":"space.main","centerMm":[0,0,0],"sizeMm":[220,460,480],
+        "binding":{"status":"provisional","sourceFactIds":["fact.fixture.case.width","fact.fixture.case.height","fact.fixture.case.depth"],"derivationIds":["derive.fixture.wall-thickness"],"uncertaintyMm":2}
+      }],
+      "forbiddenZones": [{
+        "nodeId":"forbidden.front-radiator-gpu-overlap","centerMm":[0,0,-225],"sizeMm":[220,460,30],
+        "binding":{"status":"provisional","sourceFactIds":["fact.fixture.case.gpu-max","fact.fixture.case.radiators"],"derivationIds":["derive.fixture.radiator-overlap"],"uncertaintyMm":4}
+      }],
+      "serviceCorridors": [{
+        "nodeId":"corridor.rear-cable","centerMm":[105,0,0],"sizeMm":[20,430,430],
+        "binding":{"status":"provisional","sourceFactIds":["fact.fixture.case.cable-families","fact.fixture.case.depth"],"derivationIds":["derive.fixture.rear-cable-corridor"],"uncertaintyMm":3}
+      }]
+    },
+    "mounts": [
+      {"mountId":"mount.board.atx","kind":"motherboard","standardIds":["mount.motherboard.atx"],"quantity":1,"location":"main","binding":{"status":"verified","sourceFactIds":["fact.fixture.case.mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.psu.atx","kind":"psu","standardIds":["mount.psu.atx"],"quantity":1,"location":"lower-rear","binding":{"status":"verified","sourceFactIds":["fact.fixture.case.mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.drive.35","kind":"drive","standardIds":["mount.drive.3.5"],"quantity":2,"location":"lower-front","binding":{"status":"verified","sourceFactIds":["fact.fixture.case.mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.fan.front","kind":"fan","standardIds":["mount.fan.120","mount.fan.140"],"quantity":3,"location":"front","binding":{"status":"verified","sourceFactIds":["fact.fixture.case.fan-mounts"],"derivationIds":[],"uncertaintyMm":0}},
+      {"mountId":"mount.radiator.front","kind":"radiator","standardIds":["mount.radiator.360"],"quantity":1,"location":"front","binding":{"status":"verified","sourceFactIds":["fact.fixture.case.radiators"],"derivationIds":[],"uncertaintyMm":0}}
+    ],
+    "ports": [{
+      "portId":"port.front.usb3","connectorStandardId":"usb.internal-3.2-gen1-19pin","direction":"bidirectional","quantity":1,"anchorMm":[90,210,-235],
+      "binding":{"status":"provisional","sourceFactIds":["fact.fixture.case.front-port"],"derivationIds":["derive.fixture.front-port-anchor"],"uncertaintyMm":5}
+    }],
+    "routingZones": [{
+      "zoneId":"route.rear","kind":"channel","centerMm":[105,0,0],"sizeMm":[20,430,430],"connectsToZoneIds":[],
+      "binding":{"status":"provisional","sourceFactIds":["fact.fixture.case.cable-families"],"derivationIds":["derive.fixture.route-rear"],"uncertaintyMm":3}
+    }],
+    "assemblyConstraints": [{
+      "constraintId":"constraint.board-before-cables","beforeActionId":"install.board","afterActionId":"route.front-io",
+      "binding":{"status":"verified","sourceFactIds":["fact.fixture.case.tool-required"],"derivationIds":[],"uncertaintyMm":0}
+    }],
+    "bundleItems": [
+      {
+        "schemaVersion":"bundle-item-v1","bundleItemId":"bundle.fixture.case.6-32-screws","ownerSkuId":"fixture.case.atx-builder-v1","kind":"fastener",
+        "specification":[{"facetId":"resource.kind","value":"fastener"},{"facetId":"fastener.thread","value":"6-32"}],"quantity":2,"region":"fixture","revision":"A",
+        "variantScopeFactIds":["fact.fixture.case.identity.revision"],"evidenceFactIds":["fact.fixture.case.package.fasteners"]
+      },
+      {
+        "schemaVersion":"bundle-item-v1","bundleItemId":"bundle.fixture.case.front-usb-cable","ownerSkuId":"fixture.case.atx-builder-v1","kind":"cable",
+        "specification":[{"facetId":"resource.kind","value":"cable"},{"facetId":"cable.connector_standard","value":["usb.internal-3.2-gen1-19pin"]}],"quantity":1,"region":"fixture","revision":"A",
+        "variantScopeFactIds":["fact.fixture.case.identity.revision"],"evidenceFactIds":["fact.fixture.case.package.cable"]
+      }
+    ],
+    "resourcePatterns": [{
+      "schemaVersion":"assembly-resource-pattern-v1","patternId":"pattern.fixture.mount-board","mountStandardIds":["mount.motherboard.atx"],
+      "needs":[
+        {"needTemplateId":"board-fasteners","kind":"fastener","specification":[{"facetId":"fastener.thread","operator":"eq","value":"6-32"}],"quantity":3,"criticality":"normal","requiredBefore":"assembly"},
+        {"needTemplateId":"driver","kind":"tool","specification":[{"facetId":"tool.drive","operator":"eq","value":"phillips-2"}],"quantity":1,"criticality":"normal","requiredBefore":"assembly"},
+        {"needTemplateId":"front-io-cable","kind":"cable","specification":[{"facetId":"cable.connector_standard","operator":"includes","value":"usb.internal-3.2-gen1-19pin"}],"quantity":1,"criticality":"boot","requiredBefore":"first_boot"}
+      ],
+      "evidenceFactIds":["fact.fixture.case.package.fasteners","fact.fixture.case.tool-required","fact.fixture.case.package.cable"]
+    }],
+    "sourceRefs":["fixture://case/atx-builder-v1/manual"]
+  },
+  "factInputs": [
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.identity.revision","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"identity.revision","value":"A","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.width","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"physical.width","value":230,"unit":"mm","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.height","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"physical.height","value":480,"unit":"mm","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.depth","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"physical.depth","value":500,"unit":"mm","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.mounts","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"mount.point_ids","value":["mount.board.atx","mount.psu.atx","mount.drive.35","mount.fan.front","mount.radiator.front"],"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.form-factors","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"case.motherboard_form_factors","value":["atx","micro-atx","mini-itx"],"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.gpu-max","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"case.gpu_max_length","value":400,"unit":"mm","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.cooler-max","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"case.cpu_cooler_max_height","value":175,"unit":"mm","scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.fan-mounts","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"cooling.fan_mounts","value":["front-3x120","front-3x140","rear-1x120"],"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.radiators","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"cooling.radiator_support","value":["front-360"],"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.cable-families","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"power.cable_families","value":["atx24","eps8","pcie8","sata-power"],"scope":"revision","authority":"official","safetyClass":"electrical_safety","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.front-port","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"io.port_topology","value":{"endpointId":"port.front.usb3","connectorType":"usb.internal-3.2-gen1-19pin","location":"front","controllerId":"case.front-io","pathId":"path.front-usb3","quantity":1},"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.package.contents","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"package.contents","value":["bundle.fixture.case.6-32-screws","bundle.fixture.case.front-usb-cable"],"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.package.fasteners","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"package.fastener_count","value":{"fastenerId":"fastener.6-32","quantity":2},"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.tool-required","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"package.tool_required","value":{"toolId":"phillips-2","required":true},"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"},
+    {"schemaVersion":"fact-record-v1","factId":"fact.fixture.case.package.cable","subject":{"kind":"product","skuId":"fixture.case.atx-builder-v1","revision":"A","region":"fixture"},"field":"package.cable_count","value":{"cableId":"bundle.fixture.case.front-usb-cable","connectorFamily":"usb.internal-3.2-gen1-19pin","quantity":1},"scope":"revision","authority":"official","safetyClass":"compatibility_critical","status":"active","evidenceRefs":["claim-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"derivedFromFactIds":[],"confidence":1,"retrievedAt":"2026-08-28T00:00:00.000Z"}
+  ]
+}

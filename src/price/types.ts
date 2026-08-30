@@ -1,7 +1,7 @@
 import type { EvidenceLevel } from "../core/evidence";
 
 /** Marketplace platforms we may audit into snapshots. */
-export type PricePlatform = "jd" | "taobao" | "pdd" | "amazon" | "official" | "other";
+export type PricePlatform = "jd" | "tmall" | "taobao" | "pdd" | "amazon" | "official" | "other_cn" | "other";
 
 /**
  * How the listing was matched to a catalog SKU.

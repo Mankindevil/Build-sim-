@@ -15,7 +15,7 @@ interface DiscoveredSkill extends AgentSkillCatalogEntry {
 }
 
 const MANIFEST_KEYS = new Set([
-  "contractVersion", "id", "name", "version", "description", "allowedTools", "readOnly", "contextBudget", "triggers",
+  "contractVersion", "id", "name", "version", "description", "allowedTools", "optionalTools", "readOnly", "contextBudget", "triggers",
 ]);
 
 function scalar(value: string): string | number | boolean {
@@ -68,6 +68,18 @@ export class AgentSkillLoader {
 
   constructor(private readonly root: string, private readonly tools: AgentToolRegistry) {}
 
+  private effectiveManifest(manifest: AgentSkillManifest): AgentSkillManifest {
+    const registered = new Set(this.tools.names());
+    const { optionalTools = [], ...required } = manifest;
+    return Object.freeze({
+      ...structuredClone(required),
+      allowedTools: Object.freeze([
+        ...manifest.allowedTools,
+        ...optionalTools.filter((name) => registered.has(name)),
+      ]),
+    }) as unknown as AgentSkillManifest;
+  }
+
   private async scan(): Promise<Map<string, DiscoveredSkill>> {
     if (this.discovered) return this.discovered;
     const entries = await readdir(this.root, { withFileTypes: true });
@@ -81,10 +93,11 @@ export class AgentSkillLoader {
       if (discovered.has(parsed.manifest.id)) throw new Error(`Duplicate Agent Skill: ${parsed.manifest.id}`);
       const instructionBytes = Buffer.byteLength(parsed.instructions);
       if (instructionBytes > parsed.manifest.contextBudget) throw new Error(`Agent Skill exceeds contextBudget: ${parsed.manifest.id}`);
+      const manifest = this.effectiveManifest(parsed.manifest);
       const definitionHash = createHash("sha256")
-        .update(stableDefinition({ manifest: parsed.manifest, instructions: parsed.instructions }))
+        .update(stableDefinition({ manifest, instructions: parsed.instructions }))
         .digest("hex");
-      discovered.set(parsed.manifest.id, { manifest: parsed.manifest, definitionHash, file });
+      discovered.set(parsed.manifest.id, { manifest, definitionHash, file });
     }
     this.discovered = discovered;
     return discovered;
@@ -99,10 +112,13 @@ export class AgentSkillLoader {
     const discovered = (await this.scan()).get(skillId);
     if (!discovered) throw new Error(`Unknown Agent Skill: ${skillId}`);
     const parsed = parseSkillFile(await readFile(discovered.file, "utf8"), discovered.file);
+    const errors = validateSkillManifest(parsed.manifest, new Set(this.tools.names()));
+    if (errors.length) throw new Error(`Invalid Agent Skill ${parsed.manifest.id || skillId}: ${errors.join("; ")}`);
+    const manifest = this.effectiveManifest(parsed.manifest);
     const definitionHash = createHash("sha256")
-      .update(stableDefinition({ manifest: parsed.manifest, instructions: parsed.instructions }))
+      .update(stableDefinition({ manifest, instructions: parsed.instructions }))
       .digest("hex");
     if (definitionHash !== discovered.definitionHash) throw new Error(`Agent Skill changed after discovery: ${skillId}`);
-    return { manifest: structuredClone(parsed.manifest), instructions: parsed.instructions, definitionHash };
+    return { manifest: structuredClone(manifest), instructions: parsed.instructions, definitionHash };
   }
 }

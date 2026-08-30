@@ -3,16 +3,80 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { installLocalCatalogRoute } from "./local-browser-fixtures.mjs";
 
 const visualRoot = await mkdtemp(path.join(tmpdir(), "build-sim-r10-visual-"));
+const webPort = Number(process.env.WEB_SERVER_PORT ?? 5173);
+if (!Number.isSafeInteger(webPort) || webPort < 1 || webPort > 65_535) throw new Error("WEB_SERVER_PORT is invalid");
+const webOrigin = `http://127.0.0.1:${webPort}`;
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
+await installLocalCatalogRoute(page);
 page.setDefaultTimeout(25_000);
 const errors = [];
 const archives = [];
+const workspaceTraffic = [];
+const httpFailures = [];
+const recordWorkspaceTraffic = (entry) => {
+  workspaceTraffic.push(entry);
+  if (workspaceTraffic.length > 40) workspaceTraffic.shift();
+};
 page.on("pageerror", (error) => errors.push(String(error)));
-page.on("console", (message) => { if (message.type() === "error" && !/500|502/.test(message.text())) errors.push(message.text()); });
+page.on("console", (message) => {
+  if (message.type() !== "error" || /500|502/.test(message.text()) || message.text().startsWith("Failed to load resource:")) return;
+  errors.push(message.text());
+});
 page.on("dialog", (dialog) => dialog.accept());
+const expectedOfflineHttpFailure = (response) => {
+  const request = response.request();
+  const { pathname } = new URL(response.url());
+  if (response.status() === 500 && request.method() === "GET" && [
+    "/api/price/catalog",
+    "/api/price/state",
+    "/api/advice/billing",
+  ].includes(pathname)) return true;
+  if (response.status() === 404 && request.method() === "POST" && /^\/api\/workspace\/plans\/[^/]+\/evaluations$/.test(pathname)) return true;
+  if (response.status() === 400 && request.method() === "POST" && pathname === "/api/agent/evaluate") {
+    const config = request.postDataJSON()?.buildConfig;
+    return !config?.caseId || !config?.boardId || !config?.cpuId;
+  }
+  return false;
+};
+page.on("request", (request) => {
+  if (!request.url().includes("/api/workspace/plans/") || request.method() !== "PATCH") return;
+  const body = request.postDataJSON();
+  recordWorkspaceTraffic({
+    phase: "request",
+    expectedRevision: body?.expectedRevision,
+    idempotencyKey: body?.idempotencyKey,
+    diskCount: body?.config?.selection?.diskCount,
+    psuId: body?.config?.selection?.psuId,
+    fanGroups: body?.config?.selection?.fanGroups,
+  });
+});
+page.on("response", (response) => {
+  const request = response.request();
+  if (response.status() >= 400 && !expectedOfflineHttpFailure(response)) {
+    const body = request.postDataJSON();
+    const config = body?.buildConfig;
+    httpFailures.push({
+      method: request.method(), status: response.status(), url: response.url(),
+      ...(config ? {
+        config: {
+          schemaVersion: config.schemaVersion,
+          caseId: config.caseId,
+          boardId: config.boardId,
+          cpuId: config.cpuId,
+          diskCount: config.selection?.diskCount,
+          psuId: config.selection?.psuId,
+          fanGroups: config.selection?.fanGroups,
+        },
+      } : {}),
+    });
+  }
+  if (!request.url().includes("/api/workspace/plans/") || request.method() !== "PATCH") return;
+  recordWorkspaceTraffic({ phase: "response", status: response.status() });
+});
 
 const routeTransactions = async (target) => target.route("**/api/price/transactions/**", async (route) => {
   const request = route.request(); const url = new URL(request.url());
@@ -36,18 +100,8 @@ const revealCreateModes = async () => {
   if (!await advanced.evaluate((details) => details.open)) await advanced.locator("summary").click();
 };
 
-const resolveFrontSfxConflict = async () => {
-  await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation?.findings.some((finding) => finding.verdict === "bad" && finding.message.includes("前置 SFX")));
-  await page.selectOption('[data-fan-mount="front"] [data-fan-count]', "0");
-  await page.waitForFunction(() => {
-    const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
-    return !state?.activePlan?.draft.config.selection.fanGroups?.some((group) => group.mountId === "front")
-      && !state?.evaluation?.findings.some((finding) => finding.verdict === "bad" && finding.message.includes("前置 SFX"));
-  });
-};
-
 const started = Date.now();
-await page.goto("http://127.0.0.1:5173/index.html#/workspace", { waitUntil: "networkidle" });
+await page.goto(`${webOrigin}/index.html#/workspace`, { waitUntil: "domcontentloaded" });
 await page.waitForFunction(() => Boolean(window.__BUILD_SIM_PLAN_STORE__?.getState().evaluationSnapshot));
 const firstLoadMs = Date.now() - started;
 const browserHashGoldens = await page.evaluate(async () => {
@@ -86,16 +140,61 @@ await page.fill("[data-create-name]", "R10 完整验收方案");
 await page.click("[data-create-submit]");
 await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.name === "R10 完整验收方案");
 const firstPlan = await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__.getState().activePlan.id);
+// Clear the front mount before changing to the SFX PSU. The authoritative
+// repository refuses the conflicting intermediate instead of persisting a
+// draft that the evaluator already knows cannot coexist.
+await page.selectOption('[data-fan-mount="front"] [data-fan-count]', "0");
+await page.waitForFunction(() => {
+  const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+  return !state?.activePlan?.draft.config.selection.fanGroups?.some((group) => group.mountId === "front");
+});
+await page.waitForFunction(() => {
+  const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+  return state?.saveStatus === "saved"
+    && !state.activePlan?.draft.config.selection.fanGroups?.some((group) => group.mountId === "front")
+    && state.evaluationSnapshot?.draftRevision === state.activePlan.draftRevision
+    && !state.evaluationSnapshot.evaluation.config.selection.fanGroups?.some((group) => group.mountId === "front");
+});
 
 const evaluationStarted = Date.now();
 await page.fill('[data-config-field="selection.diskCount"]', "2");
 await page.locator('[data-config-field="selection.diskCount"]').dispatchEvent("change");
+await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.config.selection.diskCount === 2);
+try {
+  await page.waitForFunction(() => {
+    const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+    return state?.saveStatus === "saved"
+      && state.activePlan?.draft.config.selection.diskCount === 2
+      && state.evaluationSnapshot?.draftRevision === state.activePlan.draftRevision
+      && state.evaluationSnapshot.evaluation.config.selection.diskCount === 2;
+  });
+} catch (error) {
+  const diagnostic = await page.evaluate(() => {
+    const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+    return {
+      saveStatus: state?.saveStatus,
+      error: state?.error,
+      activeRevision: state?.activePlan?.draftRevision,
+      activeDirty: state?.activePlan?.draft.dirty,
+      activeDiskCount: state?.activePlan?.draft.config.selection.diskCount,
+      snapshotRevision: state?.evaluationSnapshot?.draftRevision,
+      snapshotDiskCount: state?.evaluationSnapshot?.evaluation.config.selection.diskCount,
+      evaluationDiskCount: state?.evaluation?.config.selection.diskCount,
+      evaluationAuthority: document.querySelector("#n6-lab")?.getAttribute("data-evaluation-authority"),
+    };
+  });
+  throw new Error(`disk evaluation did not converge: ${JSON.stringify({ diagnostic, workspaceTraffic })}`, { cause: error });
+}
 await page.selectOption('[data-config-field="selection.psuId"]', "psu.corsair-sf750-atx31");
+await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.config.selection.psuId === "psu.corsair-sf750-atx31");
 await page.waitForFunction(() => {
   const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
-  return state?.evaluation?.config.selection.diskCount === 2 && state.evaluation.config.selection.psuId === "psu.corsair-sf750-atx31";
+  return state?.saveStatus === "saved"
+    && state.activePlan?.draft.config.selection.psuId === "psu.corsair-sf750-atx31"
+    && state.evaluationSnapshot?.draftRevision === state.activePlan.draftRevision
+    && state.evaluationSnapshot.evaluation.config.selection.diskCount === 2
+    && state.evaluationSnapshot.evaluation.config.selection.psuId === "psu.corsair-sf750-atx31";
 });
-await resolveFrontSfxConflict();
 const reevaluationMs = Date.now() - evaluationStarted;
 await page.click("[data-open-save]");
 await page.fill("[data-version-summary]", "R10 v1 · 双盘与 SF750");
@@ -116,6 +215,12 @@ if (await page.locator('[data-config-field="selection.diskCount"]').inputValue()
 const switchStarted = Date.now();
 await page.selectOption("[data-plan-switcher]", secondPlan);
 await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id === id, secondPlan);
+await page.waitForFunction((id) => {
+  const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+  return state?.activePlan?.id === id
+    && state.evaluationSnapshot?.planId === id
+    && state.evaluationSnapshot.draftRevision === state.activePlan.draftRevision;
+}, secondPlan);
 const planSwitchMs = Date.now() - switchStarted;
 
 await page.click('[data-route="workspace"]');
@@ -139,11 +244,16 @@ const proposal = await page.evaluate(() => {
 });
 await page.locator("[data-agent-plan-proposals]").evaluate((host, value) => host.dispatchEvent(new CustomEvent("build-sim:agent-plan-proposal", { detail: { proposal: {
   schemaVersion: "1.0.0", id: "proposal-platform-r10", planId: value.planId, expectedDraftRevision: value.revision, expectedConfigHash: value.configHash, createdAt: "2026-08-25T02:00:00.000Z",
+  configSchemaVersion: "2.0.0",
   summary: "R10 人工批准增加一块数据盘", rationale: ["完整路径 fixture"], operations: [{ op: "replace", path: "/selection/diskCount", value: value.diskCount + 1 }],
   predictedImpact: { resolvedFindingIds: [], introducedFindingIds: [], budgetDeltaCny: null }, status: "proposed",
 } } })), proposal);
 const proposalCard = page.locator('[data-plan-proposal="proposal-platform-r10"]');
-await proposalCard.waitFor();
+try { await proposalCard.waitFor(); }
+catch (error) {
+  const proposalHostText = await page.locator("[data-agent-plan-proposals]").innerText();
+  throw new Error(`plan proposal did not render: ${proposalHostText}`, { cause: error });
+}
 if (!await proposalCard.locator("[data-apply-proposal]").isDisabled()) throw new Error("proposal bypassed approval gate");
 await proposalCard.locator("[data-proposal-approval]").check();
 await proposalCard.locator("[data-apply-proposal]").click();
@@ -194,11 +304,32 @@ await revealCreateModes();
 await page.selectOption("[data-create-mode]", "template");
 await page.fill("[data-create-name]", "R10 手机方案");
 await page.click("[data-create-submit]");
+await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.name === "R10 手机方案");
+await page.selectOption('[data-fan-mount="front"] [data-fan-count]', "0");
+await page.waitForFunction(() => {
+  const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+  return state?.saveStatus === "saved"
+    && !state.activePlan?.draft.config.selection.fanGroups?.some((group) => group.mountId === "front")
+    && state.evaluationSnapshot?.draftRevision === state.activePlan.draftRevision;
+});
 await page.fill('[data-config-field="selection.diskCount"]', "3");
 await page.locator('[data-config-field="selection.diskCount"]').dispatchEvent("change");
+await page.waitForFunction(() => {
+  const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+  return state?.saveStatus === "saved"
+    && state.activePlan?.draft.config.selection.diskCount === 3
+    && state.evaluationSnapshot?.draftRevision === state.activePlan.draftRevision
+    && state.evaluationSnapshot.evaluation.config.selection.diskCount === 3;
+});
 await page.selectOption('[data-config-field="selection.psuId"]', "psu.corsair-sf750-atx31");
-await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation?.config.selection.diskCount === 3);
-await resolveFrontSfxConflict();
+await page.waitForFunction(() => {
+  const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+  return state?.saveStatus === "saved"
+    && state.activePlan?.draft.config.selection.psuId === "psu.corsair-sf750-atx31"
+    && state.evaluationSnapshot?.draftRevision === state.activePlan.draftRevision
+    && state.evaluationSnapshot.evaluation.config.selection.diskCount === 3
+    && state.evaluationSnapshot.evaluation.config.selection.psuId === "psu.corsair-sf750-atx31";
+});
 await page.click("[data-open-save]");
 await page.fill("[data-version-summary]", "R10 mobile version");
 await page.click("[data-version-submit]");
@@ -218,7 +349,7 @@ await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().a
 const cdp = await page.context().newCDPSession(page);
 await cdp.send("HeapProfiler.collectGarbage");
 const heapBeforeReload = await cdp.send("Runtime.getHeapUsage");
-await page.reload({ waitUntil: "networkidle" });
+await page.reload({ waitUntil: "domcontentloaded" });
 await page.waitForFunction((id) => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.id === id, saved.id);
 await cdp.send("HeapProfiler.collectGarbage");
 const heapAfterReload = await cdp.send("Runtime.getHeapUsage");
@@ -235,7 +366,7 @@ const apiPayloadBytes = await page.evaluate(async (planId) => {
   entries.push(["in-memory:evaluationSnapshot", new TextEncoder().encode(JSON.stringify(state.evaluationSnapshot)).byteLength]);
   return Object.fromEntries(entries);
 }, saved.id);
-if (errors.length) throw new Error(`page errors:\n${errors.join("\n")}`);
+if (errors.length || httpFailures.length) throw new Error(`page errors: ${JSON.stringify({ errors, httpFailures })}`);
 
 console.log("Platform acceptance browser passed", {
   plans: [firstPlan, secondPlan],

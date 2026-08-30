@@ -4,7 +4,6 @@ import type { CenteredBox, PartKind, PlacedPart, Vec3 } from "../core/geometry";
 import type { EngineFinding } from "../core/engine";
 import type { FieldProvenance } from "../catalog-search/types";
 import type { SkuCatalog, SkuRecord } from "../sku/types";
-import { N6_INTERIOR_BOX } from "../adapters/jonsbo-n6/geometry";
 import { targetForFinding } from "../plans/finding-targets";
 
 export const SPATIAL_SCENE_SCHEMA_VERSION = "1.0.0" as const;
@@ -163,7 +162,7 @@ function syntheticNode(
     repeatGroup: null,
     explodedOffset: [0, 0, 0],
     selectable: id === "case-shell",
-    note: id === "case-shell" ? caseSku.dims.note ?? null : "可用内部空间来自 N6 统一几何源。",
+    note: id === "case-shell" ? caseSku.dims.note ?? null : "可用空间来自当前 case runtime 的几何投影。",
   };
 }
 
@@ -171,10 +170,11 @@ function syntheticNode(
 export function buildSpatialSceneModel(evaluation: BuildEvaluation, catalog: SkuCatalog): SpatialSceneModel {
   const caseSku = skuById(catalog, evaluation.config.caseId);
   if (!caseSku) throw new Error(`Unknown case SKU: ${evaluation.config.caseId}`);
-  const bounds = envelopeFromCase(caseSku);
+  const runtimeEnvelope = evaluation.geometry.find((part) => part.kind === "chassis" && part.skuId === caseSku.id);
+  const bounds = runtimeEnvelope ? structuredClone(runtimeEnvelope.box) : envelopeFromCase(caseSku);
   const findings = evaluation.findings ?? [];
   const shell = syntheticNode("case-shell", `${caseSku.name} 外壳`, "shell", bounds, caseSku, caseSku.dims.evidence);
-  const interior = syntheticNode("case-interior", "N6 内部可用空间", "interior", N6_INTERIOR_BOX, caseSku, "inferred");
+  const interior = syntheticNode("case-interior", "机箱可用空间", "interior", bounds, caseSku, runtimeEnvelope?.anchorEvidence ?? "unknown");
   shell.findingIds = findings.filter((finding) => targetForFinding(finding.id).spatialPartId === "case").map((finding) => finding.id).sort();
   const nodes = [shell, interior, ...evaluation.geometry.map((part) => nodeFromPart(part, catalog, findings))];
   return {

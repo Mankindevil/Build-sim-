@@ -43,7 +43,7 @@ export interface Occupant {
   evidence: EvidenceLevel;
   /**
    * Evidence for *where* the envelope sits, as opposed to how big it is. Almost
-   * always `inferred` for the N6: the manual publishes no internal anchors. A
+   * `inferred` when the selected case manual publishes no internal anchors. A
    * conflict resting on a guessed anchor cannot be reported as a hard failure.
    */
   anchorEvidence?: EvidenceLevel;

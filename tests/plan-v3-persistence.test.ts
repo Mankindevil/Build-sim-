@@ -154,6 +154,7 @@ describe("U2 Plan V3 persistence", () => {
     cooler.attrs = { ...cooler.attrs, type: "down-draft" };
     catalogA.skus.push(cooler);
     sourceConfig.selection.coolerId = cooler.id;
+    sourceConfig.bom = [{ skuId: cooler.id, qty: 1, bucket: "buy_now" }];
     const repositoryA = new FilePlanRepository<BuildConfigDocument>({
       root, id: ids, topologyV3Enabled: true, now: () => "2026-08-27T13:16:00.000Z", getCatalog: () => catalogA,
     });
@@ -180,6 +181,10 @@ describe("U2 Plan V3 persistence", () => {
     expect(validatePlanConfigMigrationRuntime(immutableAudit, {
       planId: reloaded.id, config: reloaded.draft.config, sourceVersion, catalog: loadBundledCatalog(),
     })).toEqual([]);
+    await expect(repositoryB.updateDraft(created.id, {
+      expectedRevision: reloaded.draftRevision,
+      config: structuredClone(reloaded.draft.config),
+    })).rejects.toThrow(/does not exist|不存在/);
   });
 
   it("restores an immutable V3 version as a new draft without rewriting history", async () => {

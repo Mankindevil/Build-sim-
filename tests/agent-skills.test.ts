@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import baseline from "../data/configs/baseline-atx-1hdd.json";
-import type { ProviderAdapter, ProviderTurnRequest } from "../src/agent/contracts";
+import { AGENT_CONTRACT_VERSION, type AgentSkillManifest, type ProviderAdapter, type ProviderTurnRequest } from "../src/agent/contracts";
+import { validateSkillManifest } from "../src/agent/contract-validation";
 import { AgentRuntime } from "../src/agent/runtime";
 import { MemoryAgentSessionStore } from "../src/agent/session-store";
 import { AgentSkillLoader } from "../src/agent/skill-loader";
@@ -15,14 +16,23 @@ function registry(): AgentToolRegistry {
 }
 
 describe("A4 Agent Skill loader", () => {
-  it("discovers six metadata-only catalog entries and loads instructions on activation", async () => {
+  it("discovers eight metadata-only catalog entries and loads instructions on activation", async () => {
     const loader = new AgentSkillLoader(path.resolve("skills"), registry());
     const catalog = await loader.catalog();
     expect(catalog.map((entry) => entry.manifest.id)).toEqual([
-      "assembly-and-wiring", "build-diagnosis", "geometry-evidence-audit", "plan-initializer", "shopping-research", "upgrade-advisor",
+      "assembly-and-wiring", "build-diagnosis", "evidence-and-attachments", "geometry-evidence-audit", "plan-initializer", "shopping-research", "upgrade-advisor", "whole-build-solver",
     ]);
     expect(catalog.every((entry) => /^[a-f0-9]{64}$/.test(entry.definitionHash))).toBe(true);
     expect(JSON.stringify(catalog)).not.toContain("装机诊断工作流");
+
+    const governedWrites = await loader.load("evidence-and-attachments");
+    expect(governedWrites.manifest).toMatchObject({ readOnly: false });
+    expect(governedWrites.manifest.allowedTools).toEqual(expect.arrayContaining([
+      "archive_user_attachment", "archive_official_evidence", "propose_fact_update", "inspect_attachment",
+      "propose_agent_inference", "approve_agent_inference", "register_provisional_case_adapter",
+    ]));
+    expect(governedWrites.manifest.optionalTools).toBeUndefined();
+    expect(governedWrites.instructions).toContain("等待人工审批");
 
     const loaded = await loader.load("build-diagnosis");
     expect(loaded.instructions).toContain("装机诊断工作流");
@@ -32,18 +42,22 @@ describe("A4 Agent Skill loader", () => {
     expect(shopping.manifest.allowedTools).toEqual(expect.arrayContaining(["search_catalog_skus", "propose_catalog_review", "propose_plan_change"]));
     expect(shopping.manifest.allowedTools).not.toContain("enrich_official_catalog");
     const initializer = await loader.load("plan-initializer");
-    expect(initializer.manifest).toMatchObject({ version: "2.0.0", readOnly: true });
+    expect(initializer.manifest).toMatchObject({ version: "2.1.0", readOnly: true });
     expect(initializer.manifest.allowedTools).toContain("propose_catalog_review");
     expect(initializer.manifest.allowedTools).toContain("propose_plan_change");
     expect(initializer.manifest.allowedTools).not.toContain("propose_plan_initialization");
     expect(initializer.instructions).toContain("渐进");
     expect(initializer.instructions).toContain("stable selector");
+    expect(initializer.instructions).toContain("证据阶梯、官网未找到原因、第三方证据、可重放推断、下一步补证");
+    expect(initializer.instructions).toContain("claimCandidateId");
     const audit = await loader.load("geometry-evidence-audit");
-    expect(audit.manifest).toMatchObject({ version: "1.3.0", readOnly: true });
+    expect(audit.manifest).toMatchObject({ version: "1.4.0", readOnly: true });
     expect(audit.manifest.allowedTools).toEqual(["get_build_evaluation", "get_sku_facts", "get_evidence_document", "get_evidence_excerpt", "discover_official_documents", "search_official_catalog"]);
     expect(audit.instructions).toContain("c.z + d/2");
     expect(audit.instructions).toContain("contentTrust=untrusted-evidence-text");
     expect(audit.instructions).toContain("发现结果还不是已归档证据");
+    expect(audit.instructions).toContain("证据阶梯、官网未找到原因、第三方证据、可重放推断、下一步补证");
+    expect(audit.instructions).toContain("网页、PDF、OCR、附件正文");
   });
 
   it("rejects unknown Tools before a Skill can enter the catalog", async () => {
@@ -51,6 +65,48 @@ describe("A4 Agent Skill loader", () => {
     await mkdir(path.join(root, "invalid"));
     await writeFile(path.join(root, "invalid", "SKILL.md"), `---\ncontractVersion: "1.0.0"\nid: invalid\nname: Invalid\nversion: "1.0.0"\ndescription: This manifest intentionally references a Tool that is not registered.\nallowedTools:\n  - missing_tool\nreadOnly: true\ncontextBudget: 2000\ntriggers:\n  - invalid\n---\n\nDo not load.\n`);
     await expect(new AgentSkillLoader(root, registry()).catalog()).rejects.toThrow("unknown tool: missing_tool");
+  });
+
+  it("resolves feature-gated optional Tools into the effective manifest and definition hash", async () => {
+    const enabledTools = registry();
+    const enabled = await new AgentSkillLoader(path.resolve("skills"), enabledTools).load("evidence-and-attachments");
+    expect(enabled.manifest.allowedTools).toContain("register_provisional_case_adapter");
+    expect(enabledTools.names()).toContain("register_provisional_case_adapter");
+
+    const disabledTools = new AgentToolRegistry(createBuildSimTools({ provisionalCaseAdapterToolEnabled: false }));
+    const disabledLoader = new AgentSkillLoader(path.resolve("skills"), disabledTools);
+    await expect(disabledLoader.catalog()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ manifest: expect.objectContaining({ id: "evidence-and-attachments" }) }),
+    ]));
+    const disabled = await disabledLoader.load("evidence-and-attachments");
+    expect(disabled.manifest.allowedTools).not.toContain("register_provisional_case_adapter");
+    expect(disabledTools.names()).not.toContain("register_provisional_case_adapter");
+    expect(disabled.definitionHash).not.toBe(enabled.definitionHash);
+  });
+
+  it("strictly rejects duplicate, malformed and required/optional-overlapping Tool declarations", () => {
+    const base: AgentSkillManifest = {
+      contractVersion: AGENT_CONTRACT_VERSION,
+      id: "optional-fixture",
+      name: "Optional fixture",
+      version: "1.0.0",
+      description: "Validates strict optional Tool manifest declarations.",
+      allowedTools: ["get_build_evaluation"],
+      optionalTools: ["feature_write"],
+      readOnly: false,
+      contextBudget: 2_000,
+      triggers: ["optional"],
+    };
+    const registered = new Set(["get_build_evaluation"]);
+    expect(validateSkillManifest(base, registered)).toEqual([]);
+    expect(validateSkillManifest({ ...base, optionalTools: ["feature_write", "feature_write"] }, registered))
+      .toContain("skill.optionalTools invalid");
+    expect(validateSkillManifest({ ...base, optionalTools: ["get_build_evaluation"] }, registered))
+      .toContain("skill optionalTools overlap allowedTools");
+    expect(() => validateSkillManifest({ ...base, optionalTools: [null] } as unknown as AgentSkillManifest, registered))
+      .not.toThrow();
+    expect(validateSkillManifest({ ...base, optionalTools: [null] } as unknown as AgentSkillManifest, registered))
+      .toContain("skill.optionalTools invalid");
   });
 
   it("detects Skill body changes between discovery and activation", async () => {
@@ -77,7 +133,7 @@ describe("A4 Skill-scoped Tool runtime", () => {
         requests.push(request);
         if (requests.length === 1) {
           expect(request.system).toContain("Active Skill (build-diagnosis@1.0.0)");
-          expect(request.tools.map((tool) => tool.name).sort()).toEqual(["get_build_evaluation", "get_sku_facts", "propose_plan_change"]);
+          expect(request.tools.map((tool) => tool.name).sort()).toEqual(["get_build_evaluation", "get_sku_facts", "get_system_profile", "propose_plan_change"]);
           return { provider: "deepseek", providerRequestId: "p1", model: request.model, content: "", toolCalls: [{ id: "forbidden", name: "search_price_candidates", input: { skuIds: ["case.jonsbo-n6"] } }], stopReason: "tool_use", usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, latencyMs: 1 };
         }
         expect(JSON.parse(request.messages.at(-1)?.content ?? "{}")).toMatchObject({ ok: false, errorCode: "tool_not_allowed" });

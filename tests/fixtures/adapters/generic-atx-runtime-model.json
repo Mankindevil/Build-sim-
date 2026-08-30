@@ -1,0 +1,214 @@
+{
+  "schemaVersion": "case-runtime-model-fixture-seed-v1",
+  "runtimeId": "runtime.fixture.atx-primitives",
+  "runtimeVersion": "1.0.0",
+  "interpreterId": "declarative-case-v1",
+  "authorityStatus": "legacy_unverified",
+  "authorityRefs": {
+    "factIds": [],
+    "derivationIds": [],
+    "evidenceContentHashes": []
+  },
+  "identity": {
+    "skuId": "fixture.case.atx-builder-v1",
+    "region": "fixture",
+    "revision": "A"
+  },
+  "documents": {
+    "profile": {
+      "schemaVersion": "case-runtime-profile-primitives-v1",
+      "caseId": "fixture.case.atx-builder-v1",
+      "capabilities": {
+        "trayCount": 0,
+        "backplane": {
+          "sataPowerInlets": 0,
+          "molexInlets": 0,
+          "evidence": "unknown"
+        },
+        "fanMounts": [
+          {
+            "id": "mount.fan.front",
+            "label": "Front fan row",
+            "size": 120,
+            "count": 2,
+            "supportedSizes": [120],
+            "maxCountBySize": { "120": 2 },
+            "direction": "intake",
+            "chamber": "upper",
+            "evidence": "inferred",
+            "source": "tests/fixtures/adapters/generic-atx-runtime-model.json",
+            "geometryRole": "front"
+          }
+        ],
+        "psuLimits": { "atxMaxLengthMm": null, "sfxMaxLengthMm": null },
+        "coolerLimits": { "overheadAtxMm": null, "openTopMm": null },
+        "gpuLimits": { "planningMinMm": null, "publishedMaxMm": null }
+      },
+      "powerProfile": {
+        "boardBaseW": null,
+        "fanBaseW": null,
+        "fan120W": null,
+        "fan140W": null,
+        "dualSyncW": null,
+        "cpuIdleW": null,
+        "cpuReadW": null,
+        "cpuQuickSyncW": null,
+        "hbaW": null,
+        "driveSpinUpExtraW": null,
+        "evidence": "unknown",
+        "source": "tests/fixtures/adapters/generic-atx-runtime-model.json"
+      },
+      "thermalProfile": {
+        "airDensityKgM3": 1.2,
+        "airCpJPerKgK": 1005,
+        "systemDerate": { "lo": 0.7, "hi": 0.9 },
+        "passiveCfm": { "lo": 1, "hi": 3 },
+        "evidence": "unknown"
+      },
+      "defaults": { "ownedNvmeQty": 0 }
+    },
+    "geometry": {
+      "schemaVersion": "case-runtime-geometry-primitives-v1",
+      "caseId": "fixture.case.atx-builder-v1",
+      "envelope": { "centerMm": [0, 0, 0], "sizeMm": [230, 480, 500] },
+      "interior": { "centerMm": [0, 0, 0], "sizeMm": [220, 460, 480] },
+      "envelopePartId": "case.shell",
+      "thermalDeckY": 0,
+      "mountPartIds": {
+        "mount.board.atx": "board",
+        "mount.psu.atx": "psu.primary",
+        "mount.fan.front": "fan.front"
+      },
+      "parts": [
+        {
+          "id": "case.shell",
+          "name": "ATX case envelope",
+          "kind": "chassis",
+          "centerMm": [0, 0, 0],
+          "sizeMm": [230, 480, 500],
+          "sizeEvidence": "inferred",
+          "anchorEvidence": "inferred",
+          "dimsLabel": "manifest envelope",
+          "skuSelector": "case"
+        },
+        {
+          "id": "board",
+          "name": "{sku.name}",
+          "kind": "board",
+          "centerMm": [0, 35, 30],
+          "sizeMm": [220, 2, 300],
+          "sizeEvidence": "standard",
+          "anchorEvidence": "inferred",
+          "dimsLabel": "ATX board planning primitive",
+          "skuSelector": "board",
+          "mountedOn": "case.shell"
+        },
+        {
+          "id": "cpu",
+          "name": "{sku.name}",
+          "kind": "cpu",
+          "centerMm": [0, 40, 30],
+          "sizeMm": [45, 5, 45],
+          "sizeEvidence": "standard",
+          "anchorEvidence": "inferred",
+          "dimsLabel": "socket package planning primitive",
+          "skuSelector": "cpu",
+          "mountedOn": "board",
+          "thermalId": "cpu"
+        },
+        {
+          "id": "cooler",
+          "name": "{sku.name}",
+          "kind": "cooler",
+          "centerMm": [0, 70, 30],
+          "sizeMm": [100, { "source": "catalog-dimension", "selector": "cooler", "field": "heightMm", "fallback": 55 }, 100],
+          "sizeEvidence": "inferred",
+          "anchorEvidence": "inferred",
+          "dimsLabel": "catalog height with declared planning footprint",
+          "skuSelector": "cooler",
+          "mountedOn": "cpu"
+        },
+        {
+          "id": "memory.{index}",
+          "name": "{sku.name} module {index}",
+          "kind": "ram",
+          "centerMm": [55, 54, 10],
+          "sizeMm": [8, { "source": "catalog-dimension", "selector": "memory", "field": "heightMm", "fallback": 32 }, 130],
+          "sizeEvidence": "inferred",
+          "anchorEvidence": "inferred",
+          "dimsLabel": "catalog height with standard DIMM envelope",
+          "skuSelector": "memory",
+          "repeat": { "source": "catalog-attribute", "selector": "memory", "field": "modules", "fallback": 1 },
+          "repeatOffsetMm": [12, 0, 0],
+          "mountedOn": "board"
+        },
+        {
+          "id": "psu.primary",
+          "name": "{sku.name}",
+          "kind": "psu",
+          "centerMm": [0, -150, 140],
+          "sizeMm": [
+            { "source": "catalog-dimension", "selector": "psu", "field": "widthMm", "fallback": 150 },
+            { "source": "catalog-dimension", "selector": "psu", "field": "heightMm", "fallback": 86 },
+            { "source": "catalog-dimension", "selector": "psu", "field": "lengthMm", "fallback": 160 }
+          ],
+          "sizeEvidence": "standard",
+          "anchorEvidence": "inferred",
+          "dimsLabel": "catalog PSU envelope",
+          "skuSelector": "psu",
+          "mountedOn": "case.shell",
+          "thermalId": "psu",
+          "chamber": "lower"
+        },
+        {
+          "id": "fan.front",
+          "name": "Front fan row",
+          "kind": "fan",
+          "centerMm": [0, 80, -225],
+          "sizeMm": [120, 120, 25],
+          "sizeEvidence": "inferred",
+          "anchorEvidence": "inferred",
+          "dimsLabel": "declared fan mount primitive",
+          "mountedOn": "case.shell",
+          "chamber": "upper"
+        }
+      ],
+      "slots": []
+    },
+    "routing": {
+      "schemaVersion": "case-runtime-routing-primitives-v1",
+      "caseId": "fixture.case.atx-builder-v1",
+      "mode": "no-case-managed-cables",
+      "ports": [],
+      "waypoints": [],
+      "edges": []
+    },
+    "assembly": {
+      "schemaVersion": "case-runtime-assembly-primitives-v1",
+      "caseId": "fixture.case.atx-builder-v1",
+      "preinstalled": [
+        { "match": "case.shell", "removable": false, "source": "fixture declaration" }
+      ],
+      "install": [
+        { "match": "board", "axis": "+y", "travelMm": "self", "source": "fixture declaration" },
+        { "match": "psu.primary", "axis": "+z", "travelMm": 160, "source": "fixture declaration" }
+      ],
+      "declared": []
+    },
+    "calibration": {
+      "schemaVersion": "1.0.0",
+      "calibrationVersion": "fixture-atx-unknown-v1",
+      "caseId": "fixture.case.atx-builder-v1",
+      "capturedAt": null,
+      "source": "No physical measurements are claimed by this legacy fixture",
+      "provenance": [],
+      "wallPowerW": { "value": null, "evidence": "unknown", "unit": "W", "source": null },
+      "smartTemperatureC": { "min": null, "max": null, "evidence": "unknown", "unit": "°C", "source": null },
+      "cpuTemperatureC": { "min": null, "max": null, "evidence": "unknown", "unit": "°C", "source": null },
+      "gpuTemperatureC": { "min": null, "max": null, "evidence": "unknown", "unit": "°C", "source": null },
+      "noiseDba": { "value": null, "evidence": "unknown", "unit": "dBA", "source": null },
+      "fanCurve": { "mode": null, "rpm": null, "cfm": null, "evidence": "unknown", "source": null }
+    }
+  },
+  "sourceRefs": ["tests/fixtures/adapters/generic-atx-runtime-model.json"]
+}

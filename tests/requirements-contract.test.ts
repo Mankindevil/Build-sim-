@@ -121,7 +121,7 @@ describe("U0 topology and derived requirement contracts", () => {
     const satisfaction = (requirementId: string): RequirementSatisfaction => ({
       requirementId,
       status: "satisfied",
-      allocations: [{ source: "package_content", refId: "one-screw", ownerInstanceId: "case", quantity: 1, availability: "present_verified", verificationStatus: "verified", evidenceRefs: [], observationRefs: ["obs-count"] }],
+      allocations: [{ source: "package_content", refId: "one-screw", ownerInstanceId: "case", quantity: 1, availability: "present_verified", verificationStatus: "verified", evidenceRefs: [], observationRefs: ["observation:obs-count"] }],
       residualQuantity: 0,
     });
     expect(validateRequirementSatisfaction(requirement, satisfaction(requirement.requirementId))).toEqual([]);

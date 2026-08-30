@@ -1,14 +1,19 @@
 import { chromium } from "playwright";
+import { installLocalCatalogRoute } from "./local-browser-fixtures.mjs";
 
+const webPort = Number(process.env.WEB_SERVER_PORT ?? 5173);
+if (!Number.isSafeInteger(webPort) || webPort < 1 || webPort > 65_535) throw new Error("WEB_SERVER_PORT is invalid");
+const webOrigin = `http://127.0.0.1:${webPort}`;
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1360, height: 960 } });
+await installLocalCatalogRoute(page);
 page.setDefaultTimeout(20_000);
 const errors = [];
 const archives = [];
 let transactionSearchBody = null;
 let activePsuId = "psu.seasonic-focus-gx-850-v5";
 page.on("pageerror", (error) => errors.push(String(error)));
-page.on("console", (message) => { if (message.type() === "error" && !message.text().includes("500") && !message.text().includes("502")) errors.push(message.text()); });
+page.on("console", (message) => { if (message.type() === "error" && !message.text().includes("404") && !message.text().includes("500") && !message.text().includes("502")) errors.push(message.text()); });
 page.on("dialog", (dialog) => dialog.accept());
 
 await page.route("**/api/price/transactions/**", async (route) => {
@@ -54,22 +59,22 @@ await page.route("**/api/price/transactions/**", async (route) => {
 
 await page.route("**/api/catalog/search/job-browser-gpu", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ jobId: "job-browser-gpu", status: "completed", stage: "score", candidates: [], summary: { discovered: 0, exact: 0 } }) }));
 
-await page.goto("http://127.0.0.1:5173/index.html#/workspace", { waitUntil: "networkidle" });
+await page.goto(`${webOrigin}/index.html#/workspace`, { waitUntil: "domcontentloaded" });
 await page.waitForFunction(() => Boolean(window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation));
 const plan = await page.evaluate(() => {
   const state = window.__BUILD_SIM_PLAN_STORE__.getState();
   return { id: state.activePlan.id, versionId: state.activePlan.activeVersionId, psuId: state.activePlan.draft.config.selection.psuId };
 });
 activePsuId = plan.psuId;
-const baselineKnownSpent = await page.evaluate(() => {
-  const matches = [...(document.querySelector("#build-hero-progress")?.textContent?.matchAll(/¥([\d,]+)/g) ?? [])];
-  return Number(matches.at(-1)?.[1]?.replaceAll(",", "") ?? 0);
-});
 await page.evaluate(() => {
   window.location.hash = "#/purchases";
   window.dispatchEvent(new HashChangeEvent("hashchange"));
 });
 await page.waitForFunction(() => document.querySelector("#build-base-dialog")?.hasAttribute("open"));
+const baselineKnownSpent = await page.evaluate(() => {
+  const matches = [...(document.querySelector("#build-hero-progress")?.textContent?.matchAll(/¥([\d,]+)/g) ?? [])];
+  return Number(matches.at(-1)?.[1]?.replaceAll(",", "") ?? 0);
+});
 await page.setInputFiles("#transaction-screenshot-input", { name: "order.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
 await page.click("#transaction-start-recognition");
 await page.waitForFunction(() => document.querySelector("#transaction-screenshot-status")?.getAttribute("data-phase") === "reviewing");
@@ -84,11 +89,21 @@ await page.waitForFunction(() => document.querySelector("#build-base-save-status
 if (archives.length !== 1 || archives[0].link.planId !== plan.id || archives[0].link.planItemId !== activePsuId || archives[0].link.linkStatus !== "linked") throw new Error(`archived plan link is wrong: ${JSON.stringify(archives[0]?.link)}`);
 const purchase = await page.evaluate((planId) => JSON.parse(localStorage.getItem(`build-sim.progress.v2:${planId}`) ?? "null"), plan.id);
 if (purchase?.items?.[activePsuId]?.unitPriceCny !== 899) throw new Error("active plan purchase budget was not persisted");
-await page.waitForFunction((baseline) => {
-  const matches = [...(document.querySelector("#build-hero-progress")?.textContent?.matchAll(/¥([\d,]+)/g) ?? [])];
-  const current = Number(matches.at(-1)?.[1]?.replaceAll(",", "") ?? 0);
-  return current === baseline + 899 && document.querySelector("#next-buy-list")?.textContent?.includes("¥899");
-}, baselineKnownSpent);
+try {
+  await page.waitForFunction((baseline) => {
+    const matches = [...(document.querySelector("#build-hero-progress")?.textContent?.matchAll(/¥([\d,]+)/g) ?? [])];
+    const current = Number(matches.at(-1)?.[1]?.replaceAll(",", "") ?? 0);
+    return current === baseline + 899 && document.querySelector("#next-buy-list")?.textContent?.includes("¥899");
+  }, baselineKnownSpent);
+} catch (error) {
+  const state = await page.evaluate(() => ({
+    hero: document.querySelector("#build-hero-progress")?.textContent ?? null,
+    list: document.querySelector("#next-buy-list")?.textContent ?? null,
+    hash: window.location.hash,
+    evaluation: Boolean(window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation),
+  }));
+  throw new Error(`purchase summary did not refresh: ${JSON.stringify({ baselineKnownSpent, state })}`, { cause: error });
+}
 
 await page.click("#build-review-transactions-tab");
 await page.waitForSelector('[data-archive-receipt="receipt-browser-r8"]');

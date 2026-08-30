@@ -13,7 +13,7 @@ import type { BoxMm } from "./occupancy";
  * - `y` — height, positive up
  * - `z` — depth, positive toward the rear
  *
- * So for the N6 (305 × 353 × 318) every point of the outer envelope satisfies
+ * Every point of a centered outer envelope therefore satisfies
  * `|x| ≤ 152.5`, `|y| ≤ 159`, `|z| ≤ 176.5`.
  *
  * Boxes are stored centred (`{ c, w, h, d }`) because that is how a part's
@@ -97,7 +97,7 @@ export interface PlacedPart {
    * a heat source at the part's real centroid instead of a hand-typed coordinate.
    */
   thermalId?: ThermalNodeId;
-  /** Chamber the part breathes in; the deck splits the case at `N6_DECK_Y`. */
+  /** Chamber the part breathes in; the adapter declares any chamber split. */
   chamber?: "lower" | "upper";
   /** Free-form note surfaced in the preview callout. */
   note?: string;

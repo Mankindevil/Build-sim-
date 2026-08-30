@@ -22,13 +22,14 @@ import {
   renderRuntimeProductGallery,
   type RuntimeProductCard,
 } from "./runtime-dom";
-import { planPanelWiring } from "../wiring/panel";
+import { bootstrapLegacyCaseRuntime, planLegacyPanelWiring as planPanelWiring } from "../adapters/legacy-runtime-bootstrap";
 import { boardSataPorts, boardStorage, nativeSataCeiling } from "../core/policy";
 import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
 import n6Routing from "../../data/cases/jonsbo-n6/routing.json";
 import v1RuntimeUrl from "./v1-runtime.js?url";
 import { initAdvicePanel } from "./advice-panel";
 import { initAgentPanel, type AgentPanelController } from "./agent-panel";
+import { mountAttachmentsPanel, type AttachmentsPanelController } from "./attachments-panel";
 import { buildAdviceInput } from "../advice/validate";
 import { initBuildProgress, type BuildProgressController } from "./build-progress";
 import { initTransactionImport, type TransactionImportController, type TransactionImportPlanContext } from "./transaction-import";
@@ -42,14 +43,24 @@ import { deriveBuildTasks, reconcileBuildTasks } from "../plans/build-tasks";
 import { mountPlanShell, type PlanShellController } from "./plan-shell";
 import { WorkspaceRouter } from "./workspace-router";
 import { mountWorkspacePages, type WorkspacePagesController } from "./workspace-pages";
-import { EvaluationCoordinator } from "../plans/evaluation";
+import { EvaluationCoordinator, isTopologyEvaluationV3 } from "../plans/evaluation";
 import { mountSpatialView, type SpatialViewController } from "./spatial-view";
 import { clearPartialResolvedSurfaces, markResolvedSurfacesReady } from "./partial-surfaces";
 import { createPlanAgentContext } from "../agent/plan-context";
-import type { BuildPlan, PlanAgentContext } from "../plans/contracts";
-import type { AuthoritativeEvaluationResponse } from "../server/evaluation-service";
-import { isPlanPartialEvaluationV3 } from "../plans/evaluation";
+import type { BuildPlan, PlanAgentContext, PlanEvidenceResolutionSummary, PlanInferenceSummary } from "../plans/contracts";
+import type { PlanCurrentPriceView } from "../price/production";
+import { mountEvidenceJobPanel, type EvidenceJobPanelController } from "./evidence-job-panel";
+import {
+  canPublishLegacyEvaluation,
+  canUsePlanAgentContext,
+  governedBuildEvaluationForActivePlan,
+  governedBuildEvaluationForSavedVersion,
+  requestPlanEvaluation,
+  type WorkspaceEvaluationMode,
+} from "./authoritative-evaluation-client";
 import "./design-system.css";
+
+bootstrapLegacyCaseRuntime();
 
 // Keep identity/spec facts separate from the active price overlay. Otherwise a
 // later price refresh would rebuild from the bundled JSON and silently discard
@@ -63,13 +74,19 @@ let buildProgress: BuildProgressController | null = null;
 let buildTaskStore: BuildTaskStore | null = null;
 let transactionImport: TransactionImportController | null = null;
 let agentPanel: AgentPanelController | null = null;
+let attachmentsPanel: AttachmentsPanelController | null = null;
 let planStore: PlanStore | null = null;
 let planShell: PlanShellController | null = null;
 let workspacePages: WorkspacePagesController | null = null;
+let evidenceJobPanel: EvidenceJobPanelController | null = null;
 let spatialView: SpatialViewController | null = null;
 const evaluationCoordinator = new EvaluationCoordinator((config) => evaluateBuild(config, catalog));
+let workspaceEvaluationMode: WorkspaceEvaluationMode = "probing";
+let workspaceEvaluationFailure: string | null = null;
+let workspacePriceHistoryEnabled = false;
 
 const BOARD_ID = "board.asus-w680m-ace-se";
+const LEGACY_LAB_ROOT_ID = "n6-lab";
 
 export interface LabEvaluationOptions {
   ambientC: number;
@@ -222,9 +239,17 @@ function configFromDom(): BuildConfig {
 }
 
 function adviceInput(): ReturnType<typeof buildAdviceInput> | null {
-  const activeConfig = planStore?.getState().activePlan?.draft.config as BuildConfigDocument | undefined;
+  const state = planStore?.getState();
+  const activeConfig = state?.activePlan?.draft.config as BuildConfigDocument | undefined;
   if (activeConfig?.schemaVersion === "3.0.0") return null;
-  const evaluation = latestEvaluation ?? evaluate();
+  const evaluation = canPublishLegacyEvaluation(workspaceEvaluationMode)
+    ? latestEvaluation ?? evaluate()
+    : governedBuildEvaluationForActivePlan(
+      workspaceEvaluationMode,
+      state?.activePlan as BuildPlan<BuildConfigDocument> | null | undefined,
+      state?.evaluationSnapshot,
+    );
+  if (!evaluation) return null;
   const ids = new Set([
     evaluation.config.caseId,
     evaluation.config.boardId,
@@ -266,83 +291,142 @@ function adviceInput(): ReturnType<typeof buildAdviceInput> | null {
 
 async function currentPlanAgentContext(): Promise<PlanAgentContext | null> {
   let state = planStore?.getState();
-  if (state?.activePlan && (state.activePlan.draft.config as BuildConfigDocument).schemaVersion === "3.0.0"
-    && (!state.evaluationSnapshot || state.evaluationSnapshot.draftRevision !== state.activePlan.draftRevision)) {
-    await ensureActiveV3Evaluation(state.activePlan as BuildPlan<BuildConfigDocument>);
+  if (state?.activePlan && (!state.evaluationSnapshot
+    || state.evaluationSnapshot.draftRevision !== state.activePlan.draftRevision
+    || !canUsePlanAgentContext(workspaceEvaluationMode, state.evaluationSnapshot, state.activePlan as BuildPlan<BuildConfigDocument>))) {
+    await ensureActivePlanEvaluation(state.activePlan as BuildPlan<BuildConfigDocument>).catch(() => undefined);
     state = planStore?.getState();
   }
-  if (!state?.activePlan || !state.evaluationSnapshot) return null;
+  if (!state?.activePlan || !state.evaluationSnapshot
+    || !canUsePlanAgentContext(workspaceEvaluationMode, state.evaluationSnapshot, state.activePlan as BuildPlan<BuildConfigDocument>)) return null;
   const evaluation = state.evaluationSnapshot.evaluation;
-  const partialV3 = isPlanPartialEvaluationV3(evaluation);
+  const topologyV3 = isTopologyEvaluationV3(evaluation);
+  const resolutionResponse = await fetch(`/api/workspace/plans/${encodeURIComponent(state.activePlan.id)}/resolution-summary`, {
+    headers: { Accept: "application/json" },
+  });
+  const resolutionBody = await resolutionResponse.json().catch(() => null) as {
+    planId?: unknown;
+    resolutions?: unknown;
+    inferences?: unknown;
+    price?: unknown;
+  } | null;
+  if (!resolutionResponse.ok || resolutionBody?.planId !== state.activePlan.id
+    || !Array.isArray(resolutionBody.resolutions) || !Array.isArray(resolutionBody.inferences)) {
+    throw new Error("服务端方案证据/推断摘要尚未就绪；没有使用浏览器合成状态启动 Agent。");
+  }
+  const priceView = resolutionBody.price as PlanCurrentPriceView | null | undefined;
+  const expectedPriceSnapshotHash = state.evaluationSnapshot.evaluationLock?.snapshotHashes.priceSnapshotHash;
+  if (workspacePriceHistoryEnabled && (!priceView || priceView.planId !== state.activePlan.id
+    || priceView.priceSnapshotHash !== expectedPriceSnapshotHash)) {
+    throw new Error("服务端价格摘要与当前评估锁定的价格快照不一致；没有启动 Agent。");
+  }
   return createPlanAgentContext({
     plan: state.activePlan,
     snapshot: state.evaluationSnapshot,
     selection: state.selection,
     spatialViewContext: spatialView?.getContext() ?? null,
     purchaseSummary: {
-      bom: partialV3
+      bom: topologyV3
         ? evaluation.topologyBom.map((line) => structuredClone(line))
         : evaluation.bom.map((line) => ({ skuId: line.skuId, qty: line.qty, bucket: line.bucket })),
-      price: partialV3
-        ? { status: "unknown", reason: "BuildConfig V3 price evaluation is not yet bound; no legacy total was reused." }
+      price: topologyV3
+        ? priceView ?? { status: "unknown", reason: "当前评估尚未取得同源价格投影。" }
         : evaluation.price,
-      progress: partialV3 ? null : buildProgress?.summary() ?? null,
+      progress: topologyV3 ? null : buildProgress?.summary() ?? null,
       note: "汇总不含交易截图、凭据或支付信息。",
     },
-    buildTaskSummary: partialV3
+    buildTaskSummary: topologyV3
       ? { status: "unknown", tasks: [], policy: "BuildConfig V3 尚未生成受治理装机任务；不得复用旧版任务或进度。" }
       : {
           ...buildTaskStore?.summary(),
           tasks: buildTaskStore?.getState().tasks.filter((task) => task.status !== "obsolete").slice(0, 20).map(({ id, kind, sourceRef, title, status, staleReason, dependsOn, relatedPartId, cableId }) => ({ id, kind, sourceRef, title, status, staleReason, dependsOn, relatedPartId, cableId })) ?? [],
           policy: "Agent 可读取任务并提出建议；任务状态只能由用户在装机页明确确认。",
         },
+    evidenceResolutionSummaries: resolutionBody.resolutions as PlanEvidenceResolutionSummary[],
+    inferenceSummaries: resolutionBody.inferences as PlanInferenceSummary[],
   });
 }
 
 async function refreshAuthoritativePlanEvaluation(plan: BuildPlan<BuildConfigDocument>): Promise<void> {
-  const response = await fetch("/api/agent/evaluate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ buildConfig: plan.draft.config }),
-  });
-  const payload = await response.json().catch(() => ({ error: "invalid_response" })) as AuthoritativeEvaluationResponse & { error?: string; message?: string };
-  if (!response.ok) throw new Error(payload.message ?? payload.error ?? `Authoritative evaluation failed with HTTP ${response.status}`);
-  const { snapshot, latest } = await evaluationCoordinator.acceptPlanResolved({
-    planId: plan.id,
-    planVersionId: plan.activeVersionId,
-    draftRevision: plan.draftRevision,
-    config: plan.draft.config,
-    evaluation: payload.evaluation,
-    expectedConfigHash: payload.configHash,
-    expectedEvaluationHash: payload.evaluationHash,
-  });
-  const active = planStore?.getState().activePlan;
-  if (!latest || !active || active.id !== plan.id || active.draftRevision !== plan.draftRevision) throw new Error("Authoritative evaluation became stale before installation");
-  planStore?.setEvaluationSnapshot(snapshot);
+  workspaceEvaluationMode = "probing";
+  workspaceEvaluationFailure = null;
+  try {
+    const result = await requestPlanEvaluation(plan);
+    const active = planStore?.getState().activePlan;
+    if (!active || active.id !== plan.id || active.draftRevision !== plan.draftRevision) {
+      throw new Error("Authoritative evaluation became stale before installation");
+    }
+    if (result.mode === "enabled") {
+      workspaceEvaluationMode = "enabled";
+      planStore?.setEvaluationSnapshot(result.snapshot);
+    } else {
+      const { snapshot, latest } = await evaluationCoordinator.acceptPlanResolved({
+        planId: plan.id,
+        planVersionId: plan.activeVersionId,
+        draftRevision: plan.draftRevision,
+        config: plan.draft.config,
+        evaluation: result.response.evaluation,
+        expectedConfigHash: result.response.configHash,
+        expectedEvaluationHash: result.response.evaluationHash,
+      });
+      const current = planStore?.getState().activePlan;
+      if (!latest || !current || current.id !== plan.id || current.draftRevision !== plan.draftRevision) {
+        throw new Error("Legacy evaluation became stale before installation");
+      }
+      workspaceEvaluationMode = "disabled";
+      planStore?.setEvaluationSnapshot(snapshot);
+    }
+    for (const id of [LEGACY_LAB_ROOT_ID, "fit-chip", "workspace-results", "spatial-stage", "build-base-dialog", "agent-title"]) {
+      const element = $(id);
+      element?.setAttribute("data-evaluation-authority", workspaceEvaluationMode);
+      const hash = planStore?.getState().evaluationSnapshot?.evaluationHash;
+      if (hash) element?.setAttribute("data-evaluation-hash", hash);
+    }
+    window.__N6_LAB_API__?.render();
+  } catch (error) {
+    workspaceEvaluationMode = "unavailable";
+    workspaceEvaluationFailure = error instanceof Error ? error.message : "unknown authority failure";
+    for (const id of [LEGACY_LAB_ROOT_ID, "fit-chip", "workspace-results", "spatial-stage", "build-base-dialog", "agent-title"]) {
+      $(id)?.setAttribute("data-evaluation-authority", "unavailable");
+    }
+    clearPartialResolvedSurfaces(document, `事实权威尚不可用：${workspaceEvaluationFailure}。兼容性、价格、功耗和散热结论已隐藏。`);
+    throw error;
+  }
 }
 
-let activeV3EvaluationGeneration = 0;
-let activeV3EvaluationInFlight: { key: string; promise: Promise<void> } | null = null;
+let activePlanEvaluationGeneration = 0;
+let activePlanEvaluationInFlight: { key: string; promise: Promise<void> } | null = null;
 
 function activePlanEvaluationKey(plan: BuildPlan<BuildConfigDocument>): string {
   return `${plan.id}:${plan.draftRevision}:${canonicalJson(plan.draft.config)}`;
 }
 
-async function ensureActiveV3Evaluation(plan: BuildPlan<BuildConfigDocument>): Promise<void> {
-  if (plan.draft.config.schemaVersion !== "3.0.0") return;
-  const current = planStore?.getState();
+async function ensureActivePlanEvaluation(plan: BuildPlan<BuildConfigDocument>): Promise<void> {
+  let current = planStore?.getState();
   if (current?.activePlan?.id !== plan.id || current.activePlan.draftRevision !== plan.draftRevision) return;
+  if (current.saveStatus === "dirty" || current.saveStatus === "saving") {
+    await planStore?.saveDraftNow();
+    current = planStore?.getState();
+    if (!current?.activePlan || current.activePlan.id !== plan.id) return;
+    if (current.activePlan.draftRevision !== plan.draftRevision
+      || canonicalJson(current.activePlan.draft.config) !== canonicalJson(plan.draft.config)) {
+      return ensureActivePlanEvaluation(current.activePlan as BuildPlan<BuildConfigDocument>);
+    }
+  }
+  if (["conflict", "failed", "offline"].includes(current.saveStatus)) {
+    throw new Error(`Authoritative evaluation requires a persisted draft; save status is ${current.saveStatus}`);
+  }
   if (current.evaluationSnapshot?.draftRevision === plan.draftRevision
-    && isPlanPartialEvaluationV3(current.evaluationSnapshot.evaluation)) return;
+    && canUsePlanAgentContext(workspaceEvaluationMode, current.evaluationSnapshot, current.activePlan as BuildPlan<BuildConfigDocument>)) return;
   const key = activePlanEvaluationKey(plan);
-  if (activeV3EvaluationInFlight?.key === key) return activeV3EvaluationInFlight.promise;
-  const generation = ++activeV3EvaluationGeneration;
+  if (activePlanEvaluationInFlight?.key === key) return activePlanEvaluationInFlight.promise;
+  const generation = ++activePlanEvaluationGeneration;
   const promise = refreshAuthoritativePlanEvaluation(plan).then(() => {
-    if (generation !== activeV3EvaluationGeneration) throw new Error("V3 evaluation refresh was superseded");
+    if (generation !== activePlanEvaluationGeneration) throw new Error("Plan evaluation refresh was superseded");
   }).finally(() => {
-    if (activeV3EvaluationInFlight?.key === key) activeV3EvaluationInFlight = null;
+    if (activePlanEvaluationInFlight?.key === key) activePlanEvaluationInFlight = null;
   });
-  activeV3EvaluationInFlight = { key, promise };
+  activePlanEvaluationInFlight = { key, promise };
   return promise;
 }
 
@@ -1031,7 +1115,32 @@ function evaluate(options?: LabEvaluationOptions): BuildEvaluation {
 }
 
 function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
-  const evaluation = result ?? evaluate(env);
+  const localEvaluation = result ?? evaluate(env);
+  if (workspaceEvaluationMode === "probing" || workspaceEvaluationMode === "unavailable") {
+    latestEvaluation = null;
+    const detail = workspaceEvaluationMode === "unavailable" && workspaceEvaluationFailure
+      ? `：${workspaceEvaluationFailure}`
+      : "，正在建立事实、观测与模型快照";
+    clearPartialResolvedSurfaces(document, `事实权威尚不可用${detail}。兼容性、价格、功耗和散热结论已隐藏。`);
+    return;
+  }
+  let evaluation = localEvaluation;
+  if (workspaceEvaluationMode === "enabled") {
+    const state = planStore?.getState();
+    const snapshot = state?.evaluationSnapshot;
+    if (!state?.activePlan || !snapshot?.evaluationLock
+      || !canUsePlanAgentContext("enabled", snapshot, state.activePlan as BuildPlan<BuildConfigDocument>)) {
+      latestEvaluation = null;
+      clearPartialResolvedSurfaces(document, "事实权威尚不可用：当前草稿还没有锁定的评估回执。兼容性、价格、功耗和散热结论已隐藏。");
+      return;
+    }
+    if (isTopologyEvaluationV3(snapshot.evaluation)) {
+      latestEvaluation = null;
+      clearPartialResolvedSurfaces(document, "当前方案只有受治理的部分拓扑结果；兼容性、价格、功耗和散热仍为 unknown。不会展示浏览器旧评估结论。");
+      return;
+    }
+    evaluation = snapshot.evaluation;
+  }
   latestEvaluation = evaluation;
   updateFitFromEngine(evaluation);
   if (evaluation.readiness.status === "incomplete") {
@@ -1057,8 +1166,18 @@ function afterRender(result?: BuildEvaluation, env?: ThermalEnv): void {
 function publishEvaluation(evaluation: BuildEvaluation): void {
   const state = planStore?.getState();
   const active = state?.activePlan;
+  if (!canPublishLegacyEvaluation(workspaceEvaluationMode)) {
+    if (workspaceEvaluationMode === "enabled" && state?.evaluationSnapshot?.evaluationLock) {
+      const governed = state.evaluationSnapshot.evaluation;
+      if (!isTopologyEvaluationV3(governed)) buildProgress?.syncEvaluation(governed);
+      for (const id of [LEGACY_LAB_ROOT_ID, "fit-chip", "workspace-results", "spatial-stage", "build-base-dialog", "agent-title"]) {
+        $(id)?.setAttribute("data-evaluation-hash", state.evaluationSnapshot.evaluationHash);
+      }
+    }
+    return;
+  }
   if (active && (active.draft.config as BuildConfigDocument).schemaVersion === "3.0.0") {
-    void ensureActiveV3Evaluation(active as BuildPlan<BuildConfigDocument>).catch(() => {});
+    void ensureActivePlanEvaluation(active as BuildPlan<BuildConfigDocument>).catch(() => {});
     return;
   }
   buildProgress?.syncEvaluation(evaluation);
@@ -1073,7 +1192,7 @@ function publishEvaluation(evaluation: BuildEvaluation): void {
     }).then(({ snapshot, latest }) => {
       if (!latest || planStore?.getState().activePlan?.id !== snapshot.planId) return;
       planStore.setEvaluationSnapshot(snapshot);
-      for (const id of ["n6-lab", "fit-chip", "workspace-results", "spatial-stage", "build-base-dialog", "agent-title"]) {
+      for (const id of [LEGACY_LAB_ROOT_ID, "fit-chip", "workspace-results", "spatial-stage", "build-base-dialog", "agent-title"]) {
         $(id)?.setAttribute("data-evaluation-hash", snapshot.evaluationHash);
       }
     });
@@ -1101,18 +1220,34 @@ function bindConfigChrome(): void {
       const version = versions.find((candidate) => candidate.id === active.activeVersionId);
       if (version) {
         const config = structuredClone(version.config) as BuildConfig;
-        const result = evaluateBuild(config, catalog);
+        const result = canPublishLegacyEvaluation(workspaceEvaluationMode)
+          ? evaluateBuild(config, catalog)
+          : governedBuildEvaluationForSavedVersion(
+            workspaceEvaluationMode,
+            version,
+            state?.evaluationSnapshot,
+          );
+        if (!result) {
+          window.alert("该已保存版本没有与当前权威服务精确匹配的评估回执；已阻止浏览器旧评估器生成清单。");
+          return;
+        }
         const generatedAt = new Date().toISOString();
         const derived = deriveBuildTasks({ planId: active.id, sourceVersionId: version.id, evaluation: result, purchaseFacts: buildProgress?.purchaseFacts() ?? [] });
         const tasks = reconcileBuildTasks(buildTaskStore?.getState().tasks ?? [], derived, generatedAt);
         downloadText(`${config.id}-v${version.versionNumber}-checklist.md`, exportChecklist(config, result.bom, result, {
           planId: active.id, planVersionId: version.id, planVersionNumber: version.versionNumber, generatedAt,
           configHash: version.configHash,
-          evaluationHash: version.evaluationHash ?? await sha256Hex(result),
+          evaluationHash: canPublishLegacyEvaluation(workspaceEvaluationMode)
+            ? await sha256Hex(result)
+            : version.evaluationHash!,
           tasks,
         }));
         return;
       }
+    }
+    if (!canPublishLegacyEvaluation(workspaceEvaluationMode)) {
+      window.alert("权威评估尚未就绪；已阻止浏览器旧评估器生成未锁定清单。");
+      return;
     }
     const config = configFromDom();
     const result = evaluateBuild(config, catalog);
@@ -1136,7 +1271,7 @@ const PLAN_CONFIG_INPUT_IDS = new Set([
 ]);
 
 function bindPlanStoreToDom(): void {
-  const root = $("n6-lab");
+  const root = $(LEGACY_LAB_ROOT_ID);
   if (!root || !planStore) return;
   const capture = (event: Event) => {
     const target = event.target as HTMLInputElement | HTMLSelectElement | null;
@@ -1152,13 +1287,14 @@ function bindPlanStoreToDom(): void {
     const plan = state.activePlan;
     if (!plan) return;
     if ((plan.draft.config as BuildConfigDocument).schemaVersion === "3.0.0") {
-      void ensureActiveV3Evaluation(plan as BuildPlan<BuildConfigDocument>).catch(() => {});
+      void ensureActivePlanEvaluation(plan as BuildPlan<BuildConfigDocument>).catch(() => {});
       return;
     }
     const signature = `${plan.id}:${canonicalJson(plan.draft.config)}`;
     if (signature === renderedSignature) return;
     renderedSignature = signature;
     applyConfigToDom(plan.draft.config);
+    void ensureActivePlanEvaluation(plan as BuildPlan<BuildConfigDocument>).catch(() => {});
     window.__N6_LAB_API__?.render();
   });
 }
@@ -1215,17 +1351,34 @@ declare global {
 
 async function boot(): Promise<void> {
   await loadRuntimeCatalog();
-  planStore = new PlanStore({ api: new WorkspaceApiClient(), storage: window.localStorage });
+  const workspaceApi = new WorkspaceApiClient();
+  const workspaceCapabilities = await workspaceApi.capabilities().catch(() => ({
+    schemaVersion: "workspace-capabilities-v1" as const,
+    topologyV3Enabled: false,
+    systemProfilesEnabled: false,
+    userObservationsEnabled: false,
+    buildExecutionV3Enabled: false,
+    storageLayoutEnabled: false,
+    priceHistoryEnabled: false,
+    priceTargetsEnabled: false,
+    recommendationsEnabled: false,
+    wholeBuildSolverEnabled: false,
+    scenarioWhatIfEnabled: false,
+    jobCenterEnabled: false,
+    backupRestoreEnabled: false,
+    doctorEnabled: false,
+    portabilityEnabled: false,
+  }));
+  workspacePriceHistoryEnabled = workspaceCapabilities.priceHistoryEnabled;
+  planStore = new PlanStore({ api: workspaceApi, storage: window.localStorage });
   await planStore.initialize();
   buildTaskStore = new BuildTaskStore(window.localStorage);
   window.__BUILD_SIM_PLAN_STORE__ = planStore;
   const activeConfig = planStore.getState().activePlan?.draft.config;
   if (activeConfig?.schemaVersion === "2.0.0") applyConfigToDom(activeConfig);
   const initialPlan = planStore.getState().activePlan;
-  if (initialPlan && (initialPlan.draft.config as BuildConfigDocument).schemaVersion === "3.0.0") {
-    void ensureActiveV3Evaluation(initialPlan as BuildPlan<BuildConfigDocument>).catch(() => {});
-  }
-  const labRoot = $("n6-lab");
+  if (initialPlan) await ensureActivePlanEvaluation(initialPlan as BuildPlan<BuildConfigDocument>).catch(() => undefined);
+  const labRoot = $(LEGACY_LAB_ROOT_ID);
   let router: WorkspaceRouter | null = null;
   if (labRoot) {
     router = new WorkspaceRouter();
@@ -1270,7 +1423,15 @@ async function boot(): Promise<void> {
   // Load legacy IIFE after LAB data is on window (Vite emits hashed URL via ?url).
   await new Promise<void>((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = v1RuntimeUrl;
+    // In Vite dev mode an explicit JavaScript `?url` import resolves back to a
+    // URL carrying that query. Loading the wrapper as a classic script leaves
+    // boot waiting forever because the response only exports the real URL.
+    // Production emits a hashed asset without this query, so normalizing the
+    // single Vite marker works in both modes while preserving every other
+    // cache-busting parameter.
+    const resolvedRuntimeUrl = new URL(v1RuntimeUrl, window.location.href);
+    resolvedRuntimeUrl.searchParams.delete("url");
+    s.src = resolvedRuntimeUrl.href;
     s.async = false;
     s.onload = () => resolve();
     s.onerror = () => reject(new Error("Failed to load v1-runtime.js"));
@@ -1310,7 +1471,28 @@ async function boot(): Promise<void> {
     getPlans: () => planStore?.getState().plans.map((plan) => ({ id: plan.id, name: plan.name })) ?? [],
   });
   if (labRoot && router && planStore) {
-    workspacePages = mountWorkspacePages(labRoot, planStore, router, buildTaskStore ?? undefined, buildProgress ?? undefined, () => catalog);
+    workspacePages = mountWorkspacePages(
+      labRoot,
+      planStore,
+      router,
+      buildTaskStore ?? undefined,
+      buildProgress ?? undefined,
+      () => catalog,
+      undefined,
+      { fetchImpl: fetch },
+      workspaceCapabilities,
+    );
+    const evidenceHost = labRoot.querySelector<HTMLElement>("[data-plan-evidence-panel]");
+    if (evidenceHost) {
+      const jobHost = document.createElement("section");
+      jobHost.id = "editor-evidence-jobs";
+      evidenceHost.insertAdjacentElement("afterend", jobHost);
+      evidenceJobPanel = mountEvidenceJobPanel(jobHost, {
+        getPlanId: () => planStore?.getState().activePlan?.id ?? null,
+        subscribePlan: (listener) => planStore?.subscribe(() => listener()) ?? (() => undefined),
+        storage: window.localStorage,
+      });
+    }
     // The purchase editor is now a real route surface rather than a modal.
     // Populate its current-plan projection immediately, before the user visits it.
     $("build-base-edit")?.click();
@@ -1391,17 +1573,26 @@ async function boot(): Promise<void> {
     acceptServerPlan: async (plan) => {
       if (!planStore) throw new Error("Plan store is unavailable");
       planStore.acceptServerPlan(plan);
-      await ensureActiveV3Evaluation(plan);
-      if (plan.draft.config.schemaVersion === "2.0.0") await refreshAuthoritativePlanEvaluation(plan);
+      await ensureActivePlanEvaluation(plan);
     },
     // Catalog acceptance and plan mutation deliberately stay separate. Chat
     // installs the server-confirmed SKU as an option; applying it still goes
     // through the existing plan-change review card in a later Agent turn.
     onCatalogSkuAccepted: (sku) => reconcileAcceptedSku(sku),
   });
+  const attachmentHost = $("agent-attachments");
+  if (attachmentHost && agentPanel) attachmentsPanel = mountAttachmentsPanel(attachmentHost, {
+    ensureSessionId: () => agentPanel!.ensureSessionId(),
+    getPlanId: () => planStore?.getState().activePlan?.id ?? null,
+    openAgentPrompt(prompt) {
+      const input = $("agent-input") as HTMLTextAreaElement | null;
+      if (input) { input.value = prompt; input.focus(); }
+      router?.navigate("agent");
+    },
+  });
   window.addEventListener("pagehide", (event) => {
     if ((event as PageTransitionEvent).persisted) return;
-    agentPanel?.dispose(); transactionImport?.dispose(); buildProgress?.dispose(); spatialView?.dispose(); workspacePages?.dispose(); planShell?.dispose(); planStore?.dispose();
+    attachmentsPanel?.dispose(); agentPanel?.dispose(); transactionImport?.dispose(); buildProgress?.dispose(); evidenceJobPanel?.dispose(); spatialView?.dispose(); workspacePages?.dispose(); planShell?.dispose(); planStore?.dispose();
   }, { once: true });
 }
 

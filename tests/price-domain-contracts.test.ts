@@ -4,7 +4,7 @@ import { createAuthoritativeResolver } from "../src/contracts/trusted-context";
 import { hashContent } from "../src/hash";
 
 const digest = (letter: string) => letter.repeat(64);
-const observation = (): PriceObservation => ({ observationId: "price", skuId: "disk", variantIdentityFactIds: ["variant-12tb"], platform: "jd", sellerId: "seller", sellerTier: "S1", condition: "new", stockStatus: "in_stock", priceCny: 1_000, shippingCny: 20, comparableTotalCny: 1_020, invoiceStatus: "yes", warrantyStatus: "mainland", canonicalUrl: "https://item.example/1", listingCaptureId: "capture", capturedAt: "2026-08-27T00:00:00.000Z" });
+const observation = (): PriceObservation => ({ observationId: "price", skuId: "disk", variantIdentityFactIds: ["variant-12tb"], platform: "jd", sellerId: "seller", sellerTier: "S1", sellerTierEvidenceRefs: ["claim:seller"], condition: "new", stockStatus: "in_stock", priceCny: 1_000, shippingCny: 20, comparableTotalCny: 1_020, invoiceStatus: "yes", warrantyStatus: "mainland", canonicalUrl: "https://item.example/1", listingCaptureId: "capture", capturedAt: "2026-08-27T00:00:00.000Z" });
 const capture = (price = observation()): ImmutableListingCapture => ({
   schemaVersion: "listing-capture-v1", listingCaptureId: price.listingCaptureId, skuId: price.skuId, variantIdentityFactIds: [...price.variantIdentityFactIds], platform: price.platform,
   ...(price.sellerId === undefined ? {} : { sellerId: price.sellerId }), ...(price.sellerName === undefined ? {} : { sellerName: price.sellerName }),

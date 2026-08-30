@@ -26,6 +26,7 @@ import {
   type PlanRepository,
   type ReplayIdempotentPlanWriteInput,
   type PlanVersion,
+  type PlanEvaluationLock,
   type SaveVersionInput,
   type UnbindPlanEvidenceInput,
   type UpdateDraftInput,
@@ -37,6 +38,7 @@ import { createImmutablePlanVersion } from "./version";
 import { migrateBuildConfigV2ToV3 } from "./migration";
 import { applyPlanV3ProposalOperations, applyRequirementConfirmations, confirmableRequirementFieldIds } from "./proposals";
 import { validatePlanIdempotencyRuntime } from "./canonical-runtime.mjs";
+import { verifyPlanEvaluationLock } from "./evaluation-lock";
 import { assertValidConfig } from "../config/validate";
 import { loadBundledCatalog } from "../sku/catalog";
 import type { SkuCatalog } from "../sku/types";
@@ -95,7 +97,26 @@ export interface FilePlanRepositoryOptions {
   getEvidenceDocumentAtRoot?: (activeRoot: string, documentId: string) => ReturnType<EvidenceDocumentLookup>;
   getEvidenceCaptureAtRoot?: (activeRoot: string, captureId: string) => ReturnType<EvidenceCaptureLookup>;
   topologyV3Enabled?: boolean;
+  factGraphEnabled?: boolean;
+  verifyEvaluationLock?: (lock: PlanEvaluationLock) => boolean | Promise<boolean>;
+  verifyEvaluationLockAtRoot?: (activeRoot: string, lock: PlanEvaluationLock) => boolean | Promise<boolean>;
+  /**
+   * Proves that the evaluation tuple was issued by the repository-backed
+   * evaluator for this exact draft. A valid lock alone does not authorize a
+   * caller-selected evaluation hash or timestamp.
+   */
+  verifyIssuedEvaluation?: (proof: IssuedEvaluationProof) => boolean | Promise<boolean>;
+  verifyIssuedEvaluationAtRoot?: (activeRoot: string, proof: IssuedEvaluationProof) => boolean | Promise<boolean>;
   v3ReadFallback?: "migration_source";
+}
+
+export interface IssuedEvaluationProof {
+  planId: string;
+  target: { kind: "draft"; draftRevision: number };
+  configHash: string;
+  evaluationHash: string;
+  evaluatedAt: string;
+  evaluationLock: PlanEvaluationLock;
 }
 
 function checksum(value: unknown): string {
@@ -118,6 +139,11 @@ export class FilePlanRepository<TConfig extends BuildConfigDocument = BuildConfi
   private readonly getEvidenceDocumentAtRoot: FilePlanRepositoryOptions["getEvidenceDocumentAtRoot"];
   private readonly getEvidenceCaptureAtRoot: FilePlanRepositoryOptions["getEvidenceCaptureAtRoot"];
   private readonly topologyV3Enabled: boolean;
+  private readonly factGraphEnabled: boolean;
+  private readonly verifyEvaluationLock: FilePlanRepositoryOptions["verifyEvaluationLock"];
+  private readonly verifyEvaluationLockAtRoot: FilePlanRepositoryOptions["verifyEvaluationLockAtRoot"];
+  private readonly verifyIssuedEvaluation: FilePlanRepositoryOptions["verifyIssuedEvaluation"];
+  private readonly verifyIssuedEvaluationAtRoot: FilePlanRepositoryOptions["verifyIssuedEvaluationAtRoot"];
   private readonly v3ReadFallback: FilePlanRepositoryOptions["v3ReadFallback"];
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly boundary = new AsyncLocalStorage<boolean>();
@@ -136,6 +162,11 @@ export class FilePlanRepository<TConfig extends BuildConfigDocument = BuildConfi
     this.getEvidenceDocumentAtRoot = options.getEvidenceDocumentAtRoot;
     this.getEvidenceCaptureAtRoot = options.getEvidenceCaptureAtRoot;
     this.topologyV3Enabled = options.topologyV3Enabled === true;
+    this.factGraphEnabled = options.factGraphEnabled === true;
+    this.verifyEvaluationLock = options.verifyEvaluationLock;
+    this.verifyEvaluationLockAtRoot = options.verifyEvaluationLockAtRoot;
+    this.verifyIssuedEvaluation = options.verifyIssuedEvaluation;
+    this.verifyIssuedEvaluationAtRoot = options.verifyIssuedEvaluationAtRoot;
     this.v3ReadFallback = options.v3ReadFallback;
   }
 
@@ -156,12 +187,32 @@ export class FilePlanRepository<TConfig extends BuildConfigDocument = BuildConfi
     return new FilePlanRepository<TConfig>({
       root: confined(activeRoot, "plans"), now: this.now, id: this.id,
       topologyV3Enabled: this.topologyV3Enabled,
+      factGraphEnabled: this.factGraphEnabled,
       ...(this.v3ReadFallback ? { v3ReadFallback: this.v3ReadFallback } : {}),
       getCatalog: this.getCatalogAtRoot ? () => this.getCatalogAtRoot!(activeRoot) : this.getCatalog,
       ...(this.getCatalogAtRoot ? { getCatalogAtRoot: this.getCatalogAtRoot } : {}),
       getEvidenceDocument: this.getEvidenceDocumentAtRoot ? (id) => this.getEvidenceDocumentAtRoot!(activeRoot, id) : this.getEvidenceDocument,
       getEvidenceCapture: this.getEvidenceCaptureAtRoot ? (id) => this.getEvidenceCaptureAtRoot!(activeRoot, id) : this.getEvidenceCapture,
+      ...((this.verifyEvaluationLockAtRoot || this.verifyEvaluationLock) ? {
+        verifyEvaluationLock: this.verifyEvaluationLockAtRoot ? (lock: PlanEvaluationLock) => this.verifyEvaluationLockAtRoot!(activeRoot, lock) : this.verifyEvaluationLock!,
+      } : {}),
+      ...(this.verifyEvaluationLockAtRoot ? { verifyEvaluationLockAtRoot: this.verifyEvaluationLockAtRoot } : {}),
+      ...((this.verifyIssuedEvaluationAtRoot || this.verifyIssuedEvaluation) ? {
+        verifyIssuedEvaluation: this.verifyIssuedEvaluationAtRoot
+          ? (proof: IssuedEvaluationProof) => this.verifyIssuedEvaluationAtRoot!(activeRoot, proof)
+          : this.verifyIssuedEvaluation!,
+      } : {}),
+      ...(this.verifyIssuedEvaluationAtRoot ? { verifyIssuedEvaluationAtRoot: this.verifyIssuedEvaluationAtRoot } : {}),
     });
+  }
+
+  /**
+   * Root-pinned read seam for services already executing inside this
+   * repository's RuntimeCoordinator barrier. It never reacquires that lock.
+   */
+  async getAtRoot(activeRoot: string, planId: string): Promise<BuildPlan<TConfig>> {
+    if (!this.coordinator) throw new PlanRepositoryError("invalid_input", "root-bound plan reads require the shared runtime coordinator", 409);
+    return this.atActiveRoot(activeRoot).readPlan(planId);
   }
 
   private async publicBoundary<T>(write: boolean, coordinated: (repository: FilePlanRepository<TConfig>) => Promise<T>, local: () => Promise<T>): Promise<T> {
@@ -309,6 +360,8 @@ export class FilePlanRepository<TConfig extends BuildConfigDocument = BuildConfi
       if (version.id !== versionId || version.planId !== planId) throw new Error("PlanVersion owner/path identity mismatch");
       if (version.configHash !== await hashPlanConfig(version.config)) throw new Error("PlanVersion config hash mismatch");
       if (version.evidenceBindings && version.evidenceHash !== await sha256Hex(version.evidenceBindings)) throw new Error("PlanVersion evidence hash mismatch");
+      if (version.evaluationLock && (!await verifyPlanEvaluationLock(version.evaluationLock) || version.evaluationLock.planId !== planId)) throw new Error("PlanVersion evaluation lock hash/owner mismatch");
+      if (version.evaluationLock && this.factGraphEnabled && (!this.verifyEvaluationLock || !await this.verifyEvaluationLock(version.evaluationLock))) throw new Error("PlanVersion evaluation lock closure is invalid");
     } catch (error) {
       throw new PlanRepositoryError("corrupt_data", error instanceof Error ? error.message : "Invalid version data", 500);
     }
@@ -775,6 +828,22 @@ export class FilePlanRepository<TConfig extends BuildConfigDocument = BuildConfi
         this.assertSemanticConfig(plan.draft.config);
         const actualHash = await hashPlanConfig(plan.draft.config);
         assertExpectedConfigHash(input.expectedConfigHash, actualHash);
+        if (this.factGraphEnabled) {
+          if (!input.evaluationLock || !input.evaluationHash || !input.evaluatedAt) throw new PlanRepositoryError("invalid_input", "Fact graph versions require an issued evaluation lock, hash, and timestamp", 409);
+          if (!await verifyPlanEvaluationLock(input.evaluationLock) || input.evaluationLock.planId !== planId || input.evaluationLock.snapshotHashes.configHash !== actualHash) throw new PlanRepositoryError("invalid_input", "Evaluation lock does not match the active plan/config", 409);
+          if (!this.verifyEvaluationLock || !await this.verifyEvaluationLock(input.evaluationLock)) throw new PlanRepositoryError("invalid_input", "Evaluation lock fact/observation/artifact closure is unavailable or invalid", 409);
+          const proof: IssuedEvaluationProof = {
+            planId,
+            target: { kind: "draft", draftRevision: plan.draftRevision },
+            configHash: actualHash,
+            evaluationHash: input.evaluationHash,
+            evaluatedAt: input.evaluatedAt,
+            evaluationLock: clone(input.evaluationLock),
+          };
+          if (!this.verifyIssuedEvaluation || !await this.verifyIssuedEvaluation(proof)) {
+            throw new PlanRepositoryError("invalid_input", "Evaluation hash/time was not issued for the active plan draft and lock", 409);
+          }
+        }
         const versions = await this.listVersions(planId);
         const versionId = this.id("version");
         const version = await createImmutablePlanVersion({
@@ -786,6 +855,7 @@ export class FilePlanRepository<TConfig extends BuildConfigDocument = BuildConfi
           ...(input.summary ? { summary: input.summary } : {}),
           ...(input.evaluationHash ? { evaluationHash: input.evaluationHash } : {}),
           ...(input.evaluatedAt ? { evaluatedAt: input.evaluatedAt } : {}),
+          ...(input.evaluationLock ? { evaluationLock: input.evaluationLock } : {}),
           config: plan.draft.config,
           evidenceBindings: plan.draft.evidenceBindings ?? [],
           parentVersionId: plan.activeVersionId,

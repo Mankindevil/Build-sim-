@@ -1,9 +1,8 @@
-import { createRequire } from "node:module";
+import bundledCatalog from "../../../data/skus/catalog.json" with { type: "json" };
 import { assertDiscoveryResult } from "./contracts.mjs";
 import { activeOfficialRegistry, registryForBrand } from "./registry.mjs";
 import { validateOfficialUrl } from "./security.mjs";
 
-const bundledCatalog = createRequire(import.meta.url)("../../../data/skus/catalog.json");
 export const QUERY_NORMALIZATION_VERSION = "1.1.0";
 
 function now() { return new Date().toISOString(); }

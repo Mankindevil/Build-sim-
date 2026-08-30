@@ -1,9 +1,8 @@
 import type { EvidenceLevel } from "./evidence";
-import { THERMAL_PROFILE } from "./capabilities";
-import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
+import type { ThermalProfile } from "./capabilities";
 
 /**
- * Lumped-parameter (0D) thermal accounting for the N6.
+ * Lumped-parameter (0D) thermal accounting for a case runtime profile.
  *
  * The only exact physics here is the sensible-heat balance of the air stream:
  * every watt dumped into a chamber must leave as `ṁ · cp · ΔT`. That part is
@@ -15,8 +14,8 @@ import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
  */
 
 /** Dry air at 25 °C, 101.325 kPa. */
-export const AIR_DENSITY_KG_M3 = THERMAL_PROFILE.airDensityKgM3;
-export const AIR_CP_J_PER_KGK = THERMAL_PROFILE.airCpJPerKgK;
+export const AIR_DENSITY_KG_M3 = 1.184;
+export const AIR_CP_J_PER_KGK = 1005;
 export const M3_S_PER_CFM = 4.719474e-4;
 /** Sensible-heat capacity of one CFM of air: ρ·cp·V̇ ≈ 0.5615 W/K. */
 export const W_PER_K_PER_CFM = AIR_DENSITY_KG_M3 * AIR_CP_J_PER_KGK * M3_S_PER_CFM;
@@ -44,11 +43,6 @@ const FAN_FREE_AIR_CFM: Record<FanSize, Record<FanMode, Range>> = {
  * tray stack. Drive-dense chassis are high-impedance; the low end assumes the
  * backplane and nine trays are the dominant restriction.
  */
-const SYSTEM_DERATE: Range = THERMAL_PROFILE.systemDerate;
-
-/** Buoyancy-driven leakage when no fan serves a chamber. Wide by construction. */
-const PASSIVE_CFM: Range = THERMAL_PROFILE.passiveCfm;
-
 /** Drive case-to-local-air resistance. No vendor θ is published for 3.5″ HDDs. */
 const HDD_THETA_K_PER_W: Range = { lo: 0.8, hi: 1.9 };
 
@@ -135,6 +129,8 @@ export interface FanGroupInput {
 }
 
 export interface ThermalInput {
+  /** Case-issued airflow/air-property profile; core owns no case defaults. */
+  profile: ThermalProfile;
   ambientC: number;
   fanMode: FanMode;
   /** Fan groups actually installed, per mount position. */
@@ -204,12 +200,12 @@ export function airRiseK(watts: number, cfm: number): number {
   return watts / (W_PER_K_PER_CFM * cfm);
 }
 
-function groupCfm(group: FanGroupInput | null | undefined, mode: FanMode): Range {
+function groupCfm(group: FanGroupInput | null | undefined, mode: FanMode, derate: Range): Range {
   if (!group || group.count <= 0) return { lo: 0, hi: 0 };
   const free = FAN_FREE_AIR_CFM[group.size][mode];
   return {
-    lo: free.lo * group.count * SYSTEM_DERATE.lo,
-    hi: free.hi * group.count * SYSTEM_DERATE.hi,
+    lo: free.lo * group.count * derate.lo,
+    hi: free.hi * group.count * derate.hi,
   };
 }
 
@@ -230,18 +226,25 @@ const round1 = (v: number): number => Math.round(v * 10) / 10;
 
 export function computeThermal(input: ThermalInput): ThermalResult {
   const { ambientC, fanMode } = input;
+  const profile = input.profile;
+  const systemDerate = profile.systemDerate;
+  const passiveCfm = profile.passiveCfm;
+  const profileWPerKPerCfm = profile.airDensityKgM3 * profile.airCpJPerKgK * M3_S_PER_CFM;
+  const profileAirRiseK = (watts: number, cfm: number): number => cfm <= 0
+    ? Number.POSITIVE_INFINITY
+    : watts / (profileWPerKPerCfm * cfm);
 
-  const lowerFans = groupCfm(input.fans.left, fanMode);
+  const lowerFans = groupCfm(input.fans.left, fanMode, systemDerate);
   const lowerFanned = lowerFans.hi > 0;
-  const lowerCfm = lowerFanned ? lowerFans : PASSIVE_CFM;
+  const lowerCfm = lowerFanned ? lowerFans : passiveCfm;
 
   const upperFans = sumCfm([
-    groupCfm(input.fans.front, fanMode),
-    groupCfm(input.fans.rear, fanMode),
-    groupCfm(input.fans.right, fanMode),
+    groupCfm(input.fans.front, fanMode, systemDerate),
+    groupCfm(input.fans.rear, fanMode, systemDerate),
+    groupCfm(input.fans.right, fanMode, systemDerate),
   ]);
   const upperFanned = upperFans.hi > 0;
-  const upperCfm = upperFanned ? upperFans : PASSIVE_CFM;
+  const upperCfm = upperFanned ? upperFans : passiveCfm;
 
   const driveW = input.diskCount * input.diskWattsEach;
   const lowerAuxW = input.lowerAuxWatts ?? 0;
@@ -254,12 +257,12 @@ export function computeThermal(input: ThermalInput): ThermalResult {
   const lowerBaseW = driveW + lowerAuxW;
   const lowerLoad: Range = { lo: lowerBaseW, hi: lowerBaseW + psuWasteW };
   const lowerRise: Range = {
-    lo: airRiseK(lowerLoad.lo, lowerCfm.hi),
-    hi: airRiseK(lowerLoad.hi, lowerCfm.lo),
+    lo: profileAirRiseK(lowerLoad.lo, lowerCfm.hi),
+    hi: profileAirRiseK(lowerLoad.hi, lowerCfm.lo),
   };
   const upperRise: Range = {
-    lo: airRiseK(input.upperWatts, upperCfm.hi),
-    hi: airRiseK(input.upperWatts, upperCfm.lo),
+    lo: profileAirRiseK(input.upperWatts, upperCfm.hi),
+    hi: profileAirRiseK(input.upperWatts, upperCfm.lo),
   };
 
   const riseOf = (chamber: "lower" | "upper"): Range =>
@@ -298,7 +301,7 @@ export function computeThermal(input: ThermalInput): ThermalResult {
     evidence: ci.evidence,
   }));
 
-  const extraRiseK = psuWasteW > 0 ? lowerRise.hi - airRiseK(lowerBaseW, lowerCfm.lo) : 0;
+  const extraRiseK = psuWasteW > 0 ? lowerRise.hi - profileAirRiseK(lowerBaseW, lowerCfm.lo) : 0;
 
   const notes: string[] = [
     `下层热负荷 ${round1(lowerLoad.lo)}–${round1(lowerLoad.hi)}W，估算风量 ${round1(lowerCfm.lo)}–${round1(lowerCfm.hi)} CFM，出风温升 ${round1(lowerRise.lo)}–${round1(lowerRise.hi)}K。`,
@@ -319,7 +322,7 @@ export function computeThermal(input: ThermalInput): ThermalResult {
     {
       id: "air-props",
       label: "空气热容",
-      value: `ρ·cp = ${Math.round(AIR_DENSITY_KG_M3 * AIR_CP_J_PER_KGK)} J/(m³·K) → ${W_PER_K_PER_CFM.toFixed(3)} W/(K·CFM)`,
+      value: `ρ·cp = ${Math.round(profile.airDensityKgM3 * profile.airCpJPerKgK)} J/(m³·K) → ${profileWPerKPerCfm.toFixed(3)} W/(K·CFM)`,
       evidence: "standard",
       note: "25°C、101.325kPa 干空气物性；ΔT = Q /(ρ·cp·V̇) 是能量守恒，不是拟合。",
     },
@@ -333,9 +336,9 @@ export function computeThermal(input: ThermalInput): ThermalResult {
     {
       id: "system-derate",
       label: "系统阻抗折减",
-      value: `×${SYSTEM_DERATE.lo}–${SYSTEM_DERATE.hi}`,
-      evidence: "inferred",
-      note: "防尘网、背板 PCB 与九托架叠加后的通风折减；N6 未公布 P-Q 曲线，无法反算。",
+      value: `×${systemDerate.lo}–${systemDerate.hi}`,
+      evidence: profile.evidence,
+      note: "机箱 adapter 提供的系统阻抗规划折减；没有闭合 P-Q 曲线时不能反算局部流量。",
     },
     {
       id: "hdd-theta",
@@ -412,9 +415,4 @@ export function computeThermal(input: ThermalInput): ThermalResult {
     ]),
     notes,
   };
-}
-
-/** Left-side 2×120 mounts are lost to the bottom PSU rack (manual §8.1 + §14). */
-export function leftFanMountAvailable(psuInLowerChamber: boolean): boolean {
-  return !(psuInLowerChamber && n6Profile.bottomPsu.removesLeftFanBracket);
 }

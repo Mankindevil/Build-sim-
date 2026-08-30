@@ -15,6 +15,7 @@ const MAX_TEXT = 2_000;
 const MAX_ARRAY = 64;
 const cache = new Map();
 const rollbackQueues = new Map();
+const rollbackWriteQueues = new Map();
 const auditQueues = new Map();
 
 function canonicalize(value) {
@@ -105,6 +106,7 @@ async function appendRollback(entry, options = {}) {
 
 async function validateAdviceManifest(options = {}) {
   const file = await rollbackManifestPath(options);
+  await (rollbackWriteQueues.get(file) ?? Promise.resolve());
   try {
     const payload = JSON.parse(await readFile(file, "utf8"));
     const unsigned = { schemaVersion: payload.schemaVersion, entries: payload.entries };
@@ -118,6 +120,14 @@ async function validateAdviceManifest(options = {}) {
 }
 
 async function writeWithRollback(file, payload, operation, options = {}) {
+  const manifestFile = await rollbackManifestPath(options);
+  const prior = rollbackWriteQueues.get(manifestFile) ?? Promise.resolve();
+  const current = prior.then(() => writeWithRollbackUnlocked(file, payload, operation, options));
+  rollbackWriteQueues.set(manifestFile, current.catch(() => {}));
+  await current;
+}
+
+async function writeWithRollbackUnlocked(file, payload, operation, options = {}) {
   const previous = await readFile(file, "utf8").catch(() => null);
   const rollbackRoot = options.rollbackRoot ?? await runtimeAdviceRoot(options, "rollback");
   let backup = null;

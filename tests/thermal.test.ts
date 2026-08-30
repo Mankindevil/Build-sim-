@@ -2,18 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   airRiseK,
   computeThermal,
-  leftFanMountAvailable,
   W_PER_K_PER_CFM,
   type ThermalInput,
 } from "../src/core/thermal";
 import { evaluateBuild, type ThermalEnv } from "../src/core/evaluate";
 import { loadRawCatalog } from "../src/sku/catalog";
 import type { BuildConfig, PsuTopology } from "../src/config/types";
+import { N6_CASE_RUNTIME_ADAPTER } from "../src/adapters/jonsbo-n6/assembly";
 
 const catalog = loadRawCatalog();
 
 function input(over: Partial<ThermalInput> = {}): ThermalInput {
   return {
+    profile: N6_CASE_RUNTIME_ADAPTER.thermalProfile!,
     ambientC: 25,
     fanMode: "balanced",
     fans: { front: { size: 140, count: 2 }, rear: { size: 120, count: 1 }, left: { size: 120, count: 2 } },
@@ -148,8 +149,9 @@ describe("bottom PSU coupling", () => {
 
 describe("left fan bracket", () => {
   it("is unavailable once the bottom PSU rack takes it (manual §8.1 + §14)", () => {
-    expect(leftFanMountAvailable(false)).toBe(true);
-    expect(leftFanMountAvailable(true)).toBe(false);
+    const fans = { left: { size: 120 as const, count: 2 } };
+    expect(N6_CASE_RUNTIME_ADAPTER.thermalFans(config({ psuTopology: "auto" }), fans).left).toEqual(fans.left);
+    expect(N6_CASE_RUNTIME_ADAPTER.thermalFans(config({ psuTopology: "bottom" }), fans).left).toBeNull();
   });
 
   it("drops left-side fans from the balance instead of silently crediting them", () => {

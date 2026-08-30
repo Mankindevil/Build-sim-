@@ -64,6 +64,7 @@ export default defineConfig(async () => {
     },
     test: {
       include: ["tests/**/*.test.ts"],
+      setupFiles: ["tests/setup-case-runtime.ts"],
     },
   };
 });

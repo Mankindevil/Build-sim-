@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { validateAdapterSnapshot } from "../src/adapters/contracts";
 import { governedUnitRule } from "../src/contracts/registries";
-import { validateFactSnapshot } from "../src/facts/contracts";
+import { validateLegacyFactSnapshot } from "../src/facts/contracts";
 import goldenFixture from "./fixtures/baseline/u0-content-hash-golden-vectors.json";
 import {
   HASH_SPEC,
@@ -156,7 +156,9 @@ describe("hash-spec-v1 golden vectors", () => {
     const vectors = Object.fromEntries(goldenFixture.vectors.map((vector) => [vector.id, vector])) as Record<string, (typeof goldenFixture.vectors)[number]>;
     expect(validateBuildConfigV3(vectors.config?.value), "config contract").toEqual([]);
     expect(validateRequirementSpec(vectors.requirement?.value), "requirement contract").toEqual([]);
-    expect(validateFactSnapshot(vectors.fact?.value), "fact snapshot contract").toEqual([]);
+    // This frozen U0 vector intentionally preserves the v1 FactSnapshot bytes;
+    // current production snapshots use v2 and are covered by their own corpus.
+    expect(validateLegacyFactSnapshot(vectors.fact?.value), "legacy fact snapshot contract").toEqual([]);
     expect(validateUserObservationSnapshot(vectors.observation?.value), "user observation snapshot contract").toEqual([]);
     expect(validateAdapterSnapshot(vectors.adapter?.value), "adapter snapshot contract").toEqual([]);
     expect(validateSimulationModelArtifact(vectors.model?.value), "simulation model artifact contract").toEqual([]);

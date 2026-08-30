@@ -29,6 +29,44 @@
     "source": "JONSBO N6 manual §14 p.15 风扇安装：前板 120×2 或 140×2（240 水排）/ 左侧 120×2 / 右侧 120×2 / 后 120×1",
     "note": "手册只给安装位与尺寸，不给风量、静压或共存矩阵；随箱不含这些风扇。下置电源按 §8.1 取下左侧风扇架，因此左侧 120×2 与下置 SFX 互斥。"
   },
+  "runtime": {
+    "dialect": "storage-layout-v1",
+    "mountPartIds": {
+      "mount.board.matx":"board",
+      "mount.psu.rear-atx":"psu.primary",
+      "mount.psu.front-sfx":"psu.primary",
+      "mount.psu.bottom-sfx":"psu.primary",
+      "mount.drive.hot-swap":"tray.frame",
+      "mount.backplane.9bay":"backplane.pcb"
+    },
+    "psuPlacements": {
+      "auto":{"ATX":"rearUpperAtx","SFX":"frontSfx"},
+      "bottom":{"ATX":"invalidAtxBottom","SFX":"bottomSfx"},
+      "dual":{"ATX":"rearUpperAtx+bottomSfx","SFX":"frontSfx+bottomSfx"}
+    },
+    "fanMounts": [
+      {"id":"front","geometryRole":"front","label":"前部进风","size":140,"count":2,"supportedSizes":[120,140],"maxCountBySize":{"120":2,"140":2},"direction":"intake","chamber":"upper","evidence":"official","source":"JONSBO N6 manual §14 p.15"},
+      {"id":"rear","geometryRole":"rear","label":"后部排风","size":120,"count":1,"supportedSizes":[120],"maxCountBySize":{"120":1},"direction":"exhaust","chamber":"upper","evidence":"official","source":"JONSBO N6 manual §14 p.15"},
+      {"id":"left","geometryRole":"left","label":"左侧盘区进风","size":120,"count":2,"supportedSizes":[120],"maxCountBySize":{"120":2},"direction":"intake","chamber":"lower","evidence":"official","source":"JONSBO N6 manual §14 p.15"},
+      {"id":"right","geometryRole":"right","label":"右侧 GPU / HBA 进风","size":120,"count":2,"supportedSizes":[120],"maxCountBySize":{"120":2},"direction":"intake","chamber":"upper","evidence":"official","source":"JONSBO N6 manual §14 p.15"}
+    ],
+    "fanAvailabilityRules": [
+      {"mountId":"left","kind":"selection-in","field":"psuTopology","values":["bottom","dual"]},
+      {"mountId":"rear","kind":"psu-form-and-selection-in","form":"ATX","field":"psuTopology","values":["auto","dual"]},
+      {"mountId":"front","kind":"psu-form-and-selection-in","form":"SFX","field":"psuTopology","values":["auto","dual"]},
+      {"mountId":"front","kind":"cooler-attribute-equals","attribute":"fitHint","value":"front240"}
+    ],
+    "coolerFanAssignments": [
+      {"coolerType":"aio","radiatorMm":240,"geometryRole":"front","size":120,"count":2},
+      {"coolerType":"aio","radiatorMm":120,"geometryRole":"rear","size":120,"count":1}
+    ],
+    "lowerChamberPolicy": {
+      "fanMountId":"left",
+      "geometryRole":"left",
+      "unavailableWithPsuTopologies":["bottom","dual"],
+      "effectDescription":"下置 SFX 按手册 §8.1 取下左侧风扇架，而 §14 的左侧 120mm×2 风扇位就在这块支架上：机箱 4 个侧风扇位只剩右侧 2 个，且下置电源与盘仓同处下层腔体。"
+    }
+  },
   "lowerChamber": {
     "backplane": {
       "inletRowOrder": ["sata", "sata", "molex", "molex"],
@@ -56,6 +94,55 @@
   "psuLimits": { "atxMaxLengthMm": 220, "sfxMaxLengthMm": 100 },
   "coolerLimits": { "overheadAtxMm": 65, "openTopMm": 160 },
   "gpuLimits": { "planningMinMm": 275, "publishedMaxMm": 320 },
+  "domainFindings": [
+    {
+      "kind": "placement-in",
+      "placements": ["frontSfx", "frontSfx+bottomSfx"],
+      "finding": {
+        "id": "n6.front-sfx-fan",
+        "verdict": "warn",
+        "evidence": "unknown",
+        "message": "Front SFX vs front fan / 240 radiator coexistence is not confirmed in the local registry",
+        "related": ["psu.front_sfx", "fan.front"]
+      }
+    },
+    {
+      "kind": "boot-bay-full",
+      "finding": {
+        "id": "n6.bay9-boot-vs-9hdd",
+        "verdict": "bad",
+        "evidence": "inferred",
+        "message": "Tray 9 cannot be both SATA boot and the 9th data HDD",
+        "related": ["bay.9"]
+      }
+    },
+    {
+      "kind": "selected-sku-boolean",
+      "attribute": "requiresHbaCoexistenceReview",
+      "value": true,
+      "andField": "hbaMode",
+      "andValue": "always",
+      "finding": {
+        "id": "n6.gpu-hba-review",
+        "verdict": "warn",
+        "evidence": "unknown",
+        "message": "{selectedSku.name} + HBA physical coexistence is not fully verified for the locked GPU envelope",
+        "related": ["pcie.slot1", "pcie.slot2"]
+      }
+    },
+    {
+      "kind": "selection-equals",
+      "field": "psuTopology",
+      "value": "bottom",
+      "finding": {
+        "id": "n6.bottom-sfx-bracket",
+        "verdict": "warn",
+        "evidence": "official",
+        "message": "Bottom SFX requires removal of the left-side fan bracket (N6 manual)",
+        "related": ["psu.bottom_sfx"]
+      }
+    }
+  ],
   "powerProfile": {
     "boardBaseW": 23,
     "fanBaseW": 5,
@@ -86,6 +173,7 @@
     "bootBaySkuId": "storage.boot-sata-25",
     "ownedNvmeSkuId": "storage.samsung-980-pro",
     "ownedNvmeQty": 2,
+    "hbaBreakoutSkuId": "accessory.minisas-hd-4xsata",
     "slimsasCableSkuId": "accessory.slimsas-4xsata",
     "dualSyncSkuId": "accessory.dual-psu-sync",
     "secondaryPsuSkuId": "psu.sfx-450-unlocked"

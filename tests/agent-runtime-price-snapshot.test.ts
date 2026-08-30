@@ -20,7 +20,18 @@ describe("Agent authoritative runtime price snapshot", () => {
   it("reads the active runtime snapshot rather than the image seed", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "build-sim-agent-price-"));
     roots.push(root);
-    const material = { ...loadBundledPriceSnapshot(), asOf: "2026-08-27", snapshotId: "price-snapshot-runtime-fixture" };
+    const bundled = loadBundledPriceSnapshot();
+    const material = {
+      schemaVersion: bundled.schemaVersion,
+      asOf: "2026-08-27",
+      ...(bundled.note === undefined ? {} : { note: bundled.note }),
+      snapshotId: "price-snapshot-runtime-fixture",
+      ...(bundled.generatedAt === undefined ? {} : { generatedAt: bundled.generatedAt }),
+      ...(bundled.catalogVersion === undefined ? {} : { catalogVersion: bundled.catalogVersion }),
+      ...(bundled.inputHash === undefined ? {} : { inputHash: bundled.inputHash }),
+      ...(bundled.priceVersion === undefined ? {} : { priceVersion: bundled.priceVersion }),
+      quotes: bundled.quotes,
+    };
     const snapshot = { ...material, contentHash: createHash("sha256").update(JSON.stringify(material)).digest("hex") };
     const coordinator = new RuntimeCoordinator({ root });
     const state = await coordinator.initialize();

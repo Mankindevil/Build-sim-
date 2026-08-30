@@ -2,7 +2,7 @@ import type { BuildConfig } from "../config/types";
 import type { ModularPanelGroup, SkuCatalog, SkuRecord } from "../sku/types";
 import type { EvidenceLevel } from "../core/evidence";
 import { buildSataPorts, needsHba } from "../core/policy";
-import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
+import type { CaseWiringProfile } from "./plan";
 
 /**
  * Socket-level cable plan for the PSU panel.
@@ -12,8 +12,6 @@ import n6Profile from "../../data/cases/jonsbo-n6/profile.json";
  * every bundled cable to a real socket and every backplane inlet to a real
  * cable, so a shortfall shows up as a specific empty inlet instead of a verdict.
  */
-
-const BP = n6Profile.backplanePower;
 
 export type CableKind = "mb" | "cpu" | "pcie" | "12v2x6" | "sata" | "molex" | "mixed" | "sense";
 
@@ -131,16 +129,22 @@ function buildSockets(psu: SkuRecord | undefined): { sockets: PanelSocket[]; kno
   return { sockets, known: false };
 }
 
-export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): PanelWiringPlan {
+export function planPanelWiring(
+  config: BuildConfig,
+  catalog: SkuCatalog,
+  profile: CaseWiringProfile,
+): PanelWiringPlan {
+  const backplane = profile.backplanePower;
   const dual = config.selection.psuTopology === "dual";
   const feedPsuId = dual
-    ? (config.selection.secondaryPsuId ?? n6Profile.defaults.secondaryPsuSkuId)
+    ? (config.selection.secondaryPsuId ?? profile.defaults.secondaryPsuSkuId ?? config.selection.psuId)
     : config.selection.psuId;
   const psu = catalog.skus.find((s) => s.id === feedPsuId);
   const { sockets, known } = buildSockets(psu);
   const cables: PlannedCable[] = [];
   const notes: string[] = [];
   const unmet: string[] = [];
+  const populatedBackplane = config.selection.diskCount > 0 || config.selection.boot === "bay";
 
   const freeSocket = (group: ModularPanelGroup["id"]): PanelSocket | undefined =>
     sockets.find((s) => s.group === group && s.cableId === null);
@@ -174,7 +178,7 @@ export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): Panel
   // not "no socket", and drawing it as unplaceable would invent a defect.
   const hasGroup = (g: ModularPanelGroup["id"]): boolean => sockets.some((s) => s.group === g);
   const uncounted: string[] = [];
-  if (known) {
+  if (known && !dual) {
     const mbSockets = sockets.filter((s) => s.group === "mb").length;
     if (mbSockets > 0) {
       const mb = addCable("mb", 1, ["主板 24-pin"], mbSockets > 1 ? `（占 ${mbSockets} 座）` : "");
@@ -188,7 +192,7 @@ export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): Panel
       addCable("cpu", 1, ["CPU EPS 8-pin"]);
       if (config.selection.gpuId !== "gpu.none") addCable("pcie", 2, ["显卡 PCIe"]);
     } else uncounted.push("CPU / PCIe");
-  }
+  } else if (dual) notes.push("双电源模式下本图只表示背板专用电源；主板、CPU 与 GPU 线保留在主电源面板。");
 
   // Peripheral contest: one lead per inlet, per manual §13.
   const sataLeads = psu?.harness?.sataLeads ?? null;
@@ -197,7 +201,7 @@ export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): Panel
   const inlets: InletAssignment[] = [];
   const perConnector: Record<"sata" | "molex", PlannedCable[]> = { sata: [], molex: [] };
 
-  for (let i = 0; i < mixedLeads; i++) {
+  if (populatedBackplane) for (let i = 0; i < mixedLeads; i++) {
     const cable = addCable(
       "mixed",
       2,
@@ -210,9 +214,9 @@ export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): Panel
     }
   }
 
-  for (const kind of ["sata", "molex"] as const) {
+  if (populatedBackplane) for (const kind of ["sata", "molex"] as const) {
     const leads = kind === "sata" ? sataLeads : molexLeads;
-    const need = kind === "sata" ? BP.connectors.sataPower : BP.connectors.molex;
+    const need = kind === "sata" ? backplane.connectors.sataPower : backplane.connectors.molex;
     if (leads === null) {
       notes.push(`${KIND_ZH[kind]}根数未公布，接线图按"至少能插上 1 根"保守绘制。`);
     }
@@ -226,28 +230,26 @@ export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): Panel
     }
   }
 
-  // Hand out inlets in manual order: inlets 1–2 SATA, 3–4 Molex.
-  let idx = 0;
-  for (const kind of ["sata", "molex"] as const) {
-    const need = kind === "sata" ? BP.connectors.sataPower : BP.connectors.molex;
+  // Hand out inlets in the adapter-declared physical order.
+  const usedByKind: Record<"sata" | "molex", number> = { sata: 0, molex: 0 };
+  if (populatedBackplane) for (const [zeroBasedIndex, kind] of backplane.inletOrder.entries()) {
+    const idx = zeroBasedIndex + 1;
     const pool = perConnector[kind];
-    for (let i = 0; i < need; i++) {
-      idx += 1;
-      const cable = pool[i] ?? pool[pool.length - 1] ?? null;
-      const shared = cable !== null && cable.targets.length > 0;
-      if (cable) {
-        cable.targets.push(`背板口 ${idx}`);
-        if (shared) cable.status = "chained";
-      } else {
-        unmet.push(`背板口 ${idx}（${kind === "sata" ? "SATA" : "Molex"}）没有任何线可接`);
-      }
-      inlets.push({
-        index: idx,
-        connector: kind,
-        cableId: cable?.id ?? null,
-        shared,
-      });
+    const connectorIndex = usedByKind[kind]++;
+    const cable = pool[connectorIndex] ?? pool[pool.length - 1] ?? null;
+    const shared = cable !== null && cable.targets.length > 0;
+    if (cable) {
+      cable.targets.push(`背板口 ${idx}`);
+      if (shared) cable.status = "chained";
+    } else {
+      unmet.push(`背板口 ${idx}（${kind === "sata" ? "SATA" : "Molex"}）没有任何线可接`);
     }
+    inlets.push({
+      index: idx,
+      connector: kind,
+      cableId: cable?.id ?? null,
+      shared,
+    });
   }
 
   // Boot bay and HBA hang off spare SATA connectors, not extra cables.
@@ -264,11 +266,11 @@ export function planPanelWiring(config: BuildConfig, catalog: SkuCatalog): Panel
       `${chained.map((c) => c.label).join(" / ")} 被安排串接两个背板口，这正是手册第 13 节不建议的接法。`,
     );
   }
-  if (freeSockets.some((s) => s.group === "peripheral")) {
+  if (populatedBackplane && freeSockets.some((s) => s.group === "peripheral")) {
     notes.push(
       `外围组还有 ${freeSockets.filter((s) => s.group === "peripheral").length} 个空座，加购同型号原厂线可以插上。`,
     );
-  } else if (known) {
+  } else if (populatedBackplane && known) {
     notes.push("外围组已插满，加购线无处可插——只能换电源或上双电源。");
   }
   if (!known) {

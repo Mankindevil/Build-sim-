@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "third-party-registry-v1",
+  "updatedAt": "2026-08-28T00:00:00.000Z",
+  "sources": [
+    {
+      "publisherId": "serve-the-home",
+      "name": "ServeTheHome",
+      "domains": [
+        "servethehome.com"
+      ],
+      "sourceType": "professional_measurement",
+      "independenceGroupId": "serve-the-home",
+      "editorialControl": "independent",
+      "fundingDisclosure": "undisclosed",
+      "enabled": true,
+      "approvedAt": "2026-08-28T00:00:00.000Z"
+    },
+    {
+      "publisherId": "storage-review",
+      "name": "StorageReview",
+      "domains": [
+        "storagereview.com"
+      ],
+      "sourceType": "professional_measurement",
+      "independenceGroupId": "storage-review",
+      "editorialControl": "independent",
+      "fundingDisclosure": "undisclosed",
+      "enabled": true,
+      "approvedAt": "2026-08-28T00:00:00.000Z"
+    },
+    {
+      "publisherId": "techpowerup",
+      "name": "TechPowerUp",
+      "domains": [
+        "techpowerup.com"
+      ],
+      "sourceType": "professional_measurement",
+      "independenceGroupId": "techpowerup",
+      "editorialControl": "independent",
+      "fundingDisclosure": "undisclosed",
+      "enabled": true,
+      "approvedAt": "2026-08-28T00:00:00.000Z"
+    },
+    {
+      "publisherId": "toms-hardware",
+      "name": "Tom's Hardware",
+      "domains": [
+        "tomshardware.com"
+      ],
+      "sourceType": "professional_review",
+      "independenceGroupId": "future-hardware-media",
+      "editorialControl": "independent",
+      "fundingDisclosure": "undisclosed",
+      "enabled": true,
+      "approvedAt": "2026-08-28T00:00:00.000Z"
+    }
+  ]
+}

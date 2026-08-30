@@ -6,7 +6,7 @@ import { parseConfig } from "../src/config/types";
 import { evaluateBuild } from "../src/core/evaluate";
 import { loadBundledCatalog } from "../src/sku/catalog";
 import { validateBuildConfigV3 } from "../src/topology/contracts";
-import { validateFactRecord, validateFactSnapshot } from "../src/facts/contracts";
+import { validateLegacyFactSnapshot, validateLegacyFactRecord } from "../src/facts/contracts";
 import { isSha256Hex } from "../src/hash";
 import { validateUserObservation } from "../src/observations/contracts";
 import { validateRequirementSpec } from "../src/requirements/contracts";
@@ -126,7 +126,7 @@ function expectGenericCatalogFactFixture(fixture: Dict): { skuIds: Set<string>; 
   const factById = new Map<string, Dict>();
   for (const [index, raw] of records.entries()) {
     const record = asDict(raw, `generic fact ${index}`);
-    expect(validateFactRecord(record), `generic fact ${index} must satisfy FactRecord`).toEqual([]);
+    expect(validateLegacyFactRecord(record), `generic fact ${index} must satisfy the explicit U0 legacy fact contract`).toEqual([]);
     const factId = stringValue(record.factId, `generic fact ${index}.factId`);
     expect(factIds.has(factId)).toBe(false);
     factIds.add(factId);
@@ -134,7 +134,7 @@ function expectGenericCatalogFactFixture(fixture: Dict): { skuIds: Set<string>; 
   }
   expect(identityFactIds).toEqual(new Set([...identityFactIds].filter((factId) => factIds.has(factId))));
   const snapshot = asDict(fixture.factSnapshot, "generic fact snapshot");
-  expect(validateFactSnapshot(snapshot), "generic FactSnapshot must satisfy the frozen contract").toEqual([]);
+  expect(validateLegacyFactSnapshot(snapshot), "generic FactSnapshot must satisfy the explicit U0 legacy contract").toEqual([]);
   expect(new Set(asArray(snapshot.factIds, "generic snapshot factIds"))).toEqual(factIds);
   expect(asArray(snapshot.conflictSetIds, "generic snapshot conflictSetIds")).toHaveLength(0);
   const variantFactIds = new Set<string>();

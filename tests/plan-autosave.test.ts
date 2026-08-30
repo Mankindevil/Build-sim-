@@ -59,6 +59,34 @@ describe("R2 plan autosave", () => {
     store.dispose();
   });
 
+  it("installs the in-flight guard before saving subscribers can re-enter", async () => {
+    const update = vi.fn(async (_id: string, input: Parameters<WorkspacePlanApi["updateDraft"]>[1]) => ({
+      ...activePlan(),
+      draftRevision: input.expectedRevision + 1,
+      draft: { ...activePlan().draft, config: input.config },
+    }));
+    const store = new PlanStore({ api: testApi(update), storage, debounceMs: 60_000 });
+    await store.initialize();
+    let reentrantSave: Promise<BuildPlan | null> | null = null;
+    let reentered = false;
+    const unsubscribe = store.subscribe((state) => {
+      if (state.saveStatus !== "saving" || reentered) return;
+      reentered = true;
+      reentrantSave = store.saveDraftNow();
+    });
+
+    store.patchDraft((config) => { config.selection.diskCount = 2; });
+    const primarySave = store.saveDraftNow();
+    await primarySave;
+    await reentrantSave;
+
+    expect(reentered).toBe(true);
+    expect(update).toHaveBeenCalledOnce();
+    expect(store.getState()).toMatchObject({ saveStatus: "saved", activePlan: { draftRevision: 1 } });
+    unsubscribe();
+    store.dispose();
+  });
+
   it("clears the old V2 snapshot before accepting a V3 server draft", async () => {
     const store = new PlanStore({ api: testApi(async () => activePlan()), storage, debounceMs: 60_000 });
     await store.initialize();

@@ -25,6 +25,14 @@ export interface SpatialRouteOverlay {
   verdict: ConflictVerdict;
   findingIds: string[];
   endpointPartIds: [string, string];
+  /** Governed plug/removal directions at the two endpoints when available. */
+  endpointDirections: Array<{ at: Vec3; direction: Vec3 }>;
+  /** Symmetric spatial error carried by the route projection. */
+  toleranceMm: number | null;
+  /** Governed alternatives are visual hints only and never replace the verdict. */
+  alternativePaths: Vec3[][];
+  /** Exact points at which the current route is blocked, if known. */
+  blockedPoints: Vec3[];
 }
 
 export interface SpatialDimensionOverlay {
@@ -153,6 +161,10 @@ export function buildSpatialOverlayModel(evaluation: BuildEvaluation, model: Spa
       verdict: worstVerdict(related),
       findingIds: related.map((finding) => finding.id).sort(),
       endpointPartIds: [cable.from.partId, cable.to.partId] as [string, string],
+      endpointDirections: [],
+      toleranceMm: null,
+      alternativePaths: [],
+      blockedPoints: [],
     };
   });
   const clearanceDimensions = model.nodes.filter((node) => node.kind === "clearance").map((node) => {

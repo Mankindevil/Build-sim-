@@ -1,6 +1,7 @@
 import type { BuildConfig, BuildConfigDocument } from "../config/types";
 import type { TopologyV3PatchOperation } from "../contracts/registries";
 import type { BuildEvaluation } from "../core/evaluate";
+import type { ProgressiveBuildEvaluation } from "../compatibility/contracts";
 import type {
   EvidenceCapture,
   EvidenceDocument,
@@ -8,6 +9,7 @@ import type {
 } from "../evidence/contracts";
 import type { BuildConfigV3 } from "../topology/contracts";
 import type { TopologyBomLine } from "../topology/projections";
+import type { SnapshotHashes } from "../hash";
 import type {
   BuildConfigV2RollbackRef,
   BuildConfigV3MigrationCatalogBinding,
@@ -126,7 +128,19 @@ export interface PlanVersion<TConfig extends PlanConfig = BuildConfig> {
   readonly evidenceHash?: string;
   readonly evaluationHash?: string;
   readonly evaluatedAt?: string;
+  /** Exact fact/observation/artifact inputs used by the saved evaluation. */
+  readonly evaluationLock?: PlanEvaluationLock;
   readonly parentVersionId: string | null;
+}
+
+export interface PlanEvaluationLock {
+  readonly schemaVersion: "plan-evaluation-lock-v1";
+  readonly planId: string;
+  readonly snapshotHashes: SnapshotHashes;
+  readonly factSnapshotId: string;
+  readonly userObservationSnapshotId: string;
+  readonly artifactLockfileHash: string;
+  readonly contentHash: string;
 }
 
 export interface PlanEvidenceSummary {
@@ -134,6 +148,148 @@ export interface PlanEvidenceSummary {
   readonly bindings: ReadonlyArray<Pick<PlanEvidenceBinding,
     "documentId" | "captureId" | "subject" | "purposes" | "locators"
   >>;
+  /**
+   * Bounded, content-addressed job resolutions only. Raw web/PDF/OCR or
+   * attachment text is deliberately excluded from the Agent context.
+   */
+  readonly resolutions?: readonly PlanEvidenceResolutionSummary[];
+  /** Server-derived candidate/approval/read-current projection from one runtime generation. */
+  readonly inferences?: readonly PlanInferenceSummary[];
+}
+
+export const PLAN_INFERENCE_SUMMARY_SCHEMA_VERSION = "plan-inference-summary-v1" as const;
+
+export interface PlanInferenceSummary {
+  readonly schemaVersion: typeof PLAN_INFERENCE_SUMMARY_SCHEMA_VERSION;
+  readonly candidateId: `fact-inference-candidate-sha256-${string}`;
+  readonly candidateHash: string;
+  readonly planId: string;
+  readonly featureEnabled: boolean;
+  readonly lifecycle:
+    | "pending_approval"
+    | "approval_pending_recovery"
+    | "active"
+    | "stale"
+    | "aborted_stale"
+    | "disabled_historical";
+  readonly proposalApprovalRef?: `sha256:${string}`;
+  readonly transaction?: {
+    readonly transactionId: `inference-approval-sha256-${string}`;
+    readonly status: "pending" | "committed" | "aborted_stale";
+    readonly approvalAuthorityRef?: `sha256:${string}`;
+  };
+  readonly inference: {
+    readonly inferenceTraceId: `inference-sha256-${string}`;
+    readonly contentHash: string;
+    readonly ruleOrModelId: string;
+    readonly ruleOrModelVersion: string;
+    readonly ruleOrModelArtifactHash: string;
+    readonly formula: string;
+    readonly inputFactRefs: readonly { readonly factId: string; readonly contentHash: string }[];
+    readonly assumptions: readonly string[];
+    readonly outputRange: { readonly min: number; readonly max: number; readonly unit?: string };
+    readonly invalidationConditions: readonly string[];
+    readonly confidence: number;
+  };
+  readonly output: {
+    readonly factId: string;
+    readonly fieldId: string;
+    readonly value: number | null;
+    readonly unit?: string;
+    readonly safetyClass: "normal" | "compatibility_critical" | "electrical_safety";
+  };
+  readonly safetyDisposition: "planning_only" | "blocked_requires_non_inference_evidence";
+  readonly maySupportSafetyPass: false;
+  readonly createdAt: string;
+}
+
+export const PLAN_EVIDENCE_RESOLUTION_SUMMARY_SCHEMA_VERSION = "plan-evidence-resolution-summary-v1" as const;
+
+export type PlanEvidenceResolutionState =
+  | "in_progress"
+  | "resolved"
+  | "needs_review"
+  | "blocked"
+  | "failed"
+  | "cancelled"
+  | "unknown";
+
+export type PlanEvidenceResolutionAuthority = "official" | "third_party" | "agent_inference" | null;
+
+export interface PlanEvidenceResolutionSummary {
+  readonly schemaVersion: typeof PLAN_EVIDENCE_RESOLUTION_SUMMARY_SCHEMA_VERSION;
+  /** The pipeline ID must be the requestHash expressed as a content address. */
+  readonly pipelineId: `evidence-pipeline-sha256-${string}`;
+  readonly requestHash: string;
+  readonly state: PlanEvidenceResolutionState;
+  readonly ladder: {
+    readonly level: 1 | 2 | 3 | 4 | 5 | 6 | null;
+    readonly authority: PlanEvidenceResolutionAuthority;
+    readonly key:
+      | "official_exact_revision_document"
+      | "official_exact_model_technical"
+      | "official_family_invariant"
+      | "third_party_professional_measurement"
+      | "third_party_independent_corroboration"
+      | "agent_replayable_inference"
+      | "unresolved";
+  };
+  readonly officialSearchReason?:
+    | "official_not_published"
+    | "official_page_found_field_missing"
+    | "official_identity_unresolved"
+    | "official_access_blocked"
+    | "official_parse_failed"
+    | "official_sources_conflict"
+    | "official_search_exhausted";
+  readonly officialAttemptRefs: readonly `sha256:${string}`[];
+  readonly thirdParty?: {
+    readonly assessmentId: `third-party-assessment-sha256-${string}`;
+    readonly contentHash: string;
+    readonly sourceIds: readonly `third-party-source-sha256-${string}`[];
+    readonly independentCount: number;
+    readonly consistent: boolean;
+    readonly conflicted: boolean;
+    readonly ladderLevel: 4 | 5 | null;
+    readonly sources: readonly {
+      readonly sourceId: `third-party-source-sha256-${string}`;
+      readonly contentHash: string;
+      readonly publisherId: string;
+      readonly sourceType: string;
+    }[];
+  };
+  readonly inference?: {
+    readonly inferenceTraceId: `inference-sha256-${string}`;
+    readonly contentHash: string;
+    readonly ruleOrModelId: string;
+    readonly ruleOrModelVersion: string;
+    readonly ruleOrModelArtifactHash: string;
+    /** Governed formula/derivation label, or null when the rule did not publish one. */
+    readonly formula: string | null;
+    readonly inputFactRefs: readonly { readonly factId: string; readonly contentHash: string }[];
+    readonly assumptionCount: number;
+    readonly assumptions: readonly string[];
+    readonly outputRange?: { readonly min: number; readonly max: number; readonly unit?: string };
+    readonly invalidationConditionCount: number;
+    readonly invalidationConditions: readonly string[];
+  };
+  /** Governed service actions only; raw source/attachment text is never copied here. */
+  readonly manualActions: readonly string[];
+  /** Server-owned approval candidates. IDs must close over the paired hash. */
+  readonly candidates?: readonly {
+    readonly kind: "claim_candidate" | "adapter_candidate" | "binding_proposal";
+    readonly id: string;
+    readonly contentHash: string;
+  }[];
+  readonly stages: readonly {
+    readonly stage: string;
+    readonly jobStatus: string;
+    readonly resultStatus?: "completed" | "skipped" | "needs_review" | "blocked";
+    readonly revision: number;
+    readonly attempt: number;
+    readonly maxAttempts: number;
+    readonly resultRefs: readonly `sha256:${string}`[];
+  }[];
 }
 
 export const PLAN_PARTIAL_EVALUATION_V3_SCHEMA_VERSION = "plan-partial-evaluation-v1" as const;
@@ -167,7 +323,11 @@ export interface PlanPartialEvaluationV3 {
   unknownDomains: PlanPartialEvaluationV3UnknownDomain[];
 }
 
-export type PlanEvaluation = BuildEvaluation | PlanPartialEvaluationV3;
+/**
+ * V3 partial evaluations remain readable as a conservative rollback/fallback
+ * artifact, while governed executions persist the progressive authority.
+ */
+export type PlanEvaluation = BuildEvaluation | PlanPartialEvaluationV3 | ProgressiveBuildEvaluation;
 
 export interface PlanEvaluationSnapshot {
   schemaVersion: PlanSchemaVersion;
@@ -176,6 +336,7 @@ export interface PlanEvaluationSnapshot {
   draftRevision: number;
   configHash: string;
   evaluationHash: string;
+  evaluationLock?: PlanEvaluationLock;
   evaluatedAt: string;
   evaluation: PlanEvaluation;
 }
@@ -187,6 +348,8 @@ export interface PlanAgentContext {
   draftRevision: number;
   configHash: string;
   evaluationHash: string;
+  /** Present for fact-graph contexts whose evaluation identity includes the full lock. */
+  evaluationLockHash?: string;
   buildConfig: BuildConfigDocument;
   evaluation: PlanEvaluation;
   spatialSelection?: {
@@ -319,6 +482,7 @@ export interface SaveVersionInput {
   summary?: string;
   evaluationHash?: string;
   evaluatedAt?: string;
+  evaluationLock?: PlanEvaluationLock;
   idempotencyKey?: string;
 }
 

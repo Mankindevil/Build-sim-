@@ -142,6 +142,99 @@ describe("A5 Agent panel", () => {
     expect(stream.closed).toBe(true);
   });
 
+  it("reviews and confirms one exact pending write without sending caller-authored approvals", async () => {
+    const stream = new FakeEventSource();
+    const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    const writeSkill = {
+      manifest: { ...skill.manifest, id: "evidence-and-attachments", name: "附件与事实治理", readOnly: false, allowedTools: ["archive_user_attachment"] },
+      definitionHash: "f".repeat(64),
+    };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+      requests.push({ url, body });
+      if (url.endsWith("/models")) return payload({ models: [model] });
+      if (url.endsWith("/skills")) return payload({ skills: [writeSkill] });
+      if (url.endsWith("/sessions") && init?.method === "POST") return payload(session, 201);
+      if (url.endsWith("/messages")) return payload({ runId: "run-write-review", status: "queued" }, 202);
+      if (url.endsWith("/runs/run-write-review/approvals/approval-write-review/confirm")) {
+        return payload({ runId: "run-write-review", status: "queued", approvalId: "approval-write-review", alreadyConfirmed: false }, 202);
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    await initAgentPanel({ getBuildConfig: () => ({}), fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => stream });
+    (document.querySelector("#agent-skill") as HTMLSelectElement).value = "evidence-and-attachments";
+    (document.querySelector("#agent-input") as HTMLTextAreaElement).value = "归档刚上传的附件";
+    document.querySelector("#agent-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(requests.some((entry) => entry.url.endsWith("/messages"))).toBe(true));
+    expect(requests.find((entry) => entry.url.endsWith("/messages"))?.body).not.toHaveProperty("approvals");
+
+    const pending = {
+      contractVersion: "1.0.0", status: "pending", approvalId: "approval-write-review", nonce: `nonce-${"1".repeat(64)}`,
+      runId: "run-write-review", sessionId: session.id,
+      call: { id: "call-write-review", name: "archive_user_attachment", input: { uploadId: "upload-write-review", deletionPolicy: "retain_until_user_deletes" } },
+      toolTitle: "归档用户附件", toolDefinitionHash: "a".repeat(64), inputHash: "b".repeat(64), idempotencyKey: "agent-write-review",
+      requestedAt: "2026-08-28T08:00:00.000Z", expiresAt: "2026-08-28T08:10:00.000Z",
+      backup: { required: true, target: "active-runtime-generation" }, rollback: { required: true, strategy: "governed rollback" },
+    };
+    stream.emit("approval_required", { type: "approval_required", runId: "run-write-review", pending, at: "now" });
+    stream.emit("run_status", { type: "run_status", runId: "run-write-review", status: "waiting_approval", at: "now" });
+    await vi.waitFor(() => expect(document.querySelector("[data-agent-write-approval='approval-write-review']")).not.toBeNull());
+    const card = document.querySelector<HTMLElement>("[data-agent-write-approval='approval-write-review']")!;
+    expect(card.textContent).toContain("尚未执行任何写入");
+    expect(card.textContent).toContain("archive_user_attachment");
+    expect(card.textContent).toContain("upload-write-review");
+    const confirm = card.querySelector<HTMLButtonElement>("[data-confirm-agent-write]")!;
+    expect(confirm.disabled).toBe(true);
+    const checkbox = card.querySelector<HTMLInputElement>("[data-agent-write-approval-check]")!;
+    checkbox.checked = true; checkbox.dispatchEvent(new Event("change"));
+    confirm.click();
+    await vi.waitFor(() => expect(requests.some((entry) => entry.url.endsWith("/confirm"))).toBe(true));
+    expect(requests.find((entry) => entry.url.endsWith("/confirm"))?.body).toEqual({ nonce: pending.nonce, approvedBy: "local-human" });
+    await vi.waitFor(() => expect(card.dataset.state).toBe("confirmed"));
+  });
+
+  it("rejects a pending write from its review card and cancels without an approval envelope", async () => {
+    const stream = new FakeEventSource();
+    const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    const writeSkill = {
+      manifest: { ...skill.manifest, id: "evidence-and-attachments", name: "附件与事实治理", readOnly: false, allowedTools: ["archive_user_attachment"] },
+      definitionHash: "f".repeat(64),
+    };
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+      requests.push({ url, body });
+      if (url.endsWith("/models")) return payload({ models: [model] });
+      if (url.endsWith("/skills")) return payload({ skills: [writeSkill] });
+      if (url.endsWith("/sessions") && init?.method === "POST") return payload(session, 201);
+      if (url.endsWith("/messages")) return payload({ runId: "run-write-reject", status: "queued" }, 202);
+      if (url.endsWith("/runs/run-write-reject/approvals/approval-write-reject/reject")) {
+        return payload({ runId: "run-write-reject", status: "cancelled", approvalId: "approval-write-reject" }, 202);
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    await initAgentPanel({ getBuildConfig: () => ({}), fetchImpl: fetchImpl as typeof fetch, eventSourceFactory: () => stream });
+    (document.querySelector("#agent-skill") as HTMLSelectElement).value = "evidence-and-attachments";
+    (document.querySelector("#agent-input") as HTMLTextAreaElement).value = "不要归档这个附件";
+    document.querySelector("#agent-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(requests.some((entry) => entry.url.endsWith("/messages"))).toBe(true));
+    const pending = {
+      contractVersion: "1.0.0", status: "pending", approvalId: "approval-write-reject", nonce: `nonce-${"2".repeat(64)}`,
+      runId: "run-write-reject", sessionId: session.id,
+      call: { id: "call-write-reject", name: "archive_user_attachment", input: { uploadId: "upload-write-reject", deletionPolicy: "retain_until_user_deletes" } },
+      toolTitle: "归档用户附件", toolDefinitionHash: "a".repeat(64), inputHash: "b".repeat(64), idempotencyKey: "agent-write-reject",
+      requestedAt: "2026-08-28T08:00:00.000Z", expiresAt: "2026-08-28T08:10:00.000Z",
+      backup: { required: true, target: "active-runtime-generation" }, rollback: { required: true, strategy: "governed rollback" },
+    };
+    stream.emit("approval_required", { type: "approval_required", runId: pending.runId, pending, at: "now" });
+    const card = document.querySelector<HTMLElement>("[data-agent-write-approval='approval-write-reject']")!;
+    card.querySelector<HTMLButtonElement>("[data-reject-agent-write]")!.click();
+    await vi.waitFor(() => expect(card.dataset.state).toBe("rejected"));
+    expect(requests.find((entry) => entry.url.endsWith("/reject"))?.body).toEqual({ nonce: pending.nonce });
+    expect(card.textContent).toContain("未执行写入");
+  });
+
   it("renders and confirms a governed catalog review from normal Agent conversation", async () => {
     const stream = new FakeEventSource();
     const onCatalogSkuAccepted = vi.fn();
@@ -382,6 +475,15 @@ describe("A5 Agent panel", () => {
     appliedPlan.draft.config.selection.diskCount = 2;
     const appliedConfigHash = await hashPlanConfig(appliedPlan.draft.config);
     const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    const auditedContext = {
+      ...context,
+      evidenceSummary: {
+        count: 0,
+        bindings: [],
+        resolutions: [],
+        inferences: [{ lifecycle: "active", marker: "server-derived-inference-summary" }],
+      },
+    } as unknown as PlanAgentContext;
     const acceptServerPlan = vi.fn(async () => {
       context = { ...context, draftRevision: appliedPlan.draftRevision, configHash: appliedConfigHash, buildConfig: structuredClone(appliedPlan.draft.config) };
     });
@@ -393,7 +495,7 @@ describe("A5 Agent panel", () => {
       if (url.endsWith("/skills")) return payload({ skills: [{ ...skill, manifest: { ...skill.manifest, allowedTools: [...skill.manifest.allowedTools, "propose_plan_change"] } }] });
       if (url.endsWith("/sessions") && init?.method === "POST") return payload(session, 201);
       if (url.endsWith("/messages")) return payload({ runId: "run-plan", status: "queued" }, 202);
-      if (url.endsWith("/agent-context")) return payload({ runId: "run-plan", contextHash: "3".repeat(64) }, 201);
+      if (url.endsWith("/agent-context")) return payload({ runId: "run-plan", contextHash: "3".repeat(64), context: auditedContext }, 201);
       if (url.endsWith("/proposals/validate")) return payload({ proposal });
       if (url.endsWith("/proposals/apply")) return payload({ proposal: { ...proposal, status: "applied" }, plan: appliedPlan, audit: { approvalId: "approval-panel" } });
       throw new Error(`unexpected ${url}`);
@@ -407,6 +509,7 @@ describe("A5 Agent panel", () => {
     expect(messageBody?.content).toContain("<plan_agent_context");
     expect(messageBody?.content).toContain(evaluationHash);
     expect(messageBody?.content).toContain("psu.primary");
+    expect(messageBody?.content).toContain("server-derived-inference-summary");
     expect(messageBody?.content).not.toContain("approvalToken");
     const contextRequest = requests.find((entry) => entry.url.endsWith("/agent-context"))!;
     expect(contextRequest.body).toMatchObject({ sessionId: session.id, idempotencyKey: expect.stringMatching(/^context-/), context: { planId: active.id, evaluationHash } });

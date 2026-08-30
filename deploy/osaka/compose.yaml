@@ -26,6 +26,20 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  release-gate:
+    image: build-sim-runtime:osaka
+    network_mode: host
+    env_file:
+      - ../../.env.remote
+    volumes:
+      - ../../runtime:/app/runtime
+      - ../../deploy-backups:/app/deploy-backups
+    profiles:
+      - operations
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
   price:
     build:
       context: ../..

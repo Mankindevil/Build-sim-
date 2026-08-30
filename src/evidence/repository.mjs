@@ -36,9 +36,10 @@ const PRODUCT_CATEGORIES = new Set([
   "accessory",
 ]);
 const ENVELOPE_KINDS = new Set(["evidence-document", "evidence-capture", "evidence-url-index"]);
-const ACQUISITION_METHODS = new Set(["official-fetch", "bundled-import"]);
+const ACQUISITION_METHODS = new Set(["official-fetch", "third-party-fetch", "bundled-import"]);
 const IDENTITY_BASES = new Set([
   "official-document-explicit",
+  "third-party-document-explicit",
   "governed-sku-user-asserted",
   "official-domain-only",
   "legacy-unverified",
@@ -105,6 +106,10 @@ function mediaType(value) {
 
 function normalizedIdentity(value, index) {
   if (!isRecord(value)) throw new EvidenceRepositoryError("invalid_input", `productIdentities[${index}] must be an object`);
+  const allowed = new Set(["brand", "basis", "model", "mpn", "category", "skuId", "familyId", "modelId", "variantId", "revision", "region"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) {
+    throw new EvidenceRepositoryError("invalid_input", `productIdentities[${index}] contains unknown fields`);
+  }
   const brand = safeText(value.brand, `productIdentities[${index}].brand`, { max: 120 });
   const basis = String(value.basis ?? "legacy-unverified");
   if (!IDENTITY_BASES.has(basis)) {
@@ -113,6 +118,11 @@ function normalizedIdentity(value, index) {
   const model = safeText(value.model, `productIdentities[${index}].model`, { max: 240, optional: true });
   const mpn = safeText(value.mpn, `productIdentities[${index}].mpn`, { max: 160, optional: true });
   const skuId = safeText(value.skuId, `productIdentities[${index}].skuId`, { max: 160, optional: true });
+  const familyId = safeText(value.familyId, `productIdentities[${index}].familyId`, { max: 256, optional: true });
+  const modelId = safeText(value.modelId, `productIdentities[${index}].modelId`, { max: 256, optional: true });
+  const variantId = safeText(value.variantId, `productIdentities[${index}].variantId`, { max: 256, optional: true });
+  const revision = safeText(value.revision, `productIdentities[${index}].revision`, { max: 256, optional: true });
+  const region = safeText(value.region, `productIdentities[${index}].region`, { max: 256, optional: true });
   const category = value.category === undefined ? undefined : String(value.category);
   if (category !== undefined && !PRODUCT_CATEGORIES.has(category)) {
     throw new EvidenceRepositoryError("invalid_input", `productIdentities[${index}].category is invalid`);
@@ -124,6 +134,11 @@ function normalizedIdentity(value, index) {
     ...(mpn ? { mpn } : {}),
     ...(category ? { category } : {}),
     ...(skuId ? { skuId } : {}),
+    ...(familyId ? { familyId } : {}),
+    ...(modelId ? { modelId } : {}),
+    ...(variantId ? { variantId } : {}),
+    ...(revision ? { revision } : {}),
+    ...(region ? { region } : {}),
   };
 }
 

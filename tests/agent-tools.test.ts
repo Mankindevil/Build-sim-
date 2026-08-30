@@ -6,21 +6,33 @@ import { MemoryAgentSessionStore } from "../src/agent/session-store";
 import { AgentToolRegistry } from "../src/agent/tool-registry";
 import { createBuildSimTools } from "../src/server/domain-tools";
 import { sha256Hex } from "../src/plans/canonical";
+import { authoritativeEvaluationHash } from "../src/plans/evaluation";
+import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
+import { evaluateProgressiveCompatibility } from "../src/compatibility/engine";
+import type { AuthoritativeEvaluationReceipt } from "../src/server/evaluation-service";
+import {
+  progressiveInput,
+  progressivePriceSnapshot,
+  resolvedComponent,
+} from "./helpers/progressive-evaluation-fixture";
 
 function context(): AgentToolContext {
   return { sessionId: "session-fixture", runId: "run-fixture", buildConfig: baseline as never, signal: new AbortController().signal };
 }
 
 describe("A3 Build Sim Tool registry", () => {
-  it("registers governed read/external-read tools and one approval-bound write tool", () => {
+  it("registers governed read/external-read tools and approval-bound writes", () => {
     const registry = new AgentToolRegistry(createBuildSimTools());
     expect(registry.names()).toEqual([
-      "compare_builds", "discover_official_documents", "enrich_official_catalog", "get_build_evaluation", "get_catalog_search_job", "get_evidence_document", "get_evidence_excerpt", "get_price_snapshot", "get_sku_facts", "inspect_catalog_candidate", "list_official_domain_proposals", "propose_catalog_review", "propose_plan_change", "search_catalog_skus", "search_official_catalog", "search_price_candidates",
+      "approve_agent_inference", "archive_official_evidence", "archive_user_attachment", "bind_fact_evidence", "bind_observation_attachment", "compare_builds", "discover_official_documents", "enrich_official_catalog", "get_build_evaluation", "get_catalog_search_job", "get_evidence_document", "get_evidence_excerpt", "get_price_snapshot", "get_sku_facts", "get_system_profile", "inspect_attachment", "inspect_catalog_candidate", "list_official_domain_proposals", "propose_agent_inference", "propose_catalog_review", "propose_fact_update", "propose_plan_change", "propose_user_observation", "register_provisional_case_adapter", "resolve_fact_conflict", "search_catalog_skus", "search_official_catalog", "search_price_candidates",
     ]);
-    expect(registry.catalog()).toHaveLength(16);
+    expect(registry.catalog()).toHaveLength(28);
     expect(registry.catalog().every((tool) => /^[a-f0-9]{64}$/.test(tool.definitionHash))).toBe(true);
-    expect(registry.catalog().filter((tool) => tool.effect === "write")).toEqual([expect.objectContaining({ name: "enrich_official_catalog", approval: "required" })]);
+    expect(registry.catalog().filter((tool) => tool.effect === "write").map((tool) => tool.name).sort()).toEqual([
+      "approve_agent_inference", "archive_official_evidence", "archive_user_attachment", "bind_fact_evidence", "bind_observation_attachment", "enrich_official_catalog", "propose_agent_inference", "propose_fact_update", "propose_user_observation", "register_provisional_case_adapter", "resolve_fact_conflict",
+    ]);
     expect(registry.definitions().map((tool) => tool.name)).toContain("propose_catalog_review");
+    expect(registry.definitions().map((tool) => tool.name)).toContain("inspect_attachment");
     expect(registry.definitions().map((tool) => tool.name)).not.toContain("enrich_official_catalog");
     expect(registry.definitions(new Set(["enrich_official_catalog"])).map((tool) => tool.name)).toEqual(["enrich_official_catalog"]);
   });
@@ -42,6 +54,100 @@ describe("A3 Build Sim Tool registry", () => {
     });
     const invalid = await registry.dispatch("get_build_evaluation", { sections: ["findings"], invented: true }, context());
     expect(invalid.result).toMatchObject({ ok: false, errorCode: "tool_input_invalid" });
+  });
+
+  it("returns the exact server-issued progressive V3 receipt instead of a local unknown projection", async () => {
+    const config = createEmptyBuildConfigV3("plan-agent-progressive", "Agent progressive", "2026-08-29T00:00:00.000Z");
+    config.components = [resolvedComponent("psu-agent-progressive", "psu", "psu.agent.850w")];
+    const input = await progressiveInput(config, [], [], [], progressivePriceSnapshot([{
+      skuId: "psu.agent.850w",
+      platform: "official",
+      priceCny: 899,
+      currency: "CNY",
+      listingUrl: "https://example.invalid/psu.agent.850w",
+      match: "mpn",
+      evidence: "audited",
+      priceKind: "variant",
+      variantLabel: "850W",
+    }]));
+    const evaluation = await evaluateProgressiveCompatibility(input);
+    const receipt: AuthoritativeEvaluationReceipt = {
+      schemaVersion: "authoritative-evaluation-receipt-v1",
+      planId: config.id,
+      target: { kind: "draft", draftRevision: 7 },
+      runtimeGeneration: 3,
+      preparedRevision: 10,
+      committedRevision: 11,
+      configHash: input.snapshotHashes.configHash,
+      evaluationHash: await authoritativeEvaluationHash(evaluation, input.evaluationLock),
+      evaluationLock: input.evaluationLock,
+      evaluatedAt: "2026-08-29T00:00:01.000Z",
+      evaluation,
+      catalogVersion: "progressive-agent-fixture",
+      priceSnapshotVersion: "snapshot:progressive-agent-fixture",
+      cacheStatus: "miss",
+    };
+    const evaluate = vi.fn(async () => receipt);
+    const registry = new AgentToolRegistry(createBuildSimTools({ progressiveEvaluationActions: { evaluate } }));
+    const toolContext: AgentToolContext = {
+      sessionId: "session-progressive",
+      runId: "run-progressive",
+      buildConfig: config,
+      signal: new AbortController().signal,
+    };
+    const result = await registry.dispatch(
+      "get_build_evaluation",
+      { sections: ["findings", "bom", "power", "price", "thermal", "noise"] },
+      toolContext,
+    );
+    expect(result.result).toMatchObject({
+      ok: true,
+      content: {
+        schemaVersion: "agent-progressive-evaluation-v1",
+        planId: config.id,
+        runtimeGeneration: 3,
+        configHash: input.snapshotHashes.configHash,
+        evaluationHash: receipt.evaluationHash,
+        evaluationLockHash: input.evaluationLock.contentHash,
+        sections: {
+          findings: evaluation.decisions,
+          bom: evaluation.topologyBom,
+          power: { ready: false },
+          price: { projection: { knownSubtotalCny: 899, complete: true } },
+          thermal: {
+            simulationInputHash: input.snapshotHashes.simulationInputHash,
+            workloadId: evaluation.thermalAcousticEvaluation.workloadId,
+            evaluation: {
+              displayNotice: "规划热场插值，非 CFD、非实测",
+              peakTemperatureC: evaluation.thermalAcousticEvaluation.thermal.peakTemperatureC,
+            },
+          },
+          noise: {
+            simulationInputHash: input.snapshotHashes.simulationInputHash,
+            workloadId: evaluation.thermalAcousticEvaluation.workloadId,
+            evaluation: {
+              referenceDistanceM: 1,
+              displayNotice: "标准化硬件声源结果，不代表房间或用户位置的实际噪音",
+              totalDba: evaluation.thermalAcousticEvaluation.acoustic.totalDba,
+            },
+          },
+        },
+      },
+    });
+    expect(result.result.provenance).toEqual(expect.arrayContaining([
+      `evaluation-lock:${input.evaluationLock.contentHash}`,
+      evaluation.priceProjection.priceSnapshotRef,
+    ]));
+    expect(evaluate).toHaveBeenCalledOnce();
+
+    const stale = new AgentToolRegistry(createBuildSimTools({
+      progressiveEvaluationActions: { evaluate: async () => ({ ...receipt, configHash: "0".repeat(64) }) },
+    }));
+    expect((await stale.dispatch("get_build_evaluation", { sections: ["price"] }, toolContext)).result).toMatchObject({
+      ok: false,
+      errorCode: "tool_execution_failed",
+      message: expect.stringContaining("does not match the active BuildConfig"),
+    });
   });
 
   it("compares a candidate copy without mutating the active BuildConfig", async () => {

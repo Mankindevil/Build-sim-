@@ -13,6 +13,8 @@ export interface PriceObservation {
   sellerId?: string;
   sellerName?: string;
   sellerTier: SellerTier;
+  /** Persisted proof for every non-unknown seller tier. */
+  sellerTierEvidenceRefs: string[];
   condition: "new";
   stockStatus: "in_stock" | "seller_claimed" | "unknown";
   priceCny: number;
@@ -48,6 +50,9 @@ export interface ImmutableListingCapture {
   canonicalUrl: string;
   capturedAt: string;
   recheckedAt?: string;
+  /** Exact immutable price-server capture used to derive this governed record. */
+  sourceListingCaptureId?: string;
+  sourceListingCaptureContentHash?: string;
   contentHash: string;
 }
 
@@ -105,7 +110,7 @@ export interface PriceTargetEvent {
 
 export interface JobSchedule {
   scheduleId: string;
-  jobType: "price_target_recheck" | "official_update_scan";
+  jobType: "price_target_recheck" | "price_history_rebuild" | "official_update_scan";
   subjectRef: string;
   cadenceSeconds: number;
   nextRunAt: string;
@@ -133,6 +138,7 @@ export function validateImmutableListingCapture(value: unknown): string[] {
     "schemaVersion", "listingCaptureId", "skuId", "variantIdentityFactIds", "platform", "sellerId", "sellerName", "sellerTier",
     "condition", "stockStatus", "priceCny", "shippingCny", "comparableTotalCny", "requiredDiscountConditions", "invoiceStatus",
     "warrantyStatus", "canonicalUrl", "capturedAt", "recheckedAt", "contentHash",
+    "sourceListingCaptureId", "sourceListingCaptureContentHash",
   ];
   if (Object.keys(value).some((key) => !allowed.includes(key))) errors.push("listing capture contains unknown fields");
   if (capture.schemaVersion !== "listing-capture-v1" || !capture.listingCaptureId || !capture.skuId || !isSha256Hex(capture.contentHash)) errors.push("listing capture identity/content hash invalid");
@@ -154,6 +160,11 @@ export function validateImmutableListingCapture(value: unknown): string[] {
     && capture.comparableTotalCny !== capture.priceCny + (capture.shippingCny ?? 0)) errors.push("listing capture comparable total invalid");
   if (!/^https:\/\//.test(String(capture.canonicalUrl)) || !Number.isFinite(Date.parse(capture.capturedAt))) errors.push("listing capture URL/time invalid");
   if (capture.recheckedAt !== undefined && (!Number.isFinite(Date.parse(capture.recheckedAt)) || Date.parse(capture.recheckedAt) < Date.parse(capture.capturedAt))) errors.push("listing capture recheck time invalid");
+  if ((capture.sourceListingCaptureId === undefined) !== (capture.sourceListingCaptureContentHash === undefined)
+    || (capture.sourceListingCaptureId !== undefined && !/^listing-capture-[a-f0-9]{20}$/.test(capture.sourceListingCaptureId))
+    || (capture.sourceListingCaptureContentHash !== undefined && !isSha256Hex(capture.sourceListingCaptureContentHash))) {
+    errors.push("listing capture source closure invalid");
+  }
   return errors;
 }
 
@@ -171,6 +182,12 @@ export function validatePriceObservationWithResolvedCaptures(value: unknown, lis
   const observation = value as unknown as PriceObservation;
   const errors: string[] = [];
   if (!observation.observationId || !observation.skuId || !Array.isArray(observation.variantIdentityFactIds) || observation.variantIdentityFactIds.length === 0 || observation.variantIdentityFactIds.some((id) => !id) || new Set(observation.variantIdentityFactIds).size !== observation.variantIdentityFactIds.length || !observation.listingCaptureId) errors.push("price observation identity/capture fields missing or invalid");
+  if (!Array.isArray(observation.sellerTierEvidenceRefs)
+    || observation.sellerTierEvidenceRefs.some((ref) => typeof ref !== "string" || !ref)
+    || new Set(observation.sellerTierEvidenceRefs).size !== observation.sellerTierEvidenceRefs.length
+    || (observation.sellerTier === "unknown" ? observation.sellerTierEvidenceRefs.length !== 0 : observation.sellerTierEvidenceRefs.length === 0)) {
+    errors.push("price observation seller tier evidence closure invalid");
+  }
   const capture = typeof listingCaptures?.get === "function" ? listingCaptures.get(observation.listingCaptureId) : undefined;
   if (!capture) {
     errors.push("price observation is not derived from a saved immutable server listing capture");

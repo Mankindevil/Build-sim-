@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planPanelWiring } from "../src/wiring/panel";
+import { N6_WIRING_PROFILE, planN6PanelWiring as planPanelWiring } from "../src/adapters/jonsbo-n6/assembly";
+import { planPanelWiring as planCasePanelWiring } from "../src/wiring/panel";
 import { loadRawCatalog } from "../src/sku/catalog";
 import type { BuildConfig, PsuTopology } from "../src/config/types";
 
@@ -106,6 +107,16 @@ describe("panel socket plan", () => {
       catalog,
     );
     expect(plan.psuId).toBe("psu.corsair-sf750-atx31");
+    expect(plan.cables.some((cable) => ["mb", "cpu", "pcie", "12v2x6", "sense"].includes(cable.kind))).toBe(false);
+    expect(plan.notes.join()).toContain("主板、CPU 与 GPU 线保留在主电源面板");
+  });
+
+  it.each(["m2", "usbssd"] as const)("does not consume or report backplane leads for zero HDD + %s boot", (boot) => {
+    const plan = planPanelWiring(config({ diskCount: 0, boot }), catalog);
+    expect(plan.inlets).toEqual([]);
+    expect(plan.cables.some((cable) => ["sata", "molex", "mixed"].includes(cable.kind))).toBe(false);
+    expect(plan.unmet).toEqual([]);
+    expect(plan.notes.join()).not.toMatch(/背板口|加购.*外围线|Molex.*少/);
   });
 
   it("adds a PCIe cable only when a GPU is selected", () => {
@@ -113,5 +124,18 @@ describe("panel socket plan", () => {
     const withGpu = planPanelWiring(config({ gpuId: "gpu.rtx-a4000-16gb" }), catalog);
     expect(none.cables.some((c) => c.kind === "pcie")).toBe(false);
     expect(withGpu.cables.some((c) => c.kind === "pcie")).toBe(true);
+  });
+
+  it("assigns cables to the adapter-declared interleaved inlet order", () => {
+    const plan = planCasePanelWiring(config(), catalog, {
+      ...N6_WIRING_PROFILE,
+      backplanePower: {
+        ...N6_WIRING_PROFILE.backplanePower,
+        inletOrder: ["sata", "molex", "sata", "molex"],
+      },
+    });
+    expect(plan.inlets.map((inlet) => inlet.connector)).toEqual(["sata", "molex", "sata", "molex"]);
+    expect(plan.inlets[3]?.shared).toBe(true);
+    expect(plan.inlets[3]?.cableId).toBe(plan.inlets[1]?.cableId);
   });
 });

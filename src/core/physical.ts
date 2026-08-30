@@ -1,9 +1,8 @@
 import type { BuildConfig } from "../config/types";
 import type { EngineFinding } from "./engine";
-import type { PlacedPart, Vec3 } from "./geometry";
+import type { CenteredBox, PlacedPart, Vec3 } from "./geometry";
 import { maxOn, minOn } from "./geometry";
-import { N6_INTERIOR_BOX } from "../adapters/jonsbo-n6/geometry";
-import type { N6Routing } from "../adapters/jonsbo-n6/routing";
+import type { RoutedCable } from "./routing";
 import type { SkuCatalog } from "../sku/types";
 import type { WiringPlan } from "../wiring/types";
 
@@ -48,6 +47,9 @@ export interface PhysicalEvaluation {
 
 export interface PhysicalOptions {
   gpuRotationDeg?: number;
+  /** Adapter-issued usable volume. Omit when the geometry domain cannot prove one. */
+  interiorBox?: CenteredBox;
+  provenance?: readonly string[];
 }
 
 /** Plan identity, display metadata and persistence timestamps are not physical inputs. */
@@ -91,16 +93,16 @@ function obbCorners(obb: OBB2D): [number, number][] {
   ] as [number, number]));
 }
 
-function obbOutsideCase(obb: OBB2D): boolean {
+function obbOutsideCase(obb: OBB2D, interiorBox: CenteredBox): boolean {
   const corners = obbCorners(obb);
-  const xLo = minOn(N6_INTERIOR_BOX, "x");
-  const xHi = maxOn(N6_INTERIOR_BOX, "x");
-  const zLo = minOn(N6_INTERIOR_BOX, "z");
-  const zHi = maxOn(N6_INTERIOR_BOX, "z");
+  const xLo = minOn(interiorBox, "x");
+  const xHi = maxOn(interiorBox, "x");
+  const zLo = minOn(interiorBox, "z");
+  const zHi = maxOn(interiorBox, "z");
   return corners.some(([x, z]) => x < xLo || x > xHi || z < zLo || z > zHi);
 }
 
-function bendRadius(cable: N6Routing["cables"][number]): number | null {
+function bendRadius(cable: RoutedCable): number | null {
   const points = cable.route?.polyline ?? [];
   if (points.length < 3) return cable.route ? Infinity : null;
   let available = Infinity;
@@ -115,7 +117,7 @@ function bendRadius(cable: N6Routing["cables"][number]): number | null {
   return Number.isFinite(available) ? Math.round(available * 10) / 10 : null;
 }
 
-function requiredBendRadius(kind: N6Routing["cables"][number]["kind"]): number {
+function requiredBendRadius(kind: RoutedCable["kind"]): number {
   return kind === "power" ? 25 : kind === "data" ? 15 : 10;
 }
 
@@ -123,7 +125,7 @@ export function evaluatePhysicalConstraints(
   config: BuildConfig,
   catalog: SkuCatalog,
   parts: PlacedPart[],
-  routing: N6Routing,
+  routing: { cables: RoutedCable[] },
   wiring: WiringPlan,
   options: PhysicalOptions = {},
 ): PhysicalEvaluation {
@@ -134,7 +136,7 @@ export function evaluatePhysicalConstraints(
     ? (() => {
         const obb = gpuObb(gpu, angleDeg);
         const projected = obbProjectedExtents(obb);
-        if (obbOutsideCase(obb)) findings.push({ id: "physical.gpu-obb-case", verdict: "warn", evidence: "inferred", message: `GPU OBB 旋转 ${angleDeg}° 后的包络超出机箱规划内框；旋转角、挡板和线材净空需要实装复核。`, related: [gpu.id, config.caseId] });
+        if (options.interiorBox && obbOutsideCase(obb, options.interiorBox)) findings.push({ id: "physical.gpu-obb-case", verdict: "warn", evidence: "inferred", message: `GPU OBB 旋转 ${angleDeg}° 后的包络超出机箱规划内框；旋转角、挡板和线材净空需要实装复核。`, related: [gpu.id, config.caseId] });
         return { obb, projectedWidthMm: projected.widthMm, projectedDepthMm: projected.depthMm, angleDeg };
       })()
     : undefined;
@@ -157,14 +159,16 @@ export function evaluatePhysicalConstraints(
   const slotEvidence = gpuSlots === null ? "unknown" : "standard";
   if (hbaPresent && gpuSlots !== null && gpuSlots > 2) findings.push({ id: "physical.slot-width-hba", verdict: "bad", evidence: "standard", message: `GPU 约 ${gpuSlots} 槽且 HBA 占用第二扩展位；槽宽不允许两者同时规划。`, related: [gpu?.id ?? "gpu.none", "hba"] });
   const nvmeCount = config.selection.nvmeCount ?? 0;
-  const m2Slots = 2;
+  const board = catalog.skus.find((sku) => sku.id === config.boardId);
+  const catalogM2Slots = Number(board?.attrs?.m2Slots);
+  const m2Slots = Number.isFinite(catalogM2Slots) && catalogM2Slots >= 0 ? catalogM2Slots : 0;
   const slimSasClaimed = nvmeCount > m2Slots;
   const laneEvidence = "standard" as const;
   if (slimSasClaimed && !hbaPresent) findings.push({ id: "physical.lane-slimsas", verdict: "warn", evidence: "standard", message: `NVMe ${nvmeCount} 块超过 ${m2Slots} 个 M.2 槽，额外设备占用 SlimSAS；主板 SATA lane 与 HBA 需求需复核。`, related: [config.boardId] });
   const minimumInsertionMm = plugSweeps.length ? Math.min(...plugSweeps.map((sweep) => sweep.sweep.w + sweep.sweep.h + sweep.sweep.d).filter(Number.isFinite)) : null;
   if (!wiring.checklist.length) findings.push({ id: "physical.service-space-checklist", verdict: "warn", evidence: "unknown", message: "接线服务空间清单为空，无法证明维护时的插拔通道。", related: [config.caseId] });
 
-  const provenance = ["case.jonsbo-n6/geometry.json", "case.jonsbo-n6/routing.json", "BuildEvaluation.wiring", PHYSICAL_RULESET_VERSION];
+  const provenance = [...(options.provenance ?? ["BuildEvaluation.geometry", "BuildEvaluation.routing"]), "BuildEvaluation.wiring", PHYSICAL_RULESET_VERSION];
   const result: PhysicalEvaluation = {
     schemaVersion: "1.0.0",
     rulesetVersion: PHYSICAL_RULESET_VERSION,

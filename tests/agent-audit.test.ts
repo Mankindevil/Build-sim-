@@ -19,6 +19,7 @@ function approval(overrides: Partial<AgentWriteApprovalEnvelope> = {}): AgentWri
     toolName: "apply_build_patch",
     toolDefinitionHash: "a".repeat(64),
     sessionId: "session-fixture-001",
+    runId: "run-fixture-001",
     inputHash: "b".repeat(64),
     idempotencyKey: "idempotency-fixture-001",
     issuedAt: "2026-08-24T00:00:00.000Z",
@@ -35,8 +36,8 @@ describe("A6 write approval contract", () => {
   it("requires a short-lived, execution-bound, idempotent approval with backup and rollback", () => {
     const valid = approval();
     expect(validateWriteApprovalEnvelope(valid, new Date("2026-08-24T00:05:00.000Z"))).toEqual([]);
-    expect(approvalMatchesExecution(valid, { toolName: valid.toolName, toolDefinitionHash: valid.toolDefinitionHash, sessionId: valid.sessionId, inputHash: valid.inputHash })).toBe(true);
-    expect(approvalMatchesExecution(valid, { toolName: valid.toolName, toolDefinitionHash: valid.toolDefinitionHash, sessionId: valid.sessionId, inputHash: "c".repeat(64) })).toBe(false);
+    expect(approvalMatchesExecution(valid, { toolName: valid.toolName, toolDefinitionHash: valid.toolDefinitionHash, sessionId: valid.sessionId, runId: valid.runId, inputHash: valid.inputHash })).toBe(true);
+    expect(approvalMatchesExecution(valid, { toolName: valid.toolName, toolDefinitionHash: valid.toolDefinitionHash, sessionId: valid.sessionId, runId: valid.runId, inputHash: "c".repeat(64) })).toBe(false);
     expect(validateWriteApprovalEnvelope(approval({ expiresAt: "2026-08-24T01:00:00.000Z", backup: undefined as never }), new Date("2026-08-24T00:05:00.000Z"))).toEqual(expect.arrayContaining(["approval lifetime exceeds 15 minutes", "approval backup plan required"]));
     expect(validateWriteApprovalEnvelope(valid, new Date("2026-08-24T00:11:00.000Z"))).toContain("approval expired");
   });

@@ -41,7 +41,9 @@ describe("U1 production runtime composition and CLIs", () => {
     const missing = { ...missingBase, graphHash: portableReferenceGraphHash(missingBase) };
     expect(verifyProductionReferenceGraph(missing, await coordinator.readState())).toContain("reference graph production provider coverage incomplete");
 
-    await coordinator.withWrite(async ({ activeRoot }: { activeRoot: string }) => atomicWriteJson(confined(activeRoot, "facts", "revision.json"), { schemaVersion: "fixture-v1" }));
+    // Facts are now an explicit fail-closed authority. Use the intentionally
+    // generic config inventory to advance the revision without forging one.
+    await coordinator.withWrite(async ({ activeRoot }: { activeRoot: string }) => atomicWriteJson(confined(activeRoot, "config", "revision.json"), { schemaVersion: "fixture-v1" }));
     await expect(createBackup({ coordinator, outputFile: path.join(root, "stale.backup"), password: "a sufficiently long password", referenceGraph: graph })).rejects.toThrow(/caller reference graph is stale/);
   });
 
@@ -143,6 +145,20 @@ describe("U1 production runtime composition and CLIs", () => {
     await expect(createBackup({ coordinator: ninth.coordinator, outputFile: path.join(ninth.root, "forged-transaction-rollback.backup"), password: "a sufficiently long password" })).rejects.toThrow(/private, or invalid/);
     await writeRollback({ ...settledEntry, source: "quarantine/receipt-private-source.json" });
     await expect(createBackup({ coordinator: ninth.coordinator, outputFile: path.join(ninth.root, "forged-transaction-source.backup"), password: "a sufficiently long password" })).rejects.toThrow(/private, or invalid/);
+
+    const tenth = await runtime(); const tenthState = await tenth.coordinator.readState();
+    const forgedPlanContext = {
+      schemaVersion: "1.0.0", sessionId: "session-forged", runId: "run-forged-context", planId: "plan-forged-context",
+      planVersionId: null, draftRevision: 0, configHash: "a".repeat(64), evaluationHash: "b".repeat(64),
+      spatialSelection: null, contextHash: "c".repeat(64), recordedAt: "2026-08-27T00:00:00.000Z",
+      browserSuppliedAuthority: true,
+    };
+    await atomicWriteJson(confined(tenth.coordinator.activeRoot(tenthState), "audit", "plan-agent-context", "run-forged-context.json"), {
+      schemaVersion: "plan-agent-context-audit-envelope-v1", kind: "plan-agent-context-audit",
+      checksum: sha256Json(forgedPlanContext), payload: forgedPlanContext,
+    });
+    await expect(createBackup({ coordinator: tenth.coordinator, outputFile: path.join(tenth.root, "forged-plan-context.backup"), password: "a sufficiently long password" }))
+      .rejects.toThrow(/plan Agent context audit fields invalid/);
   });
 
   it("Doctor generates its own graph and rejects a persisted stale revision without writing", async () => {

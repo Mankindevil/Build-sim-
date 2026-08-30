@@ -55,6 +55,9 @@ describe("Osaka lifecycle deployment", () => {
     expect(script).toContain("build-sim-runtime:rollback");
     expect(script).toContain("BUILD_SIM_HEALTH_ATTEMPTS");
     expect(script).toContain("restore_previous_release");
-    expect(script).toContain("/api/workspace/plans");
+    expect(script).toContain("/api/workspace/health");
+    expect(script).toContain("scripts/backup/create.mjs");
+    expect(script).toContain("scripts/backup/verify.mjs");
+    expect(script).toContain("scripts/doctor.mjs --runtime-root /app/runtime --strict");
   });
 });

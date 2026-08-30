@@ -15,6 +15,19 @@
 | `…/08/20/rollout-…-01a01e45-…` / `01a01ec2` / `01a01ed6` | Large forked build sessions |
 | `…/08/20/rollout-…-01a01e16-…` | Full layout / power / alternatives |
 
+## Universal-platform authority provenance (2026-08-30)
+
+The U0-U12 implementation no longer treats this document or a checked-in SKU row as runtime authority. Production conclusions are reconstructible through these persisted layers:
+
+1. `EvidenceDocument`/`EvidenceCapture` retains exact bytes, retrieval identity, bounded locators, and content hashes. Official and third-party promotion records keep their reviewed candidate and durable approval bindings.
+2. `EvidenceClaim`, `FactRecord`, `UserObservation`, and their immutable snapshots retain subject identity, scope, field/value/unit, source references, and lifecycle status. Inference facts additionally close over the reviewed candidate, executed implementation bytes, trace, and approval transaction.
+3. `CaseAdapterManifest`, `CaseRuntimeModel`, capability/provider/standard manifests, rule sets, and engine implementations are stored as exact artifacts. Their raw bytes and transitive implementation hashes enter `ArtifactLockfile`.
+4. `PlanVersion` stores the exact config, `EvaluationLock`, evaluation hash, and evaluated target. The receipt closes over FactSnapshot, UserObservationSnapshot, price, scenario/simulation input, adapter, and every replay-required artifact.
+5. Price captures, observations, immutable history points, current snapshots, target revisions/events/schedules, solver candidates, promotion records, decisions, execution checkpoints, and recommendations keep their own content-addressed input closure rather than copying prose conclusions.
+6. The production reference graph is the common validation boundary for Doctor, backup verification, restore staging, portability, and garbage-collection reachability.
+
+Local release evidence is recorded in `docs/superpowers/reports/`. Fixtures prove deterministic behavior and failure handling; they are not evidence of current retail availability or physical measurements. The required independent ATX/ITX/NAS physical holdouts for clearance, minimum cable length, temperature interval, and standardized hardware-acoustic interval are not present in this repository as of 2026-08-30, so production-default rollout remains blocked on those measurements.
+
 ## Locked purchased anchors (user transaction prices)
 
 | Part | Paid (CNY) | Notes |

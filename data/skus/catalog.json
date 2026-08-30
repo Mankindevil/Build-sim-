@@ -1192,7 +1192,8 @@
       ],
       "attrs": {
         "vramGb": 16,
-        "cooling": "single-slot blower"
+        "cooling": "single-slot blower",
+        "requiresHbaCoexistenceReview": true
       },
       "appearance": {
         "image": "assets/official/a4000.jpg",

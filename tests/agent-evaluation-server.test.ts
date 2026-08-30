@@ -4,17 +4,21 @@ import { authoritativeEvaluationPayload } from "../src/agent/evaluation-contract
 import { evaluateBuild } from "../src/core/evaluate";
 import { loadBundledCatalog } from "../src/sku/catalog";
 import { handleAgentRoute } from "../src/server/agent-server";
-import { evaluateBuildAuthoritatively, evaluateBuildDocumentAuthoritatively, sha256AgentValue } from "../src/server/evaluation-service";
+import { evaluateBuildAuthoritatively, evaluateBuildDocumentAuthoritatively, loadAuthoritativeCatalog, sha256AgentValue } from "../src/server/evaluation-service";
 import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
 import { configV3Hash } from "../src/topology/hash";
 import { sha256Hex } from "../src/plans/canonical";
+import { CaseRuntimeAdapterRegistry } from "../src/adapters/runtime";
+import { createLegacyV2CaseRuntimeRegistry } from "../src/adapters/legacy-runtime-bootstrap";
+import { createDefaultN6Config } from "../src/plans/default-plan";
 
 describe("A1 authoritative server evaluation", () => {
   it("hashes exactly the same BuildEvaluation payload the browser consumes", () => {
-    const browserEvaluation = evaluateBuild(baseline as never, loadBundledCatalog());
-    const serverEvaluation = evaluateBuildAuthoritatively(baseline);
-    expect(serverEvaluation.evaluationHash).toBe(sha256AgentValue(authoritativeEvaluationPayload(browserEvaluation)));
+    const catalog = loadAuthoritativeCatalog();
+    const browserEvaluation = evaluateBuild(baseline as never, catalog);
+    const serverEvaluation = evaluateBuildAuthoritatively(baseline, catalog);
     expect(serverEvaluation.evaluation).toEqual(browserEvaluation);
+    expect(serverEvaluation.evaluationHash).toBe(sha256AgentValue(authoritativeEvaluationPayload(browserEvaluation)));
     expect(serverEvaluation.catalogVersion).toBe("2.0.0");
     expect(serverEvaluation.priceSnapshotVersion).toBe("1.0.0:2026-08-21");
   });
@@ -32,6 +36,16 @@ describe("A1 authoritative server evaluation", () => {
     expect(payload.evaluation.config).toEqual(baseline);
     expect(handleAgentRoute("GET", "/api/agent/health").status).toBe(200);
     expect(handleAgentRoute("GET", "/missing").status).toBe(404);
+  });
+
+  it("validates V2 fan mounts against the exact caller-scoped runtime registry", () => {
+    const config = createDefaultN6Config("plan-agent-runtime-12345678", "2026-08-29T00:00:00.000Z");
+    expect(() => evaluateBuildDocumentAuthoritatively(config, loadBundledCatalog(), {
+      caseRuntimeRegistry: CaseRuntimeAdapterRegistry.create(),
+    })).toThrow(/风扇安装位|fan/i);
+    expect(evaluateBuildDocumentAuthoritatively(config, loadBundledCatalog(), {
+      caseRuntimeRegistry: createLegacyV2CaseRuntimeRegistry(),
+    })).toMatchObject({ evaluation: { config: { selection: { fanGroups: config.selection.fanGroups } } } });
   });
 
   it("returns only topology BOM plus explicit unknown domains for BuildConfig V3", async () => {

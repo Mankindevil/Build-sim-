@@ -109,6 +109,51 @@ describe("U0 build execution contracts", () => {
     expect(unscopedSafety.powerReady).toBe(false);
   });
 
+  it("rejects duplicate satisfaction and checkpoint identities independent of array order", () => {
+    const requirement = {
+      requirementId: "eps", kind: "cable" as const, predicates: [], quantity: 1,
+      criticality: "safety" as const, requiredBefore: "pre_power" as const,
+      producedBy: { ruleId: "eps", ruleVersion: "1", instanceIds: [] }, evidenceRefs: [],
+    };
+    const open = { requirementId: "eps", status: "open" as const, allocations: [], residualQuantity: 1 };
+    const satisfied = {
+      requirementId: "eps", status: "satisfied" as const, residualQuantity: 0,
+      allocations: [{
+        source: "component" as const, refId: "eps-cable", quantity: 1,
+        availability: "present_verified" as const, verificationStatus: "verified" as const,
+        evidenceRefs: ["fact-eps"], observationRefs: ["observation:obs-eps"],
+      }],
+    };
+    const base = {
+      requirementNodes: [requirement],
+      checkpointRecords: [],
+      checkpointContext: {
+        planVersionId: "v1", procedureId: "procedure", procedureSafetyHash: digest("b"), expectedDependencyHashes: {},
+      },
+      requiredCheckpointIds: {
+        assembly: [], power: [], post: [], systemInstall: [], workload: [], destructive: [],
+      },
+    };
+    for (const satisfactions of [[open, satisfied], [satisfied, open]]) {
+      expect(() => deriveBuildReadiness({ ...base, satisfactions })).toThrow(/exactly one entry per requirement/);
+    }
+
+    const checkpointA = {
+      checkpointId: "shared-checkpoint", requirementId: "gate-a", planVersionId: "v1", procedureId: "procedure",
+      dependencyHash: digest("7"), procedureSafetyHash: digest("b"), confirmedAt: "2026-08-27T00:00:00.000Z", actor: "user" as const,
+    };
+    const checkpointB = { ...checkpointA, requirementId: "gate-b" };
+    const checkpointBase = {
+      ...base,
+      satisfactions: [open],
+      checkpointContext: { ...base.checkpointContext, expectedDependencyHashes: { "shared-checkpoint": digest("7") } },
+    };
+    for (const checkpointRecords of [[checkpointA, checkpointB], [checkpointB, checkpointA]]) {
+      expect(() => deriveBuildReadiness({ ...checkpointBase, checkpointRecords }))
+        .toThrow(/checkpointId values must be globally unique/);
+    }
+  });
+
   it("derives readiness only from a resolver-issued evaluator snapshot", async () => {
     const inputs = {
       requirementNodes: [], satisfactions: [], checkpointRecords: [],

@@ -1,7 +1,7 @@
 import type { BuildConfigDocument } from "../config/types";
 import type { PlanEvidenceBinding } from "../evidence/contracts";
 import { deepReadonly, hashPlanConfig, sha256Hex } from "./canonical";
-import { PLAN_SCHEMA_VERSION, type PlanVersion, type PlanVersionReason } from "./contracts";
+import { PLAN_SCHEMA_VERSION, type PlanEvaluationLock, type PlanVersion, type PlanVersionReason } from "./contracts";
 import { assertValidPlanVersion } from "./validation";
 
 export interface CreatePlanVersionInput<TConfig extends BuildConfigDocument = BuildConfigDocument> {
@@ -13,6 +13,7 @@ export interface CreatePlanVersionInput<TConfig extends BuildConfigDocument = Bu
   summary?: string;
   evaluationHash?: string;
   evaluatedAt?: string;
+  evaluationLock?: PlanEvaluationLock;
   config: TConfig;
   evidenceBindings?: readonly PlanEvidenceBinding[];
   parentVersionId: string | null;
@@ -39,6 +40,7 @@ export async function createImmutablePlanVersion<TConfig extends BuildConfigDocu
     evidenceHash: await sha256Hex(evidenceBindings),
     ...(input.evaluationHash ? { evaluationHash: input.evaluationHash } : {}),
     ...(input.evaluatedAt ? { evaluatedAt: input.evaluatedAt } : {}),
+    ...(input.evaluationLock ? { evaluationLock: structuredClone(input.evaluationLock) } : {}),
     parentVersionId: input.parentVersionId,
   };
   assertValidPlanVersion(version);

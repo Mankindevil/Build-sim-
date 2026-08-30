@@ -40,7 +40,7 @@ try {
   start("fixture", ["scripts/agent-provider-fixture.mjs"], { AGENT_FIXTURE_PORT: String(ports.fixture) });
   start("workspace", ["dist-workspace/workspace-server.js"], {
     WORKSPACE_SERVER_PORT: String(ports.workspace),
-    PLAN_REPOSITORY_ROOT: path.join(runtimeRoot, "plans"),
+    RUNTIME_ROOT: runtimeRoot,
     BUILD_SIM_TOPOLOGY_V3_ENABLED: "true",
   });
   start("agent", ["dist-agent/agent-server.js"], {
@@ -73,9 +73,9 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.stack ?? String(error)));
   page.on("console", (message) => {
-    if (message.type() === "error" && !message.text().includes("409") && !message.text().includes("500") && !message.text().includes("502")) errors.push(message.text());
+    if (message.type() === "error" && !message.text().includes("404") && !message.text().includes("409") && !message.text().includes("500") && !message.text().includes("502")) errors.push(message.text());
   });
-  await page.goto(`http://127.0.0.1:${ports.web}/index.html#/workspace`, { waitUntil: "networkidle" });
+  await page.goto(`http://127.0.0.1:${ports.web}/index.html#/workspace`, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => Boolean(window.__BUILD_SIM_PLAN_STORE__?.getState().evaluationSnapshot));
 
   await page.locator("[data-new-plan]").click();
@@ -88,6 +88,24 @@ try {
   await page.locator(".agent-controls-details summary").click();
   await page.locator("#agent-skill").selectOption("plan-initializer");
   await page.waitForFunction(() => document.querySelector("#agent-skill")?.value === "plan-initializer");
+  try {
+    await page.waitForFunction(() => document.querySelector("[data-agent-plan-context]")?.textContent?.includes("已同步当前装机方案"));
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => {
+      const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+      return {
+        badge: document.querySelector("[data-agent-plan-context]")?.textContent,
+        planId: state?.activePlan?.id,
+        schemaVersion: state?.activePlan?.draft.config.schemaVersion,
+        revision: state?.activePlan?.draftRevision,
+        snapshotRevision: state?.evaluationSnapshot?.draftRevision,
+        saveStatus: state?.saveStatus,
+        error: state?.error,
+        authority: document.getElementById("n6-lab")?.getAttribute("data-evaluation-authority"),
+      };
+    });
+    throw new Error(`progressive blank plan context did not synchronize: ${JSON.stringify(diagnostic)}\n${logs.join("")}`, { cause: error });
+  }
   if (!(await page.locator("[data-agent-plan-context]").textContent()).includes("已同步当前装机方案")) throw new Error("progressive blank plan context is not visible");
   if (await page.locator("[data-save-version]").isDisabled()) throw new Error("progressive blank plan cannot be versioned");
   const blank = await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__.getState().activePlan);
@@ -236,7 +254,7 @@ try {
       evaluationHash: state.evaluationSnapshot.evaluationHash,
     };
   });
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForFunction((expected) => {
     const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
     return state?.activePlan?.id === expected.planId

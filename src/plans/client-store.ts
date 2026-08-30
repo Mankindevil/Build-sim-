@@ -6,7 +6,7 @@ import type { WorkspacePlanApi } from "./client";
 import { WorkspaceApiError } from "./client";
 import { migrateLegacyProgress, type KeyValueStorage } from "./migration";
 import { validateBuildPlan } from "./validation";
-import { isPlanPartialEvaluationV3 } from "./evaluation";
+import { isTopologyEvaluationV3 } from "./evaluation";
 
 export const ACTIVE_PLAN_KEY = "build-sim.workspace.active-plan.v1";
 const CACHE_PREFIX = "build-sim.workspace.plan-cache.v1:";
@@ -208,6 +208,10 @@ export class PlanStore {
     plan.draft.config = next;
     plan.draft.dirty = true;
     plan.draft.updatedAt = new Date().toISOString();
+    // A local edit changes the semantic config before the repository revision
+    // advances. Never let the prior server receipt survive that window.
+    this.state.evaluationSnapshot = null;
+    this.state.evaluation = null;
     this.state.localRevision += 1;
     this.state.saveStatus = this.state.offline ? "offline" : "dirty";
     this.state.error = null;
@@ -267,8 +271,8 @@ export class PlanStore {
     const config = clone(plan.draft.config);
     const token = this.changeToken;
     this.state.saveStatus = "saving";
-    this.emit();
-    this.saveInFlight = this.options.api.updateDraft(planId, {
+    let pending!: Promise<BuildPlan | null>;
+    pending = this.options.api.updateDraft(planId, {
       expectedRevision,
       config,
       idempotencyKey: `draft-${planId}-${expectedRevision}-${token}`,
@@ -307,8 +311,14 @@ export class PlanStore {
         this.emit();
       }
       return null;
-    }).finally(() => { this.saveInFlight = null; });
-    return this.saveInFlight;
+    }).finally(() => {
+      if (this.saveInFlight === pending) this.saveInFlight = null;
+    });
+    // Install the re-entrancy guard before publishing the "saving" state.
+    // Evaluation subscribers may synchronously call saveDraftNow() again.
+    this.saveInFlight = pending;
+    this.emit();
+    return pending;
   }
 
   async saveVersion(reason: PlanVersionReason = "manual-save", summary?: string): Promise<PlanVersion> {
@@ -323,12 +333,23 @@ export class PlanStore {
       ...(this.state.evaluationSnapshot?.configHash === await hashPlanConfig(plan.draft.config) ? {
         evaluationHash: this.state.evaluationSnapshot.evaluationHash,
         evaluatedAt: this.state.evaluationSnapshot.evaluatedAt,
+        ...(this.state.evaluationSnapshot.evaluationLock
+          ? { evaluationLock: clone(this.state.evaluationSnapshot.evaluationLock) }
+          : {}),
       } : {}),
       idempotencyKey: `version-${plan.id}-${plan.draftRevision}-${await hashPlanConfig(plan.draft.config)}`,
     });
     plan.activeVersionId = version.id;
     plan.draft.baseVersionId = version.id;
     plan.draft.dirty = false;
+    const snapshot = this.state.evaluationSnapshot;
+    const snapshotLock = snapshot?.evaluationLock;
+    if (snapshot && snapshotLock && version.evaluationHash && version.evaluationLock
+      && snapshot.planId === version.planId && snapshot.configHash === version.configHash
+      && snapshot.evaluationHash === version.evaluationHash
+      && snapshotLock.contentHash === version.evaluationLock.contentHash) {
+      this.state.evaluationSnapshot = { ...snapshot, planVersionId: version.id };
+    }
     this.state.saveStatus = "clean";
     this.replaceSummary(plan);
     this.cache(plan);
@@ -336,7 +357,7 @@ export class PlanStore {
     return version;
   }
 
-  async create(name: string, config: BuildConfig, metadata?: BuildPlan["metadata"]): Promise<BuildPlan> {
+  async create(name: string, config: BuildConfigDocument, metadata?: BuildPlan["metadata"]): Promise<BuildPlan> {
     const plan = await this.options.api.create({ name, config, ...(metadata ? { metadata } : {}), idempotencyKey: `create-${crypto.randomUUID()}` });
     this.state.plans.push(summary(plan));
     await this.activate(plan.id, true);
@@ -421,7 +442,7 @@ export class PlanStore {
   setEvaluationSnapshot(snapshot: PlanEvaluationSnapshot): void {
     if (snapshot.planId !== this.state.activePlan?.id || snapshot.draftRevision !== this.state.activePlan.draftRevision) return;
     this.state.evaluationSnapshot = snapshot;
-    this.state.evaluation = isPlanPartialEvaluationV3(snapshot.evaluation) ? null : snapshot.evaluation;
+    this.state.evaluation = isTopologyEvaluationV3(snapshot.evaluation) ? null : snapshot.evaluation;
     this.emit();
   }
 

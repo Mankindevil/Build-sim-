@@ -396,6 +396,16 @@ export class FileJobRepository {
     return (await this.coordinator.withConsistentSnapshot(async ({ activeRoot }: RuntimeOperationContext) => this.listStoredJobs(activeRoot))).result;
   }
 
+  /** Root-pinned read used by server-owned aggregate projections. */
+  async getAtRoot(activeRoot: string, jobId: string): Promise<BackgroundJob> {
+    return clone(await this.readStoredJob(activeRoot, jobId));
+  }
+
+  /** Root-pinned read used by server-owned aggregate projections. */
+  async listAtRoot(activeRoot: string): Promise<BackgroundJob[]> {
+    return clone(await this.listStoredJobs(activeRoot));
+  }
+
   /** Called from a RuntimeCoordinator consistent-snapshot barrier; it never reacquires the lock or writes. */
   async snapshotReferences(activeRoot: string): Promise<{
     providerId: "jobs";
@@ -596,7 +606,7 @@ export class FileJobRepository {
     })).result;
   }
 
-  async resume(jobId: string, expectedRevision: number): Promise<BackgroundJob> {
+  async resume(jobId: string, expectedRevision: number, options: { checkpointRef?: string } = {}): Promise<BackgroundJob> {
     const now = this.now();
     return (await this.coordinator.withWrite(async ({ state, activeRoot }: RuntimeOperationContext) => {
       const current = await this.readStoredJob(activeRoot, jobId);
@@ -605,7 +615,35 @@ export class FileJobRepository {
       if (!["waiting_user", "waiting_retry", "paused_offline", "paused_restore_review"].includes(current.status)) {
         throw new JobRepositoryError("invalid_input", "job status cannot be resumed");
       }
-      const next: BackgroundJob = { ...current, status: "queued", revision: current.revision + 1, runAfter: now, updatedAt: now };
+      if (options.checkpointRef !== undefined) assertNonEmpty(options.checkpointRef, "checkpointRef");
+      const next: BackgroundJob = {
+        ...current,
+        status: "queued",
+        revision: current.revision + 1,
+        runAfter: now,
+        ...(options.checkpointRef === undefined ? {} : { checkpointRef: options.checkpointRef }),
+        updatedAt: now,
+      };
+      await this.writeTransition(activeRoot, current, next);
+      return clone(next);
+    })).result;
+  }
+
+  async pauseForUser(jobId: string, lease: JobLease, progress?: BackgroundJob["progress"]): Promise<BackgroundJob> {
+    const now = this.now();
+    return (await this.coordinator.withWrite(async ({ state, activeRoot }: RuntimeOperationContext) => {
+      const current = await this.readStoredJob(activeRoot, jobId);
+      this.assertFence(current, lease, now, state.runtimeGeneration);
+      const next: BackgroundJob = {
+        ...withoutLease(current),
+        status: "waiting_user",
+        revision: current.revision + 1,
+        // Waiting for a human is not an execution failure and must not consume
+        // the retry/dead-letter budget.
+        attempt: Math.max(0, current.attempt - 1),
+        ...(progress === undefined ? {} : { progress: clone(progress) }),
+        updatedAt: now,
+      };
       await this.writeTransition(activeRoot, current, next);
       return clone(next);
     })).result;
@@ -617,7 +655,16 @@ export class FileJobRepository {
       const current = await this.readStoredJob(activeRoot, jobId);
       this.assertFence(current, lease, now, state.runtimeGeneration);
       if (!current.networkRequired) throw new JobRepositoryError("invalid_input", "only network-required jobs may pause offline");
-      const next: BackgroundJob = { ...withoutLease(current), status: "paused_offline", revision: current.revision + 1, updatedAt: now };
+      const next: BackgroundJob = {
+        ...withoutLease(current),
+        status: "paused_offline",
+        revision: current.revision + 1,
+        // Claiming increments attempt before the handler can observe a network
+        // transition. An offline pause is not an execution failure and must not
+        // spend the retry/dead-letter budget.
+        attempt: Math.max(0, current.attempt - 1),
+        updatedAt: now,
+      };
       await this.writeTransition(activeRoot, current, next);
       return clone(next);
     })).result;

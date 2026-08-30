@@ -655,3 +655,327 @@
 @media (prefers-reduced-motion: reduce) {
   #n6-lab#n6-lab .workspace-pages > section { animation: none; }
 }
+.workspace-system-panel .workspace-help-button,
+.workspace-help-button {
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+[data-buildsim-help-dialog]::backdrop {
+  background: rgb(15 23 42 / 55%);
+}
+
+[data-buildsim-help-dialog] [data-help-sources] {
+  overflow-wrap: anywhere;
+}
+
+.buildsim-app.buildsim-app .workspace-nas-layout-editor {
+  margin-top: 14px;
+}
+
+.buildsim-app.buildsim-app .workspace-nas-layout-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-block: 12px;
+}
+
+.buildsim-app.buildsim-app .workspace-nas-layout-controls label {
+  display: grid;
+  gap: 6px;
+}
+
+.buildsim-app.buildsim-app .workspace-nas-layout-controls select[multiple] {
+  min-height: 7rem;
+}
+
+@media (max-width: 700px) {
+  .buildsim-app.buildsim-app .workspace-nas-layout-controls { grid-template-columns: 1fr; }
+}
+
+.buildsim-app.buildsim-app .workspace-system-execution-panel {
+  display: grid;
+  gap: 14px;
+  margin-block: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface, #fff);
+}
+
+.buildsim-app.buildsim-app .workspace-system-execution-panel > header,
+.buildsim-app.buildsim-app .workspace-execution-session > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.buildsim-app.buildsim-app .workspace-system-storage,
+.buildsim-app.buildsim-app .workspace-system-procedure-summary,
+.buildsim-app.buildsim-app .workspace-execution-session {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.buildsim-app.buildsim-app .workspace-execution-session ol,
+.buildsim-app.buildsim-app .workspace-system-storage ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-inline-start: 1.5rem;
+}
+
+.buildsim-app.buildsim-app .workspace-execution-session li {
+  display: grid;
+  gap: 6px;
+  padding-block: 8px;
+}
+
+.buildsim-app.buildsim-app .workspace-execution-session input {
+  width: min(100%, 36rem);
+}
+
+.buildsim-app.buildsim-app .workspace-governed-price-panel {
+  display: grid;
+  gap: 14px;
+  margin-block: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface, #fff);
+}
+
+.buildsim-app.buildsim-app .workspace-governed-price-panel[hidden] { display: none; }
+
+.buildsim-app.buildsim-app .workspace-governed-price-panel > header,
+.buildsim-app.buildsim-app .workspace-governed-price-panel article > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.buildsim-app.buildsim-app .workspace-governed-price-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 12px;
+}
+
+.buildsim-app.buildsim-app .workspace-governed-price-grid article {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.buildsim-app.buildsim-app .workspace-governed-price-grid ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
+.buildsim-app.buildsim-app .workspace-governed-price-grid li small { display: block; }
+
+.buildsim-app.buildsim-app .workspace-requirements-panel,
+.buildsim-app.buildsim-app .workspace-solver-panel,
+.buildsim-app.buildsim-app .workspace-scenario-panel {
+  display: grid;
+  gap: 16px;
+  padding: clamp(16px, 2vw, 24px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface, #fff);
+}
+
+.buildsim-app.buildsim-app .workspace-requirements-panel > header,
+.buildsim-app.buildsim-app .workspace-solver-panel > header,
+.buildsim-app.buildsim-app .workspace-scenario-panel > header,
+.buildsim-app.buildsim-app [data-solver-status] > header,
+.buildsim-app.buildsim-app [data-scenario-output] > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+}
+
+.buildsim-app.buildsim-app [data-requirements-form],
+.buildsim-app.buildsim-app [data-solver-form],
+.buildsim-app.buildsim-app [data-scenario-form] {
+  display: grid;
+  gap: 14px;
+}
+
+.buildsim-app.buildsim-app [data-requirements-form] fieldset,
+.buildsim-app.buildsim-app [data-solver-form] fieldset {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.buildsim-app.buildsim-app [data-requirements-form] label,
+.buildsim-app.buildsim-app [data-solver-form] label,
+.buildsim-app.buildsim-app [data-scenario-form] label {
+  display: grid;
+  gap: 6px;
+}
+
+.buildsim-app.buildsim-app .workspace-inline-check {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.buildsim-app.buildsim-app .workspace-requirement-metric,
+.buildsim-app.buildsim-app .workspace-solver-candidates > article,
+.buildsim-app.buildsim-app [data-scenario-proposal] {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface, #fff) 92%, var(--primary) 8%);
+}
+
+.buildsim-app.buildsim-app .workspace-requirement-metric > header {
+  display: grid;
+  gap: 4px;
+  grid-column: 1 / -1;
+}
+
+.buildsim-app.buildsim-app [data-requirement-constraints] ul,
+.buildsim-app.buildsim-app [data-solver-coverage],
+.buildsim-app.buildsim-app [data-scenario-input-changes],
+.buildsim-app.buildsim-app [data-scenario-proposal] ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-inline-start: 1.4rem;
+}
+
+.buildsim-app.buildsim-app .workspace-solver-candidates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 12px;
+}
+
+.buildsim-app.buildsim-app .workspace-solver-candidates dl,
+.buildsim-app.buildsim-app [data-scenario-output] dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.buildsim-app.buildsim-app .workspace-solver-candidates dl > div,
+.buildsim-app.buildsim-app [data-scenario-output] dl > div {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.buildsim-app.buildsim-app .workspace-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.buildsim-app.buildsim-app [data-scenario-isolation] {
+  color: var(--warning, #8a5700);
+}
+
+.buildsim-app.buildsim-app .workspace-job-center {
+  display: grid;
+  gap: 12px;
+  margin-block: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.buildsim-app.buildsim-app .workspace-job-center > header,
+.buildsim-app.buildsim-app .workspace-job-list article > header,
+.buildsim-app.buildsim-app .workspace-job-list article > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.buildsim-app.buildsim-app .workspace-job-list {
+  display: grid;
+  gap: 10px;
+}
+
+.buildsim-app.buildsim-app .workspace-job-list article {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.buildsim-app.buildsim-app .workspace-job-list [data-status="failed"],
+.buildsim-app.buildsim-app .workspace-job-list [data-status="dead_letter"] { color: var(--danger, #a32020); }
+.buildsim-app.buildsim-app .workspace-job-list [data-status="succeeded"] { color: var(--success, #1b6f42); }
+
+.buildsim-app.buildsim-app .workspace-backup-panel,
+.buildsim-app.buildsim-app .workspace-portability-panel,
+.buildsim-app.buildsim-app .workspace-doctor-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.buildsim-app.buildsim-app .workspace-backup-panel > header,
+.buildsim-app.buildsim-app .workspace-portability-panel > header,
+.buildsim-app.buildsim-app .workspace-doctor-panel > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.buildsim-app.buildsim-app [data-create-backup] {
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+}
+
+.buildsim-app.buildsim-app [data-create-backup] label { display: grid; gap: 6px; }
+.buildsim-app.buildsim-app .workspace-portability-panel form {
+  display: grid;
+  gap: 10px;
+  max-width: 680px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.buildsim-app.buildsim-app .workspace-portability-panel form label { display: grid; gap: 6px; }
+.buildsim-app.buildsim-app .workspace-portability-panel [role="status"] { min-height: 1.5rem; }
+.buildsim-app.buildsim-app .workspace-portability-panel [role="status"] a { margin-inline-start: 8px; }
+.buildsim-app.buildsim-app .workspace-doctor-checks { display: grid; gap: 10px; }
+.buildsim-app.buildsim-app .workspace-doctor-checks article {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+@media (max-width: 700px) {
+  .buildsim-app.buildsim-app .workspace-requirements-panel > header,
+  .buildsim-app.buildsim-app .workspace-solver-panel > header,
+  .buildsim-app.buildsim-app .workspace-scenario-panel > header { flex-direction: column; }
+}

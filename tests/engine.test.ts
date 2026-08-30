@@ -6,7 +6,7 @@ import { parseConfig } from "../src/config/types";
 import baseline from "../data/configs/baseline-atx-1hdd.json";
 import sfx9 from "../data/configs/sfx-9hdd-hba-a4000.json";
 import type { BuildConfig } from "../src/config/types";
-import { planN6Wiring } from "../src/wiring/plan";
+import { planN6Wiring } from "../src/adapters/jonsbo-n6/assembly";
 
 const catalog = loadBundledCatalog();
 

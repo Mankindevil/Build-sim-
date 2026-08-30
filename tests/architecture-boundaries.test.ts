@@ -13,7 +13,12 @@ const testsDir = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = resolve(testsDir, "../src");
 const sourceExtensions = /\.(?:[cm]?[jt]sx?|mjs|css|html)$/;
 const tokenPattern = new RegExp(baseline.tokenPattern);
-const caseSpecificFiles = new Set(baseline.caseSpecificFiles as string[]);
+const explicitCompositionFiles = new Set(["src/adapters/legacy-runtime-bootstrap.ts"]);
+const caseSpecificFiles = new Set([
+  ...(baseline.caseSpecificFiles as string[]),
+  "src/adapters/jonsbo-n6/runtime-registration.ts",
+]);
+const strictGenericPrefixes = ["src/core/", "src/config/", "src/spatial/", "src/wiring/", "src/server/"] as const;
 
 function sourceFiles(root: string): string[] {
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -27,7 +32,7 @@ function scanDebt(sources: readonly SourceText[]): Debt[] {
   for (const source of sources) {
     // Only the concrete adapter implementation is exempt. Legacy lab/spatial
     // files remain scanned and ratcheted even when they are already N6-heavy.
-    if (caseSpecificFiles.has(source.path)) continue;
+    if (caseSpecificFiles.has(source.path) || explicitCompositionFiles.has(source.path)) continue;
     source.content.split(/\r?\n/).forEach((line, index) => {
       const text = line.trim();
       if (!text || text.startsWith("//") || text.startsWith("/*") || text.startsWith("*")) return;
@@ -37,6 +42,17 @@ function scanDebt(sources: readonly SourceText[]): Debt[] {
     });
   }
   return debt;
+}
+
+function isStrictGenericPath(path: string): boolean {
+  return strictGenericPrefixes.some((prefix) => path.startsWith(prefix))
+    || (path.startsWith("src/adapters/")
+      && !caseSpecificFiles.has(path)
+      && !explicitCompositionFiles.has(path));
+}
+
+function strictGenericDebt(debt: readonly Debt[]): Debt[] {
+  return debt.filter((entry) => isStrictGenericPath(entry.path));
 }
 
 function currentDebt(): Debt[] {
@@ -63,6 +79,19 @@ function ratchetErrors(debt: readonly Debt[]): string[] {
 }
 
 describe("universal architecture boundaries", () => {
+  it("keeps generic core, config, spatial, wiring, server and adapters at absolute zero", () => {
+    expect([...explicitCompositionFiles]).toEqual(["src/adapters/legacy-runtime-bootstrap.ts"]);
+    expect(strictGenericDebt(currentDebt())).toEqual([]);
+
+    const injected = scanDebt([{
+      path: "src/core/new-case-default.ts",
+      content: "export const concreteCase = 'case.jonsbo-n6';",
+    }]);
+    expect(strictGenericDebt(injected)).toEqual([
+      { path: "src/core/new-case-default.ts", line: 1, kind: "concrete-reference" },
+    ]);
+  });
+
   it("exempts only exact case-adapter implementations and ratchets every legacy file", () => {
     expect(baseline.schemaVersion).toBe("u0.n6-core-import-baseline/3.0.0");
     expect(baseline.scope).toContain("every legacy lab/spatial");
@@ -105,8 +134,9 @@ describe("universal architecture boundaries", () => {
       path: "src/spatial/model.ts",
       content: `${readFileSync(resolve(sourceRoot, "spatial/model.ts"), "utf8")}\nexport const extraN6SpatialDefault = 'jonsbo-n6';`,
     }]);
-    expect(ratchetErrors([...existing.filter((entry) => entry.path !== "src/spatial/model.ts"), ...spatialInjected]))
-      .toContain("N6/JONSBO debt increased: src/spatial/model.ts:concrete-reference 3 > 2");
+    expect(strictGenericDebt(spatialInjected)).toEqual([
+      expect.objectContaining({ path: "src/spatial/model.ts", kind: "concrete-reference" }),
+    ]);
 
     const oneLimit = (baseline.maxDebt as DebtLimit[]).find((entry) => entry.path === "src/config/io.ts" && entry.kind === "concrete-reference");
     expect(oneLimit).toBeDefined();

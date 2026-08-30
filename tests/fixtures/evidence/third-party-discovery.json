@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "third-party-discovery-fixture-v1",
+  "resultsByDomain": {
+    "servethehome.com": [
+      {
+        "url": "https://www.servethehome.com/review/exact-model-rev-a/",
+        "title": "Exact model Rev A measurement"
+      }
+    ],
+    "storagereview.com": [
+      {
+        "url": "https://www.storagereview.com/review/exact-model-rev-a",
+        "title": "Exact model Rev A storage measurement"
+      }
+    ],
+    "techpowerup.com": [
+      {
+        "url": "https://www.techpowerup.com/review/exact-model-rev-a/",
+        "title": "Exact model Rev A test"
+      },
+      {
+        "url": "https://untrusted.invalid/review/exact-model-rev-a/",
+        "title": "Untrusted result injected by search index"
+      },
+      {
+        "url": "https://www.techpowerup.com/review/exact-model-rev-a/2.html",
+        "title": "Second page from the same source"
+      }
+    ],
+    "tomshardware.com": [
+      {
+        "url": "https://www.tomshardware.com/reviews/exact-model-rev-a",
+        "title": "Exact model Rev A review"
+      }
+    ]
+  }
+}

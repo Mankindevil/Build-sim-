@@ -12,6 +12,7 @@ export function validateWriteApprovalEnvelope(value: unknown, now = new Date()):
   if (!TOOL.test(approval.toolName ?? "")) errors.push("approval.toolName invalid");
   if (!HASH.test(approval.toolDefinitionHash ?? "")) errors.push("approval.toolDefinitionHash invalid");
   if (!ID.test(approval.sessionId ?? "")) errors.push("approval.sessionId invalid");
+  if (!ID.test(approval.runId ?? "")) errors.push("approval.runId invalid");
   if (!HASH.test(approval.inputHash ?? "")) errors.push("approval.inputHash invalid");
   if (!ID.test(approval.idempotencyKey ?? "")) errors.push("approval.idempotencyKey invalid");
   if (!ID.test(approval.approvedBy ?? "")) errors.push("approval.approvedBy invalid");
@@ -33,10 +34,11 @@ export function validateWriteApprovalEnvelope(value: unknown, now = new Date()):
 
 export function approvalMatchesExecution(
   approval: AgentWriteApprovalEnvelope,
-  execution: { toolName: string; toolDefinitionHash: string; sessionId: string; inputHash: string },
+  execution: { toolName: string; toolDefinitionHash: string; sessionId: string; runId: string; inputHash: string },
 ): boolean {
   return approval.toolName === execution.toolName
     && approval.toolDefinitionHash === execution.toolDefinitionHash
     && approval.sessionId === execution.sessionId
+    && approval.runId === execution.runId
     && approval.inputHash === execution.inputHash;
 }

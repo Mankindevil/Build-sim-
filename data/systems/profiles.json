@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "system-profile-registry-v1",
+  "profiles": [
+    {
+      "schemaVersion": "system-profile-v1",
+      "profileId": "system.windows-11",
+      "releaseFactId": "system-release.windows-11.24h2",
+      "label": "Windows 11",
+      "family": "desktop",
+      "machineIntents": ["pc", "workstation"],
+      "helpRef": "help.system.windows-11",
+      "alternativeProfileIds": ["system.linux-desktop"],
+      "requiredChecks": ["firmware_path", "uefi", "tpm", "secure_boot", "boot_device", "display_path", "network_driver", "storage_driver"],
+      "officialSourceRefs": [
+        "official:microsoft/windows-11-supported-processors",
+        "official:microsoft/windows-11-system-requirements"
+      ]
+    },
+    {
+      "schemaVersion": "system-profile-v1",
+      "profileId": "system.linux-desktop",
+      "releaseFactId": "system-release.linux-desktop.user-selected",
+      "label": "主流 Linux 桌面",
+      "family": "desktop",
+      "machineIntents": ["pc", "workstation"],
+      "helpRef": "help.system.linux-desktop",
+      "alternativeProfileIds": ["system.windows-11"],
+      "requiredChecks": ["firmware_path", "boot_device", "display_path", "network_driver", "storage_driver"],
+      "officialSourceRefs": ["official:distribution/release-hardware-requirements"]
+    },
+    {
+      "schemaVersion": "system-profile-v1",
+      "profileId": "system.truenas-scale",
+      "releaseFactId": "system-release.truenas-scale.25.04",
+      "label": "TrueNAS SCALE",
+      "family": "storage",
+      "machineIntents": ["nas"],
+      "helpRef": "help.system.truenas-scale",
+      "alternativeProfileIds": ["system.proxmox-ve"],
+      "requiredChecks": ["firmware_path", "uefi", "boot_device", "network_driver", "storage_driver", "hba_it_mode", "boot_data_separation", "disk_unique_locator"],
+      "officialSourceRefs": [
+        "official:truenas/scale-hardware-guide",
+        "official:truenas/storage-controller-guidance"
+      ]
+    },
+    {
+      "schemaVersion": "system-profile-v1",
+      "profileId": "system.proxmox-ve",
+      "releaseFactId": "system-release.proxmox-ve.9",
+      "label": "Proxmox VE",
+      "family": "hypervisor",
+      "machineIntents": ["workstation", "nas"],
+      "helpRef": "help.system.proxmox-ve",
+      "alternativeProfileIds": ["system.truenas-scale", "system.linux-desktop"],
+      "requiredChecks": ["firmware_path", "uefi", "boot_device", "network_driver", "storage_driver"],
+      "officialSourceRefs": ["official:proxmox/system-requirements"]
+    }
+  ]
+}

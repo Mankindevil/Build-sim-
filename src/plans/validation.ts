@@ -1,4 +1,5 @@
 import { parseConfig, type BuildConfigDocument } from "../config/types";
+import { validateProgressiveBuildEvaluationRuntime } from "../compatibility/runtime.mjs";
 import { validateGovernedPatchOperation } from "../contracts/registries";
 import { EVIDENCE_SCHEMA_VERSION, type PlanEvidenceBinding } from "../evidence/contracts";
 import { canonicalJson } from "./canonical";
@@ -6,6 +7,8 @@ import {
   PLAN_PATCH_PATHS,
   PLAN_PARTIAL_EVALUATION_V3_SCHEMA_VERSION,
   PLAN_PARTIAL_EVALUATION_V3_UNKNOWN_DOMAINS,
+  PLAN_EVIDENCE_RESOLUTION_SUMMARY_SCHEMA_VERSION,
+  PLAN_INFERENCE_SUMMARY_SCHEMA_VERSION,
   PLAN_SCHEMA_VERSION,
   type BuildPlan,
   type BuildTask,
@@ -17,12 +20,33 @@ import {
   type PlanTransactionLink,
   type PlanVersion,
 } from "./contracts";
+import { validatePlanEvaluationLock } from "./evaluation-lock";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const HASH = /^[a-f0-9]{64}$/;
 const DOCUMENT_ID = /^doc-sha256-[a-f0-9]{64}$/;
 const CAPTURE_ID = /^capture-sha256-[a-f0-9]{64}$/;
 const BINDING_ID = /^binding-sha256-[a-f0-9]{64}$/;
+const EVIDENCE_PIPELINE_ID = /^evidence-pipeline-sha256-([a-f0-9]{64})$/;
+const CONTENT_REF = /^sha256:[a-f0-9]{64}$/;
+const THIRD_PARTY_ASSESSMENT_ID = /^third-party-assessment-sha256-([a-f0-9]{64})$/;
+const THIRD_PARTY_SOURCE_ID = /^third-party-source-sha256-([a-f0-9]{64})$/;
+const INFERENCE_ID = /^inference-sha256-([a-f0-9]{64})$/;
+const INFERENCE_CANDIDATE_ID = /^fact-inference-candidate-sha256-[a-f0-9]{64}$/;
+const INFERENCE_APPROVAL_ID = /^inference-approval-sha256-[a-f0-9]{64}$/;
+const EVIDENCE_SEARCH_REASONS = new Set([
+  "official_not_published", "official_page_found_field_missing", "official_identity_unresolved",
+  "official_access_blocked", "official_parse_failed", "official_sources_conflict", "official_search_exhausted",
+]);
+const EVIDENCE_PIPELINE_STAGES = new Set([
+  "official_discovery", "official_acquisition", "archive", "parse_ocr", "excerpt", "claim_extraction",
+  "third_party_fallback", "fact_impact", "adapter_generation", "binding_proposal",
+]);
+const EVIDENCE_JOB_STATUSES = new Set([
+  "queued", "running", "waiting_user", "waiting_retry", "paused_offline", "paused_restore_review",
+  "succeeded", "failed", "cancelled", "dead_letter",
+]);
+const EVIDENCE_RESULT_STATUSES = new Set(["completed", "skipped", "needs_review", "blocked"]);
 const EVIDENCE_PURPOSES = new Set(["identity", "compatibility", "geometry", "power", "wiring", "thermal", "assembly"]);
 const EVIDENCE_SUBJECTS = new Set(["plan", "sku", "case-profile", "component"]);
 const EVIDENCE_CATEGORIES = new Set(["case", "motherboard", "cpu", "psu", "cooler", "gpu", "memory", "storage", "hba", "fan", "accessory"]);
@@ -393,7 +417,7 @@ export function validatePlanVersion(value: unknown): string[] {
   const input = record(value);
   if (!input) return ["version must be an object"];
   const errors: string[] = [];
-  if (Object.keys(input).some((key) => !["schemaVersion", "id", "planId", "versionNumber", "createdAt", "reason", "summary", "config", "configHash", "evidenceBindings", "evidenceHash", "evaluationHash", "evaluatedAt", "parentVersionId"].includes(key))) errors.push("version contains unknown fields");
+  if (Object.keys(input).some((key) => !["schemaVersion", "id", "planId", "versionNumber", "createdAt", "reason", "summary", "config", "configHash", "evidenceBindings", "evidenceHash", "evaluationHash", "evaluatedAt", "evaluationLock", "parentVersionId"].includes(key))) errors.push("version contains unknown fields");
   schema(input, errors);
   for (const key of ["id", "planId"]) requiredString(input, key, errors);
   if (!Number.isSafeInteger(input.versionNumber) || Number(input.versionNumber) < 1) errors.push("versionNumber invalid");
@@ -407,6 +431,8 @@ export function validatePlanVersion(value: unknown): string[] {
   if ((input.evidenceBindings === undefined) !== (input.evidenceHash === undefined)) errors.push("evidenceBindings and evidenceHash must be present together");
   if (input.evaluationHash !== undefined && (typeof input.evaluationHash !== "string" || !HASH.test(input.evaluationHash))) errors.push("evaluationHash invalid");
   if (input.evaluatedAt !== undefined) isoDate(input, "evaluatedAt", errors);
+  if (input.evaluationLock !== undefined) errors.push(...validatePlanEvaluationLock(input.evaluationLock));
+  if (input.evaluationLock !== undefined && input.evaluationHash === undefined) errors.push("evaluationLock requires evaluationHash");
   if (input.parentVersionId !== null && (typeof input.parentVersionId !== "string" || !input.parentVersionId)) errors.push("parentVersionId invalid");
   return errors;
 }
@@ -415,7 +441,7 @@ export function validatePlanEvaluationSnapshot(value: unknown): string[] {
   const input = record(value);
   if (!input) return ["evaluation snapshot must be an object"];
   const errors: string[] = [];
-  if (Object.keys(input).some((key) => !["schemaVersion", "planId", "planVersionId", "draftRevision", "configHash", "evaluationHash", "evaluatedAt", "evaluation"].includes(key))) errors.push("evaluation snapshot contains unknown fields");
+  if (Object.keys(input).some((key) => !["schemaVersion", "planId", "planVersionId", "draftRevision", "configHash", "evaluationHash", "evaluationLock", "evaluatedAt", "evaluation"].includes(key))) errors.push("evaluation snapshot contains unknown fields");
   schema(input, errors);
   requiredString(input, "planId", errors);
   if (input.planVersionId !== null && (typeof input.planVersionId !== "string" || !input.planVersionId)) errors.push("planVersionId invalid");
@@ -424,6 +450,7 @@ export function validatePlanEvaluationSnapshot(value: unknown): string[] {
     if (typeof input[key] !== "string" || !HASH.test(input[key])) errors.push(`${key} invalid`);
   }
   isoDate(input, "evaluatedAt", errors);
+  if (input.evaluationLock !== undefined) errors.push(...validatePlanEvaluationLock(input.evaluationLock));
   errors.push(...validatePlanEvaluationPayload(input.evaluation));
   return errors;
 }
@@ -449,6 +476,9 @@ function validateTopologyBomLine(value: unknown, index: number): string[] {
 export function validatePlanEvaluationPayload(value: unknown): string[] {
   const evaluation = record(value);
   if (!evaluation) return ["evaluation must be an object"];
+  if (evaluation.kind === "topology-v3-progressive") {
+    return validateProgressiveBuildEvaluationRuntime(value).map((error) => `V3 progressive evaluation: ${error}`);
+  }
   if (evaluation.kind !== "topology-v3-partial") {
     const config = record(evaluation.config);
     return config?.schemaVersion === "2.0.0" && validConfig(config) ? [] : ["V2 evaluation config invalid"];
@@ -471,6 +501,247 @@ export function validatePlanEvaluationPayload(value: unknown): string[] {
   return errors;
 }
 
+function boundedCanonicalText(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= maximum
+    && value === value.normalize("NFC") && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function exactKeys(value: Record<string, unknown>, allowed: readonly string[], required: readonly string[] = allowed): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key)) && required.every((key) => key in value);
+}
+
+function validatePlanEvidenceResolutionSummary(value: unknown, index: number): string[] {
+  const prefix = `evidenceSummary.resolutions.${index}`;
+  const summary = record(value);
+  if (!summary) return [`${prefix} invalid`];
+  const errors: string[] = [];
+  const fields = [
+    "schemaVersion", "pipelineId", "requestHash", "state", "ladder", "officialSearchReason",
+    "officialAttemptRefs", "thirdParty", "inference", "manualActions", "candidates", "stages",
+  ];
+  if (!exactKeys(summary, fields, ["schemaVersion", "pipelineId", "requestHash", "state", "ladder", "officialAttemptRefs", "manualActions", "stages"])) {
+    errors.push(`${prefix} fields invalid`);
+  }
+  const pipelineMatch = typeof summary.pipelineId === "string" ? EVIDENCE_PIPELINE_ID.exec(summary.pipelineId) : null;
+  if (!pipelineMatch || !HASH.test(String(summary.requestHash)) || pipelineMatch[1] !== summary.requestHash) {
+    errors.push(`${prefix} content address invalid`);
+  }
+  if (summary.schemaVersion !== PLAN_EVIDENCE_RESOLUTION_SUMMARY_SCHEMA_VERSION) errors.push(`${prefix} schema invalid`);
+  if (!["in_progress", "resolved", "needs_review", "blocked", "failed", "cancelled", "unknown"].includes(String(summary.state))) {
+    errors.push(`${prefix} state invalid`);
+  }
+  const ladder = record(summary.ladder);
+  const ladderByKey: Record<string, { level: number | null; authority: string | null }> = {
+    official_exact_revision_document: { level: 1, authority: "official" },
+    official_exact_model_technical: { level: 2, authority: "official" },
+    official_family_invariant: { level: 3, authority: "official" },
+    third_party_professional_measurement: { level: 4, authority: "third_party" },
+    third_party_independent_corroboration: { level: 5, authority: "third_party" },
+    agent_replayable_inference: { level: 6, authority: "agent_inference" },
+    unresolved: { level: null, authority: null },
+  };
+  const expectedLadder = ladder && typeof ladder.key === "string" ? ladderByKey[ladder.key] : undefined;
+  if (!ladder || !exactKeys(ladder, ["level", "authority", "key"]) || !expectedLadder
+    || ladder.level !== expectedLadder.level || ladder.authority !== expectedLadder.authority) {
+    errors.push(`${prefix} ladder invalid`);
+  }
+  if (summary.officialSearchReason !== undefined && !EVIDENCE_SEARCH_REASONS.has(String(summary.officialSearchReason))) {
+    errors.push(`${prefix} officialSearchReason invalid`);
+  }
+  if (!Array.isArray(summary.officialAttemptRefs) || summary.officialAttemptRefs.length > 128
+    || summary.officialAttemptRefs.some((ref) => typeof ref !== "string" || !CONTENT_REF.test(ref))
+    || new Set(summary.officialAttemptRefs).size !== summary.officialAttemptRefs.length) {
+    errors.push(`${prefix} officialAttemptRefs invalid`);
+  }
+  if (summary.thirdParty !== undefined) {
+    const thirdParty = record(summary.thirdParty);
+    const assessmentMatch = typeof thirdParty?.assessmentId === "string" ? THIRD_PARTY_ASSESSMENT_ID.exec(thirdParty.assessmentId) : null;
+    const sourceIds = Array.isArray(thirdParty?.sourceIds) && thirdParty.sourceIds.every((id) => typeof id === "string")
+      ? thirdParty.sourceIds as string[] : null;
+    const sources = Array.isArray(thirdParty?.sources) ? thirdParty.sources : null;
+    const hasProfessionalMeasurement = sources?.some((candidate) => record(candidate)?.sourceType === "professional_measurement") === true;
+    if (!thirdParty || !exactKeys(thirdParty, ["assessmentId", "contentHash", "sourceIds", "independentCount", "consistent", "conflicted", "ladderLevel", "sources"])
+      || !assessmentMatch || !HASH.test(String(thirdParty.contentHash)) || assessmentMatch[1] !== thirdParty.contentHash
+      || !sourceIds || sourceIds.length > 128 || sourceIds.some((id) => !THIRD_PARTY_SOURCE_ID.test(id))
+      || new Set(sourceIds).size !== sourceIds.length
+      || !Number.isSafeInteger(thirdParty.independentCount) || Number(thirdParty.independentCount) < 0
+      || typeof thirdParty.consistent !== "boolean" || typeof thirdParty.conflicted !== "boolean"
+      || ![null, 4, 5].includes(thirdParty.ladderLevel as null | number)
+      || ([4, 5].includes(Number(thirdParty.ladderLevel)) && !hasProfessionalMeasurement)
+      || !sources || sources.length > 128 || sources.length !== sourceIds.length
+      || sources.some((candidate) => {
+        const source = record(candidate);
+        const sourceMatch = typeof source?.sourceId === "string" ? THIRD_PARTY_SOURCE_ID.exec(source.sourceId) : null;
+        return !source || !exactKeys(source, ["sourceId", "contentHash", "publisherId", "sourceType"])
+          || !sourceMatch || !HASH.test(String(source.contentHash)) || sourceMatch[1] !== source.contentHash || !boundedCanonicalText(source.publisherId, 256)
+          || !boundedCanonicalText(source.sourceType, 160) || !sourceIds.includes(String(source.sourceId));
+      })) {
+      errors.push(`${prefix} thirdParty invalid`);
+    }
+  }
+  if (summary.inference !== undefined) {
+    const inference = record(summary.inference);
+    const inferenceMatch = typeof inference?.inferenceTraceId === "string" ? INFERENCE_ID.exec(inference.inferenceTraceId) : null;
+    const range = inference ? record(inference.outputRange) : null;
+    if (!inference || !exactKeys(inference, [
+      "inferenceTraceId", "contentHash", "ruleOrModelId", "ruleOrModelVersion", "ruleOrModelArtifactHash",
+      "formula", "inputFactRefs", "assumptionCount", "assumptions", "outputRange", "invalidationConditionCount", "invalidationConditions",
+    ], [
+      "inferenceTraceId", "contentHash", "ruleOrModelId", "ruleOrModelVersion", "ruleOrModelArtifactHash",
+      "formula", "inputFactRefs", "assumptionCount", "assumptions", "invalidationConditionCount", "invalidationConditions",
+    ]) || !inferenceMatch || !HASH.test(String(inference.contentHash)) || inferenceMatch[1] !== inference.contentHash
+      || !boundedCanonicalText(inference.ruleOrModelId, 256) || !boundedCanonicalText(inference.ruleOrModelVersion, 256)
+      || !HASH.test(String(inference.ruleOrModelArtifactHash))
+      || (inference.formula !== null && !boundedCanonicalText(inference.formula, 1_024))
+      || !Array.isArray(inference.inputFactRefs) || inference.inputFactRefs.length === 0 || inference.inputFactRefs.length > 128
+      || inference.inputFactRefs.some((candidate) => {
+        const ref = record(candidate);
+        return !ref || !exactKeys(ref, ["factId", "contentHash"]) || !boundedCanonicalText(ref.factId, 256) || !HASH.test(String(ref.contentHash));
+      })
+      || !Number.isSafeInteger(inference.assumptionCount) || Number(inference.assumptionCount) < 0 || Number(inference.assumptionCount) > 128
+      || !Array.isArray(inference.assumptions) || inference.assumptions.length !== inference.assumptionCount
+      || inference.assumptions.some((item) => !boundedCanonicalText(item, 1_024))
+      || !Number.isSafeInteger(inference.invalidationConditionCount) || Number(inference.invalidationConditionCount) < 0 || Number(inference.invalidationConditionCount) > 128
+      || !Array.isArray(inference.invalidationConditions) || inference.invalidationConditions.length !== inference.invalidationConditionCount
+      || inference.invalidationConditions.some((item) => !boundedCanonicalText(item, 1_024))
+      || (inference.outputRange !== undefined && (!range || !exactKeys(range, ["min", "max", "unit"], ["min", "max"])
+        || typeof range.min !== "number" || !Number.isFinite(range.min) || typeof range.max !== "number" || !Number.isFinite(range.max)
+        || range.min > range.max || (range.unit !== undefined && !boundedCanonicalText(range.unit, 64))))) {
+      errors.push(`${prefix} inference invalid`);
+    }
+  }
+  if (!Array.isArray(summary.manualActions) || summary.manualActions.length > 20
+    || summary.manualActions.some((action) => !boundedCanonicalText(action, 1_000))
+    || new Set(summary.manualActions).size !== summary.manualActions.length) errors.push(`${prefix} manualActions invalid`);
+  if (summary.candidates !== undefined) {
+    if (!Array.isArray(summary.candidates) || summary.candidates.length > 128 || summary.candidates.some((candidate) => {
+      const row = record(candidate);
+      const match = typeof row?.id === "string" ? /^[a-z][a-z0-9-]*-sha256-([a-f0-9]{64})$/.exec(row.id) : null;
+      return !row || !exactKeys(row, ["kind", "id", "contentHash"])
+        || !["claim_candidate", "adapter_candidate", "binding_proposal"].includes(String(row.kind))
+        || !match || !HASH.test(String(row.contentHash)) || match[1] !== row.contentHash;
+    })) errors.push(`${prefix} candidates invalid`);
+  }
+  if (!Array.isArray(summary.stages) || summary.stages.length === 0 || summary.stages.length > 10) {
+    errors.push(`${prefix} stages invalid`);
+  } else {
+    const stageIds = new Set<string>();
+    summary.stages.forEach((candidate, stageIndex) => {
+      const stage = record(candidate);
+      if (!stage || !exactKeys(stage, ["stage", "jobStatus", "resultStatus", "revision", "attempt", "maxAttempts", "resultRefs"], ["stage", "jobStatus", "revision", "attempt", "maxAttempts", "resultRefs"])
+        || !EVIDENCE_PIPELINE_STAGES.has(String(stage?.stage)) || stageIds.has(String(stage?.stage))
+        || !EVIDENCE_JOB_STATUSES.has(String(stage?.jobStatus))
+        || (stage?.resultStatus !== undefined && !EVIDENCE_RESULT_STATUSES.has(String(stage.resultStatus)))
+        || !Number.isSafeInteger(stage?.revision) || Number(stage?.revision) < 0
+        || !Number.isSafeInteger(stage?.attempt) || Number(stage?.attempt) < 0
+        || !Number.isSafeInteger(stage?.maxAttempts) || Number(stage?.maxAttempts) < 1 || Number(stage?.attempt) > Number(stage?.maxAttempts)
+        || !Array.isArray(stage?.resultRefs) || stage.resultRefs.length > 64
+        || stage.resultRefs.some((ref) => typeof ref !== "string" || !CONTENT_REF.test(ref))) {
+        errors.push(`${prefix}.stages.${stageIndex} invalid`);
+      }
+      if (typeof stage?.stage === "string") stageIds.add(stage.stage);
+    });
+  }
+  return errors;
+}
+
+function validatePlanInferenceSummary(value: unknown, index: number, planId: unknown): string[] {
+  const prefix = `evidenceSummary.inferences.${index}`;
+  const summary = record(value);
+  if (!summary) return [`${prefix} invalid`];
+  const errors: string[] = [];
+  if (!exactKeys(summary, [
+    "schemaVersion", "candidateId", "candidateHash", "planId", "featureEnabled", "lifecycle",
+    "proposalApprovalRef", "transaction", "inference", "output", "safetyDisposition",
+    "maySupportSafetyPass", "createdAt",
+  ], [
+    "schemaVersion", "candidateId", "candidateHash", "planId", "featureEnabled", "lifecycle",
+    "inference", "output", "safetyDisposition", "maySupportSafetyPass", "createdAt",
+  ])) errors.push(`${prefix} fields invalid`);
+  if (summary.schemaVersion !== PLAN_INFERENCE_SUMMARY_SCHEMA_VERSION
+    || typeof summary.candidateId !== "string" || !INFERENCE_CANDIDATE_ID.test(summary.candidateId)
+    || typeof summary.candidateHash !== "string" || !HASH.test(summary.candidateHash)
+    || typeof summary.planId !== "string" || summary.planId !== planId
+    || typeof summary.featureEnabled !== "boolean"
+    || ![
+      "pending_approval", "approval_pending_recovery", "active", "stale", "aborted_stale", "disabled_historical",
+    ].includes(String(summary.lifecycle))
+    || (summary.featureEnabled === false && summary.lifecycle !== "disabled_historical")
+    || (summary.featureEnabled === true && summary.lifecycle === "disabled_historical")
+    || summary.maySupportSafetyPass !== false
+    || !ISO_DATE.test(String(summary.createdAt)) || !Number.isFinite(Date.parse(String(summary.createdAt)))) {
+    errors.push(`${prefix} identity/lifecycle invalid`);
+  }
+  if (summary.proposalApprovalRef !== undefined
+    && (typeof summary.proposalApprovalRef !== "string" || !CONTENT_REF.test(summary.proposalApprovalRef))) {
+    errors.push(`${prefix}.proposalApprovalRef invalid`);
+  }
+  if (summary.transaction !== undefined) {
+    const transaction = record(summary.transaction);
+    if (!transaction || !exactKeys(transaction, ["transactionId", "status", "approvalAuthorityRef"], ["transactionId", "status"])
+      || typeof transaction.transactionId !== "string" || !INFERENCE_APPROVAL_ID.test(transaction.transactionId)
+      || !["pending", "committed", "aborted_stale"].includes(String(transaction.status))
+      || (transaction.approvalAuthorityRef !== undefined
+        && (typeof transaction.approvalAuthorityRef !== "string" || !CONTENT_REF.test(transaction.approvalAuthorityRef)))) {
+      errors.push(`${prefix}.transaction invalid`);
+    } else if ((summary.lifecycle === "approval_pending_recovery" && transaction.status !== "pending")
+      || (summary.lifecycle === "active" && transaction.status !== "committed")
+      || (summary.lifecycle === "aborted_stale" && transaction.status !== "aborted_stale")) {
+      errors.push(`${prefix}.transaction lifecycle invalid`);
+    }
+  } else if (["approval_pending_recovery", "active", "aborted_stale"].includes(String(summary.lifecycle))) {
+    errors.push(`${prefix}.transaction missing`);
+  }
+  const inference = record(summary.inference);
+  const traceMatch = typeof inference?.inferenceTraceId === "string" ? INFERENCE_ID.exec(inference.inferenceTraceId) : null;
+  const range = record(inference?.outputRange);
+  if (!inference || !exactKeys(inference, [
+    "inferenceTraceId", "contentHash", "ruleOrModelId", "ruleOrModelVersion", "ruleOrModelArtifactHash",
+    "formula", "inputFactRefs", "assumptions", "outputRange", "invalidationConditions", "confidence",
+  ]) || !traceMatch || typeof inference.contentHash !== "string" || !HASH.test(inference.contentHash)
+    || traceMatch[1] !== inference.contentHash
+    || !boundedCanonicalText(inference.ruleOrModelId, 256)
+    || !boundedCanonicalText(inference.ruleOrModelVersion, 256)
+    || typeof inference.ruleOrModelArtifactHash !== "string" || !HASH.test(inference.ruleOrModelArtifactHash)
+    || !boundedCanonicalText(inference.formula, 1_024)
+    || !Array.isArray(inference.inputFactRefs) || inference.inputFactRefs.length === 0 || inference.inputFactRefs.length > 128
+    || inference.inputFactRefs.some((candidate) => {
+      const ref = record(candidate);
+      return !ref || !exactKeys(ref, ["factId", "contentHash"])
+        || !boundedCanonicalText(ref.factId, 256) || typeof ref.contentHash !== "string" || !HASH.test(ref.contentHash);
+    }) || new Set(inference.inputFactRefs.map((candidate) => record(candidate)?.factId)).size !== inference.inputFactRefs.length
+    || !Array.isArray(inference.assumptions) || inference.assumptions.length > 128
+    || inference.assumptions.some((item) => !boundedCanonicalText(item, 1_024))
+    || new Set(inference.assumptions).size !== inference.assumptions.length
+    || !range || !exactKeys(range, ["min", "max", "unit"], ["min", "max"])
+    || typeof range.min !== "number" || !Number.isFinite(range.min)
+    || typeof range.max !== "number" || !Number.isFinite(range.max) || range.min > range.max
+    || (range.unit !== undefined && !boundedCanonicalText(range.unit, 64))
+    || !Array.isArray(inference.invalidationConditions) || inference.invalidationConditions.length === 0
+    || inference.invalidationConditions.length > 128
+    || inference.invalidationConditions.some((item) => !boundedCanonicalText(item, 1_024))
+    || new Set(inference.invalidationConditions).size !== inference.invalidationConditions.length
+    || typeof inference.confidence !== "number" || !Number.isFinite(inference.confidence)
+    || inference.confidence < 0 || inference.confidence > 1) {
+    errors.push(`${prefix}.inference invalid`);
+  }
+  const output = record(summary.output);
+  if (!output || !exactKeys(output, ["factId", "fieldId", "value", "unit", "safetyClass"], ["factId", "fieldId", "value", "safetyClass"])
+    || !boundedCanonicalText(output.factId, 256) || !boundedCanonicalText(output.fieldId, 256)
+    || (output.value !== null && (typeof output.value !== "number" || !Number.isFinite(output.value)))
+    || (output.unit !== undefined && !boundedCanonicalText(output.unit, 64))
+    || !["normal", "compatibility_critical", "electrical_safety"].includes(String(output.safetyClass))) {
+    errors.push(`${prefix}.output invalid`);
+  }
+  if (!["planning_only", "blocked_requires_non_inference_evidence"].includes(String(summary.safetyDisposition))
+    || (record(summary.output)?.safetyClass === "normal" && summary.safetyDisposition !== "planning_only")
+    || (["compatibility_critical", "electrical_safety"].includes(String(record(summary.output)?.safetyClass))
+      && summary.safetyDisposition !== "blocked_requires_non_inference_evidence")) {
+    errors.push(`${prefix}.safetyDisposition invalid`);
+  }
+  return errors;
+}
+
 export function validatePlanAgentContext(value: unknown): string[] {
   const input = record(value);
   if (!input) return ["agent context must be an object"];
@@ -482,12 +753,19 @@ export function validatePlanAgentContext(value: unknown): string[] {
   for (const key of ["configHash", "evaluationHash"]) {
     if (typeof input[key] !== "string" || !HASH.test(input[key])) errors.push(`${key} invalid`);
   }
+  if (input.evaluationLockHash !== undefined && (typeof input.evaluationLockHash !== "string" || !HASH.test(input.evaluationLockHash))) {
+    errors.push("evaluationLockHash invalid");
+  }
   if (!validConfig(input.buildConfig)) errors.push("buildConfig must be a valid BuildConfig");
   errors.push(...validatePlanEvaluationPayload(input.evaluation));
   const config = record(input.buildConfig);
   const evaluation = record(input.evaluation);
-  if (config?.schemaVersion === "3.0.0" && evaluation?.kind !== "topology-v3-partial") errors.push("BuildConfig V3 requires a V3 partial evaluation");
-  if (config?.schemaVersion === "2.0.0" && evaluation?.kind === "topology-v3-partial") errors.push("BuildConfig V2 cannot use a V3 partial evaluation");
+  if (config?.schemaVersion === "3.0.0" && !["topology-v3-partial", "topology-v3-progressive"].includes(String(evaluation?.kind))) {
+    errors.push("BuildConfig V3 requires a V3 topology evaluation");
+  }
+  if (config?.schemaVersion === "2.0.0" && ["topology-v3-partial", "topology-v3-progressive"].includes(String(evaluation?.kind))) {
+    errors.push("BuildConfig V2 cannot use a V3 topology evaluation");
+  }
   const selection = input.spatialSelection;
   if (selection !== undefined && selection !== null) {
     const spatial = record(selection);
@@ -498,7 +776,9 @@ export function validatePlanAgentContext(value: unknown): string[] {
   if (!("buildTaskSummary" in input)) errors.push("buildTaskSummary missing");
   if (input.evidenceSummary !== undefined) {
     const summary = record(input.evidenceSummary);
-    if (!summary || !Number.isSafeInteger(summary.count) || Number(summary.count) < 0 || !Array.isArray(summary.bindings) || summary.bindings.length > 40 || Number(summary.count) < summary.bindings.length) errors.push("evidenceSummary invalid");
+    if (!summary || Object.keys(summary).some((key) => !["count", "bindings", "resolutions", "inferences"].includes(key))
+      || !Number.isSafeInteger(summary.count) || Number(summary.count) < 0 || !Array.isArray(summary.bindings)
+      || summary.bindings.length > 40 || Number(summary.count) < summary.bindings.length) errors.push("evidenceSummary invalid");
     else summary.bindings.forEach((binding, index) => {
       const row = record(binding);
       if (!row || typeof row.documentId !== "string" || !DOCUMENT_ID.test(row.documentId)) errors.push(`evidenceSummary.bindings.${index} invalid`);
@@ -506,6 +786,14 @@ export function validatePlanAgentContext(value: unknown): string[] {
       if (!record(row?.subject) || !Array.isArray(row?.purposes)) errors.push(`evidenceSummary.bindings.${index}.claims invalid`);
       if (row?.locators !== undefined && !Array.isArray(row.locators)) errors.push(`evidenceSummary.bindings.${index}.locators invalid`);
     });
+    if (summary?.resolutions !== undefined) {
+      if (!Array.isArray(summary.resolutions) || summary.resolutions.length > 20) errors.push("evidenceSummary.resolutions invalid");
+      else summary.resolutions.forEach((resolution, index) => errors.push(...validatePlanEvidenceResolutionSummary(resolution, index)));
+    }
+    if (summary?.inferences !== undefined) {
+      if (!Array.isArray(summary.inferences) || summary.inferences.length > 20) errors.push("evidenceSummary.inferences invalid");
+      else summary.inferences.forEach((inference, index) => errors.push(...validatePlanInferenceSummary(inference, index, input.planId)));
+    }
   }
   if (input.initialization !== undefined) errors.push(...validateInitialization(input.initialization));
   return errors;

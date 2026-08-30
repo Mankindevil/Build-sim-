@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "case-runtime-model-data-seed-v1",
+  "runtimeId": "runtime.case.jonsbo-n6",
+  "runtimeVersion": "1.0.0",
+  "interpreterId": "declarative-case-v1",
+  "authorityStatus": "legacy_unverified",
+  "authorityRefs": {
+    "factIds": [],
+    "derivationIds": [],
+    "evidenceContentHashes": []
+  },
+  "identity": {
+    "skuId": "case.jonsbo-n6",
+    "region": "global",
+    "revision": "vendor-unversioned"
+  },
+  "documents": {
+    "profile": "data/cases/jonsbo-n6/profile.json",
+    "geometry": "data/cases/jonsbo-n6/geometry.json",
+    "routing": "data/cases/jonsbo-n6/routing.json",
+    "assembly": "data/cases/jonsbo-n6/assembly.json",
+    "calibration": "data/cases/jonsbo-n6/calibration.json"
+  }
+}

@@ -4,10 +4,12 @@ import { describe, expect, it } from "vitest";
 import { loadBundledCatalog } from "../src/sku/catalog";
 import { evaluateBuild } from "../src/core/evaluate";
 import { evaluatePhysicalConstraints, obbProjectedExtents, type PhysicalEvaluation } from "../src/core/physical";
-import { evaluateCalibration, narrowPlanningRange } from "../src/core/calibration";
+import { narrowPlanningRange } from "../src/core/calibration";
 import { exportChecklist, parseConfig } from "../src/config/io";
 import { buildAdviceInput, validateAdviceInput } from "../src/advice/validate";
 import type { BuildConfig } from "../src/config/types";
+import { N6_INTERIOR_BOX } from "../src/adapters/jonsbo-n6/geometry";
+import { N6_CASE_RUNTIME_ADAPTER } from "../src/adapters/jonsbo-n6/assembly";
 
 const catalog = loadBundledCatalog();
 const fixtureDir = path.resolve("tests/fixtures/upgrade-scenarios");
@@ -51,7 +53,7 @@ describe("G7 physical expansion, calibration and cross-layer facts", () => {
   it("projects a rotated GPU OBB and preserves a physical warning when it leaves the case", () => {
     const base = evaluateBuild({ ...baseConfig, id: "g7-gpu", name: "G7 GPU", selection: { ...baseConfig.selection, gpuId: "gpu.rtx-a4000-16gb", boot: "m2" } }, catalog);
     const gpu = base.geometry.find((part) => part.kind === "gpu")!;
-    const rotated = evaluatePhysicalConstraints(base.config, catalog, [{ ...gpu, box: { ...gpu.box, c: [150, gpu.box.c[1], 170] } }], base.routing, base.wiring, { gpuRotationDeg: 45 });
+    const rotated = evaluatePhysicalConstraints(base.config, catalog, [{ ...gpu, box: { ...gpu.box, c: [150, gpu.box.c[1], 170] } }], base.routing, base.wiring, { gpuRotationDeg: 45, interiorBox: N6_INTERIOR_BOX });
     expect(rotated.gpu?.angleDeg).toBe(45);
     expect(obbProjectedExtents(rotated.gpu!.obb).widthMm).toBeGreaterThan(gpu.box.w);
     expect(rotated.findings.some((finding) => finding.id === "physical.gpu-obb-case")).toBe(true);
@@ -94,7 +96,7 @@ describe("G7 physical expansion, calibration and cross-layer facts", () => {
   });
 
   it("keeps calibration unknown and only narrows a planning range with measured evidence", () => {
-    const calibration = evaluateCalibration();
+    const calibration = N6_CASE_RUNTIME_ADAPTER.evaluateCalibration(baseConfig);
     expect(calibration.unknown).toEqual(expect.arrayContaining(["wallPowerW", "smartTemperatureC", "fanCurve"]));
     const planning = { lo: 20, hi: 80 };
     expect(narrowPlanningRange("cpu", planning, { min: 35, max: 55, evidence: "manual", unit: "°C" })).toEqual({ lo: 35, hi: 55 });

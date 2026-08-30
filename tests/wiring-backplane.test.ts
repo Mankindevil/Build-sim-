@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { checkBackplaneHarness, planN6Wiring } from "../src/wiring/plan";
+import { checkN6BackplaneHarness as checkBackplaneHarness, N6_WIRING_PROFILE, planN6Wiring } from "../src/adapters/jonsbo-n6/assembly";
+import { planCaseWiring } from "../src/wiring/plan";
 import { loadRawCatalog } from "../src/sku/catalog";
 import type { BuildConfig, PsuTopology } from "../src/config/types";
 import type { HarnessSpec, SkuCatalog } from "../src/sku/types";
@@ -117,6 +118,23 @@ describe("backplane harness audit", () => {
     expect(check.verdict).toBe("bad");
   });
 
+  it("fails from a known total lead ceiling even when typed lead counts are unpublished", () => {
+    const totalOnly = {
+      ...catalog,
+      skus: catalog.skus.map((sku) => sku.id === "psu.corsair-sf750-atx31"
+        ? {
+            ...sku,
+            harness: { peripheralLeads: 3, sataLeads: null, molexLeads: null, evidence: "official" as const, leadEvidence: "official" as const },
+            attrs: { ...sku.attrs, peripheralSockets: 4 },
+          }
+        : sku),
+    };
+    const check = checkBackplaneHarness(config(), totalOnly);
+    expect(check.uniquePeripheralLeads).toBe(3);
+    expect(check.verdict).toBe("bad");
+    expect(check.notes.join()).toContain("已确认只有 3 根独立外围线");
+  });
+
   it("stays unknown when neither the cable count nor the socket count is published", () => {
     const noSocketData = catalog.skus.map((s) =>
       s.id === "psu.silverstone-sx750-g"
@@ -141,6 +159,99 @@ describe("backplane harness audit", () => {
     const check = checkBackplaneHarness(config(), full);
     expect(check.verdict).toBe("ok");
     expect(check.oneLeadPerInlet).toBe(true);
+  });
+
+  it("does not report ok when full leads feed a PSU with insufficient total 12V current", () => {
+    const full = withHarness("psu.corsair-sf750-atx31", {
+      sataLeads: 2, molexLeads: 2, evidence: "official", leadEvidence: "official",
+    });
+    const constrained = {
+      ...full,
+      skus: full.skus.map((sku) => sku.id === "psu.corsair-sf750-atx31"
+        ? { ...sku, attrs: { ...sku.attrs, rail12vA: 10 } } : sku),
+    };
+    const check = checkBackplaneHarness(config(), constrained);
+    expect(check.oneLeadPerInlet).toBe(true);
+    expect(check.verdict).toBe("bad");
+  });
+
+  it("does not report ok when full leads have an unknown populated-drive startup load", () => {
+    const full = withHarness("psu.corsair-sf750-atx31", {
+      sataLeads: 2, molexLeads: 2, evidence: "official", leadEvidence: "official",
+    });
+    const withoutDiskIdentity = config();
+    delete (withoutDiskIdentity.selection as { diskSkuId?: string }).diskSkuId;
+    const check = checkBackplaneHarness(withoutDiskIdentity, full);
+    expect(check.oneLeadPerInlet).toBe(true);
+    expect(check.spinUp.totalA).toBeNull();
+    expect(check.verdict).toBe("unknown");
+  });
+
+  it("stays unknown with full leads when the PSU has no usable 12V rail capacity", () => {
+    const full = withHarness("psu.corsair-sf750-atx31", {
+      sataLeads: 2, molexLeads: 2, evidence: "official", leadEvidence: "official",
+    });
+    const withoutRailCapacity = {
+      ...full,
+      skus: full.skus.map((sku) => sku.id === "psu.corsair-sf750-atx31"
+        ? { ...sku, attrs: { ...sku.attrs, rail12vA: undefined, rail12vW: undefined } }
+        : sku),
+    };
+    const check = checkBackplaneHarness(config(), withoutRailCapacity);
+    expect(check.oneLeadPerInlet).toBe(true);
+    expect(check.verdict).toBe("unknown");
+    expect(check.spinUp.notes.join()).toContain("没有可用的 +12V 轨额定电流或功率数据");
+  });
+
+  it("uses a published 12V watt rating when the amp rating is absent", () => {
+    const full = withHarness("psu.corsair-sf750-atx31", {
+      sataLeads: 2, molexLeads: 2, evidence: "official", leadEvidence: "official",
+    });
+    const wattsOnly = {
+      ...full,
+      skus: full.skus.map((sku) => sku.id === "psu.corsair-sf750-atx31"
+        ? { ...sku, attrs: { ...sku.attrs, rail12vA: undefined, rail12vW: 750 } }
+        : sku),
+    };
+    const check = checkBackplaneHarness(config(), wattsOnly);
+    expect(check.oneLeadPerInlet).toBe(true);
+    expect(check.verdict).toBe("ok");
+    expect(check.spinUp.notes.join()).toContain("+12V 额定 750W");
+  });
+
+  it("fails full independent leads when each inlet exceeds the published lead limit", () => {
+    const full = withHarness("psu.corsair-sf750-atx31", {
+      sataLeads: 2, molexLeads: 2, evidence: "official", leadEvidence: "official",
+    });
+    const limited = {
+      ...full,
+      skus: full.skus.map((sku) => sku.id === "psu.corsair-sf750-atx31"
+        ? { ...sku, attrs: { ...sku.attrs, peripheralLeadWLimit: 60 } }
+        : sku),
+    };
+    const check = checkBackplaneHarness(config(), limited);
+    expect(check.oneLeadPerInlet).toBe(true);
+    expect(check.verdict).toBe("bad");
+    expect(check.spinUp.notes.join()).toContain("即使一口一线");
+  });
+
+  it("treats a published zero peripheral-socket count as a hard ceiling", () => {
+    const full = withHarness("psu.corsair-sf750-atx31", {
+      sataLeads: 2,
+      molexLeads: 2,
+      evidence: "official",
+      leadEvidence: "official",
+    });
+    const zeroSockets = {
+      ...full,
+      skus: full.skus.map((sku) => sku.id === "psu.corsair-sf750-atx31"
+        ? { ...sku, attrs: { ...sku.attrs, peripheralSockets: 0, peripheralSocketsEvidence: "official" } }
+        : sku),
+    };
+    const check = checkBackplaneHarness(config(), zeroSockets);
+    expect(check.peripheralSockets).toBe(0);
+    expect(check.socketLimited).toBe(true);
+    expect(check.verdict).toBe("bad");
   });
 
   it("counts only the dedicated PSU in dual mode, never the sum", () => {
@@ -171,6 +282,17 @@ describe("backplane harness audit", () => {
     expect(ids).toContain("bp-power-molex");
     expect(plan.checklist.find((c) => c.id === "bp-power-molex")?.requiredQty).toBe(2);
   });
+
+  it("preserves an interleaved adapter-declared physical inlet order", () => {
+    const plan = planCaseWiring(config(), catalog, {
+      ...N6_WIRING_PROFILE,
+      backplanePower: {
+        ...N6_WIRING_PROFILE.backplanePower,
+        inletOrder: ["sata", "molex", "sata", "molex"],
+      },
+    });
+    expect(plan.backplanePower.map((feed) => feed.connector)).toEqual(["sata", "molex", "sata", "molex"]);
+  });
 });
 
 describe("spin-up surge", () => {
@@ -191,9 +313,38 @@ describe("spin-up surge", () => {
     expect(spinUp.evidence).toBe("unknown");
   });
 
+  it("counts a bay boot device in startup load and fails closed without its own peak data", () => {
+    const bootOnly = checkBackplaneHarness(config({ diskCount: 0, boot: "bay" }), catalog).spinUp;
+    expect(bootOnly).toMatchObject({ diskCount: 1, perDiskA: null, totalA: null, evidence: "unknown" });
+
+    const fullBay = checkBackplaneHarness(config({ diskCount: 8, boot: "bay" }), catalog).spinUp;
+    expect(fullBay).toMatchObject({ diskCount: 9, perDiskA: null, totalA: null, evidence: "unknown" });
+  });
+
   it("flags a shared lead against the vendor's per-lead ceiling when published", () => {
     const { spinUp } = checkBackplaneHarness(config({ psuId: "psu.silverstone-sx750-g" }), catalog);
     expect(spinUp.leadLimitW).toBe(60);
     expect(spinUp.notes.join()).toContain("已超过厂商标注的单接头 60W 上限");
+  });
+
+  it("reports insufficient total 12V rail current instead of claiming margin", () => {
+    const constrained = {
+      ...catalog,
+      skus: catalog.skus.map((sku) => sku.id === "psu.corsair-sf750-atx31"
+        ? { ...sku, attrs: { ...sku.attrs, rail12vA: 10 } } : sku),
+    };
+    const { spinUp } = checkBackplaneHarness(config(), constrained);
+    expect(spinUp.notes.join()).toContain("总 12V 余量不足");
+    expect(spinUp.notes.join()).not.toContain("总 12V 余量充足");
+  });
+
+  it("does not claim a shared lead exceeds a higher published limit", () => {
+    const highLimit = {
+      ...catalog,
+      skus: catalog.skus.map((sku) => sku.id === "psu.corsair-sf750-atx31"
+        ? { ...sku, attrs: { ...sku.attrs, peripheralLeadWLimit: 200 } } : sku),
+    };
+    const { spinUp } = checkBackplaneHarness(config(), highLimit);
+    expect(spinUp.notes.join()).toContain("未超过厂商标注的单接头 200W 上限");
   });
 });

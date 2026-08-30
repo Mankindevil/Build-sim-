@@ -7,6 +7,8 @@ import { createEmptyBuildConfigV3 } from "../src/topology/contracts";
 import { configV3Hash } from "../src/topology/hash";
 import { createPlanPartialEvaluationV3 } from "../src/plans/evaluation";
 import { sha256Hex } from "../src/plans/canonical";
+import { evaluateProgressiveCompatibility } from "../src/compatibility/engine";
+import { progressiveInput } from "./helpers/progressive-evaluation-fixture";
 
 function evaluation(config: BuildConfig, findingId = "finding"): BuildEvaluation {
   return { config, findings: [{ id: findingId, verdict: "warn" }], price: { knownCny: 100, unknownSkuIds: [] } } as unknown as BuildEvaluation;
@@ -61,5 +63,41 @@ describe("R4 evaluation coordinator", () => {
       evaluation: partial,
       expectedConfigHash: "0".repeat(64),
     })).rejects.toThrow(/config hash mismatch/);
+  });
+
+  it("accepts a server-resolved V3 progressive evaluation and binds its config authority", async () => {
+    const coordinator = new EvaluationCoordinator((config) => evaluation(config));
+    const config = createEmptyBuildConfigV3("plan-v3-progressive", "V3 progressive", "2026-08-28T00:00:00.000Z");
+    const progressive = await evaluateProgressiveCompatibility(await progressiveInput(config));
+    await expect(coordinator.acceptPlanResolved({
+      planId: config.id,
+      planVersionId: null,
+      draftRevision: 5,
+      config,
+      evaluation: progressive,
+      expectedConfigHash: await configV3Hash(config),
+      expectedEvaluationHash: await sha256Hex(progressive),
+    })).resolves.toMatchObject({
+      latest: true,
+      snapshot: { evaluation: { kind: "topology-v3-progressive", readiness: { powerReady: false } } },
+    });
+
+    const changed = { ...config, name: "Changed after evaluation" };
+    await expect(coordinator.acceptPlanResolved({
+      planId: changed.id,
+      planVersionId: null,
+      draftRevision: 6,
+      config: changed,
+      evaluation: progressive,
+    })).rejects.toThrow(/does not match the active topology\/config authority/);
+
+    const legacy = createDefaultN6Config("plan-v2-rollback", "2026-08-28T00:00:00.000Z");
+    await expect(coordinator.acceptPlanResolved({
+      planId: legacy.id,
+      planVersionId: null,
+      draftRevision: 1,
+      config: legacy,
+      evaluation: progressive,
+    })).rejects.toThrow(/V2 cannot use a V3 topology evaluation/);
   });
 });

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { createRequire } from "node:module";
+import catalogJson from "../../../data/skus/catalog.json" with { type: "json" };
 import os from "node:os";
 import path from "node:path";
 import { normalizeModelQuery } from "./normalize.mjs";
@@ -16,8 +16,6 @@ import { createDomainProposal } from "./domain-proposals.mjs";
 import { catalogCandidateInputHash } from "./contracts.mjs";
 import { assessCatalogIdentity, classifyOfficialPage, summarizeCatalogCandidates } from "./identity.mjs";
 import { CatalogSearchJobRepository } from "./catalog-job-repository.mjs";
-
-const catalogJson = createRequire(import.meta.url)("../../../data/skus/catalog.json");
 
 const contentCache = new Map();
 const fetchCache = new Map();

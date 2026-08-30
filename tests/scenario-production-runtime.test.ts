@@ -811,6 +811,7 @@ describe("U2 scenario production authority", () => {
     migrationCooler.attrs = { ...migrationCooler.attrs, type: "down-draft" };
     migrationCatalog.skus.push(migrationCooler);
     source.selection.coolerId = migrationCooler.id;
+    source.bom = [{ skuId: migrationCooler.id, qty: 1, bucket: "buy_now" }];
     const sourceBytes = serializeConfig(source); const sourceHash = sha256Bytes(Buffer.from(sourceBytes));
     const migrated = await migrateBuildConfigV2ToV3(source, {
       sourceBytes,
@@ -843,15 +844,41 @@ describe("U2 scenario production authority", () => {
       await atomicWriteJson(confined(rootPath, "plans", planId, "versions", `${sourceVersionId}.json`), { schemaVersion: "1.0.0", kind: "version", checksum: sha256Json(sourceVersion), payload: sourceVersion });
       await atomicWriteJson(confined(rootPath, "plans", planId, "versions", `${migratedVersionId}.json`), { schemaVersion: "1.0.0", kind: "version", checksum: sha256Json(migratedVersionValue), payload: migratedVersionValue });
     };
+    const catalogOverlay = (sku: typeof migrationCooler) => ({
+      schemaVersion: migrationCatalog.schemaVersion,
+      catalogVersion: migrationCatalog.catalogVersion ?? migrationCatalog.schemaVersion,
+      updatedAt: "2026-08-28T00:00:00.000Z",
+      skus: [sku],
+      runtimeCatalog: {
+        schemaVersion: "1.0.0", acceptedSkuIds: [sku.id],
+        baseCatalogVersion: migrationCatalog.catalogVersion ?? migrationCatalog.schemaVersion,
+        baseUpdatedAt: migrationCatalog.updatedAt,
+      },
+    });
     await write(activeRoot, plan);
+    const unknownCooler = structuredClone(migrationCooler);
+    unknownCooler.attrs = { ...unknownCooler.attrs, type: "unknown" };
+    await atomicWriteJson(confined(activeRoot, "catalog-overlays", "product-catalog.json"), catalogOverlay(unknownCooler));
     await expect(createProductionReferenceGraph({ coordinator, now: () => now })).resolves.toBeDefined();
-    const cleanBackup = path.join(root, "migration-audit-clean.backup");
-    await createBackup({ coordinator, outputFile: cleanBackup, password: "a sufficiently long password" });
+    const unknownBackup = path.join(root, "migration-audit-catalog-unknown.backup");
+    await expect(createBackup({ coordinator, outputFile: unknownBackup, password: "a sufficiently long password" }))
+      .resolves.toBeDefined();
+    expect((await runDoctor({ coordinator })).report.checks.find((check: { checkId: string }) => check.checkId === "integrity.repository_hashes"))
+      .not.toMatchObject({ status: "fail" });
+    const unknownRestore = await restoreBackup({ coordinator, inputFile: unknownBackup, password: "a sufficiently long password" });
+    const unknownRoot = coordinator.activeRoot(unknownRestore.state);
+    await expect(createBackup({ coordinator, outputFile: path.join(root, "migration-audit-unknown-restored.backup"), password: "a sufficiently long password" }))
+      .resolves.toBeDefined();
+    await rm(confined(unknownRoot, "catalog-overlays", "product-catalog.json"));
+    await expect(createProductionReferenceGraph({ coordinator, now: () => now })).resolves.toBeDefined();
+    const cleanBackup = path.join(root, "migration-audit-catalog-removed.backup");
+    await expect(createBackup({ coordinator, outputFile: cleanBackup, password: "a sufficiently long password" }))
+      .resolves.toBeDefined();
     expect((await runDoctor({ coordinator })).report.checks.find((check: { checkId: string }) => check.checkId === "integrity.repository_hashes"))
       .not.toMatchObject({ status: "fail" });
     const cleanRestore = await restoreBackup({ coordinator, inputFile: cleanBackup, password: "a sufficiently long password" });
     const restoredRoot = coordinator.activeRoot(cleanRestore.state);
-    await expect(createBackup({ coordinator, outputFile: path.join(root, "migration-audit-restored.backup"), password: "a sufficiently long password" }))
+    await expect(createBackup({ coordinator, outputFile: path.join(root, "migration-audit-removed-restored.backup"), password: "a sufficiently long password" }))
       .resolves.toBeDefined();
     const forged = structuredClone(plan);
     forged.draft.configMigration.catalogBinding.cooler.type = "aio";

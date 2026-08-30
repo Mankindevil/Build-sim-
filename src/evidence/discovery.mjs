@@ -1,6 +1,7 @@
 import { registryForUrl } from "../../scripts/price-server/catalog/registry.mjs";
 import { validateOfficialUrl } from "../../scripts/price-server/catalog/security.mjs";
 import { fetchOfficial } from "../../scripts/price-server/catalog/fetch.mjs";
+import { evidenceSearchReasonForFailureCode } from "./search-outcome.mjs";
 
 const PDF_PATH = /\.pdf(?:$|[?#])/i;
 const DOCUMENT_WORDS = /\b(?:manual|user[ -]?guide|installation|instructions?|datasheet|data[ -]?sheet|specification|quick[ -]?start|qsg|documentation)\b|说明书|用户手册|使用手册|安装指南|规格书/i;
@@ -20,6 +21,7 @@ export class EvidenceDiscoveryError extends Error {
     super(boundedErrorText(`${message}${detail ? `: ${detail}` : ""}`), cause ? { cause } : undefined);
     this.name = "EvidenceDiscoveryError";
     this.code = code;
+    this.reason = evidenceSearchReasonForFailureCode(code);
     this.manualAction = boundedErrorText(manualAction);
   }
 }
@@ -191,6 +193,21 @@ function sameOfficialBrand(left, right) {
   return Boolean(a?.trustStatus === "trusted" && b?.trustStatus === "trusted" && a.brand === b.brand);
 }
 
+function officialFailure(candidates, warnings = []) {
+  if (candidates.length > 0) return null;
+  const terminalWarning = warnings.at(-1);
+  const reason = terminalWarning?.reason ?? "official_search_exhausted";
+  return Object.freeze({
+    reason,
+    detail: terminalWarning
+      ? `Official discovery completed without a usable exact document after a governed page failure: ${boundedErrorText(terminalWarning.message, 240)}`
+      : "Official discovery completed without a usable exact document candidate.",
+    manualAction: reason === "official_access_blocked"
+      ? "Retry the official site later without bypassing its access controls, or inspect it manually."
+      : "Confirm the exact model/revision and inspect another governed official support or document page.",
+  });
+}
+
 function ranked(candidates, startUrl, tokens, limit, options = {}) {
   const byUrl = new Map();
   for (const candidate of candidates) {
@@ -244,13 +261,15 @@ export async function discoverOfficialDocumentLinks(rawUrl, options = {}) {
     fail("document_discovery_brand_mismatch", "Official document discovery crossed to another manufacturer brand", "Review the exact official URL before continuing.");
   }
   if (String(initial.contentType ?? "").toLocaleLowerCase().includes("pdf") || PDF_PATH.test(finalUrl)) {
+    const candidates = ranked([{ url: finalUrl, title: options.title ?? "Official document", discoveredFrom: startUrl }], startUrl, tokens, limit);
     return {
       startUrl,
       finalUrl,
       officialBrand: registryForUrl(new URL(finalUrl))?.brand ?? null,
-      candidates: ranked([{ url: finalUrl, title: options.title ?? "Official document", discoveredFrom: startUrl }], startUrl, tokens, limit),
+      candidates,
       pagesInspected: 1,
       warnings: [],
+      officialFailure: officialFailure(candidates),
     };
   }
 
@@ -258,6 +277,7 @@ export async function discoverOfficialDocumentLinks(rawUrl, options = {}) {
   const supportPages = ranked(direct.filter((candidate) => !PDF_PATH.test(candidate.url)), startUrl, tokens, followPageLimit, { forFollow: true });
   const followed = [];
   const warnings = [];
+  const warningAudits = [];
   for (const page of supportPages) {
     try {
       const response = await fetchPage(fetcher, page.url, options.fetchOptions ?? {}, startBrand);
@@ -269,14 +289,20 @@ export async function discoverOfficialDocumentLinks(rawUrl, options = {}) {
       else followed.push(...embeddedReferences(response.body, followedUrl).map((candidate) => ({ ...candidate, discoveredFrom: followedUrl })));
     } catch (error) {
       warnings.push(`${page.url}: ${String(error?.message ?? error).slice(0, 240)}`);
+      warningAudits.push({
+        reason: error?.reason ?? evidenceSearchReasonForFailureCode(error?.code),
+        message: error?.message ?? error,
+      });
     }
   }
+  const candidates = ranked([...direct, ...followed], startUrl, tokens, limit);
   return {
     startUrl,
     finalUrl,
     officialBrand: registryForUrl(new URL(finalUrl))?.brand ?? null,
-    candidates: ranked([...direct, ...followed], startUrl, tokens, limit),
+    candidates,
     pagesInspected: 1 + supportPages.length,
     warnings,
+    officialFailure: officialFailure(candidates, warningAudits),
   };
 }

@@ -7,6 +7,8 @@ import { buildSpatialOverlayModel, configFieldPartIds, primaryPartForFinding, ty
 import type { WorkspaceRouter } from "./workspace-router";
 import { buildReadiness } from "../config/validate";
 import type { BuildConfigV3 } from "../topology/contracts";
+import { WorkspaceApiClient } from "../plans/client";
+import type { AuthoritativeSpatialSceneSnapshot } from "../spatial/authoritative-scene";
 import "./spatial-view.css";
 
 export interface SpatialViewController {
@@ -169,7 +171,13 @@ function renderInspector(host: HTMLElement, node: SpatialSceneNode | null, overl
   host.append(title, facts);
 }
 
-export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalog: () => SkuCatalog, router?: WorkspaceRouter): SpatialViewController {
+export function mountSpatialView(
+  stage: HTMLElement,
+  store: PlanStore,
+  getCatalog: () => SkuCatalog,
+  router?: WorkspaceRouter,
+  spatialApi: Pick<WorkspaceApiClient, "spatialScene"> = new WorkspaceApiClient(),
+): SpatialViewController {
   const { root, fallback } = createChrome(stage);
   const legacyToolbar = stage.previousElementSibling instanceof HTMLElement && stage.previousElementSibling.classList.contains("case-view-toolbar")
     ? stage.previousElementSibling
@@ -200,6 +208,10 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
   let evaluationIdentity: SpatialEvaluationIdentity | null = null;
   let syncedPartId: string | null = null;
   let syncedFindingId: string | null = null;
+  let v3LoadedKey: string | null = null;
+  let v3LoadingKey: string | null = null;
+  let v3RequestGeneration = 0;
+  let authoritativeSceneStatus: string | null = null;
   const forceFallback = new URLSearchParams(location.search).get("spatialFallback") === "1";
   const capability = detectWebGl(undefined, forceFallback);
   const selection = new SpatialSelectionController({ schemaVersion: "1.0.0", coordinateSystem: { units: "mm", origin: "case-envelope-center", axes: { x: "right", y: "up", z: "rear" }, anchor: "center" }, caseSkuId: "", bounds: { c: [0, 0, 0], w: 0, h: 0, d: 0 }, nodes: [], evaluationFindingIds: [] }, (node) => {
@@ -246,7 +258,9 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
   const ensureRenderer = () => {
     if (renderer || loading || disposed || !model || !overlays) return;
     if (!capability.available) { showFallback(capability.reason); return; }
-    status.textContent = "正在按需载入 Three.js…";
+    status.textContent = authoritativeSceneStatus
+      ? `${authoritativeSceneStatus} · 正在按需载入 Three.js…`
+      : "正在按需载入 Three.js…";
     const generation = sceneGeneration;
     loading = import("../spatial/three-renderer").then(({ createThreeSpatialRenderer }) => {
       if (disposed || generation !== sceneGeneration || !model || !overlays) return;
@@ -269,7 +283,9 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
       stage.classList.add("spatial-three-active");
       hideLegacyToolbar();
       fallback.classList.add("is-hidden");
-      status.textContent = "Three.js 场景已加载 · 单位 mm · 结论来自当前 BuildEvaluation";
+      status.textContent = authoritativeSceneStatus
+        ? `${authoritativeSceneStatus} · Three.js 已加载`
+        : "Three.js 场景已加载 · 单位 mm · 结论来自当前 BuildEvaluation";
     }).catch((error: unknown) => {
       if (!disposed && generation === sceneGeneration) showFallback(error instanceof Error ? error.message : "renderer error");
     }).finally(() => {
@@ -290,6 +306,7 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
     evaluationHash = null;
     syncedPartId = null;
     syncedFindingId = null;
+    authoritativeSceneStatus = null;
     selection.select(null, false);
     selection.setModel(emptySpatialModel());
     canvasHost.replaceChildren();
@@ -311,17 +328,117 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
     hideLegacyToolbar();
   };
 
+  const syncSceneSelection = (state: PlanStoreState) => {
+    if (!model || !overlays) return;
+    const partId = state.selection?.partId && sceneNode(model, state.selection.partId) ? state.selection.partId : null;
+    const findingId = state.selection?.findingId && overlays.findings.some((finding) => finding.id === state.selection?.findingId)
+      ? state.selection.findingId
+      : null;
+    const normalizedSelection = partId ? { partId, view: state.selection?.view ?? "spatial", ...(findingId ? { findingId } : {}) } : null;
+    const selectionChanged = partId !== syncedPartId;
+    const findingChanged = findingId !== syncedFindingId;
+    syncedPartId = partId;
+    syncedFindingId = findingId;
+    if (selection.getState().selectedPartId !== partId) selection.select(partId, false);
+    findingSelect.value = findingId ?? "";
+    if (findingChanged) renderer?.setFinding(findingId, false);
+    if (selectionChanged || findingChanged) renderer?.focus(partId, Boolean(partId));
+    renderInspector(inspector, partId ? sceneNode(model, partId) : null, overlays);
+    if (!sameSelection(state.selection, normalizedSelection)) queueMicrotask(() => {
+      if (!disposed) publishSelection(normalizedSelection);
+    });
+  };
+
+  const installV3Scene = (snapshot: AuthoritativeSpatialSceneSnapshot, key: string) => {
+    sceneGeneration += 1;
+    v3LoadedKey = key;
+    model = structuredClone(snapshot.model);
+    overlays = structuredClone(snapshot.overlays);
+    evaluationHash = snapshot.evaluationHash;
+    evaluationIdentity = { sourceKey: key, snapshotHash: snapshot.evaluationHash };
+    root.classList.remove("is-hidden");
+    root.classList.toggle("is-partial", snapshot.executionStatus !== "ready");
+    fallback.classList.add("is-hidden");
+    stage.classList.add("spatial-three-pending");
+    stage.classList.remove("spatial-three-active");
+    mode = "pending";
+    findingSelect.disabled = snapshot.overlays.findings.length === 0;
+    assemblySelect.disabled = snapshot.overlays.assembly.length === 0;
+    populateWorkflow();
+    selection.setModel(model);
+    renderer?.update(model, overlays);
+    const blocked = snapshot.blockedDomains.length ? `；阻断域：${snapshot.blockedDomains.join("、")}` : "";
+    authoritativeSceneStatus = snapshot.executionStatus === "ready"
+      ? `已加载服务端锁定空间场景 · ${snapshot.caseIdentity.skuId} · 单位 mm`
+      : `已加载服务端部分空间场景 · 仅显示有权威坐标的结构${blocked}`;
+    status.textContent = authoritativeSceneStatus;
+    workflowNote.textContent = snapshot.executionStatus === "ready"
+      ? "场景绑定不可变方案版本与适配器制品。"
+      : "未解析的部件位置、走线与装配步骤保持阻断，不使用占位结果。";
+    syncSceneSelection(store.getState());
+    ensureRenderer();
+  };
+
   const onState = (state: PlanStoreState) => {
     const config = state.activePlan?.draft.config;
     if (isBuildConfigV3(config)) {
+      const plan = state.activePlan;
+      const versionId = plan?.activeVersionId;
+      if (!plan || !versionId || plan.draft.dirty) {
+        if (v3LoadedKey || v3LoadingKey || model) {
+          v3RequestGeneration += 1; v3LoadedKey = null; v3LoadingKey = null;
+          clearScene({
+            status: plan?.draft.dirty ? "方案草稿已修改；保存并完成受治理评估后再刷新空间场景。" : "V3 方案尚无可重放版本；不会显示旧空间结论。",
+            workflow: "空间场景必须绑定不可变方案版本与精确适配器制品。",
+            findingLabel: "等待锁定空间评估",
+            assemblyLabel: "等待锁定空间评估",
+          });
+        }
+        if (state.selection) queueMicrotask(() => { if (!disposed && isBuildConfigV3(store.getState().activePlan?.draft.config)) publishSelection(null); });
+        return;
+      }
+      const key = `${plan.id}:${versionId}`;
+      if (v3LoadedKey === key && model && overlays) {
+        syncSceneSelection(state);
+        ensureRenderer();
+        return;
+      }
+      if (v3LoadingKey === key) return;
+      v3RequestGeneration += 1;
+      const requestGeneration = v3RequestGeneration;
+      v3LoadedKey = null;
+      v3LoadingKey = key;
       clearScene({
-        status: "当前为 V3 部分拓扑；尚未生成空间、走线或热场结论。",
-        workflow: "V3 部分拓扑不会复用旧版空间场景；物理布局、接线与尺寸仍未知。",
-        findingLabel: "V3 拓扑待物理评估",
-        assemblyLabel: "等待 V3 物理评估",
+        status: "正在读取服务端锁定的 V3 空间场景…",
+        workflow: "校验方案版本、评估锁和适配器制品。",
+        findingLabel: "读取空间场景",
+        assemblyLabel: "读取装配场景",
       });
-      if (state.selection) queueMicrotask(() => { if (!disposed && isBuildConfigV3(store.getState().activePlan?.draft.config)) publishSelection(null); });
+      if (state.selection) queueMicrotask(() => {
+        const current = store.getState();
+        if (!disposed && isBuildConfigV3(current.activePlan?.draft.config)) publishSelection(null);
+      });
+      void spatialApi.spatialScene(plan.id, versionId).then((snapshot) => {
+        if (disposed || requestGeneration !== v3RequestGeneration || v3LoadingKey !== key) return;
+        const current = store.getState().activePlan;
+        if (!current || current.id !== plan.id || current.activeVersionId !== versionId || current.draft.dirty
+          || snapshot.planId !== plan.id || snapshot.planVersionId !== versionId) return;
+        v3LoadingKey = null;
+        installV3Scene(snapshot, key);
+      }).catch((error: unknown) => {
+        if (disposed || requestGeneration !== v3RequestGeneration || v3LoadingKey !== key) return;
+        v3LoadingKey = null;
+        clearScene({
+          status: `空间场景不可用：${error instanceof Error ? error.message : "服务端拒绝场景"}`,
+          workflow: "未通过版本/制品闭包校验时保持未知，不回退到浏览器旧结果。",
+          findingLabel: "空间场景不可用",
+          assemblyLabel: "空间场景不可用",
+        });
+      });
       return;
+    }
+    if (v3LoadedKey || v3LoadingKey) {
+      v3RequestGeneration += 1; v3LoadedKey = null; v3LoadingKey = null;
     }
     if (!state.evaluation) {
       clearScene({
@@ -373,23 +490,7 @@ export function mountSpatialView(stage: HTMLElement, store: PlanStore, getCatalo
     }
     if (!model || !overlays) return;
 
-    const partId = state.selection?.partId && sceneNode(model, state.selection.partId) ? state.selection.partId : null;
-    const findingId = state.selection?.findingId && overlays.findings.some((finding) => finding.id === state.selection?.findingId)
-      ? state.selection.findingId
-      : null;
-    const normalizedSelection = partId ? { partId, view: state.selection?.view ?? "spatial", ...(findingId ? { findingId } : {}) } : null;
-    const selectionChanged = partId !== syncedPartId;
-    const findingChanged = findingId !== syncedFindingId;
-    syncedPartId = partId;
-    syncedFindingId = findingId;
-    if (selection.getState().selectedPartId !== partId) selection.select(partId, false);
-    findingSelect.value = findingId ?? "";
-    if (findingChanged) renderer?.setFinding(findingId, false);
-    if (selectionChanged || findingChanged) renderer?.focus(partId, Boolean(partId));
-    renderInspector(inspector, partId ? sceneNode(model, partId) : null, overlays);
-    if (!sameSelection(state.selection, normalizedSelection)) queueMicrotask(() => {
-      if (!disposed) publishSelection(normalizedSelection);
-    });
+    syncSceneSelection(state);
     ensureRenderer();
   };
   const unsubscribe = store.subscribe(onState);

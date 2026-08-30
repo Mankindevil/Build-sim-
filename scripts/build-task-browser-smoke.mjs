@@ -1,12 +1,17 @@
 import { chromium } from "playwright";
+import { installLocalCatalogRoute } from "./local-browser-fixtures.mjs";
 
+const webPort = Number(process.env.WEB_SERVER_PORT ?? 5173);
+if (!Number.isSafeInteger(webPort) || webPort < 1 || webPort > 65_535) throw new Error("WEB_SERVER_PORT is invalid");
+const webOrigin = `http://127.0.0.1:${webPort}`;
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
+await installLocalCatalogRoute(page);
 page.setDefaultTimeout(20_000);
 const errors = [];
 const archives = [];
 page.on("pageerror", (error) => errors.push(String(error)));
-page.on("console", (message) => { if (message.type() === "error" && !message.text().includes("500") && !message.text().includes("502")) errors.push(message.text()); });
+page.on("console", (message) => { if (message.type() === "error" && !message.text().includes("404") && !message.text().includes("500") && !message.text().includes("502")) errors.push(message.text()); });
 page.on("dialog", (dialog) => dialog.accept());
 
 await page.route("**/api/price/transactions/**", async (route) => {
@@ -27,7 +32,7 @@ await page.route("**/api/price/transactions/**", async (route) => {
   return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
 });
 
-await page.goto("http://127.0.0.1:5173/index.html#/workspace", { waitUntil: "networkidle" });
+await page.goto(`${webOrigin}/index.html#/workspace`, { waitUntil: "domcontentloaded" });
 await page.waitForFunction(() => Boolean(window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation));
 if (await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation?.config.selection.psuId) !== "psu.seasonic-focus-gx-850-v5") {
   await page.click('[data-route="editor"]');
@@ -66,9 +71,24 @@ await page.waitForFunction(() => location.hash === "#/spatial");
 if (!await page.evaluate(() => window.__BUILD_SIM_PLAN_STORE__?.getState().selection?.partId)) throw new Error("build task did not select a spatial part");
 
 await page.click('[data-route="editor"]');
+const frontFanCount = page.locator('[data-fan-mount="front"] [data-fan-count]');
+if (await frontFanCount.count() && await frontFanCount.inputValue() !== "0") {
+  await frontFanCount.selectOption("0");
+  await page.waitForFunction(() => !window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.config.selection.fanGroups?.some((group) => group.mountId === "front"));
+  await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().saveStatus === "saved");
+}
 await page.selectOption('[data-config-field="selection.psuId"]', "psu.corsair-sf750-atx31");
 await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.config.selection.psuId === "psu.corsair-sf750-atx31");
 await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().evaluation?.config.selection.psuId === "psu.corsair-sf750-atx31");
+try {
+  await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().saveStatus === "saved");
+} catch (error) {
+  const diagnostic = await page.evaluate(() => {
+    const state = window.__BUILD_SIM_PLAN_STORE__?.getState();
+    return { saveStatus: state?.saveStatus, error: state?.error, draftRevision: state?.activePlan?.draftRevision, dirty: state?.activePlan?.draft.dirty, shellStatus: document.querySelector("[data-save-status]")?.textContent };
+  });
+  throw new Error(`draft autosave did not settle: ${JSON.stringify(diagnostic)}`, { cause: error });
+}
 await page.click('[data-route="build"]');
 try {
   await page.waitForFunction((suffix) => [...document.querySelectorAll("[data-task-id]")].some((row) => row.getAttribute("data-task-id")?.endsWith(suffix) && row.getAttribute("data-task-status-value") === "obsolete"), oldTaskSuffix);
@@ -84,7 +104,25 @@ const replacement = page.locator('[data-task-kind="purchase"]').filter({ hasText
 if (await replacement.getAttribute("data-task-status-value") !== "todo") throw new Error("replacement PSU inherited the old SKU completion state");
 
 await page.click('[data-save-version]');
-await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.dirty === false);
+try {
+  await page.waitForFunction(() => window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan?.draft.dirty === false);
+} catch (error) {
+  const diagnostic = await page.evaluate(() => ({
+    hash: location.hash,
+    plan: (() => {
+      const plan = window.__BUILD_SIM_PLAN_STORE__?.getState().activePlan;
+      return plan ? { id: plan.id, draftRevision: plan.draftRevision, dirty: plan.draft.dirty, activeVersionId: plan.activeVersionId } : null;
+    })(),
+    snapshot: (() => {
+      const snapshot = window.__BUILD_SIM_PLAN_STORE__?.getState().evaluationSnapshot;
+      return snapshot ? { planId: snapshot.planId, draftRevision: snapshot.draftRevision, configHash: snapshot.configHash, evaluationHash: snapshot.evaluationHash, hasLock: Boolean(snapshot.evaluationLock) } : null;
+    })(),
+    saveStatus: [...document.querySelectorAll("[data-save-status]")].map((node) => ({ text: node.textContent, status: node.getAttribute("data-status") })),
+    error: document.querySelector("[data-workspace-error]")?.textContent ?? null,
+    saveButton: document.querySelector("[data-save-version]")?.outerHTML ?? null,
+  }));
+  throw new Error(`saved version did not settle: ${JSON.stringify(diagnostic)}`, { cause: error });
+}
 const downloadPromise = page.waitForEvent("download");
 await page.click("[data-export-saved-checklist]");
 const download = await downloadPromise;

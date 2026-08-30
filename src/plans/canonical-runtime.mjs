@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
 import { V3_RESOLVED_CATALOG_KIND_MATCHERS } from "../config/v3-catalog-runtime.mjs";
-import { sha256Json } from "../runtime/fs.mjs";
+import { sha256Utf8Runtime } from "../hash/sha256-runtime.mjs";
 
 const TOP_LEVEL_SET_PATHS = new Set([
   "/components", "/roleDecisions", "/placements", "/connections", "/logicalLayouts", "/firmwareTargets",
@@ -8,6 +7,31 @@ const TOP_LEVEL_SET_PATHS = new Set([
 
 function compare(left, right) {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Browser/Node-neutral equivalent of runtime/fs canonicalJson. */
+export function canonicalJsonRuntime(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJsonRuntime).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value)
+      .filter(([, child]) => child !== undefined)
+      .sort(([left], [right]) => compare(left, right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJsonRuntime(child)}`)
+      .join(",")}}`;
+  }
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined) throw new TypeError("value is not finite JSON");
+  return encoded;
+}
+
+function sha256Utf8(value) {
+  const digest = sha256Utf8Runtime(value);
+  if (digest === null) throw new TypeError("value cannot be hashed");
+  return digest;
+}
+
+export function sha256JsonRuntime(value) {
+  return sha256Utf8(canonicalJsonRuntime(value).normalize("NFC"));
 }
 
 function normalizeString(value) {
@@ -121,14 +145,14 @@ function canonicalize(value, path = "", ancestors = new Set()) {
   }
 }
 
-/** Node-runtime equivalent of the TypeScript Plan config hash dispatcher. */
+/** Browser/Node-neutral equivalent of the TypeScript Plan config hash dispatcher. */
 export function hashPlanConfigRuntime(config) {
   if (!config || typeof config !== "object" || Array.isArray(config)) throw new TypeError("plan config must be an object");
-  if (config.schemaVersion === "2.0.0") return sha256Json(config);
+  if (config.schemaVersion === "2.0.0") return sha256JsonRuntime(config);
   if (config.schemaVersion !== "3.0.0") throw new TypeError(`unsupported plan config schema: ${String(config.schemaVersion ?? "missing")}`);
   const normalized = normalizeBuildConfigV3(config);
   const preimage = `buildsim\u0000hash-spec-v1\u0000build-config\u00003.0.0\u0000${canonicalize(normalized)}`;
-  return createHash("sha256").update(preimage, "utf8").digest("hex");
+  return sha256Utf8(preimage);
 }
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -170,10 +194,11 @@ const FACETS = new Set([
   "motherboard.bios_upgrade_methods", "motherboard.display_outputs", "motherboard.supported_operating_systems", "memory.type", "memory.capacity",
   "io.port_types", "io.header_types", "io.endpoint_ids", "case.motherboard_form_factors", "case.side_panel", "case.gpu_max_length",
   "case.cpu_cooler_max_height", "gpu.length", "gpu.slot_width", "gpu.power_connectors", "psu.capacity", "psu.connectors", "power.source_type",
-  "power.load", "power.cable_families", "pcie.lane_count", "pcie.slot_types", "pcie.lane_sharing", "storage.interface", "storage.boot_support",
+  "power.load", "power.cable_families", "pcie.lane_count", "pcie.slot_types", "pcie.lane_sharing", "storage.interface", "storage.boot_support", "storage.capacity_bytes",
   "storage.recording_technology", "hba.mode", "cooling.fan_mounts", "cooling.radiator_support", "cooling.pump_header", "firmware.version",
   "firmware.upgrade_path_refs", "driver.supported_operating_systems", "driver.package_versions", "thermal.curve_refs", "acoustic.curve_refs",
-  "package.contents", "acoustic.noise_class",
+  "package.contents", "resource.kind", "cable.connector_standard", "fastener.thread", "fastener.length_mm", "fastener.head",
+  "tool.drive", "consumable.type", "accessory.standard", "acoustic.noise_class",
 ]);
 const FACET_RULES = {};
 function registerFacet(ids, valueType, units, operators) { for (const id of ids) FACET_RULES[id] = { valueType, units, operators }; }
@@ -185,9 +210,11 @@ registerFacet(["gpu.length"], "number", ["mm"], ["lte", "between"]);
 registerFacet(["gpu.slot_width"], "number", ["slot"], ["lte", "between"]);
 registerFacet(["psu.capacity"], "number", ["w"], ["gte", "between"]);
 registerFacet(["power.load"], "number", ["w"], ["lte", "gte", "between"]);
+registerFacet(["storage.capacity_bytes"], "number", ["byte"], ["gte", "lte", "between"]);
+registerFacet(["fastener.length_mm"], "number", ["mm"], ["eq", "gte", "lte", "between"]);
 registerFacet(["pcie.lane_count"], "number", ["count"], ["gte", "between"]);
 registerFacet(["storage.boot_support", "cooling.pump_header"], "boolean", [], ["eq"]);
-registerFacet(["mount.point_ids", "motherboard.memory_population_rules", "motherboard.bios_upgrade_methods", "motherboard.display_outputs", "motherboard.supported_operating_systems", "io.port_types", "io.header_types", "io.endpoint_ids", "case.motherboard_form_factors", "gpu.power_connectors", "psu.connectors", "power.cable_families", "pcie.slot_types", "pcie.lane_sharing", "cooling.fan_mounts", "cooling.radiator_support", "firmware.upgrade_path_refs", "driver.supported_operating_systems", "driver.package_versions", "thermal.curve_refs", "acoustic.curve_refs", "package.contents"], "string", [], ["includes"]);
+registerFacet(["mount.point_ids", "motherboard.memory_population_rules", "motherboard.bios_upgrade_methods", "motherboard.display_outputs", "motherboard.supported_operating_systems", "io.port_types", "io.header_types", "io.endpoint_ids", "case.motherboard_form_factors", "gpu.power_connectors", "psu.connectors", "power.cable_families", "pcie.slot_types", "pcie.lane_sharing", "cooling.fan_mounts", "cooling.radiator_support", "firmware.upgrade_path_refs", "driver.supported_operating_systems", "driver.package_versions", "thermal.curve_refs", "acoustic.curve_refs", "package.contents", "cable.connector_standard"], "string", [], ["includes"]);
 registerFacet(["motherboard.form_factor"], "string", [], ["eq", "includes"]);
 for (const id of FACETS) if (!FACET_RULES[id]) FACET_RULES[id] = { valueType: "string", units: [], operators: ["eq"] };
 const FIRMWARE_SETTINGS = Object.freeze({
@@ -276,12 +303,12 @@ export function validatePlanIdempotencyRuntime(record) {
   if (operation.ownerPlanId && operation.kind !== "duplicate" && result.planId !== operation.ownerPlanId) return ["plan idempotency result owner invalid"];
   if (operation.kind === "duplicate" && result.planId === operation.ownerPlanId) return ["plan duplicate idempotency result must reference the copied plan"];
   const { resultHash, ...material } = result;
-  if (resultHash !== sha256Json(material)) return ["plan idempotency result reference hash invalid"];
+  if (resultHash !== sha256JsonRuntime(material)) return ["plan idempotency result reference hash invalid"];
   return [];
 }
 
 function migrationStableIdRuntime(prefix, sourceHash, sourcePath, ordinal = 1) {
-  const digest = createHash("sha256").update(`build-sim:v2-migration:${sourceHash}:${sourcePath}:${ordinal}`, "utf8").digest("hex");
+  const digest = sha256Utf8(`build-sim:v2-migration:${sourceHash}:${sourcePath}:${ordinal}`);
   return `${prefix}-${digest}`;
 }
 
@@ -310,7 +337,7 @@ export function validateMigrationCatalogBindingRuntime(binding, coolerSkuId) {
     || (binding.cooler.catalogSkuId === null) !== (binding.cooler.category === null)
     || binding.cooler.catalogSkuId === null && binding.cooler.type !== null
     || !SHA256.test(String(binding.bindingHash ?? ""))
-    || binding.bindingHash !== sha256Json(migrationCatalogBindingMaterialRuntime(binding))) return false;
+    || binding.bindingHash !== sha256JsonRuntime(migrationCatalogBindingMaterialRuntime(binding))) return false;
   return true;
 }
 
@@ -630,7 +657,7 @@ function evidenceBindingIdentityRuntime(binding) {
 }
 
 export function evidenceBindingIdRuntime(binding) {
-  return `binding-sha256-${createHash("sha256").update(canonicalize(evidenceBindingIdentityRuntime(binding)), "utf8").digest("hex")}`;
+  return `binding-sha256-${sha256Utf8(canonicalize(evidenceBindingIdentityRuntime(binding)))}`;
 }
 
 export function validatePlanEvidenceBindingRuntime(binding, context = {}) {
@@ -723,22 +750,47 @@ export function validatePlanVersionRuntime(version, options = { topologyV3Enable
   if (version?.evidenceBindings !== undefined || version?.evidenceHash !== undefined) {
     try {
       evidenceHashMatches = Array.isArray(version?.evidenceBindings) && SHA256.test(String(version?.evidenceHash ?? ""))
-        && version.evidenceHash === sha256Json(version.evidenceBindings);
+        && version.evidenceHash === sha256JsonRuntime(version.evidenceBindings);
     } catch {
       evidenceHashMatches = false;
     }
   }
-  const allowed = ["schemaVersion", "id", "planId", "versionNumber", "createdAt", "reason", "summary", "config", "configHash", "evidenceBindings", "evidenceHash", "evaluationHash", "evaluatedAt", "parentVersionId"];
+  const allowed = ["schemaVersion", "id", "planId", "versionNumber", "createdAt", "reason", "summary", "config", "configHash", "evidenceBindings", "evidenceHash", "evaluationHash", "evaluatedAt", "evaluationLock", "parentVersionId"];
   const required = ["schemaVersion", "id", "planId", "versionNumber", "createdAt", "reason", "config", "configHash", "parentVersionId"];
   if (!exactOrSubset(version, allowed, required) || version.schemaVersion !== "1.0.0" || !nonEmpty(version.id) || !nonEmpty(version.planId) || !Number.isSafeInteger(version.versionNumber) || version.versionNumber < 1 || !iso(version.createdAt)
     || !["initial", "manual-save", "agent-proposal", "import", "restore", "migration-source"].includes(version.reason) || !configHashMatches
     || (version.parentVersionId !== null && !nonEmpty(version.parentVersionId))
     || (version.summary !== undefined && (typeof version.summary !== "string" || version.summary.length > 500))
     || (version.evaluationHash !== undefined && !SHA256.test(String(version.evaluationHash)))
+    || (version.evaluationLock !== undefined && version.evaluationHash === undefined)
     || (version.evaluatedAt !== undefined && !iso(version.evaluatedAt))) errors.push("plan version identity/schema/config hash invalid");
   errors.push(...validatePlanConfigRuntime(version?.config, options).map((error) => `config: ${error}`));
   errors.push(...validatePlanEvidenceBindingsRuntime(version?.evidenceBindings, { planId: version?.planId, versionId: version?.id }));
   if (!evidenceHashMatches) errors.push("plan version evidence hash invalid");
+  if (version?.evaluationLock !== undefined) errors.push(...validatePlanEvaluationLockRuntime(version.evaluationLock));
+  return errors;
+}
+
+const SNAPSHOT_HASH_FIELDS = [
+  "configHash", "requirementSpecHash", "factSnapshotHash", "userObservationSnapshotHash", "priceSnapshotHash", "ruleSetHash",
+  "systemProfileHash", "adapterSnapshotHash", "engineHash", "simulationModelHash", "simulationInputHash",
+];
+
+export function validatePlanEvaluationLockRuntime(value) {
+  const errors = [];
+  const fields = ["schemaVersion", "planId", "snapshotHashes", "factSnapshotId", "userObservationSnapshotId", "artifactLockfileHash", "contentHash"];
+  if (!exactOrSubset(value, fields, fields) || value.schemaVersion !== "plan-evaluation-lock-v1" || !nonEmpty(value.planId) || !nonEmpty(value.factSnapshotId)
+    || !nonEmpty(value.userObservationSnapshotId) || !SHA256.test(String(value.artifactLockfileHash ?? "")) || !SHA256.test(String(value.contentHash ?? ""))) {
+    return ["plan evaluation lock structure invalid"];
+  }
+  if (!exactOrSubset(value.snapshotHashes, SNAPSHOT_HASH_FIELDS, SNAPSHOT_HASH_FIELDS)
+    || SNAPSHOT_HASH_FIELDS.some((field) => !SHA256.test(String(value.snapshotHashes[field] ?? "")))) errors.push("plan evaluation lock snapshot hashes invalid");
+  try {
+    const material = { ...value };
+    delete material.contentHash;
+    const preimage = `buildsim\0hash-spec-v1\0plan-evaluation-lock\0plan-evaluation-lock-v1\0${canonicalJsonRuntime(material).normalize("NFC")}`;
+    if (sha256Utf8(preimage) !== value.contentHash) errors.push("plan evaluation lock content hash invalid");
+  } catch { errors.push("plan evaluation lock content hash invalid"); }
   return errors;
 }
 
@@ -756,11 +808,11 @@ export function validatePlanConfigMigrationRuntime(record, context) {
   const rollback = record.rollbackRef;
   if (!exactOrSubset(rollback, ["schemaVersion", "configId", "sourceSchemaVersion", "sourceHash", "sourceByteLength"], ["schemaVersion", "configId", "sourceSchemaVersion", "sourceHash", "sourceByteLength"])
     || rollback.schemaVersion !== "build-config-v2-rollback-ref-v1" || rollback.configId !== context?.planId || rollback.sourceSchemaVersion !== "2.0.0"
-    || rollback.sourceHash !== createHash("sha256").update(sourceBytes, "utf8").digest("hex") || rollback.sourceByteLength !== Buffer.byteLength(sourceBytes, "utf8")) errors.push("config migration rollback closure invalid");
+    || rollback.sourceHash !== sha256Utf8(sourceBytes) || rollback.sourceByteLength !== new TextEncoder().encode(sourceBytes).byteLength) errors.push("config migration rollback closure invalid");
   if (source?.config?.schemaVersion === "2.0.0" && SHA256.test(String(rollback?.sourceHash ?? ""))) {
     try {
       const expected = recomputeMigrationAuditRuntime(source.config, rollback.sourceHash, record.catalogBinding);
-      if (sha256Json(record.diff) !== sha256Json(expected.diff) || sha256Json(record.warnings) !== sha256Json(expected.warnings)) errors.push("config migration audit does not match immutable source");
+      if (sha256JsonRuntime(record.diff) !== sha256JsonRuntime(expected.diff) || sha256JsonRuntime(record.warnings) !== sha256JsonRuntime(expected.warnings)) errors.push("config migration audit does not match immutable source");
     } catch {
       errors.push("config migration audit cannot be recomputed from immutable source");
     }

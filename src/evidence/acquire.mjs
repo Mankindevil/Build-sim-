@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { fetchOfficial } from "../../scripts/price-server/catalog/fetch.mjs";
 import { validateOfficialUrl } from "../../scripts/price-server/catalog/security.mjs";
 import { registryForUrl } from "../../scripts/price-server/catalog/registry.mjs";
+import { evaluateOfficialDocumentPromotion } from "./ladder.mjs";
+import { evidenceSearchReasonForFailureCode } from "./search-outcome.mjs";
 
 export const DEFAULT_EVIDENCE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 export const DEFAULT_EVIDENCE_MAX_BYTES = 25_000_000;
@@ -30,6 +32,7 @@ export class EvidenceAcquisitionError extends Error {
     super(boundedText(`${message}${detail ? `: ${detail}` : ""}`, MAX_ERROR_MESSAGE), cause ? { cause } : undefined);
     this.name = "EvidenceAcquisitionError";
     this.code = code;
+    this.reason = evidenceSearchReasonForFailureCode(code);
     this.manualAction = boundedText(manualAction, MAX_ERROR_MESSAGE);
   }
 }
@@ -114,11 +117,31 @@ function assertExpectedBrand(value, expected, label) {
 
 function assertAcquisitionIdentity(options, brand) {
   assertExpectedBrand(options.officialBrand, brand, "Official-manual brand");
+  if (options.kindBasis !== undefined && options.kindBasis !== "user-asserted") {
+    fail(
+      "manual_identity_confirmation_required",
+      "Official-manual content verification cannot be asserted by the acquisition caller",
+      "Archive the bytes, parse their body, and submit a hash-bound exact identity confirmation.",
+    );
+  }
   if (options.productIdentities !== undefined && !Array.isArray(options.productIdentities)) {
     fail("manual_identity_invalid", "Official-manual product identities must be an array", "Use a governed catalog SKU identity or omit the product identity.");
   }
   for (const [index, identity] of (options.productIdentities ?? []).entries()) {
     assertExpectedBrand(identity?.brand, brand, `Official-manual productIdentities[${index}].brand`);
+    if (identity?.basis === "official-document-explicit") {
+      fail(
+        "manual_identity_confirmation_required",
+        `Official-manual productIdentities[${index}] cannot self-assert an explicit document identity`,
+        "Submit the governed identity as user-asserted and attach a separate hash-bound body confirmation.",
+      );
+    }
+  }
+  if (options.identityConfirmation !== undefined && (!Array.isArray(options.productIdentities) || options.productIdentities.length === 0)) {
+    fail("manual_identity_confirmation_invalid", "Official identity confirmation has no governed expected identity", "Select the exact governed SKU before confirming document identity.");
+  }
+  if (options.requiredIdentityScope !== undefined && !["model", "variant", "revision"].includes(options.requiredIdentityScope)) {
+    fail("manual_identity_confirmation_invalid", "Official identity confirmation scope is invalid", "Use model, variant, or revision scope.");
   }
 }
 
@@ -155,7 +178,102 @@ function isFresh(capture, now, ttl) {
   return age >= 0 && age <= ttl;
 }
 
-function documentMetadata(options, previousDocument, previousCapture, requestedUrl, retrievedAt) {
+function assertedProductIdentities(options, previousCapture, preservePrevious = false) {
+  const identities = preservePrevious && previousCapture
+    ? previousCapture.productIdentities
+    : options.productIdentities ?? [];
+  return structuredClone(identities).map((identity) => ({
+    ...identity,
+    basis: identity?.basis ?? (identity?.model || identity?.mpn || identity?.skuId || identity?.category
+      ? "governed-sku-user-asserted"
+      : "official-domain-only"),
+  }));
+}
+
+function identityAssociationKey(identity) {
+  return JSON.stringify(Object.fromEntries(
+    ["brand", "model", "mpn", "category", "skuId", "familyId", "modelId", "variantId", "revision", "region"]
+      .filter((field) => identity?.[field] !== undefined)
+      .map((field) => [field, identity[field]]),
+  ));
+}
+
+function sameRequestedIdentityAssociation(options, previousCapture) {
+  if (!previousCapture) return false;
+  const requested = assertedProductIdentities(options, null, false).map(identityAssociationKey).sort();
+  const cached = assertedProductIdentities({}, previousCapture, true).map(identityAssociationKey).sort();
+  return requested.length === cached.length && requested.every((value, index) => value === cached[index]);
+}
+
+function evaluatedIdentityPromotion(options, documentSha256) {
+  const expectedIdentities = assertedProductIdentities(options, null, false);
+  const confirmation = options.identityConfirmation;
+  const targetIndex = expectedIdentities.findIndex((identity) =>
+    identity?.skuId === confirmation?.identity?.skuId
+    && identity?.familyId === confirmation?.identity?.familyId
+    && identity?.modelId === confirmation?.identity?.modelId,
+  );
+  if (targetIndex < 0) {
+    fail(
+      "manual_identity_confirmation_invalid",
+      "Official identity confirmation does not target a governed acquisition identity",
+      "Re-run extraction for the selected exact SKU and document bytes.",
+    );
+  }
+  const requiredScope = options.requiredIdentityScope ?? confirmation?.scope;
+  const promotion = evaluateOfficialDocumentPromotion({
+    registryTrust: "trusted",
+    documentSha256,
+    requiredScope,
+    expectedIdentity: expectedIdentities[targetIndex],
+    confirmation,
+  });
+  if (!promotion.eligible) {
+    fail(
+      "manual_identity_confirmation_invalid",
+      `Official identity confirmation was rejected (${promotion.reason})`,
+      "Inspect the parsed body locator, exact variant/revision, and archived document hash before retrying.",
+      promotion.detail,
+    );
+  }
+  return { expectedIdentities, targetIndex, promotion };
+}
+
+function identityPromotionState(options, bytes, preservePreviousCapture = null) {
+  if (options.identityConfirmation === undefined) {
+    return {
+      productIdentities: assertedProductIdentities(options, preservePreviousCapture, Boolean(preservePreviousCapture)),
+      kindBasis: preservePreviousCapture?.kindBasis ?? "user-asserted",
+      identityPromotion: null,
+    };
+  }
+  const documentSha256 = createHash("sha256").update(bytes).digest("hex");
+  const { expectedIdentities, targetIndex, promotion } = evaluatedIdentityPromotion(options, documentSha256);
+  expectedIdentities[targetIndex] = {
+    ...expectedIdentities[targetIndex],
+    ...promotion.identity,
+    basis: "official-document-explicit",
+  };
+  return {
+    productIdentities: expectedIdentities,
+    kindBasis: promotion.kindBasis,
+    identityPromotion: promotion,
+  };
+}
+
+function cachedIdentityPromotion(options, previousDocument, previousCapture) {
+  if (options.identityConfirmation === undefined || !previousDocument || !previousCapture
+    || previousCapture.kindBasis !== "content-verified") return null;
+  const { promotion } = evaluatedIdentityPromotion(options, previousDocument.sha256);
+  const exactIdentity = previousCapture.productIdentities.some((identity) =>
+    identity?.basis === "official-document-explicit"
+    && ["brand", "skuId", "familyId", "modelId", "variantId", "revision", "region"]
+      .every((field) => promotion.identity[field] === undefined || identity[field] === promotion.identity[field]),
+  );
+  return exactIdentity ? promotion : null;
+}
+
+function documentMetadata(options, previousDocument, previousCapture, requestedUrl, retrievedAt, identityState) {
   const requestedKind = options.kind ?? previousCapture?.kind ?? "manufacturer-manual";
   if (!DOCUMENT_KINDS.has(requestedKind)) {
     fail(
@@ -169,12 +287,7 @@ function documentMetadata(options, previousDocument, previousCapture, requestedU
   return {
     kind: requestedKind,
     title,
-    productIdentities: structuredClone(options.productIdentities ?? previousCapture?.productIdentities ?? []).map((identity) => ({
-      ...identity,
-      basis: identity?.basis ?? (identity?.model || identity?.mpn || identity?.skuId || identity?.category
-        ? "governed-sku-user-asserted"
-        : "official-domain-only"),
-    })),
+    productIdentities: identityState.productIdentities,
     createdAt: previousDocument?.createdAt ?? retrievedAt,
   };
 }
@@ -274,13 +387,16 @@ export async function acquireOfficialEvidence(rawUrl, options = {}) {
       "Repair the local evidence store or remove the broken index before retrying.",
     );
   }
-  if (isFresh(previousCapture, now, ttl)) {
+  const fresh = isFresh(previousCapture, now, ttl);
+  const cachedPromotion = fresh ? cachedIdentityPromotion(options, previousDocument, previousCapture) : null;
+  if (fresh && ((options.identityConfirmation === undefined && sameRequestedIdentityAssociation(options, previousCapture)) || cachedPromotion)) {
     return {
       document: previousDocument,
       capture: previousCapture,
       reusedDocument: true,
       reusedCapture: true,
       cacheStatus: "fresh",
+      ...(cachedPromotion ? { identityPromotion: cachedPromotion } : {}),
     };
   }
 
@@ -340,13 +456,17 @@ export async function acquireOfficialEvidence(rawUrl, options = {}) {
         error,
       );
     }
-    const capture = captureMetadata(normalizedResult, previousCapture, requestedUrl, finalUrl, retrievedAt, requestedBrand, options.kindBasis);
+    const preserveIdentity = options.identityConfirmation === undefined && sameRequestedIdentityAssociation(options, previousCapture)
+      ? previousCapture
+      : null;
+    const identityState = identityPromotionState(options, buffer, preserveIdentity);
+    const capture = captureMetadata(normalizedResult, previousCapture, requestedUrl, finalUrl, retrievedAt, requestedBrand, identityState.kindBasis);
     const stored = await persist(repository, buffer, {
       mediaType: previousDocument.mediaType,
-      ...documentMetadata(options, previousDocument, previousCapture, requestedUrl, retrievedAt),
+      ...documentMetadata(options, previousDocument, previousCapture, requestedUrl, retrievedAt, identityState),
       capture,
     });
-    return { ...stored, cacheStatus: "revalidated", notModified: true };
+    return { ...stored, cacheStatus: "revalidated", notModified: true, ...(identityState.identityPromotion ? { identityPromotion: identityState.identityPromotion } : {}) };
   }
 
   if (status < 200 || status >= 300) {
@@ -385,11 +505,17 @@ export async function acquireOfficialEvidence(rawUrl, options = {}) {
   }
 
   const mediaType = boundedText(String(normalizedResult.contentType ?? "").split(";")[0], 160).toLowerCase() || "application/octet-stream";
-  const capture = captureMetadata(normalizedResult, previousCapture, requestedUrl, finalUrl, retrievedAt, requestedBrand, options.kindBasis);
+  const identityState = identityPromotionState(options, normalizedResult.rawBody);
+  const capture = captureMetadata(normalizedResult, previousCapture, requestedUrl, finalUrl, retrievedAt, requestedBrand, identityState.kindBasis);
   const stored = await persist(repository, normalizedResult.rawBody, {
     mediaType,
-    ...documentMetadata(options, previousDocument, previousCapture, requestedUrl, retrievedAt),
+    ...documentMetadata(options, previousDocument, previousCapture, requestedUrl, retrievedAt, identityState),
     capture,
   });
-  return { ...stored, cacheStatus: previousCapture ? "updated" : "miss", notModified: false };
+  return {
+    ...stored,
+    cacheStatus: previousCapture ? "updated" : "miss",
+    notModified: false,
+    ...(identityState.identityPromotion ? { identityPromotion: identityState.identityPromotion } : {}),
+  };
 }

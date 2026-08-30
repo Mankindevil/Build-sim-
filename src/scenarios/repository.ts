@@ -20,6 +20,7 @@ import {
   SCENARIO_SCHEMA_VERSION,
   validateScenarioFamily,
   validatePersistedScenarioBranch,
+  validatePersistedWhatIfResult,
   type PersistedScenarioBranch,
   type PersistedWhatIfResult,
   type ScenarioBranch,
@@ -32,6 +33,13 @@ import {
   normalizeScenarioAuthorityValue,
   validateScenarioSnapshotSetManifest,
 } from "./runtime-validation.mjs";
+import { FileArtifactRepository } from "../artifacts/repository.mjs";
+import {
+  solverArtifactReferencesRuntime,
+  validateSolverArtifactRuntime,
+  validateSolverWhatIfArtifactRuntime,
+  validateSolverWhatIfClosureRuntime,
+} from "../solver/runtime-validation.mjs";
 
 const ENVELOPE_SCHEMA_VERSION = "scenario-repository-envelope-v1" as const;
 const SAFE_ID = /^[a-z0-9][a-z0-9-]{2,79}$/;
@@ -92,6 +100,25 @@ export interface ScenarioAcceptanceProposal {
   operations: ScenarioBranch["patch"];
 }
 
+export interface ScenarioRuntimeBinding {
+  runtimeGeneration: number;
+  runtimeRevision: number;
+}
+
+export interface ScenarioAuthoritativeResultCommit {
+  scenarioId: string;
+  expectedRuntimeGeneration: number;
+  expectedRuntimeRevision: number;
+  result: PersistedWhatIfResult;
+  authority: { artifactRef: string; artifact: unknown };
+}
+
+interface AuthoritativeScenarioResultRecord {
+  schemaVersion: "scenario-authoritative-result-v1";
+  result: PersistedWhatIfResult;
+  authority: { artifactRef: string; artifact: unknown };
+}
+
 export class ScenarioRepositoryError extends Error {
   constructor(readonly code: "invalid_input" | "not_found" | "conflict" | "stale" | "corrupt_data" | "evaluation_authority_unavailable", message: string) {
     super(message);
@@ -110,6 +137,8 @@ export interface FileScenarioRepositoryOptions {
   getCatalog?: ScenarioCatalogResolver;
   getCatalogAtRoot?: ScenarioCatalogAtRootResolver;
   now?: () => string;
+  /** Internal/root-pinned artifact closure; production composition supplies it via the coordinator. */
+  artifactRoot?: string;
 }
 
 function clone<T>(value: T): T {
@@ -136,6 +165,7 @@ export class FileScenarioRepository {
   private readonly getCatalog: ScenarioCatalogResolver;
   private readonly getCatalogAtRoot: ScenarioCatalogAtRootResolver | undefined;
   private readonly now: () => string;
+  private readonly artifactRoot: string | undefined;
 
   constructor(options: FileScenarioRepositoryOptions) {
     const coordinatorRoot = (options.coordinator as unknown as { root?: string } | undefined)?.root;
@@ -153,6 +183,7 @@ export class FileScenarioRepository {
     this.getCatalogAtRoot = options.getCatalogAtRoot ?? (options.root ? undefined
       : (activeRoot) => loadMergedCatalogSync({ activeRoot, generationAware: true }) as SkuCatalog);
     this.now = options.now ?? (() => new Date().toISOString());
+    this.artifactRoot = options.artifactRoot === undefined ? undefined : path.resolve(options.artifactRoot);
   }
 
   private atActiveRoot(activeRoot: string): FileScenarioRepository {
@@ -164,6 +195,7 @@ export class FileScenarioRepository {
       resolveBase: (versionId) => resolveBaseAtRoot(activeRoot, versionId),
       getCatalog: () => getCatalogAtRoot(activeRoot),
       now: this.now,
+      artifactRoot: confined(activeRoot, "artifacts"),
     });
   }
 
@@ -190,10 +222,10 @@ export class FileScenarioRepository {
     const files = await listRegularFiles(this.root);
     for (const file of files) {
       if (file.symlink) throw new ScenarioRepositoryError("corrupt_data", "scenario repository contains a symbolic link");
-      if (/^(?:results|evaluations|evaluation-snapshots)\//.test(file.logicalPath)) {
+      if (/^(?:evaluations|evaluation-snapshots)\//.test(file.logicalPath)) {
         throw new ScenarioRepositoryError("evaluation_authority_unavailable", "persisted scenario result authority is unavailable in U2");
       }
-      if (!/^(?:(?:families|branches)\/[a-z0-9][a-z0-9-]{2,79}|snapshots\/snapshot-set-[a-f0-9]{64})\.json$/.test(file.logicalPath)) {
+      if (!/^(?:(?:families|branches|results)\/[a-z0-9][a-z0-9-]{2,79}|snapshots\/snapshot-set-[a-f0-9]{64})\.json$/.test(file.logicalPath)) {
         throw new ScenarioRepositoryError("corrupt_data", "scenario repository contains an unrecognized authority path");
       }
     }
@@ -404,23 +436,72 @@ export class FileScenarioRepository {
     });
   }
 
+  private async materializeLocal(scenarioId: string): Promise<{
+    family: ScenarioFamily;
+    branch: PersistedScenarioBranch;
+    base: ScenarioBaseSnapshot;
+    config: BuildConfigV3;
+  }> {
+    const branch = await this.getBranchLocal(scenarioId);
+    const family = await this.getFamilyLocal(branch.familyId);
+    if (branch.basePlanVersionId !== family.basePlanVersionId
+      || branch.baseConfigHash !== family.baseConfigHash
+      || !sameSnapshotHashes(branch.baseSnapshotHashes, family.baseSnapshotHashes)) {
+      throw new ScenarioRepositoryError("corrupt_data", "scenario branch base does not match its family");
+    }
+    const base = await this.assertBase(family);
+    const config = applyTopologyV3Patch(base.config, branch.patch, { actor: branch.createdByActor });
+    const catalogErrors = await this.catalogBindingErrors(config);
+    if (catalogErrors.length) throw new ScenarioRepositoryError("corrupt_data", `scenario resolved catalog binding invalid: ${catalogErrors.join("; ")}`);
+    if (await configV3Hash(config) !== branch.materializedConfigHash) {
+      throw new ScenarioRepositoryError("corrupt_data", "scenario branch materialized config hash is invalid");
+    }
+    return { family, branch, base, config };
+  }
+
   async materialize(scenarioId: string): Promise<{ family: ScenarioFamily; branch: PersistedScenarioBranch; config: BuildConfigV3 }> {
     return this.boundary(false, async (repository) => {
-      const branch = await repository.getBranchLocal(scenarioId);
-      const family = await repository.getFamilyLocal(branch.familyId);
-      if (branch.basePlanVersionId !== family.basePlanVersionId
-        || branch.baseConfigHash !== family.baseConfigHash
-        || !sameSnapshotHashes(branch.baseSnapshotHashes, family.baseSnapshotHashes)) {
-        throw new ScenarioRepositoryError("corrupt_data", "scenario branch base does not match its family");
-      }
-      const base = await repository.assertBase(family);
-      const config = applyTopologyV3Patch(base.config, branch.patch, { actor: branch.createdByActor });
-      const catalogErrors = await repository.catalogBindingErrors(config);
-      if (catalogErrors.length) throw new ScenarioRepositoryError("corrupt_data", `scenario resolved catalog binding invalid: ${catalogErrors.join("; ")}`);
-      if (await configV3Hash(config) !== branch.materializedConfigHash) {
-        throw new ScenarioRepositoryError("corrupt_data", "scenario branch materialized config hash is invalid");
-      }
-      return { family: clone(family), branch: clone(branch), config };
+      const materialized = await repository.materializeLocal(scenarioId);
+      return { family: clone(materialized.family), branch: clone(materialized.branch), config: materialized.config };
+    });
+  }
+
+  /**
+   * Read-only U6 evaluation view. It exposes a clone of the immutable base and
+   * materialized branch while performing no PlanRepository write.
+   */
+  async materializeComparison(scenarioId: string): Promise<{
+    family: ScenarioFamily;
+    branch: PersistedScenarioBranch;
+    base: ScenarioBaseSnapshot;
+    config: BuildConfigV3;
+    runtimeBinding: ScenarioRuntimeBinding;
+  }> {
+    if (this.coordinator) {
+      await this.coordinator.initialize();
+      const snapshot = await this.coordinator.withConsistentSnapshot(async ({ state, activeRoot }: {
+        state: { runtimeGeneration: number; revision: number };
+        activeRoot: string;
+      }) => {
+        const repository = this.atActiveRoot(activeRoot);
+        await repository.assertRepositoryInventoryLocal();
+        const materialized = await repository.materializeLocal(scenarioId);
+        return {
+          family: clone(materialized.family), branch: clone(materialized.branch), base: clone(materialized.base), config: clone(materialized.config),
+          runtimeBinding: { runtimeGeneration: state.runtimeGeneration, runtimeRevision: state.revision },
+        };
+      });
+      return snapshot.result;
+    }
+    return this.boundary(false, async (repository) => {
+      const materialized = await repository.materializeLocal(scenarioId);
+      return {
+        family: clone(materialized.family),
+        branch: clone(materialized.branch),
+        base: clone(materialized.base),
+        config: clone(materialized.config),
+        runtimeBinding: { runtimeGeneration: 0, runtimeRevision: 0 },
+      };
     });
   }
 
@@ -432,12 +513,132 @@ export class FileScenarioRepository {
     );
   }
 
+  private async readSolverArtifactLocal(ref: string, expectedKind: string): Promise<{ value: unknown; references: unknown[] }> {
+    if (!this.artifactRoot || !/^sha256:[a-f0-9]{64}$/.test(ref)) {
+      throw new ScenarioRepositoryError("evaluation_authority_unavailable", "scenario result artifact authority is unavailable");
+    }
+    const repository = new FileArtifactRepository({ root: this.artifactRoot });
+    const stored = await repository.get(ref);
+    if (!stored || stored.record.kind !== expectedKind || stored.record.mediaType !== "application/vnd.buildsim.solver+json"
+      || stored.bytes.byteLength > 16 * 1024 * 1024) {
+      throw new ScenarioRepositoryError("corrupt_data", `scenario ${expectedKind} artifact is missing or has invalid metadata`);
+    }
+    let value: unknown;
+    try { value = JSON.parse(Buffer.from(stored.bytes).toString("utf8")); }
+    catch { throw new ScenarioRepositoryError("corrupt_data", `scenario ${expectedKind} artifact is not JSON`); }
+    const errors = validateSolverArtifactRuntime(expectedKind, value);
+    if (errors.length) throw new ScenarioRepositoryError("corrupt_data", `scenario ${expectedKind} artifact invalid: ${errors.join("; ")}`);
+    const expectedReferences = solverArtifactReferencesRuntime(expectedKind, value);
+    if (sha256Json(stored.record.references) !== sha256Json(expectedReferences)) {
+      throw new ScenarioRepositoryError("corrupt_data", `scenario ${expectedKind} artifact reference closure invalid`);
+    }
+    return { value, references: stored.record.references };
+  }
+
+  private async validateAuthoritativeResultLocal(
+    scenarioId: string,
+    result: PersistedWhatIfResult,
+    authority: ScenarioAuthoritativeResultCommit["authority"],
+  ): Promise<AuthoritativeScenarioResultRecord> {
+    assertId(scenarioId, "scenarioId");
+    const resultErrors = validatePersistedWhatIfResult(result);
+    if (resultErrors.length || result.scenarioId !== scenarioId) {
+      throw new ScenarioRepositoryError("invalid_input", `persisted what-if result invalid: ${resultErrors.join("; ") || "scenario mismatch"}`);
+    }
+    const materialized = await this.materializeLocal(scenarioId);
+    const persisted = await this.readSolverArtifactLocal(authority.artifactRef, "solver-what-if-result");
+    if (validateSolverWhatIfArtifactRuntime(authority.artifact).length
+      || sha256Json(persisted.value) !== sha256Json(authority.artifact)) {
+      throw new ScenarioRepositoryError("invalid_input", "scenario what-if artifact inline/root authority mismatch");
+    }
+    const artifact = persisted.value as Record<string, unknown>;
+    if (artifact.scenarioId !== scenarioId || artifact.familyId !== materialized.family.familyId
+      || artifact.basePlanVersionId !== materialized.family.basePlanVersionId
+      || artifact.baseConfigHash !== materialized.family.baseConfigHash
+      || artifact.afterConfigHash !== materialized.branch.materializedConfigHash
+      || sha256Json(artifact.baseSnapshotHashes) !== sha256Json(materialized.family.baseSnapshotHashes)
+      || result.beforeConfigHash !== materialized.family.baseConfigHash
+      || result.afterConfigHash !== materialized.branch.materializedConfigHash || result.patchHash !== materialized.branch.patchHash
+      || result.createdAt !== artifact.createdAt || result.beforeEvaluationHash !== artifact.beforeEvaluationHash
+      || result.afterEvaluationHash !== artifact.afterEvaluationHash || result.decisionDiffRef !== artifact.decisionDiffRef
+      || sha256Json(result.domainDiffRefs) !== sha256Json(artifact.domainDiffRefs)
+      || result.snapshotAttribution !== artifact.snapshotAttribution) {
+      throw new ScenarioRepositoryError("stale", "scenario result no longer binds its exact family/branch/materialization authority");
+    }
+    const decision = (await this.readSolverArtifactLocal(result.decisionDiffRef, "solver-what-if-decision-diff")).value;
+    if (!decision || typeof decision !== "object" || Array.isArray(decision)) {
+      throw new ScenarioRepositoryError("corrupt_data", "scenario what-if decision diff authority is invalid");
+    }
+    const decisionRecord = decision as Record<string, unknown>;
+    if (decisionRecord.scenarioId !== artifact.scenarioId
+      || decisionRecord.beforeEvaluationHash !== artifact.beforeEvaluationHash
+      || decisionRecord.afterEvaluationHash !== artifact.afterEvaluationHash
+      || decisionRecord.beforeReceiptRef !== artifact.beforeReceiptRef
+      || decisionRecord.afterReceiptRef !== artifact.afterReceiptRef) {
+      throw new ScenarioRepositoryError("corrupt_data", "scenario what-if result/decision authority closure mismatch");
+    }
+    const domainDiffRefs = result.domainDiffRefs;
+    const domainEntries = await Promise.all(domainDiffRefs.map(async (ref) => ({
+      ref, value: (await this.readSolverArtifactLocal(ref, "solver-what-if-domain-diff")).value,
+    })));
+    const closureErrors = validateSolverWhatIfClosureRuntime(
+      artifact,
+      { ref: result.decisionDiffRef, value: decision },
+      domainEntries,
+    );
+    if (closureErrors.length) throw new ScenarioRepositoryError("corrupt_data", `scenario what-if diff closure invalid: ${closureErrors.join("; ")}`);
+    for (const ref of [artifact.beforeReceiptRef, artifact.afterReceiptRef, artifact.beforeCoverageRef, artifact.afterCoverageRef]) {
+      if (typeof ref !== "string" || !this.artifactRoot || !await new FileArtifactRepository({ root: this.artifactRoot }).get(ref)) {
+        throw new ScenarioRepositoryError("corrupt_data", "scenario evaluator receipt/coverage authority is missing");
+      }
+    }
+    return {
+      schemaVersion: "scenario-authoritative-result-v1",
+      result: clone(result),
+      authority: { artifactRef: authority.artifactRef, artifact: clone(authority.artifact) },
+    };
+  }
+
+  /** Root-bound writer used only inside a coordinator barrier. */
+  async saveAuthoritativeResultAtRoot(
+    activeRoot: string,
+    scenarioId: string,
+    result: PersistedWhatIfResult,
+    authority: ScenarioAuthoritativeResultCommit["authority"],
+  ): Promise<PersistedWhatIfResult> {
+    const repository = this.atActiveRoot(activeRoot);
+    await repository.assertRepositoryInventoryLocal();
+    const record = await repository.validateAuthoritativeResultLocal(scenarioId, result, authority);
+    const stored = await repository.writeImmutable(repository.resultFile(scenarioId), "result", record);
+    return clone(stored.result);
+  }
+
+  /** CAS commit: any generation/revision race leaves the scenario result path untouched. */
+  async commitAuthoritativeResult(input: ScenarioAuthoritativeResultCommit): Promise<PersistedWhatIfResult> {
+    if (!this.coordinator || input.expectedRuntimeGeneration < 1 || input.expectedRuntimeRevision < 0) {
+      throw new ScenarioRepositoryError("evaluation_authority_unavailable", "authoritative scenario result commit requires a coordinated runtime root");
+    }
+    return (await this.coordinator.withWrite(async ({ state, activeRoot }: {
+      state: { runtimeGeneration: number; revision: number };
+      activeRoot: string;
+    }) => {
+      if (state.runtimeGeneration !== input.expectedRuntimeGeneration || state.revision !== input.expectedRuntimeRevision) {
+        throw new ScenarioRepositoryError("stale", "scenario result runtime generation/revision changed before commit");
+      }
+      return this.saveAuthoritativeResultAtRoot(activeRoot, input.scenarioId, input.result, input.authority);
+    }, { expectedRevision: input.expectedRuntimeRevision })).result;
+  }
+
   async getResult(scenarioId: string): Promise<PersistedWhatIfResult | null> {
     return this.boundary(false, async (repository) => {
       try {
-        const result = await repository.readEnvelope<PersistedWhatIfResult>(repository.resultFile(scenarioId), "result");
-        void result;
-        throw new ScenarioRepositoryError("evaluation_authority_unavailable", "persisted scenario result authority is unavailable in U2");
+        const record = await repository.readEnvelope<AuthoritativeScenarioResultRecord>(repository.resultFile(scenarioId), "result");
+        if (!record || record.schemaVersion !== "scenario-authoritative-result-v1") {
+          throw new ScenarioRepositoryError("corrupt_data", "persisted scenario result record schema invalid");
+        }
+        const validated = await repository.validateAuthoritativeResultLocal(scenarioId, record.result, record.authority);
+        if (sha256Json(validated) !== sha256Json(record)) throw new ScenarioRepositoryError("corrupt_data", "persisted scenario result authority changed");
+        return clone(record.result);
       } catch (error) {
         if (error instanceof ScenarioRepositoryError && error.code === "not_found") return null;
         throw error;

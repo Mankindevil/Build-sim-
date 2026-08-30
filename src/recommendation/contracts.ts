@@ -52,6 +52,7 @@ export interface WholeBuildRecommendation {
   solverVersion: string;
   scoringVersion: string;
   searchCompleteness: "complete" | "partial";
+  priceConfidence: RecommendationScore["priceConfidence"];
   optimalityClaim: "bounded_best" | "not_claimed";
   totalCny?: number;
   plannedCny?: number;
@@ -148,12 +149,19 @@ export async function validateRecommendationEligibilityAuthoritatively(
 export function validateWholeBuildRecommendation(recommendation: WholeBuildRecommendation): string[] {
   const errors: string[] = [];
   if (!recommendation.recommendationId || !recommendation.candidateConfigRef || !recommendation.requirementCoverageRef || !recommendation.solverVersion || !recommendation.scoringVersion || !recommendation.explanationRef) errors.push("whole-build recommendation provenance fields missing");
+  if (!["unavailable", "low", "medium", "high"].includes(recommendation.priceConfidence)) errors.push("whole-build recommendation price confidence invalid");
   if (!isSnapshotHashes(recommendation.inputHashes)) errors.push("whole-build recommendation input hashes invalid");
   if (recommendation.alternativeCandidateIds.length === 0) errors.push("each recommendation tier requires at least one alternative");
   if (new Set(recommendation.alternativeCandidateIds).size !== recommendation.alternativeCandidateIds.length || recommendation.alternativeCandidateIds.includes(recommendation.solution.candidateId)) errors.push("alternatives must be unique and exclude the selected candidate");
   if (recommendation.solution.scoringVersion !== recommendation.scoringVersion) errors.push("solution scoringVersion mismatch");
   if (!Number.isInteger(recommendation.solution.rank) || recommendation.solution.rank < 1) errors.push("solution rank must be a positive integer");
   if (recommendation.searchCompleteness === "partial" && recommendation.optimalityClaim !== "not_claimed") errors.push("partial search cannot claim optimality");
+  if (recommendation.optimalityClaim === "bounded_best"
+    && (recommendation.searchCompleteness !== "complete"
+      || !["medium", "high"].includes(recommendation.priceConfidence)
+      || recommendation.totalCny === undefined)) {
+    errors.push("bounded optimality requires complete search and a complete sufficiently supported price split");
+  }
   if (recommendation.totalCny !== undefined) {
     if (![recommendation.totalCny, recommendation.plannedCny, recommendation.orderedCny].every((value) => typeof value === "number" && Number.isFinite(value) && value >= 0) || Math.abs(recommendation.totalCny - (recommendation.plannedCny ?? 0) - (recommendation.orderedCny ?? 0)) > Number.EPSILON) errors.push("whole-build price split must be finite, non-negative and conserved");
   } else if (recommendation.plannedCny !== undefined || recommendation.orderedCny !== undefined) {

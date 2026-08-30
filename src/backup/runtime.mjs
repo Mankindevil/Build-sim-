@@ -21,6 +21,7 @@ import {
   verifyProductionReferenceGraph,
 } from "../runtime/production-reference-graph.mjs";
 import { restoreRuntimeBackgroundJob } from "../jobs/runtime-validation.mjs";
+import { validateDestructiveActionPlanShapeRuntime } from "../storage/destructive-action-runtime.mjs";
 
 const scrypt = promisify(scryptCallback);
 const MANIFEST_PREFIX = "buildsim\0hash-spec-v1\0backup-manifest\0backup-v1\0";
@@ -61,14 +62,16 @@ function secretKind(logicalPath) {
   if (/(^|[\/_.-])(api[-_]?key|provider[-_]?key|secret|access[-_]?token|refresh[-_]?token)([\/_.-]|$)/.test(lower)) return "provider_key";
   return null;
 }
-function secretContentKind(bytes) {
+export function secretContentKind(bytes) {
   if (bytes.length > 8 * 1024 * 1024) return null;
   const text = bytes.toString("utf8");
   if (text.includes("\uFFFD")) return null;
   try {
     const value = JSON.parse(text);
     const keys = [];
+    const strings = [];
     const visit = (item) => {
+      if (typeof item === "string") { strings.push(item); return; }
       if (!item || typeof item !== "object") return;
       if (Array.isArray(item)) { for (const child of item) visit(child); return; }
       for (const [key, child] of Object.entries(item)) { keys.push(key); visit(child); }
@@ -76,6 +79,8 @@ function secretContentKind(bytes) {
     visit(value);
     if (keys.some((key) => /^(?:cookie|cookies|cookieHeader|cookie_header)$/i.test(key))) return "cookie";
     if (keys.some((key) => /^(?:apiKey|api_key|providerKey|provider_key|secret|password|accessToken|access_token|refreshToken|refresh_token)$/i.test(key))) return "provider_key";
+    if (strings.some((value) => /(?:^|\n)\s*(?:api[_-]?key|provider[_-]?key|secret|password|access[_-]?token|refresh[_-]?token)\s*[:=]\s*\S+/i.test(value))) return "provider_key";
+    if (strings.some((value) => /(?:^|\n)\s*cookies?\s*[:=]\s*\S+/i.test(value))) return "cookie";
   } catch { /* Non-JSON text is checked below. */ }
   if (/(?:^|\n)\s*(?:api[_-]?key|provider[_-]?key|secret|password|access[_-]?token|refresh[_-]?token)\s*[:=]/i.test(text)) return "provider_key";
   if (/(?:^|\n)\s*cookies?\s*[:=]/i.test(text)) return "cookie";
@@ -148,8 +153,10 @@ function executionInventory(files, runtimeGeneration, referenceGraph, declaredId
       : [];
     if (expectedReplayReferences.length !== 5 || expectedReplayReferences.some((ref) => typeof ref !== "string" || !ref)
       || new Set(expectedReplayReferences).size !== expectedReplayReferences.length
-      || !String(replayReferences.evaluatorArtifactRef).startsWith("sha256:")
-      || replayReferences.evaluatorArtifactRef !== `sha256:${stored.replayContext?.dependencyContext?.evaluatorArtifactHash}`
+      || ![
+        `sha256:${stored.replayContext?.dependencyContext?.evaluatorArtifactHash}`,
+        `evaluation-artifact:${stored.replayContext?.dependencyContext?.evaluatorArtifactHash}`,
+      ].includes(replayReferences.evaluatorArtifactRef)
       || replayReferences.planVersionRef !== `plan-version:${session.planVersionId}`
       || replayReferences.evaluationRef !== `evaluation:${session.evaluationHash}`
       || replayReferences.procedureRef !== `execution-procedure:sha256:${sha256Json(stored.replayContext?.procedure)}`
@@ -162,6 +169,15 @@ function executionInventory(files, runtimeGeneration, referenceGraph, declaredId
       || stored.replayContext.dependencyContext?.expectedInputEvaluationHash !== session.evaluationHash
       || stored.replayContext.dependencyContext?.expectedProcedureSafetyHash !== session.procedureSafetyHash) {
       throw new Error("execution replay procedure binding is invalid");
+    }
+    const destructiveActions = session.destructiveActionConfirmations ?? [];
+    if (!Array.isArray(destructiveActions)
+      || new Set(destructiveActions.map((action) => action?.actionId)).size !== destructiveActions.length
+      || destructiveActions.some((action) => validateDestructiveActionPlanShapeRuntime(action).length > 0
+        || action.confirmation !== "confirmed"
+        || action.inputPlanVersionId !== session.planVersionId
+        || action.inputProcedureSafetyHash !== session.procedureSafetyHash)) {
+      throw new Error("execution destructive action confirmation closure is invalid");
     }
     const observationIds = [...new Set(session.results.flatMap((result) => Array.isArray(result?.observationIds) ? result.observationIds : []))].sort(compare);
     sessions.push({
@@ -390,6 +406,34 @@ async function materialize(files, root) {
     const target = confined(root, ...logicalPath.split("/"));
     await atomicWriteFile(target, bytes, { mode: 0o600 });
   }
+}
+
+/**
+ * Materialize an existing active generation into a staging directory and
+ * fence every generation-bound mutable record for the generation that will
+ * become active.  Portable imports use the same transform as full restores so
+ * a copied running job or execution lease can never resume implicitly.
+ *
+ * The destination must be a fresh RuntimeCoordinator staging directory.  No
+ * pointer is changed here; callers still have to validate the staged runtime
+ * and commit it through activateStagingGeneration.
+ */
+export async function prepareStagedRuntimeGeneration({ sourceRoot, stagingRoot, targetGeneration, restoredAt }) {
+  if (typeof sourceRoot !== "string" || typeof stagingRoot !== "string"
+    || !Number.isInteger(targetGeneration) || targetGeneration < 2
+    || typeof restoredAt !== "string" || !Number.isFinite(Date.parse(restoredAt))) {
+    throw new TypeError("staged runtime generation input is invalid");
+  }
+  const files = new Map();
+  for (const file of await listRegularFiles(path.resolve(sourceRoot))) {
+    if (file.symlink) throw new Error("runtime staging source contains a symbolic link");
+    files.set(file.logicalPath, await readFile(file.absolutePath));
+  }
+  quarantineRestoredJobPayloads(files, targetGeneration, restoredAt);
+  fenceRestoredExecutionPayloads(files, targetGeneration, restoredAt);
+  await materialize(files, path.resolve(stagingRoot));
+  for (const name of RUNTIME_REQUIRED_ROOTS) await ensurePrivateDirectory(confined(stagingRoot, name));
+  return { fileCount: files.size };
 }
 
 function quarantineRestoredJobPayloads(files, runtimeGeneration, restoredAt) {

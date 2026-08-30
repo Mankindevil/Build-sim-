@@ -15,6 +15,32 @@ html:root {
   --viz-series-6: light-dark(#187e8a, #5bc6d2);
 }
 
+.agent-attachments-panel {
+  display: grid;
+  gap: var(--space-3, 12px);
+  margin-top: var(--space-4, 16px);
+  padding: var(--space-4, 16px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 12px);
+}
+
+.agent-attachments-panel form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--space-3, 12px);
+}
+
+.agent-attachments-panel label,
+.agent-attachments-panel [data-attachment-privacy],
+.agent-attachments-panel [data-attachment-status] {
+  display: grid;
+  gap: var(--space-2, 8px);
+}
+
+.agent-attachments-panel [data-attachment-privacy],
+.agent-attachments-panel [data-attachment-status],
+.agent-attachments-panel button { grid-column: 1 / -1; }
+
 html {
   scroll-behavior: smooth;
 }
@@ -1827,6 +1853,17 @@ body:has(#n6-lab#n6-lab) {
 #n6-lab#n6-lab .agent-plan-context > small { display:block;margin-top:8px;font:10px/1.5 var(--font-mono,monospace);overflow-wrap:anywhere }
 #n6-lab#n6-lab .agent-plan-context[data-stale="true"] { border-color:color-mix(in srgb,var(--warn) 45%,var(--border));background:color-mix(in srgb,var(--warn) 8%,transparent) }
 #n6-lab#n6-lab .agent-plan-proposals { display:grid;gap:10px;margin:12px 0 }
+.agent-write-approval { display:grid;gap:10px;padding:14px;border:1px solid color-mix(in srgb,var(--warn) 58%,var(--border));border-radius:10px;background:color-mix(in srgb,var(--warn) 8%,var(--card));font-size:12px }
+.agent-write-approval[data-state="confirmed"] { border-color:color-mix(in srgb,var(--ok) 55%,var(--border));background:color-mix(in srgb,var(--ok) 7%,var(--card)) }
+.agent-write-approval[data-state="rejected"] { border-color:color-mix(in srgb,var(--bad) 45%,var(--border));background:color-mix(in srgb,var(--bad) 6%,var(--card)) }
+.agent-write-approval h4,.agent-write-approval p { margin:0 }
+.agent-write-approval dl { display:grid;grid-template-columns:minmax(90px,.25fr) minmax(0,1fr);gap:5px 10px;margin:0 }
+.agent-write-approval dt { color:var(--muted-foreground) }
+.agent-write-approval dd { margin:0;font-family:var(--font-mono,monospace);overflow-wrap:anywhere }
+.agent-write-approval details > summary { cursor:pointer }
+.agent-write-approval pre { max-height:220px;overflow:auto;padding:9px;border-radius:8px;background:color-mix(in srgb,var(--background) 55%,transparent);white-space:pre-wrap;overflow-wrap:anywhere }
+.agent-write-approval > label { display:flex;gap:7px;align-items:flex-start }
+.agent-write-approval > button { width:max-content }
 #n6-lab#n6-lab .agent-plan-proposal { padding:12px;border:1px solid color-mix(in srgb,var(--primary) 34%,var(--border));border-radius:10px;background:color-mix(in srgb,var(--primary) 4%,var(--card)) }
 #n6-lab#n6-lab .agent-plan-proposal h4,#n6-lab#n6-lab .agent-plan-proposal p { margin:0 0 7px }
 #n6-lab#n6-lab .agent-plan-proposal ol { display:grid;gap:7px;margin:10px 0;padding-left:24px;font:13px/1.5 var(--font-sans,sans-serif) }

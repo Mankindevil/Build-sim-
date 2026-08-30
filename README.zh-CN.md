@@ -4,7 +4,7 @@
 
 Build Sim 是一个重视证据边界的 PC / NAS 装机模拟平台。它在同一个浏览器应用中整合了精确 SKU 配置、确定性兼容性检查、空间占用、线缆路由、装配顺序、散热与噪音估算、可审计价格快照、受治理的官网目录补全，以及可选的 Provider-neutral AI Agent。
 
-当前 `0.2.0-alpha` 版本聚焦于 JONSBO N6，参考路径为 ASUS Pro WS W680M-ACE SE 与 Intel Core i5-14500。架构已经为更多机箱和通用桌面装机预留扩展能力，但这些配置档案目前尚未交付。
+当前 `0.2.0-alpha` 工作树已经包含本地验证通过的 U0-U11 通用平台实现。JONSBO N6 现在是回归适配器而非产品边界：同一 manifest/runtime-model 编译器也覆盖 primitive ATX、Micro-ATX、Mini-ITX 布局，未预置机箱可进入需要审阅的 provisional adapter 流程。U12 发布工作仍在进行；三套实物 ATX/ITX/NAS holdout、发布 canary、迁移审阅和部署批准完成前，生产 feature flags 保持关闭。
 
 > Build Sim 是规划工具，不是厂商 CAD、CFD、电气认证，也不能替代最新官方手册。重建几何、估算风量、市场候选、OCR 结果和 AI 回复始终与官方事实分开呈现。
 
@@ -32,18 +32,19 @@ Build Sim 当前可作为本地 Alpha 版本使用，仍在持续开发中。
 
 | 领域 | 当前状态 |
 | --- | --- |
-| 确定性装机评估 | 已实现，由 UI、Advice 服务和 Agent Tool 共用 |
+| 渐进式权威评估 | 已实现 V2 回滚与 V3 部分/完整方案；UI、Workspace、Agent、solver 与 what-if 共用锁定快照 |
 | 方案生命周期工作台 | 已实现：模板或 Agent 空白初始化、自动保存、复制、切换、不可变版本、恢复、软删除与离线缓存 |
 | 方案关联交易与装机任务 | 已实现精确部件关联、稳定任务 sourceRef、reconcile 与可追溯清单导出 |
 | evidence-aware Three.js 场景 | 已实现问题、走线、尺寸、规划热场与装配工作流，并保留 SVG fallback |
-| JONSBO N6 几何、适配、接线、路由与装配 | 已在当前机箱配置中实现 |
-| 散热、噪音、功耗与价格规划 | 已实现，并明确标注估算和证据边界 |
+| 通用机箱 adapter 与 provisional 发现 | 已在 rollout flags 后实现；N6 与 ATX/mATX/Mini-ITX fixtures 使用同一编译器 |
+| 热噪、功耗、价格历史、目标价与推荐 | 已实现，并明确证据、区间、时效与可购买资格边界 |
 | 价格与官网目录服务 | 已实现，为仅绑定回环地址的本地服务 |
 | DeepSeek Advice 与 Agent 适配器 | 已实现，已通过有边界的真实 DeepSeek 冒烟验证 |
 | Claude 适配器 | 已通过协议 fixture；尚无真实 Provider 验收证据 |
 | 受治理的目录写入 | 已实现一个审批绑定的写 Tool；默认关闭写入 |
 | 公网多用户托管 | 尚未就绪：未包含认证、租户隔离和应用级限流 |
-| 完整应用容器部署 | `deploy/osaka/` 已包含 Web、Price/Advice、Agent 与 SearXNG Compose；尚无 Kubernetes 清单 |
+| 便携包、备份恢复、持久任务与 Doctor | 已实现并完成本地生产形态验证；正式发布仍受部署审批约束 |
+| 完整应用容器部署 | `deploy/osaka/` 已包含 Web、Workspace、Price/Advice、Agent 与本地搜索，以及部署前备份/Doctor 门禁；尚无 Kubernetes 清单 |
 | 开源许可证 | 当前没有 `LICENSE` 文件；公开发布前必须处理 |
 
 ## 平台功能
@@ -113,20 +114,22 @@ Build Sim 当前可作为本地 Alpha 版本使用，仍在持续开发中。
 
 ```mermaid
 flowchart LR
-  B[浏览器 UI<br/>Vite 静态应用] -->|本地确定性模块| E[BuildEvaluation]
+  B[浏览器 UI<br/>Vite 静态应用] -->|仅 target 请求| W[Workspace 权威服务<br/>127.0.0.1:5176]
   B -->|/api/price, /api/advice| P[价格 / 目录 / Advice<br/>127.0.0.1:5174]
   B -->|/api/agent| A[Agent 服务<br/>127.0.0.1:5175]
-  B -->|/api/workspace| W[Workspace 服务<br/>127.0.0.1:5176]
-  A --> E
+  W --> E[锁定的渐进评估<br/>facts + observations + artifacts + prices]
+  A -->|方案作用域权威| W
   A -->|外部只读 Tool| P
-  P --> D[(目录、价格、<br/>草稿与审计数据)]
+  P --> D[(共享 runtime generations<br/>目录、价格、证据、任务)]
+  W --> D
+  A --> D
   P -. 可选发现 .-> S[SearXNG<br/>127.0.0.1:8080]
   P -. 可选 Provider .-> DS[DeepSeek API]
   A -. 可选 Provider .-> DS
   A -. 可选 Provider .-> C[Claude API]
 ```
 
-前端、价格服务和 Agent 服务是三个独立进程。开发时由 Vite 代理 API；生产环境应把 `dist/` 作为静态文件发布，并只将选定的 API 路径代理到两个回环 Node.js 服务。
+前端、Workspace、Price/Advice 与 Agent 是四个独立进程，共享受 generation fence 保护的 runtime。开发时由 Vite 代理 API；生产环境把 `dist/` 作为静态文件，并把选定路径代理到回环服务。浏览器只是投影，不能把 fact、observation、artifact、approval 或 evaluation hash 当作权威输入提交。
 
 ## 运行要求
 
@@ -572,6 +575,12 @@ curl --fail https://build-sim.example.com/
 - `CATALOG_FETCH_*` 和 `CATALOG_PDF_OCR_*` 不能突破代码内安全上限。
 - `CATALOG_PERSIST_ROOT` 决定持久化根目录；启用写入前要确保可写并做好备份。
 
+### 通用平台 rollout 开关
+
+U 阶段能力由独立开关控制，并在 [`.env.example`](./.env.example) 中默认关闭。只应按依赖关系成组启用；Workspace factory 会拒绝不完整的组合，不会静默降级权威。主要开关包括 `BUILD_SIM_TOPOLOGY_V3_ENABLED`、`BUILD_SIM_FACT_GRAPH_ENABLED`、`BUILD_SIM_GENERIC_ADAPTERS_ENABLED`、`BUILD_SIM_PROGRESSIVE_EVALUATION_ENABLED`、`BUILD_SIM_SYSTEM_PROFILES_ENABLED`、`BUILD_SIM_SPATIAL_ROUTING_ENABLED`、`BUILD_SIM_THERMAL_ACOUSTIC_V3_ENABLED`、`BUILD_SIM_WHOLE_BUILD_SOLVER_ENABLED`、`BUILD_SIM_SCENARIO_WHAT_IF_ENABLED`、`BUILD_SIM_PRICE_HISTORY_ENABLED`、`BUILD_SIM_PRICE_TARGETS_ENABLED`、`BUILD_SIM_RECOMMENDATIONS_ENABLED`、`BUILD_SIM_PORTABILITY_ENABLED`、`BUILD_SIM_BACKUP_RESTORE_ENABLED` 与 `BUILD_SIM_DOCTOR_REPAIR_ENABLED`。
+
+`BUILD_SIM_PRICE_NETWORK_ENABLED=false` 和 `BUILD_SIM_EVIDENCE_NETWORK_ENABLED=false` 会暂停采集任务但保留其持久状态。关闭通用 adapter 时，provisional 注册 Tool 会物理移除，并使用隔离的 legacy reader；V3 数据不会被回写或删除。
+
 ### 持久化路径
 
 | 路径 | 用途 | Git 状态 |
@@ -581,6 +590,8 @@ curl --fail https://build-sim.example.com/
 | `data/agent/audit/` | 带完整性校验的 Agent 审计 | 忽略 |
 | `data/audit/` | Advice 与目录运行记录 | 忽略 |
 | `.cache/price-browser-profile/` | 市场浏览器登录配置 | 忽略 |
+| `runtime/generations/<n>/` | 活动方案、facts、证据、观察、价格、任务、执行、artifacts、decisions 与索引 | 忽略 |
+| `runtime/control/` | 活动 generation pointer、lease 与迁移控制记录 | 忽略 |
 
 会话历史为了恢复对话，会包含消息与 Tool 正文；审计文件则尽量只保存哈希和结构化元数据，不复制 Prompt、模型正文或密钥。两类目录都应按应用数据保护。
 
@@ -722,10 +733,13 @@ npm run agent:secret-scan
 
 ```bash
 npm run test:g1:browser
+npm run test:purchase-price:browser
 npm run test:g7:browser
+npm run test:u7:browser
 npm run test:workspace:browser
 npm run test:spatial:browser
 npm run test:agent-plan:browser
+npm run test:agent-initialization:browser
 npm run test:transactions:browser
 npm run test:build-tasks:browser
 npm run test:platform:browser
@@ -749,6 +763,17 @@ npm run price:search
 npm run price:refresh
 npm run price:fixture
 ```
+
+发布与恢复检查：
+
+```bash
+npm run runtime:migrate-plans-v3 -- --runtime-root <副本> --output <dry-run-report.json>
+BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:create -- --runtime-root <root> --output <root-外.backup>
+BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:verify -- --runtime-root <root> --input <root-外.backup>
+RUNTIME_ROOT=<root> npm run runtime:doctor -- --strict
+```
+
+迁移默认只做 dry-run。V2 → V3 apply 必须携带人工审阅过的精确 source-manifest hash、runtime root 外的备份路径和验证通过的加密备份。演练命令不得指向已部署 runtime。
 
 ## 仓库结构
 
@@ -780,7 +805,7 @@ legacy/v1/                 冻结的 V1 参考实现
 
 ## 当前限制与路线图
 
-- 当前仅交付 JONSBO N6 机箱配置。
+- 通用机箱编译器、registry 和 provisional adapter 流程已实现，但生产 rollout 在 ATX/ITX/NAS 实物 holdout 与发布 canary 留档前保持关闭。
 - 规划几何不是厂商 CAD，热场也不是 CFD。
 - 价格采集受第三方页面、登录、区域可用性和平台条款影响。
 - 交易截图 OCR 默认使用实验版 DeepSeek 公共视觉模型；其可用性和价格可能变化，OCR 结果仍只能生成待审证据。自托管 DeepSeek-OCR 为可选方案，Osaka Compose 不内置该模型服务。
@@ -788,7 +813,9 @@ legacy/v1/                 冻结的 V1 参考实现
 - 尚未实现公网认证、授权、租户隔离和应用级限流。
 - Legacy 详情 markup/runtime 仍位于明确的浏览器兼容 adapter 后；PlanStore 与 BuildEvaluation 已是权威源，完整框架/模板重写有意延后。
 - Osaka Docker 配置是单机且部署专用的；尚无 Kubernetes 清单和自动公网部署流水线。
-- 历史价格序列、实测校准、产品纹理映射和更多硬件档案仍是后续工作。
+- 价格历史、目标价和受治理推荐已经实现；真实市场覆盖仍依赖部署者批准的本地采集器，fixture 不能替代市场证据。
+- 仓库目前没有三套实物 holdout 对净空、最短线长、温度区间和标准化硬件声学区间的证明。这是发布阻断项，不能用软件默认值代替。
+- 产品纹理和更多实测机箱数据仍是后续工作；BoxGeometry 与区间/blocked 结果是诚实 fallback。
 
 路线图见 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 

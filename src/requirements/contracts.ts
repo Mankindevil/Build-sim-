@@ -155,10 +155,8 @@ export interface RequirementNode {
   evidenceRefs: string[];
 }
 
-export interface RequirementAllocation {
-  source: "component" | "package_content" | "user_resource" | "purchase";
+interface RequirementAllocationBase {
   refId: string;
-  ownerInstanceId?: string;
   quantity: number;
   availability: "planned" | "ordered" | "present_verified";
   verificationStatus: "unverified" | "verified";
@@ -166,6 +164,12 @@ export interface RequirementAllocation {
   evidenceRefs: string[];
   observationRefs: string[];
 }
+
+/** Physical package/user resources are always scoped to one concrete owner instance. */
+export type RequirementAllocation = RequirementAllocationBase & (
+  | { source: "package_content" | "user_resource"; ownerInstanceId: string }
+  | { source: "component" | "purchase"; ownerInstanceId?: string }
+);
 
 export interface RequirementSatisfaction {
   requirementId: string;
@@ -197,12 +201,15 @@ export interface SafetyCheckpointContext {
 }
 
 /** Available non-shareable inventory used to prove allocation conservation. */
-export interface RequirementAllocationSupply {
-  source: RequirementAllocation["source"];
+interface RequirementAllocationSupplyBase {
   refId: string;
-  ownerInstanceId?: string;
   quantity: number;
 }
+
+export type RequirementAllocationSupply = RequirementAllocationSupplyBase & (
+  | { source: "package_content" | "user_resource"; ownerInstanceId: string }
+  | { source: "component" | "purchase"; ownerInstanceId?: string }
+);
 
 export interface EvaluationDecision {
   decisionId: string;
@@ -478,8 +485,11 @@ export function validateRequirementSatisfaction(
     if (!finiteNonNegative(allocation.quantity) || allocation.quantity === 0) errors.push("allocation quantity must be positive");
     else allocated += allocation.quantity;
     if (allocation.availability === "present_verified" && allocation.verificationStatus !== "verified") errors.push("present_verified allocation must be verified");
+    if ((allocation.source === "package_content" || allocation.source === "user_resource") && !allocation.ownerInstanceId) errors.push("package/user allocation requires ownerInstanceId");
+    if (allocation.observationRefs.some((ref) => !/^observation:[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(ref))) errors.push("allocation observationRefs must be graph observation references");
+    if (allocation.availability === "present_verified" && allocation.observationRefs.length === 0) errors.push("present_verified allocation requires an observation reference");
     const gated = requirement.criticality === "boot" || requirement.criticality === "safety"
-      || requirement.requiredBefore === "pre_power" || requirement.requiredBefore === "first_boot";
+      || requirement.requiredBefore !== undefined;
     if (gated && !isCurrentSafetyCheckpoint(requirement, safetyCheckpoint, checkpointContext) && (allocation.availability !== "present_verified" || allocation.verificationStatus !== "verified")) {
       errors.push("boot/safety allocation must be present_verified or covered by a safety checkpoint");
     }

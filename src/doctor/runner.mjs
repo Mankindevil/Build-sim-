@@ -216,7 +216,11 @@ export async function runDoctor(options) {
         || !Number.isInteger(rollback?.fromRevision) || rollback.fromRevision < 0 || rollback.toRevision !== rollback.fromRevision + 1
         || rollback.previous?.jobId !== rollback.jobId || rollback.previous?.revision !== rollback.fromRevision
         || rollback.previousChecksum !== sha256Json(rollback.previous)
-        || validateRuntimeBackgroundJob(rollback.previous, { expectedRuntimeGeneration: state.runtimeGeneration }).length > 0;
+        // Rollback bytes are immutable historical audit authority. Restore
+        // advances live jobs to the new generation, but must not rewrite their
+        // signed prior states; accept current/older history and reject future
+        // generation forgery.
+        || validateRuntimeBackgroundJob(rollback.previous, { maxRuntimeGenerationExclusive: state.runtimeGeneration + 1 }).length > 0;
     }
     if (logicalPath.startsWith("jobs/") && logicalPath.endsWith(".json")) {
       return true;
@@ -323,6 +327,16 @@ export async function runDoctor(options) {
   const pdfParser = options.pdfParserAvailable === true ? status("pass", "PDF parser capability is available.", { available: true })
     : options.pdfParserAvailable === false ? status("warn", "PDF parser capability is unavailable.", { available: false })
       : status("skipped", "PDF parser capability was not probed in offline Doctor mode.", { probed: false });
+  const browserWebgl = options.browserWebglAvailable === true
+    ? status("pass", "Browser WebGL capability is available.", { available: true })
+    : options.browserWebglAvailable === false
+      ? status("warn", "Browser WebGL capability is unavailable.", { available: false })
+      : status("skipped", "Browser WebGL capability was not probed.", { probed: false });
+  const searxng = options.searxngAvailable === true
+    ? status("pass", "The local search service is available.", { available: true })
+    : options.searxngAvailable === false
+      ? status("warn", "The local search service is unavailable.", { available: false })
+      : status("skipped", "The local search service was not probed.", { probed: false, degraded: options.offline === true });
   const network = options.offline === true ? status("skipped", "Network checks were skipped because runtime is offline.", { offline: true, degraded: true })
     : options.offline === false ? status("pass", "Runtime network state was explicitly reported online.", { offline: false })
       : status("skipped", "Runtime network state was not probed.", { probed: false });
@@ -352,8 +366,8 @@ export async function runDoctor(options) {
     ["jobs.stuck_lease", expiredJobs || expiredExecutions || expiredMaintenanceLease || staleCoordinationLock || staleCatalogGeneration ? status("fail", "An expired active lease, stale runtime generation, or stale coordination lock was detected.", { expiredLeaseCount: expiredJobs + expiredExecutions + Number(expiredMaintenanceLease), staleCatalogGenerationCount: staleCatalogGeneration, staleCoordinationLock }) : status("pass", "No expired active lease, stale runtime generation, or stale coordination lock was detected.", { expiredLeaseCount: 0, staleCatalogGenerationCount: 0, staleCoordinationLock: false })],
     ["jobs.dead_letter", deadLetters ? status("warn", "Dead-letter jobs require review.", { count: deadLetters }) : status("pass", "No dead-letter jobs were found.", { count: 0 })],
     ["backup.recent_verified", freshBackup ? status("pass", "A recent verified backup is recorded.", { fresh: true }) : status("warn", "No recent verified backup is recorded.", { fresh: false })],
-    ["runtime.browser_webgl", status("skipped", "Browser and WebGL checks are unavailable in offline Doctor mode.", { offlineCheck: true })],
-    ["services.searxng", status("skipped", "Search service probing is disabled in offline Doctor mode.", { offlineCheck: true })],
+    ["runtime.browser_webgl", browserWebgl],
+    ["services.searxng", searxng],
     ["services.pdf_parser", pdfParser],
     ["network.offline", network],
     ["runtime.clock_skew", clock],
@@ -387,7 +401,7 @@ export async function runDoctor(options) {
   const report = { ...base, reportHash: reportHash(base) };
   const runResult = {
     report, evidenceArtifacts,
-    preconditionHashes: [...evidenceArtifacts.values()].map((artifact) => artifact.measurementHash).sort(),
+    preconditionHashes: [...new Set([...evidenceArtifacts.values()].map((artifact) => artifact.measurementHash))].sort(),
     exitCode: doctorProcessExitCode(report, { strict: options.strict === true }),
   };
   DOCTOR_RUN_RESULTS.add(runResult);

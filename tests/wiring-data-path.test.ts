@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planN6Wiring } from "../src/wiring/plan";
+import { planN6Wiring } from "../src/adapters/jonsbo-n6/assembly";
 import { evaluateBuild } from "../src/core/evaluate";
 import { loadRawCatalog } from "../src/sku/catalog";
 import type { BuildConfig, BootMode } from "../src/config/types";
@@ -116,6 +116,21 @@ describe("board SATA ports", () => {
     expect(plan.bayPaths.filter((b) => b.target === "none")).toHaveLength(1);
     expect(plan.warnings.some((w) => w.includes("缺少可用的 ports 字段"))).toBe(true);
     expect(plan.warnings.some((w) => w.includes("没有数据端口可接"))).toBe(true);
+  });
+
+  it("rejects fractional HBA port and connector counts", () => {
+    const malformed = {
+      ...catalog,
+      skus: catalog.skus.map((sku) => sku.id === "hba.lsi-9300-8i-it"
+        ? { ...sku, attrs: { ...sku.attrs, ports: 8.5, portsPerConnector: 4.5 } }
+        : sku),
+    };
+    const plan = planN6Wiring(config(9, "m2"), malformed);
+    expect(plan.bayPaths.filter((bay) => bay.target === "hba")).toHaveLength(0);
+    expect(plan.bayPaths.filter((bay) => bay.target === "none")).toHaveLength(1);
+    expect(qty(plan, "hba-minisas")).toBe(0);
+    expect(plan.warnings.join(" ")).toMatch(/ports 字段/);
+    expect(plan.warnings.join(" ")).toMatch(/portsPerConnector/);
   });
 
   it("drop the SlimSAS four once an NVMe claims that port", async () => {

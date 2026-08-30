@@ -29,8 +29,18 @@ function validSnapshot(value: unknown, options: { allowLegacy: boolean }): value
   const snapshot = value as PriceSnapshotFile & { contentHash?: unknown };
   if (snapshot.contentHash === undefined) return options.allowLegacy;
   if (typeof snapshot.contentHash !== "string" || !/^[a-f0-9]{64}$/.test(snapshot.contentHash)) return false;
-  const { contentHash, ...material } = snapshot;
-  return createHash("sha256").update(JSON.stringify(material)).digest("hex") === contentHash;
+  const material = {
+    schemaVersion: snapshot.schemaVersion,
+    asOf: snapshot.asOf,
+    ...(snapshot.note === undefined ? {} : { note: snapshot.note }),
+    ...(snapshot.snapshotId === undefined ? {} : { snapshotId: snapshot.snapshotId }),
+    ...(snapshot.generatedAt === undefined ? {} : { generatedAt: snapshot.generatedAt }),
+    ...(snapshot.catalogVersion === undefined ? {} : { catalogVersion: snapshot.catalogVersion }),
+    ...(snapshot.inputHash === undefined ? {} : { inputHash: snapshot.inputHash }),
+    ...(snapshot.priceVersion === undefined ? {} : { priceVersion: snapshot.priceVersion }),
+    quotes: snapshot.quotes,
+  };
+  return createHash("sha256").update(JSON.stringify(material)).digest("hex") === snapshot.contentHash;
 }
 
 export function runtimePriceSnapshotPath(options: RuntimePriceSnapshotOptions = {}): string {

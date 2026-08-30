@@ -11,6 +11,23 @@ import type {
   UpdatePlanInfoInput,
 } from "./contracts";
 import type { PlanEvidenceBinding } from "../evidence/contracts";
+import type { BuildConfigDocument } from "../config/types";
+import type { AuthoritativeSpatialSceneSnapshot } from "../spatial/authoritative-scene";
+
+export interface WorkspaceCapabilities {
+  readonly schemaVersion: "workspace-capabilities-v1";
+  readonly topologyV3Enabled: boolean;
+  readonly systemProfilesEnabled: boolean;
+  readonly priceHistoryEnabled: boolean;
+  readonly priceTargetsEnabled: boolean;
+  readonly recommendationsEnabled: boolean;
+  readonly wholeBuildSolverEnabled: boolean;
+  readonly scenarioWhatIfEnabled: boolean;
+  readonly jobCenterEnabled: boolean;
+  readonly backupRestoreEnabled: boolean;
+  readonly doctorEnabled: boolean;
+  readonly portabilityEnabled: boolean;
+}
 
 export class WorkspaceApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
@@ -22,7 +39,7 @@ export class WorkspaceApiError extends Error {
 export interface WorkspacePlanApi {
   list(): Promise<BuildPlanSummary[]>;
   get(planId: string): Promise<BuildPlan>;
-  create(input: CreatePlanInput): Promise<BuildPlan>;
+  create(input: CreatePlanInput<BuildConfigDocument>): Promise<BuildPlan>;
   updateInfo(planId: string, input: UpdatePlanInfoInput): Promise<BuildPlan>;
   updateDraft(planId: string, input: UpdateDraftInput): Promise<BuildPlan>;
   saveVersion(planId: string, input: SaveVersionInput): Promise<PlanVersion>;
@@ -63,13 +80,20 @@ export class WorkspaceApiClient implements WorkspacePlanApi, WorkspaceEvidenceAp
     });
   }
 
+  async capabilities(): Promise<WorkspaceCapabilities> {
+    const workspaceBase = this.base.endsWith("/plans") ? this.base.slice(0, -"/plans".length) : "/api/workspace";
+    return payload(await this.fetchImpl.call(globalThis, `${workspaceBase}/capabilities`, {
+      headers: { Accept: "application/json" },
+    }));
+  }
+
   async list(): Promise<BuildPlanSummary[]> {
     return (await payload<{ plans: BuildPlanSummary[] }>(await this.request())).plans;
   }
   async get(planId: string): Promise<BuildPlan> {
     return payload(await this.request(`/${encodeURIComponent(planId)}`));
   }
-  async create(input: CreatePlanInput): Promise<BuildPlan> {
+  async create(input: CreatePlanInput<BuildConfigDocument>): Promise<BuildPlan> {
     return payload(await this.request("", { method: "POST", body: JSON.stringify(input) }));
   }
   async updateInfo(planId: string, input: UpdatePlanInfoInput): Promise<BuildPlan> {
@@ -95,6 +119,9 @@ export class WorkspaceApiClient implements WorkspacePlanApi, WorkspaceEvidenceAp
   }
   async listVersions(planId: string): Promise<PlanVersion[]> {
     return (await payload<{ versions: PlanVersion[] }>(await this.request(`/${encodeURIComponent(planId)}/versions`))).versions;
+  }
+  async spatialScene(planId: string, planVersionId: string): Promise<AuthoritativeSpatialSceneSnapshot> {
+    return payload(await this.request(`/${encodeURIComponent(planId)}/versions/${encodeURIComponent(planVersionId)}/spatial-scene`));
   }
   async listEvidenceBindings(planId: string): Promise<PlanEvidenceBinding[]> {
     return (await payload<{ bindings: PlanEvidenceBinding[] }>(await this.request(`/${encodeURIComponent(planId)}/evidence-bindings`))).bindings;

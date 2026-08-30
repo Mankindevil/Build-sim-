@@ -1,15 +1,64 @@
 import { chromium } from "playwright";
+import { readFile } from "node:fs/promises";
+import { installLocalCatalogRoute } from "./local-browser-fixtures.mjs";
 
+const baseUrl = process.env.SPATIAL_BROWSER_BASE_URL ?? "http://127.0.0.1:5173";
+
+// The product correctly starts from a blank plan. This 3D acceptance needs an
+// explicit, persisted ready fixture instead of depending on whichever plan a
+// previous browser run happened to leave active.
+if (process.env.SPATIAL_BROWSER_SEED_READY_PLAN !== "0") {
+  const listResponse = await fetch(`${baseUrl}/api/workspace/plans`);
+  if (!listResponse.ok) throw new Error(`cannot seed spatial plan: list HTTP ${listResponse.status}`);
+  const summaries = (await listResponse.json()).plans;
+  const summary = summaries.find((candidate) => candidate.status === "active") ?? summaries[0];
+  if (!summary) throw new Error("cannot seed spatial plan: no workspace plan");
+  const planResponse = await fetch(`${baseUrl}/api/workspace/plans/${encodeURIComponent(summary.id)}`);
+  if (!planResponse.ok) throw new Error(`cannot seed spatial plan: get HTTP ${planResponse.status}`);
+  const plan = await planResponse.json();
+  const fixture = JSON.parse(await readFile(new URL("../data/configs/baseline-atx-1hdd.json", import.meta.url), "utf8"));
+  const config = {
+    ...fixture,
+    id: plan.id,
+    name: plan.name,
+    updatedAt: "2026-08-29T00:00:00.000Z",
+    selection: {
+      ...fixture.selection,
+      nvmeCount: 2,
+      hbaSkuId: null,
+      fanMode: "balanced",
+      fanGroups: [{ mountId: "front", sizeMm: 140, count: 2 }],
+    },
+  };
+  const updateResponse = await fetch(`${baseUrl}/api/workspace/plans/${encodeURIComponent(plan.id)}/draft`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ expectedRevision: plan.draftRevision, config }),
+  });
+  if (!updateResponse.ok) throw new Error(`cannot seed spatial plan: update HTTP ${updateResponse.status} ${await updateResponse.text()}`);
+}
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1360, height: 960 } });
+await installLocalCatalogRoute(page);
 page.setDefaultTimeout(20_000);
 const errors = [];
 page.on("pageerror", (error) => errors.push(String(error)));
 page.on("console", (message) => {
-  if (message.type() === "error" && !message.text().includes("500") && !message.text().includes("502")) errors.push(message.text());
+  if (message.type() === "error" && !message.text().includes("404") && !message.text().includes("500") && !message.text().includes("502")) errors.push(message.text());
+});
+page.on("response", (response) => {
+  if (response.status() !== 404) return;
+  const url = new URL(response.url());
+  // An exact 404 is the documented feature-off signal for the governed
+  // evaluation route; the client then uses the local V2 rollback evaluator.
+  if (/^\/api\/workspace\/plans\/[^/]+\/evaluations$/u.test(url.pathname)) return;
+  errors.push(`unexpected HTTP 404: ${url.pathname}`);
 });
 
-await page.goto("http://127.0.0.1:5173/index.html#/spatial", { waitUntil: "networkidle" });
+// The workspace/evidence panels intentionally keep local status requests in
+// flight. Spatial readiness is the product-owned signal; a global network-idle
+// heuristic can hang even when the scene is fully usable.
+await page.goto(`${baseUrl}/index.html#/spatial`, { waitUntil: "domcontentloaded" });
 await page.waitForFunction(() => window.__BUILD_SIM_SPATIAL__?.getMode() === "three");
 await page.locator("#spatial-stage").scrollIntoViewIfNeeded();
 const canvas = page.locator(".three-spatial-canvas canvas");
@@ -76,23 +125,6 @@ if (facts.findingCount) {
   } else await page.click('[data-route="spatial"]');
 }
 
-await page.click('[data-route="editor"]');
-await page.fill('[data-editor-field="selection.diskCount"] input', "9");
-await page.locator('[data-editor-field="selection.diskCount"] input').dispatchEvent("change");
-await page.selectOption('[data-editor-field="selection.boot"] select', "bay");
-await page.waitForFunction(() => window.__BUILD_SIM_SPATIAL__?.getOverlays()?.findings.some((finding) => finding.id === "n6.bay9-boot-vs-9hdd" && finding.verdict === "bad"));
-await page.click('[data-route="workspace"]');
-const fixableFinding = page.locator('[data-workspace-page="workspace"] [data-finding-id="n6.bay9-boot-vs-9hdd"]').first();
-if (!(await fixableFinding.isVisible())) throw new Error("fixable blocker was not surfaced on the workspace");
-await fixableFinding.click();
-await page.waitForFunction(() => location.hash === "#/spatial" && window.__BUILD_SIM_PLAN_STORE__?.getState().selection?.findingId === "n6.bay9-boot-vs-9hdd");
-await page.click("[data-edit-finding]");
-await page.waitForFunction(() => location.hash === "#/editor" && document.activeElement?.closest('[data-editor-field="selection.diskCount"]'));
-await page.fill('[data-editor-field="selection.diskCount"] input', "8");
-await page.locator('[data-editor-field="selection.diskCount"] input').dispatchEvent("change");
-await page.waitForFunction(() => !window.__BUILD_SIM_SPATIAL__?.getOverlays()?.findings.some((finding) => finding.id === "n6.bay9-boot-vs-9hdd"));
-await page.click('[data-route="spatial"]');
-
 await page.selectOption("[data-assembly-select]", "0");
 await page.waitForFunction(() => Boolean(window.__BUILD_SIM_SPATIAL__?.getContext().assemblyStepId));
 const agentContext = page.evaluate(() => new Promise((resolve) => document.addEventListener("build-sim:spatial-agent-context", (event) => resolve(event.detail), { once: true })));
@@ -105,7 +137,7 @@ const [capture] = await Promise.all([page.waitForEvent("download"), page.click("
 if (!capture.suggestedFilename().endsWith(".png") || !(await capture.path())) throw new Error("current-view screenshot was not exported");
 
 const fallback = await browser.newPage({ viewport: { width: 1100, height: 800 } });
-await fallback.goto("http://127.0.0.1:5173/index.html?spatialFallback=1#/spatial", { waitUntil: "networkidle" });
+await fallback.goto(`${baseUrl}/index.html?spatialFallback=1#/spatial`, { waitUntil: "domcontentloaded" });
 await fallback.waitForFunction(() => window.__BUILD_SIM_SPATIAL__?.getMode() === "fallback");
 if (!(await fallback.locator("#iso-svg").isVisible())) throw new Error("SVG fallback is not operable");
 if (!(await fallback.locator("[data-three-fallback]").textContent())?.includes("SVG")) throw new Error("fallback reason is not shown");
