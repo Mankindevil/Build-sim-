@@ -51,7 +51,7 @@ This report deliberately separates software fixture evidence from physical or li
 
 ### Full code gate
 
-- `npm test -- --testTimeout=30000`: 325 files, 1610 tests. In the default sandbox 323 files / 1607 tests passed; the only three failures were `listen EPERM` for two loopback test files. Those exact files were rerun with local-loopback permission and passed 2 files / 11 tests.
+- `npm test -- --testTimeout=30000`: 327 files, 1615 tests. In the default sandbox 325 files / 1612 tests passed; the only three failures were `listen EPERM` for two loopback test files. Those exact files were rerun with local-loopback permission and passed 2 files / 11 tests.
 - `npm run typecheck`: passed.
 - `npm run build`: client, Agent SSR, and Workspace SSR passed. The existing Vite chunk-size warning remains non-blocking.
 - `npm run agent:secret-scan`: 1039 files scanned after the release-canary and physical-holdout gate follow-ups, zero findings.
