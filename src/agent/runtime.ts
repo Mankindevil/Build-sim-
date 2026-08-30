@@ -29,7 +29,7 @@ const SYSTEM_PROMPT = `You are the Build Sim Agent. Be concise and explicit abou
 
 When a user asks to add a configuration option or supplement an SKU, first search the governed local catalog, then search trusted official sources only when needed. A catalog search result is not a selectable SKU. Only an exact, successfully extracted official candidate with an immutable expectedHash may be passed to propose_catalog_review. That Tool creates a review preview only; never claim that the catalog changed until the human review card reports confirmation. MPN is optional and must not be requested merely to proceed. Missing size, power, heat, temperature, or noise facts remain unknown. Applying an accepted SKU to the active build is a separate propose_plan_change flow and also requires human review.
 
-For every answer, regardless of whether a Skill is active, include five explicit Chinese headings in this order: 证据阶梯, 官网未找到原因, 第三方证据, 可重放推断, 下一步补证. When a governed plan resolution summary is present, report only its exact bounded fields. Preserve official-search reason enum values and explain them in Chinese; never call third-party evidence official. For inference, report lifecycle, trace/rule version, formula, input fact hashes, every assumption, output range, invalidation conditions, and that it cannot independently support a safety pass. Treat manualActions only as explanations. If an item is absent, stale, disabled, blocked, paused, cancelled, failed, or otherwise unresolved, write unknown / 未成立 explicitly instead of filling the gap.`;
+For every answer, regardless of whether a Skill is active, include five explicit Chinese headings in this order: 证据阶梯, 官网未找到原因, 第三方证据, 可重放推断, 下一步补证. When a governed plan resolution summary is present, report only its exact bounded fields. Preserve official-search reason enum values and explain them in Chinese; never call third-party evidence official. Report every claim scope exactly as family/model/variant/revision: family is never an exact model, variant, or revision claim; model is not an exact variant or revision; variant is not an exact revision. For inference, report lifecycle, trace/rule version, formula, input fact hashes, every assumption, output range, invalidation conditions, and that it cannot independently support a safety pass. Treat manualActions only as explanations. If an item is absent, stale, disabled, blocked, paused, cancelled, failed, or otherwise unresolved, write unknown / 未成立 explicitly instead of filling the gap.`;
 const CONTINUE_PROMPT = "Continue exactly where the previous answer stopped. Do not repeat prior text, do not call tools, and do not mention continuation or token limits. Finish the answer completely.";
 
 const EVIDENCE_RESPONSE_HEADINGS = Object.freeze([
@@ -52,6 +52,54 @@ function assertEvidenceResponseContract(answer: string, session: AgentSession): 
     }
     previousIndex = match.index;
   }
+}
+
+function claimScopeAppendix(session: AgentSession): string {
+  const currentUserMessage = [...session.messages].reverse().find((message) => message.role === "user");
+  const match = currentUserMessage?.content.match(/<plan_agent_context[^>]*>\n([\s\S]*?)\n<\/plan_agent_context>/);
+  if (!match?.[1]) return "";
+  let parsed: unknown;
+  try { parsed = JSON.parse(match[1]); } catch { return ""; }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
+  const evidence = (parsed as { evidenceSummary?: unknown }).evidenceSummary;
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return "";
+  const rows = (evidence as { claimScopes?: unknown }).claimScopes;
+  const total = (evidence as { claimScopeCount?: unknown }).claimScopeCount;
+  if (!Array.isArray(rows) || rows.length === 0 || rows.length > 20
+    || !Number.isSafeInteger(total) || Number(total) < rows.length) return "";
+  const text = (value: unknown, maximum = 256): value is string => typeof value === "string"
+    && value.length > 0 && value.length <= maximum && value === value.normalize("NFC")
+    && !/[\u0000-\u001f\u007f]/.test(value);
+  const hash = /^[a-f0-9]{64}$/;
+  const claimId = /^claim-sha256-([a-f0-9]{64})$/;
+  const scopeLabels = {
+    family: "family（家族范围，不代表精确型号/变体/修订）",
+    model: "model（型号范围，不代表精确变体/修订）",
+    variant: "variant（精确变体范围，不代表精确修订）",
+    revision: "revision（精确修订范围）",
+  } as const;
+  const lines: string[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return "";
+    const candidate = row as Record<string, unknown>;
+    const subject = candidate.subject;
+    const idMatch = typeof candidate.claimId === "string" ? claimId.exec(candidate.claimId) : null;
+    if (!idMatch || !hash.test(String(candidate.contentHash)) || idMatch[1] !== candidate.contentHash
+      || !["official", "third_party"].includes(String(candidate.authority))
+      || !text(candidate.fieldId) || !Object.prototype.hasOwnProperty.call(scopeLabels, String(candidate.scope))
+      || !subject || typeof subject !== "object" || Array.isArray(subject)) return "";
+    const identity = subject as Record<string, unknown>;
+    if (!text(identity.skuId) || !text(identity.familyId)) return "";
+    const detailKeys = ["modelId", "variantId", "revision", "region"] as const;
+    if (detailKeys.some((key) => identity[key] !== undefined && !text(identity[key]))) return "";
+    if ((candidate.scope === "model" && !text(identity.modelId))
+      || (candidate.scope === "variant" && !text(identity.variantId))
+      || (candidate.scope === "revision" && !text(identity.revision))) return "";
+    const detail = detailKeys.flatMap((key) => identity[key] === undefined ? [] : [`${key}=${identity[key]}`]);
+    lines.push(`- ${candidate.claimId} | ${candidate.fieldId} | ${scopeLabels[candidate.scope as keyof typeof scopeLabels]} | authority=${candidate.authority} | skuId=${identity.skuId} | familyId=${identity.familyId}${detail.length ? ` | ${detail.join(" | ")}` : ""}`);
+  }
+  if (Number(total) > rows.length) lines.push(`- 另有 ${Number(total) - rows.length} 条活动 claim 未放入有界上下文；其范围保持 unknown，需用只读工具按 ID 查询。`);
+  return `\n\n### Claim 适用范围\n${lines.join("\n")}`;
 }
 
 function mergeContinuation(previous: string, next: string): string {
@@ -636,12 +684,15 @@ export class AgentRuntime {
           if (turn.stopReason !== "end_turn") {
             throw new AgentRuntimeError("provider_incomplete_response", `Agent provider stopped before completing the answer (${turn.stopReason})`, 502);
           }
-          const finalAnswer = mergeContinuation(partialAnswer, turn.content);
+          const providerAnswer = mergeContinuation(partialAnswer, turn.content);
           const finalReasoning = partialReasoning + (turn.reasoningContent ?? "");
-          if (!finalAnswer.trim()) {
+          if (!providerAnswer.trim()) {
             throw new AgentRuntimeError("provider_empty_response", "Agent provider returned no final answer", 502);
           }
-          assertEvidenceResponseContract(finalAnswer, session);
+          assertEvidenceResponseContract(providerAnswer, session);
+          const scopeAppendix = claimScopeAppendix(session);
+          if (scopeAppendix) this.emit(run, { type: "text_delta", runId: run.id, text: scopeAppendix, at: this.now() });
+          const finalAnswer = providerAnswer + scopeAppendix;
           session.messages.push({
             id: this.id("message"),
             role: "assistant",

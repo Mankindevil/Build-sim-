@@ -155,6 +155,33 @@ export interface PlanEvidenceSummary {
   readonly resolutions?: readonly PlanEvidenceResolutionSummary[];
   /** Server-derived candidate/approval/read-current projection from one runtime generation. */
   readonly inferences?: readonly PlanInferenceSummary[];
+  /** Total active claims that match a product selected by this plan. */
+  readonly claimScopeCount?: number;
+  /**
+   * Bounded, server-derived claim identities. Values and source bodies are
+   * deliberately excluded; the scope is explicit so family evidence cannot be
+   * presented as an exact revision claim.
+   */
+  readonly claimScopes?: readonly PlanEvidenceClaimScopeSummary[];
+}
+
+export const PLAN_EVIDENCE_CLAIM_SCOPE_SUMMARY_SCHEMA_VERSION = "plan-evidence-claim-scope-v1" as const;
+
+export interface PlanEvidenceClaimScopeSummary {
+  readonly schemaVersion: typeof PLAN_EVIDENCE_CLAIM_SCOPE_SUMMARY_SCHEMA_VERSION;
+  readonly claimId: `claim-sha256-${string}`;
+  readonly contentHash: string;
+  readonly authority: "official" | "third_party";
+  readonly fieldId: string;
+  readonly scope: "family" | "model" | "variant" | "revision";
+  readonly subject: {
+    readonly skuId: string;
+    readonly familyId: string;
+    readonly modelId?: string;
+    readonly variantId?: string;
+    readonly revision?: string;
+    readonly region?: string;
+  };
 }
 
 export const PLAN_INFERENCE_SUMMARY_SCHEMA_VERSION = "plan-inference-summary-v1" as const;

@@ -411,6 +411,11 @@ export class EvidenceClaimRepository {
     return this.boundary(false, (evidenceRoot) => this.listAt(evidenceRoot));
   }
 
+  /** Root-pinned read for services already executing inside a coordinator barrier. */
+  async listClaimsAtRoot(activeRoot: string): Promise<EvidenceClaim[]> {
+    return this.listAt(confined(activeRoot, "evidence"));
+  }
+
   async snapshotReferences(activeRoot: string): Promise<{
     providerId: "evidence-claims";
     revision: number;

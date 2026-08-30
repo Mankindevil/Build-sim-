@@ -114,6 +114,8 @@ describe("R7 plan-bound Agent context", () => {
           runtimeGeneration: 7,
           resolutions: [],
           inferences: [],
+          claimScopeCount: 0,
+          claimScopes: [],
           price: null,
         }),
       },
@@ -257,6 +259,8 @@ describe("R7 plan-bound Agent context", () => {
             runtimeGeneration,
             resolutions: [],
             inferences: [],
+            claimScopeCount: 0,
+            claimScopes: [],
             price: null,
           };
         },

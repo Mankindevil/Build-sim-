@@ -96,6 +96,7 @@ import {
 import { createDefaultThirdPartyDiscovery } from "../../scripts/price-server/evidence/third-party-discovery.mjs";
 import { createSearXngDiscoveryProvider } from "../../scripts/price-server/catalog/searxng-discovery.mjs";
 import {
+  ProductionPlanClaimScopeSummary,
   ProductionWorkspacePlanResolutionSummary,
   type RootBoundWorkspacePlanResolutionSummaryAuthority,
 } from "./plan-resolution-summary";
@@ -1406,6 +1407,10 @@ export function createWorkspaceRepositories<TConfig extends BuildConfigDocument 
       ...(evidenceJobs ? { evidenceJobs } : {}),
       ...(inferenceSummary ? { inferenceSummary } : {}),
       ...(planPrices ? { planPrices } : {}),
+      claimScopes: new ProductionPlanClaimScopeSummary({
+        plans: repository,
+        claims: evidenceClaimRepository,
+      }),
     })
     : undefined;
   const priceRuntime = priceHistoryFeatureEnabled && coordinator && planPrices && currentPriceSnapshots
@@ -1477,7 +1482,7 @@ export function createProductionWorkspaceAgentContextAuthority(options: {
             state.runtimeGeneration,
             input.context.planId,
           )
-          : { resolutions: [], inferences: [], price: null };
+          : { resolutions: [], inferences: [], claimScopeCount: 0, claimScopes: [], price: null };
         const context = withServerDerivedPlanResolution(input.context, serverSummary);
         const audit = await recordPlanAgentRunContextAtRoot(
           options.repository,

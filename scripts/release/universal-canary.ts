@@ -149,6 +149,7 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
       evaluationLock: receipt.evaluationLock,
     });
     const scene = await services.spatialScene!.get(plan.id, version.id);
+    const resolutionSummary = await services.planResolutionSummary!.forPlan(plan.id);
     const facts = await services.factRepository.listCurrentFacts();
     const official = officialFactSummary(facts);
     const storageInstances = config.components.filter(({ kind }) => kind === "storage_drive");
@@ -166,6 +167,21 @@ export async function runUniversalReleaseCanary(options: { runtimeRoot?: string;
       storageInstances.map(({ instanceId, identity }) => ({ instanceId, identity }))),
       check("stage-a.no-profile-default-components", implicitKinds.length === 0,
         { configuredInstanceIds: config.components.map(({ instanceId }) => instanceId), implicitInstanceIds: implicitKinds.map(({ instanceId }) => instanceId) }),
+      check("stage-a.agent-claim-scopes-are-explicit", resolutionSummary.claimScopeCount > 0
+        && resolutionSummary.claimScopes.length > 0
+        && resolutionSummary.claimScopes.every(({ scope, subject }) => {
+          if (scope === "family") return subject.familyId.length > 0;
+          if (scope === "model") return typeof subject.modelId === "string" && subject.modelId.length > 0;
+          if (scope === "variant") return typeof subject.variantId === "string" && subject.variantId.length > 0;
+          return typeof subject.revision === "string" && subject.revision.length > 0;
+        }),
+      {
+        claimScopeCount: resolutionSummary.claimScopeCount,
+        claimScopes: resolutionSummary.claimScopes.map(({ claimId, authority, fieldId, scope, subject }) => ({
+          claimId, authority, fieldId, scope, subject,
+        })),
+        presentation: "Agent appends a deterministic Claim 适用范围 section from this server-issued projection.",
+      }),
       check("stage-a.official-fact-closure", missingOfficial.length === 0,
         { products: official, missingSkuIds: missingOfficial }),
       check("stage-a.cpu-max-turbo-power-is-official", cpuTurboFacts.length === 1

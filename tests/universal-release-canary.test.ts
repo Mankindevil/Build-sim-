@@ -15,6 +15,7 @@ describe("U12 universal release canary", () => {
     expect(report.checks.filter(({ status }) => status === "pass").map(({ checkId }) => checkId)).toEqual([
       "stage-a.two-distinct-ssd-instances",
       "stage-a.no-profile-default-components",
+      "stage-a.agent-claim-scopes-are-explicit",
       "stage-a.partial-remains-not-power-ready",
       "stage-a.no-empty-bay-data-cables",
       "stage-a.spatial-scene-is-locked-and-blocked",

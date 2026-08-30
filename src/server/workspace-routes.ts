@@ -45,7 +45,7 @@ export interface WorkspaceAgentContextRecordAuthority {
 
 export function withServerDerivedPlanResolution(
   submittedContext: PlanAgentContext,
-  serverSummary: Pick<WorkspacePlanResolutionSummary, "resolutions" | "inferences" | "price">,
+  serverSummary: Pick<WorkspacePlanResolutionSummary, "resolutions" | "inferences" | "claimScopeCount" | "claimScopes" | "price">,
 ): PlanAgentContext {
   const submittedEvidence = submittedContext.evidenceSummary;
   const submittedPurchase = submittedContext.purchaseSummary && typeof submittedContext.purchaseSummary === "object"
@@ -63,6 +63,8 @@ export function withServerDerivedPlanResolution(
       bindings: structuredClone(submittedEvidence?.bindings ?? []),
       resolutions: structuredClone(serverSummary.resolutions),
       inferences: structuredClone(serverSummary.inferences),
+      claimScopeCount: serverSummary.claimScopeCount,
+      claimScopes: structuredClone(serverSummary.claimScopes),
     },
   };
 }
@@ -705,7 +707,7 @@ export async function handleWorkspaceRoute<TConfig extends PlanConfig = PlanConf
       }
       const serverSummary = options.planResolutionSummary
         ? await options.planResolutionSummary.forPlan(submittedContext.planId)
-        : { resolutions: [], inferences: [], price: null };
+        : { resolutions: [], inferences: [], claimScopeCount: 0, claimScopes: [], price: null };
       // Browser data never gets to assert durable evidence/inference state.
       // The exact arrays below are derived from one server generation before
       // validation, context hashing and audit persistence.

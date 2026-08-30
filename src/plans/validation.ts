@@ -7,6 +7,7 @@ import {
   PLAN_PATCH_PATHS,
   PLAN_PARTIAL_EVALUATION_V3_SCHEMA_VERSION,
   PLAN_PARTIAL_EVALUATION_V3_UNKNOWN_DOMAINS,
+  PLAN_EVIDENCE_CLAIM_SCOPE_SUMMARY_SCHEMA_VERSION,
   PLAN_EVIDENCE_RESOLUTION_SUMMARY_SCHEMA_VERSION,
   PLAN_INFERENCE_SUMMARY_SCHEMA_VERSION,
   PLAN_SCHEMA_VERSION,
@@ -26,6 +27,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const HASH = /^[a-f0-9]{64}$/;
 const DOCUMENT_ID = /^doc-sha256-[a-f0-9]{64}$/;
 const CAPTURE_ID = /^capture-sha256-[a-f0-9]{64}$/;
+const CLAIM_ID = /^claim-sha256-([a-f0-9]{64})$/;
 const BINDING_ID = /^binding-sha256-[a-f0-9]{64}$/;
 const EVIDENCE_PIPELINE_ID = /^evidence-pipeline-sha256-([a-f0-9]{64})$/;
 const CONTENT_REF = /^sha256:[a-f0-9]{64}$/;
@@ -645,6 +647,32 @@ function validatePlanEvidenceResolutionSummary(value: unknown, index: number): s
   return errors;
 }
 
+function validatePlanEvidenceClaimScopeSummary(value: unknown, index: number): string[] {
+  const prefix = `evidenceSummary.claimScopes.${index}`;
+  const summary = record(value);
+  if (!summary) return [`${prefix} invalid`];
+  const errors: string[] = [];
+  const claimMatch = typeof summary.claimId === "string" ? CLAIM_ID.exec(summary.claimId) : null;
+  const subject = record(summary.subject);
+  if (!exactKeys(summary, ["schemaVersion", "claimId", "contentHash", "authority", "fieldId", "scope", "subject"])
+    || summary.schemaVersion !== PLAN_EVIDENCE_CLAIM_SCOPE_SUMMARY_SCHEMA_VERSION
+    || !claimMatch || !HASH.test(String(summary.contentHash)) || claimMatch[1] !== summary.contentHash
+    || !["official", "third_party"].includes(String(summary.authority))
+    || !boundedCanonicalText(summary.fieldId, 256)
+    || !["family", "model", "variant", "revision"].includes(String(summary.scope))) {
+    errors.push(`${prefix} identity invalid`);
+  }
+  if (!subject || !exactKeys(subject, ["skuId", "familyId", "modelId", "variantId", "revision", "region"], ["skuId", "familyId"])
+    || !boundedCanonicalText(subject.skuId, 256) || !boundedCanonicalText(subject.familyId, 256)
+    || ["modelId", "variantId", "revision", "region"].some((key) => subject[key] !== undefined && !boundedCanonicalText(subject[key], 256))
+    || (summary.scope === "model" && typeof subject.modelId !== "string")
+    || (summary.scope === "variant" && typeof subject.variantId !== "string")
+    || (summary.scope === "revision" && typeof subject.revision !== "string")) {
+    errors.push(`${prefix} subject/scope invalid`);
+  }
+  return errors;
+}
+
 function validatePlanInferenceSummary(value: unknown, index: number, planId: unknown): string[] {
   const prefix = `evidenceSummary.inferences.${index}`;
   const summary = record(value);
@@ -776,7 +804,7 @@ export function validatePlanAgentContext(value: unknown): string[] {
   if (!("buildTaskSummary" in input)) errors.push("buildTaskSummary missing");
   if (input.evidenceSummary !== undefined) {
     const summary = record(input.evidenceSummary);
-    if (!summary || Object.keys(summary).some((key) => !["count", "bindings", "resolutions", "inferences"].includes(key))
+    if (!summary || Object.keys(summary).some((key) => !["count", "bindings", "resolutions", "inferences", "claimScopeCount", "claimScopes"].includes(key))
       || !Number.isSafeInteger(summary.count) || Number(summary.count) < 0 || !Array.isArray(summary.bindings)
       || summary.bindings.length > 40 || Number(summary.count) < summary.bindings.length) errors.push("evidenceSummary invalid");
     else summary.bindings.forEach((binding, index) => {
@@ -793,6 +821,20 @@ export function validatePlanAgentContext(value: unknown): string[] {
     if (summary?.inferences !== undefined) {
       if (!Array.isArray(summary.inferences) || summary.inferences.length > 20) errors.push("evidenceSummary.inferences invalid");
       else summary.inferences.forEach((inference, index) => errors.push(...validatePlanInferenceSummary(inference, index, input.planId)));
+    }
+    if ((summary?.claimScopeCount === undefined) !== (summary?.claimScopes === undefined)
+      || (summary?.claimScopeCount !== undefined && (!Number.isSafeInteger(summary.claimScopeCount) || Number(summary.claimScopeCount) < 0))
+      || (summary?.claimScopes !== undefined && (!Array.isArray(summary.claimScopes) || summary.claimScopes.length > 20
+        || Number(summary.claimScopeCount) < summary.claimScopes.length))) {
+      errors.push("evidenceSummary.claimScopes invalid");
+    } else if (Array.isArray(summary?.claimScopes)) {
+      const claimIds = new Set<string>();
+      summary.claimScopes.forEach((claimScope, index) => {
+        errors.push(...validatePlanEvidenceClaimScopeSummary(claimScope, index));
+        const claimId = record(claimScope)?.claimId;
+        if (typeof claimId === "string" && claimIds.has(claimId)) errors.push(`evidenceSummary.claimScopes.${index} duplicate`);
+        if (typeof claimId === "string") claimIds.add(claimId);
+      });
     }
   }
   if (input.initialization !== undefined) errors.push(...validateInitialization(input.initialization));

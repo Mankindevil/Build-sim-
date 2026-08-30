@@ -2591,7 +2591,7 @@ U0-U11 全部完成。
 阶段 A：部分方案验收（保持用户原始输入，不补造硬件）：
 
 - [x] 两块 SSD 是两个实例，不来自 profile default。
-- [ ] Agent 展示精确/家族 claim scope。
+- [x] Agent 展示精确/家族 claim scope。
 - [ ] 主板/CPU/SSD/PSU 官网事实可追溯。
 - [ ] i5-14500 最大睿频功耗使用官方事实，不再从 65W × 1.35 猜测。
 - [x] 未选择内存、散热和显卡时仍显示局部评估与 requirements。
@@ -2733,9 +2733,9 @@ live network 验收使用明确的只读测试帐号/本地服务，失败不得
 - 主要变更：portable/import plan、加密 full backup、验证/restore fencing、Doctor/repair、GC/retention、恢复任务隔离、V2→V3 方案迁移演练、Osaka release gate 和完整本地执行报告已落地。
 - 数据迁移：`tests/plan-v3-migration-rehearsal.test.ts` 2/2 证明 dry-run 零写、精确 manifest、外部加密备份、apply、归档 V2 保留与 rollback；真实部署 runtime 尚未执行 dry-run/apply。
 - 聚焦测试：U12 34 files / 105 tests 通过；U9 13/62、U10 20/46、U11 17/45 通过。
-- 全量测试：327 files / 1615 tests；默认沙箱内 3 项仅因禁止本机监听失败，精确回环复跑 2 files / 11 tests 通过。typecheck、三端 build、1039-file secret scan 与 diff-check 通过。
+- 全量测试：328 files / 1618 tests；默认沙箱内 3 项仅因禁止本机监听失败，精确回环复跑 2 files / 11 tests 通过。typecheck、三端 build、1040-file content scan 与 diff-check 通过。
 - 浏览器测试：计划列出的 12 个本机页面脚本全部通过；未访问外部网络。
-- release canary：`npm run release:canary` 已把 N6 阶段 A 固化为生产权威路径；8 项通过，包含局部 requirements、空盘位零假线材，以及由锁定 adapter 生成的推断坐标/公差与 component placement/routing/assembly 三域 blocked；CPU/SSD/旧款 PSU 的完整 official fact closure 与 i5-14500 最大睿频功耗 official fact 两项保持 blocked，命令退出码为 2，未从 catalog 属性补造。
+- release canary：`npm run release:canary` 已把 N6 阶段 A 固化为生产权威路径；9 项通过，新增同一 runtime root 内的活动 claim scope 投影，Agent 对 `family/model/variant/revision` 逐条确定性展示且不会把较宽范围称为精确修订；其余通过项包含局部 requirements、空盘位零假线材，以及由锁定 adapter 生成的推断坐标/公差与 component placement/routing/assembly 三域 blocked。CPU/SSD/旧款 PSU 的完整 official fact closure 与 i5-14500 最大睿频功耗 official fact 两项保持 blocked，命令退出码为 2，未从 catalog 属性补造。
 - physical holdout gate：`npm run release:holdouts` 已固化 strict/total/content-addressed 数据契约，要求独立 ATX、Mini-ITX、NAS 均绑定精确 plan/version/evaluation/adapter/simulation authority、校准仪器与净空/线长/温度/1m 标准化声学区间；当前无真实数据，命令按设计列出三类缺失并退出 2。
 - Osaka 发布脚本现在会先构建候选 Runtime 镜像，再在备份与服务重建之前依次执行 `release:canary` 与 `/app/runtime/release-evidence/physical-holdouts` 留样门禁；任一非零退出都不会启动候选服务栈。
 - 当前本机持久 runtime 的离线只读 Doctor 已执行：引用闭包、迁移状态与任务状态通过，但 48 个文件为 `0644`、37 个目录为 `0755`，因此 `runtime.permissions` 保持 blocking；`.env.remote` 尚无 `BUILDSIM_BACKUP_PASSWORD`，未绕过“先加密备份、再显式批准 repair”的门禁。真实 V2→V3 dry-run 为 ready/0 plans，目录用户数据 dry-run 为 38 SKU/0 移除/0 quarantine，facts migration 尚未 apply。
