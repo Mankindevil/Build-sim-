@@ -55,7 +55,7 @@ This report deliberately separates software fixture evidence from physical or li
 - `npm test`: 330 files, 1625 tests. In the default sandbox 328 files / 1622 tests passed; the only three failures were `listen EPERM` for two loopback test files. Those exact files were rerun with local-loopback permission and passed 2 files / 11 tests.
 - `npm run typecheck`: passed.
 - `npm run build`: client, Agent SSR, and Workspace SSR passed. The existing Vite chunk-size warning remains non-blocking.
-- `npm run agent:secret-scan`: 1045 files scanned, zero findings.
+- `npm run agent:secret-scan`: 1054 files scanned, zero findings. The same 1054-file result passes through the no-child-process filesystem fallback, which honors the root `.gitignore`, skips symlinks, and keeps ignored local environment files out of output.
 - `git diff --check`: passed after the report and documentation update.
 
 ### Stage gates
