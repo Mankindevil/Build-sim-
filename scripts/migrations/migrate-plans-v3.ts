@@ -9,7 +9,7 @@ import { canonicalJson, sha256Hex as legacySha256Hex } from "../../src/plans/can
 import { FilePlanRepository } from "../../src/plans/file-repository";
 import { migrateBuildConfigV2ToV3 } from "../../src/plans/migration";
 import { RuntimeCoordinator } from "../../src/runtime/coordinator.mjs";
-import { atomicWriteJson, confined } from "../../src/runtime/fs.mjs";
+import { atomicWriteJson } from "../../src/runtime/fs.mjs";
 import { persistProductionReferenceGraph } from "../../src/runtime/production-reference-graph.mjs";
 import { loadMergedCatalogSync } from "../price-server/catalog/repository.mjs";
 import { fail, parseArguments, readPassword } from "../backup/cli.mjs";
@@ -64,51 +64,60 @@ export async function planBuildConfigV3Migration(options: {
 }): Promise<PlanV3MigrationReport> {
   const runtimeRoot = path.resolve(options.runtimeRoot);
   const coordinator = new RuntimeCoordinator({ root: runtimeRoot, now: options.now });
-  const state = await coordinator.readState();
-  const activeRoot = coordinator.activeRoot(state);
-  const catalog = loadMergedCatalogSync({ activeRoot, generationAware: true });
   const repository = new FilePlanRepository<BuildConfigDocument>({
-    root: confined(activeRoot, "plans"),
+    coordinator,
+    runtimeRoot,
     topologyV3Enabled: true,
-    getCatalog: () => catalog,
+    getCatalogAtRoot: (activeRoot) => loadMergedCatalogSync({ activeRoot, generationAware: true }),
   });
-  const items: PlanV3MigrationItem[] = [];
-  for (const summary of (await repository.list()).sort((left, right) => left.id.localeCompare(right.id))) {
-    const plan = await repository.get(summary.id);
-    const sourceConfigHash = await legacySha256Hex(plan.draft.config);
-    if (plan.draft.config.schemaVersion === "3.0.0") {
+  const snapshot = await coordinator.withReadOnlySnapshot(async ({ state, activeRoot }: {
+    state: { runtimeGeneration: number };
+    activeRoot: string;
+  }) => {
+    const catalog = loadMergedCatalogSync({ activeRoot, generationAware: true });
+    const items: PlanV3MigrationItem[] = [];
+    for (const summary of (await repository.listAtRoot(activeRoot)).sort((left, right) => left.id.localeCompare(right.id))) {
+      const plan = await repository.getAtRoot(activeRoot, summary.id);
+      const sourceConfigHash = await legacySha256Hex(plan.draft.config);
+      if (plan.draft.config.schemaVersion === "3.0.0") {
+        items.push({
+          planId: plan.id, planName: plan.name, sourceDraftRevision: plan.draftRevision,
+          sourceConfigHash, status: "already_v3", reason: null, diffCount: 0, warningCodes: [], rollbackRef: null,
+        });
+        continue;
+      }
+      if (plan.status !== "active") {
+        items.push({
+          planId: plan.id, planName: plan.name, sourceDraftRevision: plan.draftRevision,
+          sourceConfigHash, status: "retained_v2", reason: "archived V2 plan retained as immutable legacy history",
+          diffCount: 0, warningCodes: [], rollbackRef: null,
+        });
+        continue;
+      }
+      const source = plan.draft.config as ConfigV2;
+      const sourceBytes = serializeConfig(source);
+      const sourceHash = await sha256Utf8(sourceBytes);
+      const preview = await migrateBuildConfigV2ToV3(source, { sourceBytes, sourceHash, catalog });
       items.push({
         planId: plan.id, planName: plan.name, sourceDraftRevision: plan.draftRevision,
-        sourceConfigHash, status: "already_v3", reason: null, diffCount: 0, warningCodes: [], rollbackRef: null,
+        sourceConfigHash, status: "ready", reason: null, diffCount: preview.diff.length,
+        warningCodes: [...new Set(preview.warnings.map(({ code }) => code))].sort(),
+        rollbackRef: preview.rollbackRef.sourceHash,
       });
-      continue;
     }
-    if (plan.status !== "active") {
-      items.push({
-        planId: plan.id, planName: plan.name, sourceDraftRevision: plan.draftRevision,
-        sourceConfigHash, status: "retained_v2", reason: "archived V2 plan retained as immutable legacy history",
-        diffCount: 0, warningCodes: [], rollbackRef: null,
-      });
-      continue;
-    }
-    const source = plan.draft.config as ConfigV2;
-    const sourceBytes = serializeConfig(source);
-    const sourceHash = await sha256Utf8(sourceBytes);
-    const preview = await migrateBuildConfigV2ToV3(source, { sourceBytes, sourceHash, catalog });
-    items.push({
-      planId: plan.id, planName: plan.name, sourceDraftRevision: plan.draftRevision,
-      sourceConfigHash, status: "ready", reason: null, diffCount: preview.diff.length,
-      warningCodes: [...new Set(preview.warnings.map(({ code }) => code))].sort(),
-      rollbackRef: preview.rollbackRef.sourceHash,
-    });
-  }
-  const manifestHash = await sourceManifestHash(state.runtimeGeneration, items);
+    return { runtimeGeneration: state.runtimeGeneration, items };
+  });
+  const { runtimeGeneration, items } = snapshot.result as {
+    runtimeGeneration: number;
+    items: PlanV3MigrationItem[];
+  };
+  const manifestHash = await sourceManifestHash(runtimeGeneration, items);
   const base: Omit<PlanV3MigrationReport, "reportHash"> = {
     schemaVersion: "plan-v3-migration-report-v1",
     migrationId: "plans-v2-to-v3",
     mode: "dry-run",
     status: items.some(({ status }) => status === "blocked") ? "blocked" : "ready",
-    runtimeGeneration: state.runtimeGeneration,
+    runtimeGeneration,
     generatedAt: (options.now ?? (() => new Date().toISOString()))(),
     sourceManifestHash: manifestHash,
     backup: null,

@@ -31,7 +31,7 @@
     "runtime:preflight": "node scripts/migrations/migrate-runtime-v1.mjs --preflight",
     "runtime:migrate-legacy": "node scripts/migrations/migrate-runtime-v1.mjs",
     "runtime:migrate-user-data": "node scripts/migrations/isolate-user-data-v1.mjs",
-    "runtime:migrate-plans-v3": "vite-node scripts/migrations/migrate-plans-v3.ts",
+    "runtime:migrate-plans-v3": "vite-node --script scripts/migrations/migrate-plans-v3.ts",
     "runtime:migrate-price-v2": "vite-node --script scripts/migrations/migrate-price-snapshot-v2.ts",
     "runtime:backup:create": "node scripts/backup/create.mjs",
     "runtime:backup:verify": "node scripts/backup/verify.mjs",

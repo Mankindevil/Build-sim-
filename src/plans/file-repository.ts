@@ -215,6 +215,12 @@ export class FilePlanRepository<TConfig extends BuildConfigDocument = BuildConfi
     return this.atActiveRoot(activeRoot).readPlan(planId);
   }
 
+  /** Root-pinned list seam for read-only audits and migration previews. */
+  async listAtRoot(activeRoot: string): Promise<BuildPlanSummary[]> {
+    if (!this.coordinator) throw new PlanRepositoryError("invalid_input", "root-bound plan reads require the shared runtime coordinator", 409);
+    return this.atActiveRoot(activeRoot).listLocal();
+  }
+
   private async publicBoundary<T>(write: boolean, coordinated: (repository: FilePlanRepository<TConfig>) => Promise<T>, local: () => Promise<T>): Promise<T> {
     if (this.coordinator) {
       await this.coordinator.initialize();
@@ -581,8 +587,7 @@ export class FilePlanRepository<TConfig extends BuildConfigDocument = BuildConfi
     });
   }
 
-  async list(): Promise<BuildPlanSummary[]> {
-    return this.publicBoundary(false, (repository) => repository.list(), async () => {
+  private async listLocal(): Promise<BuildPlanSummary[]> {
     let entries;
     try {
       entries = await readdir(this.root, { withFileTypes: true });
@@ -607,7 +612,10 @@ export class FilePlanRepository<TConfig extends BuildConfigDocument = BuildConfi
       });
     }
     return plans.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
-    });
+  }
+
+  async list(): Promise<BuildPlanSummary[]> {
+    return this.publicBoundary(false, (repository) => repository.listLocal(), () => this.listLocal());
   }
 
   async get(planId: string): Promise<BuildPlan<TConfig>> {

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -109,5 +109,30 @@ describe("U12 V2 to V3 production-shaped migration rehearsal", () => {
       expect.objectContaining({ planId: active.id, status: "ready" }),
       expect.objectContaining({ planId: archived.id, status: "retained_v2" }),
     ]));
+  });
+
+  it("uses the root-pinned read seam and never acquires a repository lock during dry-run", async () => {
+    const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "buildsim-plan-v3-readonly-"));
+    roots.push(runtimeRoot);
+    const coordinator = new RuntimeCoordinator({ root: runtimeRoot, now: () => "2026-08-30T11:30:00.000Z" });
+    await coordinator.initialize("0.2.0-alpha");
+    await initializeRuntimeCatalog({ coordinator, generationAware: true });
+    const repository = new FilePlanRepository({ coordinator, runtimeRoot });
+    const created = await repository.create({
+      name: "Read-only V2",
+      config: createEmptyBuildConfig("plan-readonly-v2", "2026-08-30T11:30:00.000Z"),
+    });
+    const state = await coordinator.readState();
+    const lockPath = path.join(runtimeRoot, state.activeRoot, "plans", ".locks");
+    await rm(lockPath, { recursive: true, force: true });
+    await writeFile(lockPath, "migration dry-run must not touch this file\n");
+
+    const preview = await planBuildConfigV3Migration({ runtimeRoot, now: () => "2026-08-30T11:31:00.000Z" });
+    expect(preview).toMatchObject({
+      mode: "dry-run",
+      status: "ready",
+      plans: [expect.objectContaining({ planId: created.id, status: "ready" })],
+    });
+    await expect(readFile(lockPath, "utf8")).resolves.toBe("migration dry-run must not touch this file\n");
   });
 });
