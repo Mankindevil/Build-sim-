@@ -61,6 +61,7 @@ COMPOSE=("${DOCKER[@]}" compose -f "$COMPOSE_FILE")
 PREVIOUS_SHA="$(git rev-parse HEAD)"
 TARGET_SHA="$PREVIOUS_SHA"
 SOURCE_CHANGED=0
+IMAGES_CHANGED=0
 RELEASE_STARTED=0
 HAS_WEB_ROLLBACK=0
 HAS_RUNTIME_ROLLBACK=0
@@ -68,19 +69,21 @@ HAS_RUNTIME_ROLLBACK=0
 restore_previous_release() {
   local original_status=$?
   trap - ERR INT TERM
-  if ((SOURCE_CHANGED || RELEASE_STARTED)); then
+  if ((SOURCE_CHANGED || IMAGES_CHANGED || RELEASE_STARTED)); then
     printf '%s\n' "Deployment failed; restoring the previous release..." >&2
     if ((SOURCE_CHANGED)); then
       git checkout --detach "$PREVIOUS_SHA" >/dev/null 2>&1 || true
     fi
   fi
-  if ((RELEASE_STARTED)); then
+  if ((IMAGES_CHANGED)); then
     if ((HAS_WEB_ROLLBACK)); then
       "${DOCKER[@]}" image tag build-sim-web:rollback build-sim-web:osaka >/dev/null 2>&1 || true
     fi
     if ((HAS_RUNTIME_ROLLBACK)); then
       "${DOCKER[@]}" image tag build-sim-runtime:rollback build-sim-runtime:osaka >/dev/null 2>&1 || true
     fi
+  fi
+  if ((RELEASE_STARTED)); then
     "${COMPOSE[@]}" up -d --force-recreate >&2 || true
     "${COMPOSE[@]}" ps >&2 || true
   fi
@@ -117,7 +120,7 @@ if "${DOCKER[@]}" image inspect build-sim-runtime:osaka >/dev/null 2>&1; then
   HAS_RUNTIME_ROLLBACK=1
 fi
 
-RELEASE_STARTED=1
+IMAGES_CHANGED=1
 "${COMPOSE[@]}" build
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
   npm run release:canary
@@ -128,6 +131,7 @@ BACKUP_NAME="predeploy-${PREVIOUS_SHA}-$(date -u +%Y%m%dT%H%M%SZ).backup"
   node scripts/backup/create.mjs --runtime-root /app/runtime --output "/app/deploy-backups/$BACKUP_NAME"
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
   node scripts/backup/verify.mjs --runtime-root /app/runtime --input "/app/deploy-backups/$BACKUP_NAME"
+RELEASE_STARTED=1
 "${COMPOSE[@]}" up -d --force-recreate
 
 healthcheck() {
@@ -158,5 +162,6 @@ fi
 
 "${COMPOSE[@]}" ps
 RELEASE_STARTED=0
+IMAGES_CHANGED=0
 trap - ERR INT TERM
 printf 'Deployment succeeded: %s (verified backup: %s)\n' "$TARGET_SHA" "$BACKUP_NAME"

@@ -66,11 +66,15 @@ describe("Osaka lifecycle deployment", () => {
     const canary = script.indexOf("npm run release:canary");
     const holdouts = script.indexOf("npm run release:holdouts -- /app/runtime/release-evidence/physical-holdouts");
     const backup = script.indexOf("node scripts/backup/create.mjs");
+    const releaseStart = script.indexOf("RELEASE_STARTED=1", holdouts);
     const startup = script.indexOf('"${COMPOSE[@]}" up -d --force-recreate', backup);
 
     expect(canary).toBeGreaterThan(-1);
     expect(holdouts).toBeGreaterThan(canary);
     expect(backup).toBeGreaterThan(holdouts);
-    expect(startup).toBeGreaterThan(backup);
+    expect(releaseStart).toBeGreaterThan(backup);
+    expect(startup).toBeGreaterThan(releaseStart);
+    expect(script).toContain("if ((IMAGES_CHANGED)); then");
+    expect(script).toContain("if ((RELEASE_STARTED)); then");
   });
 });
