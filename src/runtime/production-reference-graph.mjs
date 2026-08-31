@@ -2896,6 +2896,8 @@ function validateGovernedAgentProposalRepository(agentRecords, evidenceRecords, 
 
 const CATALOG_FACTS_MIGRATION_ID = "catalog-facts-v1";
 const CATALOG_FACTS_MANIFEST_PATH = `${CATALOG_FACTS_MIGRATION_ID}/manifest.json`;
+const FRESH_GOVERNED_REBUILD_MIGRATION_ID = "fresh-governed-rebuild-v1";
+const FRESH_GOVERNED_REBUILD_MANIFEST_PATH = `${FRESH_GOVERNED_REBUILD_MIGRATION_ID}/manifest.json`;
 
 function exactMigrationShape(value, allowed, required = allowed) {
   return object(value) && Object.keys(value).every((key) => allowed.includes(key))
@@ -2917,6 +2919,52 @@ function catalogFactsPlanHash(manifest) {
     catalogHash: manifest.catalogHash, constraintsHash: manifest.constraintsHash, manuals: manifest.manuals,
     formal: manifest.formal, legacyUnverified: manifest.legacyUnverified,
   });
+}
+
+function validateFreshGovernedRebuildClosure(records, backupRecords, context, runtimeGeneration) {
+  const record = records.find((candidate) => candidate.rootLogicalPath === FRESH_GOVERNED_REBUILD_MANIFEST_PATH);
+  if (!record) return;
+  const manifest = record.value;
+  const fields = [
+    "schemaVersion", "migrationId", "status", "policy", "sourceRuntimeGeneration", "sourceRuntimeRevision",
+    "targetRuntimeGeneration", "sourcePointerHash", "sourceReferenceGraphHash", "planHash", "backupId",
+    "backupManifestHash", "backupVerificationRef", "legacyDisposition", "preservedAuthorityKinds",
+    "reacquireKinds", "activatedAt", "manifestHash",
+  ];
+  invariant(exactMigrationShape(manifest, fields)
+    && manifest.schemaVersion === "fresh-governed-rebuild-v1-manifest"
+    && manifest.migrationId === FRESH_GOVERNED_REBUILD_MIGRATION_ID
+    && manifest.status === "activated" && manifest.policy === "backup_then_fresh_authority"
+    && manifest.legacyDisposition === "backup_only_no_legacy_import"
+    && Number.isInteger(manifest.sourceRuntimeGeneration) && manifest.sourceRuntimeGeneration >= 1
+    && Number.isInteger(manifest.sourceRuntimeRevision) && manifest.sourceRuntimeRevision >= 0
+    && Number.isInteger(manifest.targetRuntimeGeneration) && manifest.targetRuntimeGeneration > manifest.sourceRuntimeGeneration
+    && manifest.targetRuntimeGeneration === runtimeGeneration
+    && [manifest.sourcePointerHash, manifest.sourceReferenceGraphHash, manifest.planHash, manifest.backupManifestHash, manifest.manifestHash]
+      .every((value) => SHA256.test(String(value ?? "")))
+    && migrationText(manifest.backupId, 256) && iso(manifest.activatedAt)
+    && manifest.backupVerificationRef === `backups/verifications/${manifest.backupManifestHash}.json`
+    && canonicalJson(manifest.preservedAuthorityKinds) === canonicalJson(["backup_verification"])
+    && canonicalJson(manifest.reacquireKinds) === canonicalJson(["official_evidence", "third_party_evidence", "prices", "plans", "observations"])
+    && manifest.manifestHash === sha256Json(without(manifest, "manifestHash")),
+  "fresh governed rebuild migration manifest is invalid");
+
+  const backupPath = `verifications/${manifest.backupManifestHash}.json`;
+  const verification = backupRecords.find((candidate) => candidate.rootLogicalPath === backupPath)?.value;
+  invariant(object(verification) && verification.schemaVersion === "backup-verification-record-v1"
+    && verification.checksum === sha256Json(verification.payload)
+    && verification.payload?.schemaVersion === "backup-verification-payload-v1"
+    && verification.payload.manifest?.manifestHash === manifest.backupManifestHash
+    && verification.payload.manifest?.backupId === manifest.backupId
+    && verification.payload.report?.result === "pass"
+    && verification.payload.report?.manifestHash === manifest.backupManifestHash
+    && verification.payload.report?.backupId === manifest.backupId,
+  "fresh governed rebuild backup verification closure is invalid");
+  const migrationRef = `migration:${FRESH_GOVERNED_REBUILD_MIGRATION_ID}`;
+  const backupRef = `backup-verification:${manifest.backupManifestHash}`;
+  context.nodes.push(migrationRef, backupRef);
+  context.pointers.push(migrationRef);
+  context.edges.push(edge(migrationRef, backupRef, "required_for_replay"));
 }
 
 /**
@@ -3034,6 +3082,11 @@ function validateMigrationRecord(record) {
   if (record.rootLogicalPath.startsWith(`${CATALOG_FACTS_MIGRATION_ID}/`)) {
     invariant(record.rootLogicalPath === CATALOG_FACTS_MANIFEST_PATH,
       "catalog facts migration contains an unrecognized authority path");
+    return;
+  }
+  if (record.rootLogicalPath.startsWith(`${FRESH_GOVERNED_REBUILD_MIGRATION_ID}/`)) {
+    invariant(record.rootLogicalPath === FRESH_GOVERNED_REBUILD_MANIFEST_PATH,
+      "fresh governed rebuild migration contains an unrecognized authority path");
     return;
   }
   if (!record.rootLogicalPath.endsWith(".json")) return;
@@ -3172,10 +3225,11 @@ async function validateRoot(root, records, context, activeRoot, generation) {
   }
   if (root === "migrations") {
     for (const record of records) validateMigrationRecord(record);
-    const [factRecords, evidenceRecords] = await Promise.all([
-      recordsFor(activeRoot, "facts"), recordsFor(activeRoot, "evidence"),
+    const [factRecords, evidenceRecords, backupRecords] = await Promise.all([
+      recordsFor(activeRoot, "facts"), recordsFor(activeRoot, "evidence"), recordsFor(activeRoot, "backups"),
     ]);
     validateCatalogFactsMigrationClosure(records, context, factRecords, evidenceRecords);
+    validateFreshGovernedRebuildClosure(records, backupRecords, context, generation);
     return;
   }
   if (root === "agent") {
