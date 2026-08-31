@@ -98,6 +98,6 @@ describe("C3 provider-neutral catalog discovery", () => {
     expect(result?.candidates).toHaveLength(2);
     expect(result?.discovery.providerIds).toEqual([provider.id]);
     expect(result?.discovery.registryVersion).toMatch(/^[a-f0-9]{64}$/);
-    expect(result?.discovery.queryNormalizationVersion).toBe("1.2.0");
+    expect(result?.discovery.queryNormalizationVersion).toBe("1.2.1");
   });
 });

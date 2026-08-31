@@ -86,7 +86,10 @@ export function extractOfficialHtml(fetch, { sourceKind = "official-page" } = {}
   }
   parseJsonLd(html, fetch, fields, conflicts);
   const title = strip(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)?.[1]);
-  if (title) addField(fields, conflicts, fetch, "model", title, "HTML title", title, sourceKind);
+  // JSON-LD Product.model/name is the explicit product identity. Page titles
+  // commonly append navigation or regional branding and are only a fallback,
+  // not a second conflicting model assertion.
+  if (title && !fields.some((entry) => entry.field === "model")) addField(fields, conflicts, fetch, "model", title, "HTML title", title, sourceKind);
   for (const row of html.matchAll(/<(?:tr|div|li)[^>]*>[\s\S]*?<(?:(?:th|dt)|span)[^>]*>([^<]{1,100})<\/(?:th|dt|span)>[\s\S]*?<(?:(?:td|dd)|span)[^>]*>([^<]{1,240})<\/(?:td|dd|span)>[\s\S]*?<\/(?:tr|div|li)>/gi)) {
     const label = strip(row[1]);
     const alias = FIELD_ALIASES.find(([, pattern]) => pattern.test(label));

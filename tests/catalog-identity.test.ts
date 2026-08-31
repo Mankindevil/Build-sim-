@@ -185,6 +185,7 @@ describe("official page classification and diagnostics", () => {
     expect(classifyOfficialPage({ status: 200, finalUrl: "https://rog-forum.asus.com/t5/gpu/topic", contentType: "text/html" }, { fields: [] }).kind).toBe("forum");
     expect(classifyOfficialPage({ status: 200, finalUrl: "https://www.asus.com/search/result/", contentType: "text/html" }, { fields: [] }).kind).toBe("search");
     expect(classifyOfficialPage({ status: 200, finalUrl: "https://www.asus.com/motherboards/example", contentType: "text/html" }, { fields: [{ field: "brand" }, { field: "model" }, { field: "dims.lengthMm" }] }).kind).toBe("product");
+    expect(classifyOfficialPage({ status: 200, finalUrl: "https://www.asus.com/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/", contentType: "text/html" }, { fields: [{ field: "brand" }, { field: "model" }] })).toMatchObject({ kind: "product" });
   });
 
   it("summarizes rejected and related candidates instead of collapsing everything to zero", () => {

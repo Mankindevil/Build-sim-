@@ -106,6 +106,7 @@ export function classifyOfficialPage(fetchResult, extracted, urlValue = fetchRes
   const specificationCount = fields.filter((field) => /^(?:dims|power|attrs|harness)\./.test(field.field)).length;
   if (/specification|specifications|specs/.test(path) && identityCount) return { kind: "spec", reasons: ["official specification path with identity fields"] };
   if (identityCount >= 2 && specificationCount >= 1) return { kind: "product", reasons: ["identity and specification fields extracted"] };
+  if (identityCount >= 2) return { kind: "product", reasons: ["multiple explicit product identity fields extracted from an official product path"] };
   if (identityCount >= 1 && specificationCount >= 1) return { kind: "spec", reasons: ["model and specification fields extracted"] };
   if (identityCount === 1) return { kind: "unknown", reasons: ["only one identity field was extracted"] };
   return { kind: "unknown", reasons: ["no product-page identity evidence"] };

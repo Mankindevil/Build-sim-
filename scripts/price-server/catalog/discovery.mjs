@@ -3,7 +3,7 @@ import { assertDiscoveryResult } from "./contracts.mjs";
 import { activeOfficialRegistry, registryForBrand } from "./registry.mjs";
 import { validateOfficialUrl } from "./security.mjs";
 
-export const QUERY_NORMALIZATION_VERSION = "1.2.0";
+export const QUERY_NORMALIZATION_VERSION = "1.2.1";
 
 function now() { return new Date().toISOString(); }
 function safeText(value, limit = 240) { return String(value ?? "").slice(0, limit); }

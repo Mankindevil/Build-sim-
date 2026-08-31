@@ -170,6 +170,15 @@ describe("G3 official extraction and provenance", () => {
     expect(identity.criticalConflicts).toHaveLength(0);
   });
 
+  it("keeps an explicit JSON-LD model authoritative over a branded page-title suffix", () => {
+    const body = `<title>Pro WS W680M-ACE SE｜Motherboards｜ASUS Global</title><script type="application/ld+json">${JSON.stringify({
+      "@type": "Product", name: "Pro WS W680M-ACE SE", sku: "23762", brand: { name: "ASUS" },
+    })}</script>`;
+    const extracted = extractOfficialHtml({ ...fetchResult, body, contentHash: "asus-title-suffix" });
+    expect(extracted.fields.find((field) => field.field === "model")?.value).toBe("Pro WS W680M-ACE SE");
+    expect(extracted.conflicts).toHaveLength(0);
+  });
+
   it("extracts explicit vendor Model Number and Rated Power labels", () => {
     const body = `<title>WD Red Plus 8TB</title><div><span>Model Number</span><span>WD80EFPX</span></div><div><span>Capacity</span><span>8TB</span></div><div><span>Interface</span><span>SATA</span></div><div><span>Rated Power</span><span>850 W</span></div>`;
     const extracted = extractOfficialHtml({ ...fetchResult, body, contentHash: "explicit-model-rated-power" });
