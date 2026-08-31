@@ -425,7 +425,6 @@ export function initTransactionImport(options: {
     const unlinked = document.createElement("option");
     unlinked.value = "";
     unlinked.textContent = planContext ? "不对应方案（作为额外采购）" : "暂存为未关联采购";
-    link.append(unlinked);
     const appendPlanItems = (labelText: string, items: TransactionImportPlanContext["items"]): void => {
       if (items.length === 0) return;
       const group = document.createElement("optgroup");
@@ -434,15 +433,10 @@ export function initTransactionImport(options: {
         const option = document.createElement("option");
         option.value = item.id;
         option.textContent = `${CATEGORY_LABELS[item.category] ?? item.category} · ${item.name}`;
-        option.selected = record.planLink?.planItemId === item.id || item.skuId === record.skuId || Boolean(item.placeholder && item.category === record.category);
         group.append(option);
       }
       link.append(group);
     };
-    const sameCategoryItems = (planContext?.items ?? []).filter((item) => item.category === record.category);
-    const otherItems = (planContext?.items ?? []).filter((item) => item.category !== record.category);
-    appendPlanItems("同类方案位置", sameCategoryItems);
-    appendPlanItems("其他方案位置", otherItems);
     const updateLinkHint = (): void => {
       const selectedItem = planContext?.items.find((item) => item.id === link.value);
       if (!planContext) {
@@ -457,8 +451,27 @@ export function initTransactionImport(options: {
         linkHint.textContent = "买了不同型号时，选择它实际用于的方案位置；购买型号仍以左侧识别结果为准。";
       }
     };
+    const rebuildPlanItems = (): void => {
+      const previousValue = link.value;
+      link.replaceChildren(unlinked);
+      const sameCategoryItems = (planContext?.items ?? []).filter((item) => item.category === category.value);
+      appendPlanItems("同类方案位置", sameCategoryItems);
+      if (planContext && sameCategoryItems.length === 0) {
+        const unavailable = document.createElement("option");
+        unavailable.disabled = true;
+        unavailable.textContent = `当前方案没有可对应的${CATEGORY_LABELS[category.value] ?? category.value}位置`;
+        link.append(unavailable);
+      }
+      const preferred = sameCategoryItems.find((item) => item.id === previousValue)
+        ?? sameCategoryItems.find((item) => item.id === record.planLink?.planItemId)
+        ?? sameCategoryItems.find((item) => Boolean(record.skuId) && item.skuId === record.skuId)
+        ?? sameCategoryItems.find((item) => item.placeholder);
+      link.value = preferred?.id ?? "";
+      updateLinkHint();
+    };
     link.addEventListener("change", updateLinkHint);
-    updateLinkHint();
+    category.addEventListener("change", rebuildPlanItems);
+    rebuildPlanItems();
     const linkLabel = makeLabel("对应方案位置（可选）", link);
     linkLabel.append(linkHint);
     fields.append(makeLabel(record.skuId ? "部件名称（已匹配正式 SKU，可编辑显示信息）" : "部件名称", name), makeLabel("分类", category), makeLabel("数量", qty), makeLabel("成交单价 ¥", price), makeLabel("当前状态", stage), linkLabel);

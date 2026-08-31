@@ -13,7 +13,7 @@ export function applyArchivedPurchasesAsDefaults(config: BuildConfig, items: Bui
     if (sku.category === "case") { updated = config.caseId !== sku.id; config.caseId = sku.id; }
     else if (sku.category === "motherboard") { updated = config.boardId !== sku.id; config.boardId = sku.id; }
     else if (sku.category === "cpu") { updated = config.cpuId !== sku.id; config.cpuId = sku.id; }
-    else if (sku.category === "psu" && config.selection.secondaryPsuId === previous) { updated = config.selection.secondaryPsuId !== sku.id; config.selection.secondaryPsuId = sku.id; }
+    else if (sku.category === "psu" && (previous === "psu.secondary" || config.selection.secondaryPsuId === previous)) { updated = config.selection.secondaryPsuId !== sku.id; config.selection.secondaryPsuId = sku.id; }
     else if (sku.category === "psu") { updated = config.selection.psuId !== sku.id; config.selection.psuId = sku.id; }
     else if (sku.category === "cooler") { updated = config.selection.coolerId !== sku.id; config.selection.coolerId = sku.id; }
     else if (sku.category === "gpu") { updated = config.selection.gpuId !== sku.id; config.selection.gpuId = sku.id; }

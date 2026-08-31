@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 import baseline from "../data/configs/baseline-atx-1hdd.json";
-import { applyAcceptedCatalogSkuToPlan, syncCatalogCategoryOptions, syncGpuCatalogOptions, upsertCatalogSku } from "../src/lab/catalog-runtime";
+import { applyAcceptedCatalogSkuToPlan, projectTransactionPlanItems, syncCatalogCategoryOptions, syncGpuCatalogOptions, upsertCatalogSku } from "../src/lab/catalog-runtime";
 import type { BuildConfig } from "../src/config/types";
 import { loadBundledCatalog } from "../src/sku/catalog";
 import type { SkuRecord } from "../src/sku/types";
@@ -68,5 +68,31 @@ describe("runtime catalog selector", () => {
     expect(config.selection.psuId).toBe(originalPsu);
     expect(applyAcceptedCatalogSkuToPlan(config, { ...reviewedGpu, id: "gpu.unlinked" }, originalPsu)).toBeNull();
     expect(config.selection.gpuId).toBe(reviewedGpu.id);
+  });
+
+  it("projects every stable plan slot from config instead of the procurement BOM", () => {
+    const config = structuredClone(baseline) as BuildConfig;
+    config.bom = [];
+    config.selection.gpuId = "gpu.none";
+    const items = projectTransactionPlanItems(config, loadBundledCatalog());
+
+    expect(items.find((item) => item.id === "motherboard.primary")).toMatchObject({
+      skuId: config.boardId,
+      category: "motherboard",
+    });
+    expect(items.find((item) => item.id === "motherboard.primary")).not.toHaveProperty("placeholder");
+    expect(items.find((item) => item.id === "gpu.primary")).toMatchObject({
+      skuId: "gpu.none",
+      category: "gpu",
+      placeholder: true,
+    });
+    expect(items.map((item) => item.category)).toEqual(expect.arrayContaining(["case", "motherboard", "cpu", "psu", "cooler", "gpu", "memory", "storage", "hba"]));
+  });
+
+  it("updates a stable motherboard slot without depending on the previous SKU id", () => {
+    const config = structuredClone(baseline) as BuildConfig;
+    const replacement = { ...loadBundledCatalog().skus.find((sku) => sku.category === "motherboard")!, id: "board.reviewed-replacement", name: "Reviewed replacement board" };
+    expect(applyAcceptedCatalogSkuToPlan(config, replacement, "motherboard.primary")).toBe("主板");
+    expect(config.boardId).toBe(replacement.id);
   });
 });

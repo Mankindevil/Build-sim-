@@ -191,6 +191,43 @@ describe("transaction screenshot review UI", () => {
     }), expect.any(File));
   });
 
+  it("offers only same-category plan positions and rebuilds them when category changes", async () => {
+    const onImport = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      receiptId: "receipt-board-position",
+      status: "matched-catalog",
+      detected: { name: "ASUS Pro WS W680M-ACE SE", brand: "ASUS", model: "Pro WS W680M-ACE SE", category: "motherboard", qty: 1, unitPriceCny: 2799 },
+      catalogMatch: { skuId: "board.asus-w680m-ace-se", kind: "exact-mpn", score: 1 },
+      evidence: { receiptId: "receipt-board-position", fileName: "board.png", contentHash: "8".repeat(64), capturedAt: "2026-08-31T00:00:00.000Z", ocrEngine: "fixture", ocrConfidence: 99, excerpt: "ASUS Pro WS W680M-ACE SE" },
+      catalogSearch: null,
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    initTransactionImport({
+      onImport,
+      getPlanContext: () => ({
+        planId: "plan-board-position-12345678", planVersionId: null, planName: "Board plan",
+        items: [
+          { id: "motherboard.primary", skuId: "board.asus-w680m-ace-se", name: "ASUS Pro WS W680M-ACE SE", category: "motherboard" },
+          { id: "gpu.primary", skuId: "gpu.none", name: "显卡未配置（可关联本次购买）", category: "gpu", placeholder: true },
+        ],
+      }),
+    });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["board"], "board.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    startRecognition();
+    await vi.waitFor(() => expect(document.querySelector<HTMLSelectElement>(".transaction-review-link")?.value).toBe("motherboard.primary"));
+
+    const link = document.querySelector<HTMLSelectElement>(".transaction-review-link")!;
+    expect([...link.options].map((option) => option.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("主板 · ASUS Pro WS W680M-ACE SE")]));
+    expect([...link.options].some((option) => option.textContent?.includes("显卡"))).toBe(false);
+    const category = document.querySelector<HTMLSelectElement>(".transaction-review-category")!;
+    category.value = "gpu";
+    category.dispatchEvent(new Event("change"));
+    expect(link.value).toBe("gpu.primary");
+    expect([...link.options].some((option) => option.textContent?.includes("主板"))).toBe(false);
+    expect([...link.options].some((option) => option.textContent?.includes("显卡 · 显卡未配置"))).toBe(true);
+  });
+
   it("shows an exact SKU as a directory match without presenting bundled data as official", async () => {
     const onImport = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
