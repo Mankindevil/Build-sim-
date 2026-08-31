@@ -2,7 +2,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { restoreBackup, verifyBackup } from "../src/backup/runtime.mjs";
+import { createBackup, restoreBackup, verifyBackup } from "../src/backup/runtime.mjs";
 import { RuntimeCoordinator } from "../src/runtime/coordinator.mjs";
 import { atomicWriteJson, confined, listRegularFiles, readJson, sha256Json } from "../src/runtime/fs.mjs";
 import {
@@ -88,6 +88,55 @@ describe("fresh governed runtime rebuild", () => {
     expect(restored.state.runtimeGeneration).toBe(3);
     const restoredLegacy = confined(test.coordinator.activeRoot(restored.state), "migrations", "quarantine", "legacy-runtime-v1", "legacy.txt");
     expect(await readFile(restoredLegacy, "utf8")).toContain("backup-only");
+  });
+
+  it("verifies and restores a backup taken after the fresh authority generation was activated", async () => {
+    const test = await fixture();
+    const plan = await createFreshGovernedRebuildPlan({ coordinator: test.coordinator, now });
+    await applyFreshGovernedRebuildPlan({
+      coordinator: test.coordinator,
+      plan,
+      expectedPlanHash: plan.contentHash,
+      backupOutput: path.join(test.artifactsRoot, "legacy-before-rebuild.backup"),
+      password,
+      confirmation: FRESH_GOVERNED_REBUILD_CONFIRMATION,
+      now,
+    });
+    const freshBackup = path.join(test.artifactsRoot, "fresh-authority.backup");
+    const created = await createBackup({
+      coordinator: test.coordinator,
+      outputFile: freshBackup,
+      password,
+      now,
+    });
+    expect(created.manifest.runtimeGeneration).toBe(2);
+    await expect(verifyBackup({ inputFile: freshBackup, password, now })).resolves.toMatchObject({
+      valid: true,
+      report: { temporaryRestore: { runtimeGeneration: 3 } },
+    });
+
+    const restoredRoot = path.join(test.root, "restored-runtime");
+    const restoredCoordinator = new RuntimeCoordinator({ root: restoredRoot, now });
+    await restoredCoordinator.initialize("fresh-authority-restore-test");
+    const restored = await restoreBackup({
+      coordinator: restoredCoordinator,
+      inputFile: freshBackup,
+      password,
+      now,
+    });
+    expect(restored.state.runtimeGeneration).toBe(3);
+    await expect(validateProductionRuntimeRoot({
+      state: restored.state,
+      activeRoot: restoredCoordinator.activeRoot(restored.state),
+      now,
+    })).resolves.toMatchObject({ runtimeGeneration: 3 });
+    const manifest = await readJson(confined(
+      restoredCoordinator.activeRoot(restored.state),
+      "migrations",
+      "fresh-governed-rebuild-v1",
+      "manifest.json",
+    ));
+    expect(manifest.targetRuntimeGeneration).toBe(2);
   });
 
   it("fails closed on stale review, in-runtime artifacts and staged manifest tampering without switching authority", async () => {

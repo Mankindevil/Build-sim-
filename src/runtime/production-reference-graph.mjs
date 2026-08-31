@@ -2939,7 +2939,11 @@ function validateFreshGovernedRebuildClosure(records, backupRecords, context, ru
     && Number.isInteger(manifest.sourceRuntimeGeneration) && manifest.sourceRuntimeGeneration >= 1
     && Number.isInteger(manifest.sourceRuntimeRevision) && manifest.sourceRuntimeRevision >= 0
     && Number.isInteger(manifest.targetRuntimeGeneration) && manifest.targetRuntimeGeneration > manifest.sourceRuntimeGeneration
-    && manifest.targetRuntimeGeneration === runtimeGeneration
+    // The target generation is immutable provenance.  A verified backup may
+    // be restored into a later generation, so the historical rebuild target
+    // must not be rewritten to the new pointer generation.  Future-generation
+    // manifests still fail closed.
+    && manifest.targetRuntimeGeneration <= runtimeGeneration
     && [manifest.sourcePointerHash, manifest.sourceReferenceGraphHash, manifest.planHash, manifest.backupManifestHash, manifest.manifestHash]
       .every((value) => SHA256.test(String(value ?? "")))
     && migrationText(manifest.backupId, 256) && iso(manifest.activatedAt)
