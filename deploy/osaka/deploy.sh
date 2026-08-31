@@ -168,6 +168,9 @@ if ((healthy == 0)); then
 fi
 
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
+  node scripts/runtime/persist-reference-graph.mjs --runtime-root /app/runtime
+
+"${COMPOSE[@]}" run --rm --no-deps release-gate \
   node scripts/doctor.mjs --runtime-root /app/runtime --strict
 
 "$APP_DIR/deploy/osaka/update-basic-auth.sh" "$AUTH_ENV_FILE"

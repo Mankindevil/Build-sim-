@@ -126,6 +126,7 @@ describe("Osaka lifecycle deployment", () => {
     expect(script).toContain("/api/workspace/health");
     expect(script).toContain("scripts/backup/create.mjs");
     expect(script).toContain("scripts/backup/verify.mjs");
+    expect(script).toContain("scripts/runtime/persist-reference-graph.mjs --runtime-root /app/runtime");
     expect(script).toContain("scripts/doctor.mjs --runtime-root /app/runtime --strict");
   });
 
@@ -136,6 +137,8 @@ describe("Osaka lifecycle deployment", () => {
     const backup = script.indexOf("node scripts/backup/create.mjs");
     const releaseStart = script.indexOf("RELEASE_STARTED=1", holdouts);
     const startup = script.indexOf('"${COMPOSE[@]}" up -d --force-recreate', backup);
+    const refreshGraph = script.indexOf("scripts/runtime/persist-reference-graph.mjs --runtime-root /app/runtime", startup);
+    const doctor = script.indexOf("scripts/doctor.mjs --runtime-root /app/runtime --strict", refreshGraph);
 
     expect(canary).toBeGreaterThan(-1);
     expect(script).toContain("npm run release:canary -- --source-runtime-root /app/runtime --generic-platform");
@@ -143,6 +146,8 @@ describe("Osaka lifecycle deployment", () => {
     expect(backup).toBeGreaterThan(holdouts);
     expect(releaseStart).toBeGreaterThan(backup);
     expect(startup).toBeGreaterThan(releaseStart);
+    expect(refreshGraph).toBeGreaterThan(startup);
+    expect(doctor).toBeGreaterThan(refreshGraph);
     expect(script).toContain("if ((IMAGES_CHANGED)); then");
     expect(script).toContain("if ((RELEASE_STARTED)); then");
   });
