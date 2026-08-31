@@ -10,6 +10,23 @@ const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
 
 describe("U11 production local operations projection", () => {
+  it("uses one frozen timestamp for a production backup when no test clock is injected", async () => {
+    const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "buildsim-workspace-live-clock-backup-"));
+    roots.push(runtimeRoot);
+    const coordinator = new RuntimeCoordinator({ root: runtimeRoot });
+    await coordinator.initialize("workspace-live-clock-backup-test");
+    const operations = new ProductionWorkspaceOperations({ coordinator, runtimeRoot });
+
+    await expect(operations.createFullBackup({
+      password: "local-backup-passphrase",
+      confirmation: true,
+    })).resolves.toMatchObject({
+      schemaVersion: "workspace-backup-summary-v1",
+      result: "pass",
+      runtimeGeneration: 1,
+    });
+  }, 30_000);
+
   it("creates, verifies, persists, lists, and diagnoses one local full backup without returning a filesystem path", async () => {
     const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "buildsim-workspace-operations-"));
     roots.push(runtimeRoot);

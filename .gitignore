@@ -15,3 +15,4 @@ tests/static-test-report.json
 !.env.example
 data/audit/
 /runtime
+/deploy-backups/

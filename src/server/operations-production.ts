@@ -200,7 +200,11 @@ export class ProductionWorkspaceOperations {
     await ensurePrivateDirectory(this.exportRoot);
     const id = `backup-${randomUUID()}`;
     const outputFile = path.join(this.exportRoot, `${id}.buildsim`);
-    const now = this.options.now ?? (() => new Date().toISOString());
+    // The production reference graph includes its creation timestamp. Freeze
+    // one timestamp across graph persistence, backup creation and verification
+    // so an ordinary wall-clock tick cannot make the caller graph stale.
+    const createdAt = (this.options.now ?? (() => new Date().toISOString()))();
+    const now = () => createdAt;
     const graph = await persistProductionReferenceGraph({ coordinator: this.options.coordinator, now });
     await createBackup({ coordinator: this.options.coordinator, outputFile, password: input.password, backupId: id, mode: "full_local_backup", referenceGraph: graph, now });
     const verification = await verifyBackup({ inputFile: outputFile, password: input.password, now });
