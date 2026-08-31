@@ -63,6 +63,8 @@ describe("Osaka lifecycle deployment", () => {
     expect(example).toContain("BUILD_SIM_BASIC_AUTH_USERNAME=buildsim");
     expect(example).toContain("BUILD_SIM_BASIC_AUTH_PASSWORD=");
     expect(script).toContain('AUTH_ENV_FILE="${AUTH_ENV_FILE:-$APP_DIR/.env.auth}"');
+    expect(script).toContain("Site-login environment must have mode 600");
+    expect(script).toContain("Deployment environment must have mode 600");
     expect(script).toContain('update-basic-auth.sh" "$AUTH_ENV_FILE"');
     expect(updater).toContain("htpasswd -ciB");
     expect(updater).toContain("htpasswd -vi");

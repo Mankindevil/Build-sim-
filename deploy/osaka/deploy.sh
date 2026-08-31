@@ -46,6 +46,10 @@ AUTH_ENV_FILE="${AUTH_ENV_FILE:-$APP_DIR/.env.auth}"
 [[ -d "$APP_DIR/runtime" ]] || { printf 'Missing persistent runtime directory: %s/runtime\n' "$APP_DIR" >&2; exit 1; }
 [[ -f "$AUTH_ENV_FILE" ]] \
   || { printf 'Missing site-login environment: %s (copy deploy/osaka/auth.env.example and chmod 600).\n' "$AUTH_ENV_FILE" >&2; exit 1; }
+[[ "$(stat -Lc '%a' "$AUTH_ENV_FILE")" == "600" ]] \
+  || { printf 'Site-login environment must have mode 600: %s\n' "$AUTH_ENV_FILE" >&2; exit 1; }
+[[ "$(stat -Lc '%a' "$APP_DIR/.env.remote")" == "600" ]] \
+  || { printf 'Deployment environment must have mode 600: %s/.env.remote\n' "$APP_DIR" >&2; exit 1; }
 grep -q '^BUILDSIM_BACKUP_PASSWORD=' "$APP_DIR/.env.remote" \
   || { printf '%s\n' "Missing BUILDSIM_BACKUP_PASSWORD in .env.remote." >&2; exit 1; }
 mkdir -p "$APP_DIR/deploy-backups"
