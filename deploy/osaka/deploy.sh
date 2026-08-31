@@ -168,6 +168,9 @@ if ((healthy == 0)); then
 fi
 
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
+  node scripts/runtime/initialize-artifact-repository.mjs --runtime-root /app/runtime
+
+"${COMPOSE[@]}" run --rm --no-deps release-gate \
   node scripts/runtime/persist-reference-graph.mjs --runtime-root /app/runtime
 
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
