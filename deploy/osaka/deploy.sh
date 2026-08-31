@@ -127,9 +127,9 @@ fi
 IMAGES_CHANGED=1
 "${COMPOSE[@]}" build
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
-  npm run release:canary -- --source-runtime-root /app/runtime
+  npm run release:canary -- --source-runtime-root /app/runtime --generic-platform
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
-  npm run release:holdouts -- /app/runtime/release-evidence/physical-holdouts
+  npm run release:external-reviews -- /app/runtime/release-evidence/external-reviews
 BACKUP_NAME="predeploy-${PREVIOUS_SHA}-$(date -u +%Y%m%dT%H%M%SZ).backup"
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
   node scripts/backup/create.mjs --runtime-root /app/runtime --output "/app/deploy-backups/$BACKUP_NAME"

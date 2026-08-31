@@ -56,6 +56,8 @@
     "release:canary": "vite-node --script scripts/release/universal-canary.ts",
     "release:journey-manifest": "vite-node --script scripts/release/create-universal-journey-evidence.ts",
     "release:holdouts": "vite-node --script scripts/release/physical-holdouts.ts",
+    "release:external-reviews": "vite-node --script scripts/release/external-reviews.ts",
+    "evidence:acquire-external-reviews": "vite-node --script scripts/evidence/acquire-external-reviews.ts",
     "workspace:serve": "npm run workspace:build && node dist-workspace/workspace-server.js",
     "searxng:up": "node scripts/searxng-local.mjs up",
     "searxng:health": "node scripts/searxng-local.mjs health",

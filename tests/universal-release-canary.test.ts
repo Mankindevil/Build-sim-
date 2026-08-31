@@ -115,6 +115,19 @@ describe("U12 universal release canary", () => {
     });
   }, 30_000);
 
+  it("keeps product evidence gaps as explicit advisories for a generic-platform deployment", async () => {
+    const report = await runUniversalReleaseCanary({ deploymentScope: "generic_platform" });
+    expect(report.status).toBe("pass");
+    expect(report.deploymentScope).toBe("generic_platform");
+    expect(report.blockers).toEqual([]);
+    expect(report.advisories).toEqual([
+      "stage-a.official-fact-closure",
+      "stage-a.cpu-max-turbo-power-is-official",
+      ...UNIVERSAL_JOURNEY_CHECK_IDS,
+    ]);
+    expect(report.checks.find(({ checkId }) => checkId === "stage-a.official-fact-closure")?.status).toBe("blocked");
+  }, 30_000);
+
   it("reports a missing fresh-install price snapshot as unknown without mutating the source runtime", async () => {
     const sourceRuntimeRoot = await mkdtemp(path.join(tmpdir(), "buildsim-canary-fresh-source-"));
     try {

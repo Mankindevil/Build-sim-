@@ -2739,7 +2739,14 @@ live network 验收使用明确的只读测试帐号/本地服务，失败不得
 - Stage B/跨产品 canary 已新增严格、total、content-addressed 的 `universal-journey-evidence-v1` 清单与 12 项生产复验：清单只保存 server-owned ID/hash，不保存自报 pass；发布门禁会重读 solver candidate、三层推荐、热噪 SimulationInput、随盒/需购/firmware、完整 procedure、TrueNAS 布局、四类 same-snapshot what-if、未预置机箱 registry、价格目标与五类重启任务，并实际执行 complete `.buildsim` dry-run/import、两段 verified full backup、空环境 restore 和 Doctor strict hash tuple 对比。缺失、跨 generation、篡改或不完整状态均 blocked；真实 runtime 当前没有该清单，所有 Stage B/跨产品 checkbox 保持未勾选。
 - 价格迁移只读预演：真实 runtime generation 1 / revision 98 的报告为 `ready`，source manifest `85c8384810d4f4325046b5825adc036dba31365049508c26c429815c4a75996c`；旧 current 含 1 条历史报价，受治理 capture/observation 均为 0，所以计划结果是归档旧字节并生成 0 报价的 v2 current。该命令没有写 runtime；apply 仍等待外部加密备份、人工审阅和明确批准。
 - physical holdout gate：`npm run release:holdouts` 已固化 strict/total/content-addressed 数据契约，要求独立 ATX、Mini-ITX、NAS 均绑定精确 plan/version/evaluation/adapter/simulation authority、校准仪器与净空/线长/温度/1m 标准化声学区间；当前无真实数据，命令按设计列出三类缺失并退出 2。
-- Osaka 发布脚本现在会先构建候选 Runtime 镜像，再在备份与服务重建之前依次执行 `release:canary -- --source-runtime-root /app/runtime` 与 `/app/runtime/release-evidence/physical-holdouts` 留样门禁；canary 只读克隆现有活动 generation，不把测试 plan、fact 或 price 写回源 runtime；任一非零退出都不会启动候选服务栈。
+- Osaka 发布脚本原先在备份与服务重建之前执行严格产品 canary 与本地实物 holdout；下方 2026-08-31 决策已将本次通用平台发布改为显式 generic-platform canary 与外部专业评测验证集。canary 仍只读克隆现有活动 generation，不把测试 plan、fact 或 price 写回源 runtime；任一结构性门禁失败都不会启动候选服务栈。
+
+### 2026-08-31 用户批准的通用平台发布证据调整
+
+- 用户明确批准：以多份独立专业第三方评测组成的外部验证集替代本地实物 holdout；缺失的产品级测量继续显示 `unknown`，但不阻止通用平台部署。
+- 新门禁 `external-review-validation-v1` 要求 ATX、Mini-ITX、NAS 每类至少两个独立编辑控制组，保存内容寻址原始网页、精确定位文本、方法说明，并强制 `productReadiness=unknown`、`eligibleForProductPass=false`。第三方资料不得提升为官网事实，也不得支持产品级安全通过。
+- 2026-08-31 已联网重新获取并验证 GamersNexus、Tom's Hardware、ServeTheHome、StorageReview 共六份评测。验证集通过；显式未知项为 ATX/ITX 线长，以及 NAS 线长、温度、声学。
+- Osaka 发布改用 `release:canary -- --generic-platform` 与 `release:external-reviews`。严格产品 canary 默认行为不变；通用平台范围只把产品级事实/价格/完整旅程缺口列为 advisory，结构性平台失败仍为 blocker。原 `release:holdouts` 保留供未来本地实物对照，不再是本次通用平台部署门禁。
 - 此前本机持久 runtime 的离线只读 Doctor 已执行：引用闭包、迁移状态与任务状态通过，但 48 个文件为 `0644`、37 个目录为 `0755`，因此 `runtime.permissions` 保持 blocking；`.env.remote` 尚无 `BUILDSIM_BACKUP_PASSWORD`，未绕过“先加密备份、再显式批准 repair”的门禁。真实 V2→V3 dry-run 为 ready/0 plans，目录用户数据 dry-run 为 38 SKU/0 移除/0 quarantine，facts migration 尚未 apply。
 - 最新真实 runtime 只读复验进一步确认三个旧 Docker 路径由 `nobody:nogroup` 持有且为 `0700`，普通运行用户无法遍历；Doctor 现不再异常退出，而是返回完整 `unhealthy`/exit 2，并将权限、repository/reference closure、migration、jobs、backup 和日志检查全部标为不可验证。`runtime:migrate-plans-v3` 已改为 root-pinned optimistic read-only seam，包脚本真实执行后返回 generation 1、`ready`、0 plans，且不再创建/调整 `plans/.locks`。修复所有权、创建并验证外部加密备份及任何 apply 仍需单独批准。
 - 生产 Doctor UI/API 现把权限修复拆成三道边界：无口令、零写入的聚合影响检查；显式确认后创建并验证完整加密备份、持久修复计划；最后按 exact plan hash 和第二次确认执行。真实 runtime 的只读影响检查返回 `blocked_unreadable`，不暴露路径、不创建 `exports`/backup/plan，活动 pointer SHA-256 前后同为 `0f92903f37e44a7e9f856053093c9f5288c015ab83da3d01a160e4d69d04cf24`；因此必须先由管理员恢复旧 Docker 路径的所有权与只读访问，不能绕过备份门禁直接 chmod。

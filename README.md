@@ -309,7 +309,7 @@ cd /home/linuxuser/Code/build-sim
 
 cp deploy/osaka/env.remote.example .env.remote
 chmod 600 .env.remote
-mkdir -p runtime/release-evidence/physical-holdouts deploy-backups
+mkdir -p runtime/release-evidence/external-reviews deploy-backups
 chmod 700 runtime
 ```
 
@@ -399,7 +399,7 @@ For a repeatable manual release, use the checked-in deployment script. With no a
 ./deploy/osaka/deploy.sh --ref <full-commit-sha>
 ```
 
-The script refuses tracked local changes, validates Compose, preserves `.env.remote` and `runtime/`, and builds the candidate images. Before it backs up or recreates any running service, the candidate Runtime image must pass `release:canary` and the independent holdout set stored under `runtime/release-evidence/physical-holdouts/`. It then backs up the current Web and Runtime images, recreates the stack, and checks Web, Price, Agent, Workspace, and SearXNG. A failed release gate, build, or backup restores the previous Git commit and image tags without restarting the currently running stack; a failure after candidate startup additionally recreates the previous stack.
+The script refuses tracked local changes, validates Compose, preserves `.env.remote` and `runtime/`, and builds the candidate images. Before it backs up or recreates any running service, the candidate Runtime image must pass the generic-platform release canary and the independent professional-review validation set stored under `runtime/release-evidence/external-reviews/`. It then backs up the current Web and Runtime images, recreates the stack, and checks Web, Price, Agent, Workspace, and SearXNG. A failed release gate, build, or backup restores the previous Git commit and image tags without restarting the currently running stack; a failure after candidate startup additionally recreates the previous stack.
 
 Stop the stack without deleting the bind-mounted `runtime/` data:
 
@@ -781,6 +781,8 @@ Release and recovery checks:
 ```bash
 npm run release:canary
 npm run release:holdouts -- [holdout-directory]
+npm run evidence:acquire-external-reviews -- [external-review-directory]
+npm run release:external-reviews -- [external-review-directory]
 npm run runtime:migrate-plans-v3 -- --runtime-root <copy> --output <dry-run-report.json>
 npm run runtime:migrate-price-v2 -- --runtime-root <copy> --as-of YYYY-MM-DD --output <dry-run-report.json>
 BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:create -- --runtime-root <root> --output <outside-root.backup>
@@ -788,7 +790,7 @@ BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:verify -- --runtime-root <ro
 RUNTIME_ROOT=<root> npm run runtime:doctor -- --strict
 ```
 
-`release:canary` and `release:holdouts` intentionally exit `2` while any release evidence is missing. Holdout datasets must cover independent ATX, Mini-ITX, and NAS builds that were not used for tuning and must bind measured clearance, cable length, temperature, and standardized hardware-acoustic intervals to exact plan/evaluation hashes and calibrated instruments. Migrations default to dry-run. Applying either V2-to-V3 plans or the current-price v2 migration requires the exact reviewed source-manifest hash, a backup path outside the runtime root, and a verified encrypted backup. The price migration archives the legacy current file byte-for-byte and rebuilds current state only from governed observations; an old quote never becomes current merely because it existed in `latest.json`. Never point rehearsal commands at the deployed runtime.
+`release:canary` remains strict by default. Osaka deployment uses its explicit `--generic-platform` scope: product-specific official facts, prices, and complete-journey evidence remain visible advisories/`unknown`, while structural platform failures still block. The deployment gate uses at least two independent professional publishers for each ATX, Mini-ITX, and NAS layout. Raw pages and bounded locator text are content-addressed; missing product measurements remain `unknown`, can never support a product-level pass, and do not block a generic-platform release. `release:holdouts` remains available for future local physical validation but is not the deployment gate. Migrations default to dry-run. Applying either V2-to-V3 plans or the current-price v2 migration requires the exact reviewed source-manifest hash, a backup path outside the runtime root, and a verified encrypted backup. Never point rehearsal commands at the deployed runtime.
 
 ## Repository layout
 

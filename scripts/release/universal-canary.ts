@@ -17,7 +17,7 @@ import { projectCurrentChinaPrice, type CurrentPriceProjection } from "../../src
 import type { PriceObservation } from "../../src/price/contracts";
 import { loadRuntimePriceSnapshot, runtimePriceSnapshotPath } from "../../src/server/runtime-price-snapshot";
 import { RuntimeCoordinator } from "../../src/runtime/coordinator.mjs";
-import { verifyUniversalJourneyEvidence } from "./universal-journey-canary";
+import { UNIVERSAL_JOURNEY_CHECK_IDS, verifyUniversalJourneyEvidence } from "./universal-journey-canary";
 
 const CANARY_AT = "2026-08-30T12:00:00.000Z";
 
@@ -40,7 +40,17 @@ export interface UniversalCanaryReport {
   factSnapshotHash: string;
   checks: UniversalCanaryCheck[];
   blockers: string[];
+  advisories: string[];
+  deploymentScope: "full_product" | "generic_platform";
 }
+
+const GENERIC_PLATFORM_ADVISORY_CHECKS = new Set<string>([
+  "stage-a.agent-claim-scopes-are-explicit",
+  "stage-a.official-fact-closure",
+  "stage-a.cpu-max-turbo-power-is-official",
+  "stage-a.china-new-price-is-governed",
+  ...UNIVERSAL_JOURNEY_CHECK_IDS,
+]);
 
 const CANARY_COMPONENTS: ReadonlyArray<Pick<ComponentInstance, "instanceId" | "kind" | "role"> & { skuId: string }> = Object.freeze([
   { instanceId: "case-n6-canary", kind: "case", role: "chassis", skuId: "case.jonsbo-n6" },
@@ -226,6 +236,7 @@ export async function runUniversalReleaseCanary(options: {
    */
   sourceRuntimeRoot?: string;
   keepRuntime?: boolean;
+  deploymentScope?: "full_product" | "generic_platform";
 } = {}): Promise<UniversalCanaryReport> {
   if (options.runtimeRoot !== undefined && options.sourceRuntimeRoot !== undefined) {
     throw new TypeError("release canary accepts either runtimeRoot or sourceRuntimeRoot, not both");
@@ -456,7 +467,10 @@ export async function runUniversalReleaseCanary(options: {
       evidenceRuntimeRoot: options.sourceRuntimeRoot ?? runtimeRoot,
     });
     const checks = [...stageAChecks, ...journeyChecks];
-    const blockers = checks.filter(({ status }) => status === "blocked").map(({ checkId }) => checkId);
+    const failed = checks.filter(({ status }) => status === "blocked").map(({ checkId }) => checkId);
+    const genericPlatform = options.deploymentScope === "generic_platform";
+    const advisories = genericPlatform ? failed.filter((checkId) => GENERIC_PLATFORM_ADVISORY_CHECKS.has(checkId)) : [];
+    const blockers = genericPlatform ? failed.filter((checkId) => !GENERIC_PLATFORM_ADVISORY_CHECKS.has(checkId)) : failed;
     return {
       schemaVersion: "universal-release-canary-v1",
       generatedAt: CANARY_AT,
@@ -468,6 +482,8 @@ export async function runUniversalReleaseCanary(options: {
       factSnapshotHash: receipt.evaluationLock.snapshotHashes.factSnapshotHash,
       checks,
       blockers,
+      advisories,
+      deploymentScope: genericPlatform ? "generic_platform" : "full_product",
     };
   } finally {
     if (ownedRoot && options.keepRuntime !== true) await rm(runtimeRoot, { recursive: true, force: true });
@@ -480,6 +496,7 @@ if (isMain) {
   const args = process.argv.slice(2);
   let sourceRuntimeRoot: string | undefined;
   let keepRuntime = false;
+  let deploymentScope: "full_product" | "generic_platform" = "full_product";
   while (args.length > 0) {
     const argument = args.shift();
     if (argument === "--source-runtime-root") {
@@ -488,6 +505,8 @@ if (isMain) {
       sourceRuntimeRoot = value;
     } else if (argument === "--keep-runtime") {
       keepRuntime = true;
+    } else if (argument === "--generic-platform") {
+      deploymentScope = "generic_platform";
     } else {
       throw new TypeError(`unknown release canary argument: ${argument}`);
     }
@@ -495,6 +514,7 @@ if (isMain) {
   const report = await runUniversalReleaseCanary({
     ...(sourceRuntimeRoot === undefined ? {} : { sourceRuntimeRoot }),
     ...(keepRuntime ? { keepRuntime: true } : {}),
+    deploymentScope,
   });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (report.status !== "pass") process.exitCode = 2;

@@ -308,7 +308,7 @@ cd /home/linuxuser/Code/build-sim
 
 cp deploy/osaka/env.remote.example .env.remote
 chmod 600 .env.remote
-mkdir -p runtime/release-evidence/physical-holdouts deploy-backups
+mkdir -p runtime/release-evidence/external-reviews deploy-backups
 chmod 700 runtime
 ```
 
@@ -398,7 +398,7 @@ docker compose -f deploy/osaka/compose.yaml up -d --force-recreate
 ./deploy/osaka/deploy.sh --ref <完整提交 SHA>
 ```
 
-脚本会拒绝带有已跟踪本地改动的生产检出，校验 Compose，保留 `.env.remote` 与 `runtime/`，并构建候选镜像。在备份或重建任何运行中服务之前，候选 Runtime 镜像必须通过 `release:canary`，并通过 `runtime/release-evidence/physical-holdouts/` 中的独立留样集合。随后脚本才备份当前 Web/Runtime 镜像、重建服务，并检查 Web、Price、Agent、Workspace 与 SearXNG。发布门禁、构建或备份失败时只恢复 Git 与镜像标签，不会重启当前运行中的服务；候选服务已经启动后的失败才会重建上一版服务栈。
+脚本会拒绝带有已跟踪本地改动的生产检出，校验 Compose，保留 `.env.remote` 与 `runtime/`，并构建候选镜像。在备份或重建任何运行中服务之前，候选 Runtime 镜像必须通过通用平台发布 canary，并通过 `runtime/release-evidence/external-reviews/` 中的独立专业第三方评测验证集。随后脚本才备份当前 Web/Runtime 镜像、重建服务，并检查 Web、Price、Agent、Workspace 与 SearXNG。发布门禁、构建或备份失败时只恢复 Git 与镜像标签，不会重启当前运行中的服务；候选服务已经启动后的失败才会重建上一版服务栈。
 
 停止服务但保留绑定挂载的 `runtime/` 数据：
 
@@ -773,6 +773,8 @@ npm run price:fixture
 ```bash
 npm run release:canary
 npm run release:holdouts -- [留样目录]
+npm run evidence:acquire-external-reviews -- [外部评测目录]
+npm run release:external-reviews -- [外部评测目录]
 npm run runtime:migrate-plans-v3 -- --runtime-root <副本> --output <dry-run-report.json>
 npm run runtime:migrate-price-v2 -- --runtime-root <副本> --as-of YYYY-MM-DD --output <dry-run-report.json>
 BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:create -- --runtime-root <root> --output <root-外.backup>
@@ -780,7 +782,7 @@ BUILDSIM_BACKUP_PASSWORD=... npm run runtime:backup:verify -- --runtime-root <ro
 RUNTIME_ROOT=<root> npm run runtime:doctor -- --strict
 ```
 
-`release:canary` 和 `release:holdouts` 在发布证据未齐时会有意以退出码 `2` 阻断。留样必须覆盖未用于调参的独立 ATX、Mini-ITX、NAS 实物，并把净空、线长、温度、标准化硬件噪音区间绑定到精确方案/评估哈希和已校准仪器。迁移默认只做 dry-run。方案 V2 → V3 与当前价格 v2 的 apply 都必须携带人工审阅过的精确 source-manifest hash、runtime root 外的备份路径和验证通过的加密备份。价格迁移会逐字节归档旧 current 文件，并且只从受治理观察重建当前视图；旧 `latest.json` 中出现过的报价不会自动变成当前价。演练命令不得指向已部署 runtime。
+`release:canary` 默认仍为严格产品门禁。Osaka 部署显式使用 `--generic-platform`：缺少的产品级官网事实、价格和完整旅程证据继续显示为 advisory/`unknown`，结构性平台失败仍会阻断。部署验证集要求 ATX、Mini-ITX、NAS 每类至少两家独立专业出版方，原始网页与定位文本均内容寻址；缺失的产品级测量始终为 `unknown`，不得支持产品级通过，但不阻止通用平台发布。`release:holdouts` 保留用于未来本地实物验证，不再作为部署门禁。迁移默认只做 dry-run。方案 V2 → V3 与当前价格 v2 的 apply 都必须携带人工审阅过的精确 source-manifest hash、runtime root 外的备份路径和验证通过的加密备份。演练命令不得指向已部署 runtime。
 
 ## 仓库结构
 

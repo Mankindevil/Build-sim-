@@ -125,16 +125,16 @@ describe("Osaka lifecycle deployment", () => {
     expect(script).toContain("scripts/doctor.mjs --runtime-root /app/runtime --strict");
   });
 
-  it("blocks release startup until the universal canary and independent holdouts pass", async () => {
+  it("blocks release startup until the universal canary and independent professional review validation pass", async () => {
     const script = await readFile("deploy/osaka/deploy.sh", "utf8");
     const canary = script.indexOf("npm run release:canary");
-    const holdouts = script.indexOf("npm run release:holdouts -- /app/runtime/release-evidence/physical-holdouts");
+    const holdouts = script.indexOf("npm run release:external-reviews -- /app/runtime/release-evidence/external-reviews");
     const backup = script.indexOf("node scripts/backup/create.mjs");
     const releaseStart = script.indexOf("RELEASE_STARTED=1", holdouts);
     const startup = script.indexOf('"${COMPOSE[@]}" up -d --force-recreate', backup);
 
     expect(canary).toBeGreaterThan(-1);
-    expect(script).toContain("npm run release:canary -- --source-runtime-root /app/runtime");
+    expect(script).toContain("npm run release:canary -- --source-runtime-root /app/runtime --generic-platform");
     expect(holdouts).toBeGreaterThan(canary);
     expect(backup).toBeGreaterThan(holdouts);
     expect(releaseStart).toBeGreaterThan(backup);
