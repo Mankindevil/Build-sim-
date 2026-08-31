@@ -1,6 +1,7 @@
 #!/usr/bin/env -S vite-node
 
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { copyFile, cp, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -14,7 +15,7 @@ import type { FactRecord } from "../../src/facts/contracts";
 import { isProgressiveBuildEvaluation, type ProgressiveBuildEvaluation } from "../../src/compatibility/contracts";
 import { projectCurrentChinaPrice, type CurrentPriceProjection } from "../../src/price/policy";
 import type { PriceObservation } from "../../src/price/contracts";
-import { loadRuntimePriceSnapshot } from "../../src/server/runtime-price-snapshot";
+import { loadRuntimePriceSnapshot, runtimePriceSnapshotPath } from "../../src/server/runtime-price-snapshot";
 import { RuntimeCoordinator } from "../../src/runtime/coordinator.mjs";
 import { verifyUniversalJourneyEvidence } from "./universal-journey-canary";
 
@@ -133,6 +134,11 @@ async function selectCanarySourcePrices(
   runtimeRoot: string,
 ): Promise<CanarySourcePriceAuthority | null> {
   await services.priceRepository.initialize("universal-release-canary-price-read-v1");
+  // A freshly rebuilt authority has no current-price snapshot yet. Treat that
+  // as an explicit empty/unknown source state so the disposable canary clone
+  // can install its governed empty snapshot and report the price blocker.
+  // Corrupt or malformed snapshots still fail closed in the loader below.
+  if (!existsSync(runtimePriceSnapshotPath({ runtimeRoot }))) return null;
   const snapshot = loadRuntimePriceSnapshot({ runtimeRoot, allowSeedFallback: false });
   if (snapshot.schemaVersion === "1.0.0" && snapshot.priceVersion === undefined) return null;
   if (snapshot.schemaVersion !== "1.1.0" || snapshot.priceVersion !== "price-snapshot-v2"

@@ -115,6 +115,33 @@ describe("U12 universal release canary", () => {
     });
   }, 30_000);
 
+  it("reports a missing fresh-install price snapshot as unknown without mutating the source runtime", async () => {
+    const sourceRuntimeRoot = await mkdtemp(path.join(tmpdir(), "buildsim-canary-fresh-source-"));
+    try {
+      const coordinator = new RuntimeCoordinator({ root: sourceRuntimeRoot, now: () => "2026-08-30T09:00:00.000Z" });
+      await coordinator.initialize("fresh-release-canary-source");
+      const state = await coordinator.readState();
+      const pointerPath = path.join(sourceRuntimeRoot, "control", "active-pointer.json");
+      const pricePath = path.join(sourceRuntimeRoot, state.activeRoot, "prices", "latest.json");
+      const pointerBefore = await readFile(pointerPath);
+
+      const report = await runUniversalReleaseCanary({ sourceRuntimeRoot });
+
+      expect(report.checks.find(({ checkId }) => checkId === "stage-a.china-new-price-is-governed")).toMatchObject({
+        status: "blocked",
+        evidence: {
+          sourcePriceAuthorityStatus: "legacy_history_only",
+          sourcePriceSnapshotHash: null,
+          sourcePriceSnapshotId: null,
+        },
+      });
+      await expect(readFile(pointerPath)).resolves.toEqual(pointerBefore);
+      await expect(readFile(pricePath)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(sourceRuntimeRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("clones an initialized runtime read-only and verifies low-confidence points plus an independent-seller range", async () => {
     const sourceRuntimeRoot = await mkdtemp(path.join(tmpdir(), "buildsim-canary-source-"));
     try {
