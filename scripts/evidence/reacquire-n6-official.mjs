@@ -55,6 +55,7 @@ export async function reacquireN6OfficialEvidence(options) {
     now = () => new Date().toISOString(),
     discoveryFetcher,
     acquisitionFetcher,
+    cacheTtlMs = 0,
     requireFreshGeneration = true,
     adapterFile,
   } = options ?? {};
@@ -80,7 +81,7 @@ export async function reacquireN6OfficialEvidence(options) {
   const acquired = await acquireOfficialEvidence(manual.url, {
     repository: evidence,
     clock: () => new Date(now()),
-    cacheTtlMs: 0,
+    cacheTtlMs,
     kind: "manufacturer-manual",
     title: "JONSBO N6 Installation Manual",
     officialBrand: "JONSBO",

@@ -43,6 +43,7 @@
     "runtime:gc": "node scripts/runtime-gc.mjs",
     "evidence:import-bundled": "node scripts/evidence/import-bundled-manuals.mjs",
     "evidence:reacquire-n6": "node scripts/evidence/reacquire-n6-official.mjs",
+    "evidence:reacquire-release-official": "node scripts/evidence/reacquire-release-official.mjs",
     "facts:migrate": "node scripts/migrations/migrate-facts-v1.mjs",
     "facts:scan-official": "node scripts/facts/scan-official.mjs",
     "agent:build": "vite build --config vite.agent.config.ts",
