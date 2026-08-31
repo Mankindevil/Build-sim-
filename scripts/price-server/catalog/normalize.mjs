@@ -23,11 +23,21 @@ export function normalizeModelQuery(raw, overrides = {}) {
   const capacity = capacityMatch ? `${capacityMatch[1]}${capacityMatch[2].toUpperCase()}` : undefined;
   const iface = INTERFACES.find((item) => lower.includes(item.toLocaleLowerCase()));
   const tokens = normalized.split(/[^A-Za-z0-9-]+/).filter(Boolean);
-  const mpn = tokens.filter((token) => /[A-Za-z]/.test(token)
+  const candidates = tokens.filter((token) => /[A-Za-z]/.test(token)
     && /\d/.test(token)
     && (token.includes("-") || token.length >= 8)
     && !((brand?.toLocaleLowerCase() === "seasonic" || category === "psu") && SEASONIC_PSU_MODEL_TOKEN.test(token))
-    && !(category === "gpu" && GPU_CHIP_MODEL_TOKEN.test(token))).sort((a, b) => b.length - a.length)[0];
-  const model = normalized.replace(brand ?? "", "").replace(mpn ?? "", "").replace(/\b\d+(?:\.\d+)?\s*(?:tb|gb|mb)\b/ig, "").replace(new RegExp(INTERFACES.join("|"), "ig"), "").replace(/\s+/g, " ").trim() || undefined;
+    && !(category === "gpu" && GPU_CHIP_MODEL_TOKEN.test(token)));
+  const categoryWords = new Set(CATEGORIES.flatMap(([, words]) => words.flatMap((word) => word.toLocaleLowerCase().split(/\s+/))));
+  const brandWords = new Set((brand ?? "").toLocaleLowerCase().split(/\s+/).filter(Boolean));
+  const meaningful = tokens.filter((token) => {
+    const tokenLower = token.toLocaleLowerCase();
+    return !brandWords.has(tokenLower) && !categoryWords.has(tokenLower) && !INTERFACES.includes(tokenLower)
+      && !/^\d+(?:\.\d+)?(?:tb|gb|mb|w)$/i.test(token);
+  });
+  const inferredMpn = meaningful.length === 1 && candidates.includes(meaningful[0]) ? meaningful[0] : undefined;
+  const mpn = overrides.mpn ?? (overrides.model ? undefined : inferredMpn);
+  const inferredModel = normalized.replace(brand ?? "", "").replace(mpn ?? "", "").replace(/\b\d+(?:\.\d+)?\s*(?:tb|gb|mb)\b/ig, "").replace(new RegExp(INTERFACES.join("|"), "ig"), "").replace(/\s+/g, " ").trim() || undefined;
+  const model = overrides.model ?? inferredModel;
   return { raw, ...(brand ? { brand } : {}), ...(model ? { model } : {}), ...(mpn ? { mpn } : {}), ...(category ? { category } : {}), ...(capacity ? { capacity } : {}), ...(iface ? { interface: iface } : {}), tokens: normalized.toLocaleLowerCase().split(/[^a-z0-9\u4e00-\u9fff]+/).filter(Boolean), locale: overrides.locale ?? "zh-CN" };
 }

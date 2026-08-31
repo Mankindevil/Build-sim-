@@ -1,5 +1,5 @@
 import type { SkuCategory } from "../sku/types";
-import type { NormalizedModelQuery } from "./types";
+import type { NormalizedModelQuery, NormalizedModelQueryOverrides } from "./types";
 
 const BRANDS: Array<[string, string[]]> = [
   ["Western Digital", ["western digital", "wd"]],
@@ -55,20 +55,28 @@ function findMpn(normalized: string, brand?: string, category?: SkuCategory): st
     && (token.includes("-") || token.length >= 8)
     && !((brand?.toLocaleLowerCase() === "seasonic" || category === "psu") && SEASONIC_PSU_MODEL_TOKEN.test(token))
     && !(category === "gpu" && GPU_CHIP_MODEL_TOKEN.test(token)));
-  return candidates.sort((a, b) => b.length - a.length)[0];
+  const categoryWords = new Set(CATEGORY_WORDS.flatMap(([, words]) => words.flatMap((word) => word.toLocaleLowerCase().split(/\s+/))));
+  const brandWords = new Set((brand ?? "").toLocaleLowerCase().split(/\s+/).filter(Boolean));
+  const meaningful = tokens.filter((token) => {
+    const lower = token.toLocaleLowerCase();
+    return !brandWords.has(lower) && !categoryWords.has(lower) && !INTERFACES.includes(lower)
+      && !/^\d+(?:\.\d+)?(?:tb|gb|mb|w)$/i.test(token);
+  });
+  if (meaningful.length !== 1) return undefined;
+  return candidates.includes(meaningful[0]!) ? meaningful[0] : undefined;
 }
 
-export function normalizeModelQuery(raw: string, overrides: Partial<Pick<NormalizedModelQuery, "brand" | "category" | "locale">> = {}): NormalizedModelQuery {
+export function normalizeModelQuery(raw: string, overrides: NormalizedModelQueryOverrides = {}): NormalizedModelQuery {
   if (typeof raw !== "string" || clean(raw) === "") throw new Error("query must be a non-empty string");
   const normalized = clean(raw);
   const brand = overrides.brand ?? findBrand(normalized);
   const category = overrides.category ?? findCategory(normalized);
   const capacity = findCapacity(normalized);
   const iface = findInterface(normalized);
-  const mpn = findMpn(normalized, brand, category);
+  const mpn = overrides.mpn ?? (overrides.model ? undefined : findMpn(normalized, brand, category));
   const withoutBrand = brand ? normalized.replace(new RegExp(brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ") : normalized;
   const withoutMpn = mpn ? withoutBrand.replace(mpn, " ") : withoutBrand;
-  const model = withoutMpn.replace(/\b\d+(?:\.\d+)?\s*(?:tb|gb|mb)\b/ig, " ").replace(new RegExp(INTERFACES.join("|"), "ig"), " ").replace(/\s+/g, " ").trim() || undefined;
+  const model = overrides.model ?? (withoutMpn.replace(/\b\d+(?:\.\d+)?\s*(?:tb|gb|mb)\b/ig, " ").replace(new RegExp(INTERFACES.join("|"), "ig"), " ").replace(/\s+/g, " ").trim() || undefined);
   const tokens = normalized.toLocaleLowerCase().split(/[^a-z0-9\u4e00-\u9fff]+/).filter(Boolean);
   return { raw, ...(brand ? { brand } : {}), ...(model ? { model } : {}), ...(mpn ? { mpn } : {}), ...(category ? { category } : {}), ...(capacity ? { capacity } : {}), ...(iface ? { interface: iface } : {}), tokens, locale: overrides.locale ?? "zh-CN" };
 }

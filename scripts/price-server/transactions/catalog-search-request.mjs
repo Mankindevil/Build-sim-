@@ -3,6 +3,8 @@ export function transactionCatalogSearchRequest(body = {}) {
   return {
     query: body.query,
     ...(body.brand ? { brand: body.brand } : {}),
+    ...(body.model ? { model: body.model } : {}),
+    ...(body.mpn ? { mpn: body.mpn } : {}),
     category: body.category,
     ...(typeof body.requestId === "string" ? { requestId: body.requestId } : {}),
     ...(body.trigger === "user-confirmed-review" ? { trigger: body.trigger } : {}),

@@ -6,6 +6,7 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import { normalizeModelQuery } from "../src/catalog-search/normalize";
 import { normalizeModelQuery as normalizeServerModelQuery } from "../scripts/price-server/catalog/normalize.mjs";
 import { extractOfficialHtml, extractOfficialPdf } from "../scripts/price-server/catalog/extract.mjs";
+import { assessCatalogIdentity } from "../scripts/price-server/catalog/identity.mjs";
 import { extractPdfText, fetchOfficial } from "../scripts/price-server/catalog/fetch.mjs";
 import { validateOfficialUrl, validateRedirect } from "../scripts/price-server/catalog/security.mjs";
 import { getJob, queueSearch, waitForJob } from "../scripts/price-server/catalog/service.mjs";
@@ -83,6 +84,29 @@ describe("G3 model query normalization", () => {
       expect(normalize("MSI 912-V390-001", { category: "gpu" }).mpn).toBe("912-V390-001");
     }
   });
+
+  it("keeps multi-token product model names out of the inferred MPN field", () => {
+    for (const normalize of [normalizeModelQuery, normalizeServerModelQuery]) {
+      expect(normalize("ASUS Pro WS W680M-ACE SE", { category: "motherboard" })).toMatchObject({
+        brand: "ASUS",
+        model: "Pro WS W680M-ACE SE",
+        category: "motherboard",
+      });
+      expect(normalize("ASUS Pro WS W680M-ACE SE", { category: "motherboard" }).mpn).toBeUndefined();
+      expect(normalize("ASUS PRIME-B650M-A WIFI", { category: "motherboard" }).mpn).toBeUndefined();
+    }
+  });
+
+  it("uses caller-supplied model and MPN identities without heuristic rewriting", () => {
+    for (const normalize of [normalizeModelQuery, normalizeServerModelQuery]) {
+      expect(normalize("ASUS Pro WS W680M-ACE SE", {
+        brand: "ASUS",
+        category: "motherboard",
+        model: "Pro WS W680M-ACE SE",
+        mpn: "90MB1A20-M0EAY0",
+      })).toMatchObject({ model: "Pro WS W680M-ACE SE", mpn: "90MB1A20-M0EAY0" });
+    }
+  });
 });
 
 describe("G3 official extraction and provenance", () => {
@@ -93,6 +117,57 @@ describe("G3 official extraction and provenance", () => {
     expect(extracted.fields.every((field) => field.sourceUrl === fetchResult.finalUrl)).toBe(true);
     expect(extracted.fields.every((field) => field.provenanceId.startsWith("prov-"))).toBe(true);
     expect(extracted.fields.every((field) => field.snippet && field.snippet.length <= 240)).toBe(true);
+  });
+
+  it("does not promote a JSON-LD site SKU or CMS id to manufacturer MPN", () => {
+    const body = `<script type="application/ld+json">${JSON.stringify({
+      "@type": "Product",
+      name: "Pro WS W680M-ACE SE",
+      sku: "23762",
+      brand: { name: "ASUS" },
+    })}</script>`;
+    const extracted = extractOfficialHtml({ ...fetchResult, body, contentHash: "asus-site-sku" });
+    expect(extracted.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "brand", value: "ASUS" }),
+      expect.objectContaining({ field: "model", value: "Pro WS W680M-ACE SE" }),
+    ]));
+    expect(extracted.fields.some((field) => field.field === "mpn")).toBe(false);
+  });
+
+  it("retains an explicitly published JSON-LD manufacturer MPN", () => {
+    const body = `<script type="application/ld+json">${JSON.stringify({
+      "@type": "Product",
+      name: "Example Product",
+      sku: "internal-23762",
+      mpn: "90MB1A20-M0EAY0",
+      brand: { name: "ASUS" },
+    })}</script>`;
+    const extracted = extractOfficialHtml({ ...fetchResult, body, contentHash: "explicit-jsonld-mpn" });
+    expect(extracted.fields.find((field) => field.field === "mpn")?.value).toBe("90MB1A20-M0EAY0");
+  });
+
+  it("does not treat a generic SKU specification label as MPN evidence", () => {
+    const body = `<title>Pro WS W680M-ACE SE</title><div><span>SKU</span><span>23762</span></div>`;
+    const extracted = extractOfficialHtml({ ...fetchResult, body, contentHash: "generic-sku-label" });
+    expect(extracted.fields.some((field) => field.field === "mpn")).toBe(false);
+  });
+
+  it("accepts the ASUS board page when its numeric JSON-LD SKU is only a site id", () => {
+    const query = normalizeServerModelQuery("ASUS Pro WS W680M-ACE SE", {
+      brand: "ASUS",
+      model: "Pro WS W680M-ACE SE",
+      mpn: "Pro WS W680M-ACE SE",
+      category: "motherboard",
+    });
+    const body = `<script type="application/ld+json">${JSON.stringify({
+      "@type": "Product", name: "Pro WS W680M-ACE SE", sku: "23762", brand: { name: "ASUS" },
+    })}</script>`;
+    const extracted = extractOfficialHtml({ ...fetchResult, body, contentHash: "asus-23762-integration" });
+    const identity = assessCatalogIdentity({
+      query, category: "motherboard", canonicalUrl: "https://www.asus.com/motherboards-components/motherboards/workstation/pro-ws-w680m-ace-se/",
+    }, extracted, { brand: "ASUS" });
+    expect(identity).toMatchObject({ verdict: "exact", reasons: ["official brand and model exactly match"] });
+    expect(identity.criticalConflicts).toHaveLength(0);
   });
 
   it("extracts explicit vendor Model Number and Rated Power labels", () => {
@@ -196,6 +271,8 @@ describe("G3 catalog search job", () => {
   it("preserves manual-review request identity across the transaction HTTP boundary", async () => {
     const firstBody = transactionCatalogSearchRequest({
       query: "MSI RTX 3070 Ventus 2X OC 8GB GDDR6",
+      model: "RTX 3070 Ventus 2X OC",
+      mpn: "912-V390-001",
       category: "gpu",
       requestId: "transaction-route-review-0001",
       trigger: "user-confirmed-review",
@@ -204,6 +281,8 @@ describe("G3 catalog search job", () => {
     });
     expect(firstBody).toEqual({
       query: "MSI RTX 3070 Ventus 2X OC 8GB GDDR6",
+      model: "RTX 3070 Ventus 2X OC",
+      mpn: "912-V390-001",
       category: "gpu",
       requestId: "transaction-route-review-0001",
       trigger: "user-confirmed-review",

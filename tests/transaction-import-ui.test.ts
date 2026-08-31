@@ -213,6 +213,48 @@ describe("transaction screenshot review UI", () => {
     expect(onImport).not.toHaveBeenCalled();
   });
 
+  it("passes governed catalog model identity to official lookup without inventing an MPN", async () => {
+    const onImport = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
+        receiptId: "receipt-asus-board", status: "matched-catalog",
+        detected: { name: "ASUS Pro WS W680M-ACE SE", brand: "ASUS", model: "Pro WS W680M-ACE SE", category: "motherboard", qty: 1, unitPriceCny: 2799 },
+        catalogMatch: { skuId: "board.asus-w680m-ace-se", kind: "exact-mpn", score: 1 },
+        evidence: { receiptId: "receipt-asus-board", fileName: "board.png", contentHash: "8".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 99, excerpt: "ASUS Pro WS W680M-ACE SE" }, catalogSearch: null,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/price/transactions/catalog-search") return new Response(JSON.stringify({ jobId: "job-asus-board", status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/search/job-asus-board") return new Response(JSON.stringify({
+        jobId: "job-asus-board", status: "partial", stage: "score", candidates: [],
+        summary: { discovered: 0, inspected: 0, fetchSucceeded: 0, productPages: 0, exact: 0, sameFamily: 0, conflicts: 0 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({
+      onImport,
+      getCatalogSku: (skuId) => skuId === "board.asus-w680m-ace-se" ? ({
+        id: skuId, category: "motherboard", brand: "ASUS", model: "Pro WS W680M-ACE SE", name: "ASUS Pro WS W680M-ACE SE", mpn: "Pro WS W680M-ACE SE",
+        dims: { evidence: "unknown" }, power: { evidence: "unknown" }, price: { currency: "CNY", historicalLowEvidence: "unknown", currentEvidence: "unknown" }, appearance: {},
+      }) : null,
+    });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["board"], "board.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    startRecognition();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/price/transactions/catalog-search")).toBe(true));
+    const searchCall = fetchMock.mock.calls.find(([url]) => String(url) === "/api/price/transactions/catalog-search");
+    expect(JSON.parse(String(searchCall?.[1]?.body))).toMatchObject({
+      query: "ASUS Pro WS W680M-ACE SE",
+      brand: "ASUS",
+      model: "Pro WS W680M-ACE SE",
+      mpn: "Pro WS W680M-ACE SE",
+      category: "motherboard",
+    });
+  });
+
   it("waits for corrected identity and category before starting catalog search", async () => {
     const onImport = vi.fn();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

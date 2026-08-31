@@ -854,6 +854,11 @@ export function initTransactionImport(options: {
         }
         const identityChanged = comparableIdentity(reviewed.name) !== comparableIdentity(enrichmentAnalysis.detected.name);
         const reviewedBrand = brandForReviewedName(enrichmentAnalysis.detected.name, reviewed.name, enrichmentAnalysis.detected.brand);
+        const governedSku = !identityChanged && enrichmentAnalysis.catalogMatch?.skuId
+          ? options.getCatalogSku?.(enrichmentAnalysis.catalogMatch.skuId) ?? null
+          : null;
+        const reviewedModel = !identityChanged ? governedSku?.model ?? enrichmentAnalysis.detected.model : null;
+        const reviewedMpn = !identityChanged ? governedSku?.mpn ?? null : null;
         const officialQuery = compactOfficialQuery(reviewed.name, reviewedBrand, reviewed.category);
         const progressMessages: string[] = [];
         const searchLog = document.createElement("section");
@@ -889,6 +894,8 @@ export function initTransactionImport(options: {
             body: JSON.stringify({
               query: officialQuery,
               ...(reviewedBrand ? { brand: reviewedBrand } : {}),
+              ...(reviewedModel ? { model: reviewedModel } : {}),
+              ...(reviewedMpn ? { mpn: reviewedMpn } : {}),
               category: reviewed.category,
               requestId: globalThis.crypto?.randomUUID?.() ?? `${record.receiptId}-${Date.now()}`,
               trigger: "user-confirmed-review",

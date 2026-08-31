@@ -1,7 +1,7 @@
 import { detectAccessBarrier } from "./access-barrier.mjs";
 
 const FIELD_ALIASES = [
-  ["mpn", /^(mpn|sku|part\s*(number|no\.?)|model\s*(number|no\.?))$/i],
+  ["mpn", /^(mpn|manufacturer\s*part\s*(number|no\.?)|part\s*(number|no\.?)|model\s*(number|no\.?))$/i],
   ["brand", /^brand$/i],
   ["model", /^(model|product\s*name)$/i],
   ["dims.lengthMm", /^(length|depth|长度|深度)$/i],
@@ -67,7 +67,7 @@ function parseJsonLd(html, fetch, fields, conflicts) {
         if (!product || (product["@type"] && !String(product["@type"]).toLocaleLowerCase().includes("product"))) continue;
         addField(fields, conflicts, fetch, "brand", typeof product.brand === "string" ? product.brand : product.brand?.name, "JSON-LD Product.brand", match[1]);
         addField(fields, conflicts, fetch, "model", product.model ?? product.name, "JSON-LD Product.model/name", match[1]);
-        addField(fields, conflicts, fetch, "mpn", product.mpn ?? product.sku, "JSON-LD Product.mpn/sku", match[1]);
+        addField(fields, conflicts, fetch, "mpn", product.mpn, "JSON-LD Product.mpn", match[1]);
       }
     } catch { /* invalid JSON-LD is a warning, not a guessed field */ }
   }

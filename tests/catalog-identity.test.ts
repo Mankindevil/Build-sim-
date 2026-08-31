@@ -163,6 +163,17 @@ describe("catalog identity assessment", () => {
     expect(result).toMatchObject({ verdict: "exact", score: 1, reasons: ["official MPN exactly matches"] });
     expect(result.criticalMatches).toContainEqual(expect.objectContaining({ field: "mpn", evidenceId: "prov-mpn" }));
   });
+
+  it("accepts an exact official brand and full model without comparing a site SKU as MPN", () => {
+    const base = candidate("ASUS Pro WS W680M-ACE SE", "motherboard", "ASUS");
+    const input = { ...base, query: { ...base.query, model: "Pro WS W680M-ACE SE", mpn: "Pro WS W680M-ACE SE" } };
+    const result = assessCatalogIdentity(input, extracted("Pro WS W680M-ACE SE", [
+      { field: "brand", value: "ASUS", provenanceId: "prov-brand" },
+      { field: "model", value: "Pro WS W680M-ACE SE", provenanceId: "prov-model" },
+    ]), { brand: "ASUS" });
+    expect(result).toMatchObject({ verdict: "exact", score: 0.95, reasons: ["official brand and model exactly match"] });
+    expect(result.criticalConflicts).toHaveLength(0);
+  });
 });
 
 describe("official page classification and diagnostics", () => {

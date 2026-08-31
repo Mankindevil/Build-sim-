@@ -388,7 +388,7 @@ async function runOne(repository, options) {
 }
 
 export async function queueSearch(body, options = {}) {
-  const query = normalizeModelQuery(String(body.query ?? ""), { brand: body.brand, category: body.category, locale: body.locale ?? "zh-CN" });
+  const query = normalizeModelQuery(String(body.query ?? ""), { brand: body.brand, model: body.model, mpn: body.mpn, category: body.category, locale: body.locale ?? "zh-CN" });
   const limit = Math.min(20, Math.max(1, Number(body.limit ?? 10)));
   const providerIds = (options.discoveryProviders ?? []).map((provider) => provider.id);
   const requestId = typeof body.requestId === "string" && /^[A-Za-z0-9._:-]{8,160}$/.test(body.requestId) ? body.requestId : null;
@@ -454,7 +454,7 @@ export async function initializeCatalogJobs(options = {}) {
 
 export async function inspectUrl(body, options = {}) {
   const url = validateOfficialUrl(String(body.url ?? "")).toString();
-  const query = normalizeModelQuery(String(body.query ?? new URL(url).pathname), { brand: body.brand, category: body.category, locale: body.locale ?? "zh-CN" });
+  const query = normalizeModelQuery(String(body.query ?? new URL(url).pathname), { brand: body.brand, model: body.model, mpn: body.mpn, category: body.category, locale: body.locale ?? "zh-CN" });
   const candidate = { candidateId: candidateId(`${query.raw}|${url}`), query, ...(query.brand ? { brand: query.brand } : {}), ...(query.model ? { model: query.model } : {}), ...(query.mpn ? { mpn: query.mpn } : {}), ...(query.category ? { category: query.category } : {}), title: query.raw, url, source: { kind: "official", domain: domainOf(url), retrievedAt: now() }, match: { score: 0, kind: "weak", reasons: ["inspection pending"] }, extraction: { status: "not-run", fieldsFound: 0, fieldsMissing: 0 } };
   const inspected = await inspectCandidate(candidate, options);
   const { repository } = await repositoryFor(options);

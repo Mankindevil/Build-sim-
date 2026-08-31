@@ -652,7 +652,7 @@ function createSearchOfficialCatalog(priceServiceUrl: string): AgentToolSpec {
     approval: "never",
     timeoutMs: 30_000,
     maxResultBytes: 80_000,
-    inputSchema: schema({ query: { type: "string", minLength: 2, maxLength: 240 }, brand: { type: "string", minLength: 1, maxLength: 80 }, category: { type: "string", maxLength: 40 }, limit: { type: "integer", minimum: 1, maximum: 20 } }, ["query"]),
+    inputSchema: schema({ query: { type: "string", minLength: 2, maxLength: 240 }, brand: { type: "string", minLength: 1, maxLength: 80 }, model: { type: "string", minLength: 1, maxLength: 160 }, mpn: { type: "string", minLength: 1, maxLength: 160 }, category: { type: "string", maxLength: 40 }, limit: { type: "integer", minimum: 1, maximum: 20 } }, ["query"]),
     async execute(input, context) { return searchOfficialCatalog(priceServiceUrl, { ...input as object, officialOnly: true }, context.signal); },
   };
 }
@@ -667,7 +667,7 @@ function createInspectCatalogCandidate(priceServiceUrl: string): AgentToolSpec {
     approval: "never",
     timeoutMs: 30_000,
     maxResultBytes: 100_000,
-    inputSchema: schema({ url: { type: "string", minLength: 10, maxLength: 2_000, pattern: "^https://" }, query: { type: "string", maxLength: 240 }, brand: { type: "string", maxLength: 80 }, category: { type: "string", maxLength: 40 } }, ["url"]),
+    inputSchema: schema({ url: { type: "string", minLength: 10, maxLength: 2_000, pattern: "^https://" }, query: { type: "string", maxLength: 240 }, brand: { type: "string", maxLength: 80 }, model: { type: "string", maxLength: 160 }, mpn: { type: "string", maxLength: 160 }, category: { type: "string", maxLength: 40 } }, ["url"]),
     async execute(input, context) { return localService(priceServiceUrl, "/api/catalog/inspect", input, context.signal); },
   };
 }

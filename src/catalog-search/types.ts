@@ -14,6 +14,8 @@ export interface NormalizedModelQuery {
   locale: string;
 }
 
+export type NormalizedModelQueryOverrides = Partial<Pick<NormalizedModelQuery, "brand" | "model" | "mpn" | "category" | "locale">>;
+
 export type CandidateSourceKind = "official" | "marketplace" | "search";
 
 export interface FieldProvenance {
