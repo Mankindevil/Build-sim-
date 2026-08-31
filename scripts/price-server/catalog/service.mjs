@@ -6,7 +6,7 @@ import { normalizeModelQuery } from "./normalize.mjs";
 import { activeOfficialRegistry, registryForBrand, registryForUrl } from "./registry.mjs";
 import { fetchOfficial } from "./fetch.mjs";
 import { validateOfficialUrl } from "./security.mjs";
-import { extractOfficialHtml, extractOfficialPdf } from "./extract.mjs";
+import { discoverEmbeddedOfficialPdfUrls, extractExactVariantOfficialPdf, extractOfficialHtml, extractOfficialPdf } from "./extract.mjs";
 import { adapterForUrl } from "./adapters.mjs";
 import { discoverOfficialUrls, QUERY_NORMALIZATION_VERSION } from "./discovery.mjs";
 import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./discovery.mjs";
@@ -216,7 +216,7 @@ function renderedExtraction(extracted, fetchResult) {
 }
 
 /** Rendered values win per field, while static-only evidence and diagnostics survive. */
-export function mergeFallbackExtraction(initial, rendered) {
+export function mergeFallbackExtraction(initial, rendered, renderer = "playwright") {
   const fields = [...(initial.fields ?? [])];
   const indexByField = new Map(fields.map((field, index) => [field.field, index]));
   for (const field of rendered.fields ?? []) {
@@ -235,7 +235,7 @@ export function mergeFallbackExtraction(initial, rendered) {
     fields,
     conflicts: uniqueRecords([...(initial.conflicts ?? []), ...(rendered.conflicts ?? [])]),
     warnings: [...new Set([...(initial.warnings ?? []), ...(rendered.warnings ?? [])])],
-    adapter: `${initial.adapter}+${rendered.adapter}+playwright-fallback`,
+    adapter: `${initial.adapter}+${rendered.adapter}+${renderer}-fallback`,
   };
   // A successful rendered document resolves a barrier on the initial response;
   // the initial warning and fetch audit remain available without blocking it.
@@ -243,12 +243,34 @@ export function mergeFallbackExtraction(initial, rendered) {
   return merged;
 }
 
+function officialDocumentUrls(fetchResult, expectedBrand, limit = 3) {
+  return discoverEmbeddedOfficialPdfUrls(fetchResult.body, fetchResult.finalUrl, { limit: Math.min(3, Math.max(0, Number(limit) || 0)) })
+    .filter((url) => {
+      try {
+        const validated = validateOfficialUrl(url);
+        const entry = registryForUrl(validated);
+        return entry?.trustStatus === "trusted" && (!expectedBrand || entry.brand.toLocaleLowerCase() === expectedBrand.toLocaleLowerCase());
+      } catch { return false; }
+    });
+}
+
+function extractionEvidenceHash(fetchResult, supportingDocuments) {
+  if (!supportingDocuments.length) return fetchResult.contentHash;
+  return sha256(JSON.stringify({
+    schemaVersion: "catalog-extraction-evidence-v1",
+    page: { url: fetchResult.finalUrl, contentHash: fetchResult.contentHash },
+    documents: supportingDocuments.map(({ finalUrl, contentHash }) => ({ url: finalUrl, contentHash })),
+  }));
+}
+
 async function inspectCandidate(candidate, {
   fetcher = fetchOfficial,
   browserFallback,
+  officialDocumentLimit = 3,
   responseCache = fetcher === fetchOfficial ? fetchCache : null,
 } = {}) {
   try {
+    const supportingDocuments = [];
     let fetchResult = responseCache?.get(candidate.url) ?? await fetcher(candidate.url);
     const initialCacheKey = fetchContentCacheKey(fetchResult);
     let extracted = contentCache.get(initialCacheKey);
@@ -257,17 +279,39 @@ async function inspectCandidate(candidate, {
       extracted = adapter?.extract(fetchResult) ?? (fetchResult.contentType.includes("pdf") ? extractOfficialPdf(fetchResult) : extractOfficialHtml(fetchResult));
       if (successfulFetch(fetchResult) && !extracted.accessBarrier) contentCache.set(initialCacheKey, extracted);
     }
-    if (missingRequiredFields(candidate, extracted).length && browserFallback && !fetchResult.contentType.includes("pdf") && fetchResult.fallback !== "playwright") {
+    if (missingRequiredFields(candidate, extracted).length && browserFallback && !fetchResult.contentType.includes("pdf") && !fetchResult.fallback) {
       try {
         const initialFetch = fetchResult.initialFetch ?? fetchAudit(fetchResult);
         const fallbackResult = await browserFallback(fetchResult.finalUrl);
         const fallbackAdapter = adapterForUrl(fallbackResult.finalUrl);
         const fallbackExtracted = renderedExtraction(fallbackAdapter?.extract(fallbackResult) ?? extractOfficialHtml(fallbackResult, { sourceKind: "official-rendered-page" }), fallbackResult);
-        extracted = mergeFallbackExtraction(extracted, fallbackExtracted);
+        extracted = mergeFallbackExtraction(extracted, fallbackExtracted, fallbackResult.fallback ?? "browser");
         fetchResult = { ...fallbackResult, initialFetch };
         if (successfulFetch(fetchResult) && !extracted.accessBarrier) contentCache.set(fetchContentCacheKey(fetchResult), extracted);
       } catch (error) {
-        extracted = { ...extracted, warnings: [...extracted.warnings, `Playwright fallback failed: ${safeText(error?.message ?? error)}`] };
+        extracted = { ...extracted, warnings: [...extracted.warnings, `browser fallback failed: ${safeText(error?.message ?? error)}`] };
+      }
+    }
+    const expectedBrand = registryForUrl(new URL(fetchResult.finalUrl))?.brand;
+    const requestedMpn = candidate.query?.mpn ?? candidate.mpn;
+    if (requestedMpn && missingRequiredFields(candidate, extracted).length && !fetchResult.contentType.includes("pdf")) {
+      for (const documentUrl of officialDocumentUrls(fetchResult, expectedBrand, officialDocumentLimit)) {
+        try {
+          const documentFetch = responseCache?.get(documentUrl) ?? await fetcher(documentUrl, { expectedBrand });
+          if (!successfulFetch(documentFetch) || !documentFetch.contentType.includes("pdf")) throw new Error("embedded official document is not a successful PDF response");
+          const documentExtracted = extractExactVariantOfficialPdf(documentFetch, { mpn: requestedMpn, brand: expectedBrand });
+          const audit = { ...fetchAudit(documentFetch), exactVariant: documentExtracted.exactVariant === true };
+          supportingDocuments.push(audit);
+          if (responseCache) responseCache.set(documentUrl, documentFetch);
+          if (!documentExtracted.exactVariant) {
+            extracted = { ...extracted, warnings: [...extracted.warnings, ...documentExtracted.warnings] };
+            continue;
+          }
+          extracted = mergeFallbackExtraction(extracted, documentExtracted, "official-document");
+          if (!missingRequiredFields(candidate, extracted).length) break;
+        } catch (error) {
+          extracted = { ...extracted, warnings: [...extracted.warnings, `embedded official PDF failed: ${safeText(error?.message ?? error)}`] };
+        }
       }
     }
     if (responseCache) {
@@ -278,6 +322,9 @@ async function inspectCandidate(candidate, {
     let canonicalUrl;
     if (canonicalMatch?.[1]) canonicalUrl = validateOfficialUrl(new URL(canonicalMatch[1], fetchResult.finalUrl).toString()).toString();
     const fields = extracted.fields;
+    const finalWarnings = !extracted.accessBarrier && !missingRequiredFields(candidate, extracted).length
+      ? extracted.warnings.filter((warning) => !/^missing official (?:PDF )?fields:|^access barrier detected:/i.test(warning))
+      : extracted.warnings;
     const canonical = canonicalUrl ?? fetchResult.canonicalUrl ?? fetchResult.finalUrl;
     const officialEntry = registryForUrl(new URL(canonical));
     const page = classifyOfficialPage(fetchResult, extracted, canonical);
@@ -285,11 +332,11 @@ async function inspectCandidate(candidate, {
     const inspected = {
       ...candidate,
       canonicalUrl: canonical,
-      source: { ...candidate.source, kind: "official", retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.fallback ? { fetchMode: fetchResult.fallback } : {}), ...(fetchResult.initialFetch ? { initialFetch: fetchResult.initialFetch } : {}), ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
+      source: { ...candidate.source, kind: "official", retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.fallback ? { fetchMode: fetchResult.fallback } : {}), ...(fetchResult.initialFetch ? { initialFetch: fetchResult.initialFetch } : {}), ...(supportingDocuments.length ? { supportingDocuments } : {}), ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
       official: { trustStatus: officialEntry?.trustStatus ?? "untrusted", brand: officialEntry?.brand, pageKind: page.kind, reasons: page.reasons },
       identity,
       match: scoreExtracted(identity),
-      extraction: { status: extractionStatus(candidate, extracted, fetchResult), fieldsFound: fields.length, fieldsMissing: Math.max(0, 6 - fields.length), adapter: extracted.adapter, ...(fetchResult.contentHash ? { contentHash: fetchResult.contentHash } : {}), ...(extracted.warnings.length ? { error: safeText(extracted.warnings.join("; ")) } : {}) },
+      extraction: { status: extractionStatus(candidate, extracted, fetchResult), fieldsFound: fields.length, fieldsMissing: Math.max(0, 6 - fields.length), adapter: extracted.adapter, ...(fetchResult.contentHash ? { contentHash: extractionEvidenceHash(fetchResult, supportingDocuments) } : {}), ...(supportingDocuments.length ? { supportingDocuments } : {}), ...(finalWarnings.length ? { error: safeText(finalWarnings.join("; ")) } : {}) },
       fields,
       ...(extracted.accessBarrier ? { accessBarrier: extracted.accessBarrier } : {}),
       ...(extracted.conflicts.length ? { conflicts: extracted.conflicts } : {}),

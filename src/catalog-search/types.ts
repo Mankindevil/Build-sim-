@@ -42,6 +42,7 @@ export interface CandidateExtraction {
   adapter?: string;
   error?: string;
   contentHash?: string;
+  supportingDocuments?: Array<{ requestedUrl: string; finalUrl: string; httpStatus: number; retrievedAt: string; contentHash: string; redirects: string[]; exactVariant: boolean }>;
 }
 
 export interface ModelCandidate {
@@ -62,6 +63,9 @@ export interface ModelCandidate {
     retrievedAt: string;
     httpStatus?: number;
     finalUrl?: string;
+    fetchMode?: "playwright" | "cloakbrowser";
+    initialFetch?: { requestedUrl: string; finalUrl: string; httpStatus: number; retrievedAt: string; contentHash: string; redirects: string[] };
+    supportingDocuments?: Array<{ requestedUrl: string; finalUrl: string; httpStatus: number; retrievedAt: string; contentHash: string; redirects: string[]; exactVariant: boolean }>;
     etag?: string;
     lastModified?: string;
   };

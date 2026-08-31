@@ -19,6 +19,12 @@ const FIELD_ALIASES = [
 
 function strip(value) { return String(value ?? "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim(); }
 function esc(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function decodeHtmlAttribute(value) {
+  return String(value ?? "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
+}
 function numberWithUnit(value) {
   const match = String(value).replace(/,/g, "").match(/(-?\d+(?:\.\d+)?)\s*(mm|cm|w|kw|tb|gb|mb|slot|slots|槽)?/i);
   if (!match) return undefined;
@@ -55,6 +61,50 @@ function addField(fields, conflicts, fetch, field, value, locator, snippet, sour
     snippet: String(snippet ?? "").slice(0, 240),
     confidence: sourceKind === "official-ocr-pdf" ? 0.7 : 1,
   });
+}
+
+function exactTextMatch(text, value) {
+  const expected = String(value ?? "").normalize("NFKC").trim();
+  if (!expected) return null;
+  const flexible = expected.split(/[\s_-]+/).filter(Boolean).map(esc).join("[\\s_-]*");
+  const match = String(text ?? "").normalize("NFKC").match(new RegExp(`(?:^|[^A-Z0-9])(${flexible})(?=$|[^A-Z0-9])`, "i"));
+  return match?.[1] ?? null;
+}
+
+/**
+ * Discover bounded official PDF links embedded in a rendered product page.
+ * Some vendor sites put downloads in data-url/data-href instead of href. This
+ * function only discovers candidates; the caller must still apply the official
+ * registry, DNS and exact-product checks before trusting any field.
+ */
+export function discoverEmbeddedOfficialPdfUrls(html, pageUrl, { limit = 3 } = {}) {
+  const candidates = [];
+  const source = String(html ?? "");
+  const attribute = /\b(?:href|data-url|data-href)\s*=\s*(["'])([^"']+)\1/gi;
+  for (const match of source.matchAll(attribute)) {
+    const raw = decodeHtmlAttribute(match[2]);
+    let url;
+    try { url = new URL(raw, pageUrl); } catch { continue; }
+    if (url.protocol !== "https:" || !/\.pdf$/i.test(url.pathname)) continue;
+    url.hash = "";
+    const start = Math.max(0, source.lastIndexOf("<", match.index));
+    const openingEnd = source.indexOf(">", (match.index ?? 0) + match[0].length);
+    const tagName = source.slice(start, openingEnd + 1).match(/^<([a-z][\w:-]*)\b/i)?.[1];
+    const closingEnd = tagName ? source.toLocaleLowerCase().indexOf(`</${tagName.toLocaleLowerCase()}>`, openingEnd + 1) : -1;
+    const end = closingEnd >= 0 ? closingEnd + tagName.length + 3 : Math.min(source.length, openingEnd + 160);
+    const context = strip(source.slice(start, end));
+    const searchable = `${url.pathname} ${context}`;
+    const score = /data\s*sheet|datasheet|specification|spec\s*sheet|technical\s*data/i.test(searchable) ? 4
+      : /product|focus|power|dimension|download/i.test(searchable) ? 3
+        : /manual|guide|document/i.test(searchable) ? 2 : 1;
+    candidates.push({ url: url.toString(), score, index: match.index ?? 0 });
+  }
+  const seen = new Set();
+  return candidates
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .filter((entry) => !seen.has(entry.url) && seen.add(entry.url))
+    .slice(0, Math.min(5, Math.max(0, Number(limit) || 0)))
+    .map((entry) => entry.url);
 }
 
 function parseJsonLd(html, fetch, fields, conflicts) {
@@ -119,11 +169,14 @@ export function extractOfficialPdf(fetch, { sourceKind = fetch.pdfExtraction?.mo
   const lines = text.split(/\r?\n/).map((line) => line.replace(/[^\x20-\x7E\u4E00-\u9FFF]+/g, " ").trim()).filter(Boolean);
   for (const line of lines) {
     const normalizedLine = line.replace(/^\s*\|\s*/, "").replace(/\s*\|\s*$/, "");
-    const dimension = normalizedLine.match(/^(?:dimension|dimensions|size)\s*[:：]\s*(\d+(?:\.\d+)?)\s*mm\s*\(W\)\s*[*x×]\s*(\d+(?:\.\d+)?)\s*mm\s*\((?:D|L)\)\s*[*x×]\s*(\d+(?:\.\d+)?)\s*mm\s*\(H\)/i);
-    if (dimension) {
-      addField(fields, conflicts, fetch, "dims.widthMm", Number(dimension[1]), "PDF dimension label (W)", normalizedLine, sourceKind);
-      addField(fields, conflicts, fetch, "dims.lengthMm", Number(dimension[2]), "PDF dimension label (D/L)", normalizedLine, sourceKind);
-      addField(fields, conflicts, fetch, "dims.heightMm", Number(dimension[3]), "PDF dimension label (H)", normalizedLine, sourceKind);
+    const dimensionLabel = normalizedLine.match(/^(?:dimension|dimensions|size)\s*[:：]/i);
+    const dimensionParts = dimensionLabel ? [...normalizedLine.matchAll(/(\d+(?:\.\d+)?)\s*mm\s*\(([WDLH])\)/gi)] : [];
+    if (dimensionParts.length >= 2) {
+      for (const dimension of dimensionParts) {
+        const axis = dimension[2].toLocaleUpperCase();
+        const field = axis === "W" ? "dims.widthMm" : axis === "H" ? "dims.heightMm" : "dims.lengthMm";
+        addField(fields, conflicts, fetch, field, Number(dimension[1]), `PDF dimension label (${axis})`, normalizedLine, sourceKind);
+      }
       continue;
     }
     const match = normalizedLine.match(/^([^:：]{1,80})\s*[:：]\s*(.{1,160})$/);
@@ -140,6 +193,42 @@ export function extractOfficialPdf(fetch, { sourceKind = fetch.pdfExtraction?.mo
   const missing = expected.filter((field) => !fields.some((entry) => entry.field === field));
   if (missing.length) warnings.push(`missing official PDF fields: ${missing.join(", ")}`);
   return { fields, conflicts, warnings, adapter: sourceKind === "official-ocr-pdf" ? "generic-official-pdf-ocr-v1" : "generic-official-pdf-text-v1" };
+}
+
+/**
+ * Promote fields from a family PDF only when that document explicitly names
+ * the requested MPN. Shared labelled dimensions may then apply to that listed
+ * variant; rated power is accepted only from the exact MPN's own row.
+ */
+export function extractExactVariantOfficialPdf(fetch, { mpn, brand } = {}) {
+  const extracted = extractOfficialPdf(fetch);
+  const sourceKind = fetch.pdfExtraction?.mode === "ocr" ? "official-ocr-pdf" : "official-pdf";
+  const text = String(fetch.body ?? "").replace(/\u0000/g, " ");
+  const lines = text.split(/\r?\n/).map((line) => line.replace(/[^\x20-\x7E\u4E00-\u9FFF]+/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const variantLines = lines.filter((line) => exactTextMatch(line, mpn));
+  if (!variantLines.length) {
+    return {
+      ...extracted,
+      fields: [],
+      conflicts: [],
+      warnings: [...extracted.warnings, `official PDF does not explicitly name requested MPN: ${String(mpn ?? "missing").slice(0, 80)}`],
+      exactVariant: false,
+    };
+  }
+  const variantLine = variantLines[0];
+  addField(extracted.fields, extracted.conflicts, fetch, "mpn", exactTextMatch(variantLine, mpn), "exact MPN row in official PDF", variantLine, sourceKind);
+  const explicitBrand = exactTextMatch(text, brand);
+  if (explicitBrand) addField(extracted.fields, extracted.conflicts, fetch, "brand", explicitBrand, "explicit manufacturer name in exact-variant official PDF", explicitBrand, sourceKind);
+  const powerRows = variantLines.flatMap((line) => {
+    const values = [...line.matchAll(/\b(\d{3,4})\s*W\b/gi)].map((match) => Number(match[1]));
+    return [...new Set(values)].length === 1 ? [{ line, value: values[0] }] : [];
+  });
+  const uniqueWattages = [...new Set(powerRows.map((row) => row.value))];
+  if (uniqueWattages.length === 1) {
+    const row = powerRows.find((entry) => entry.value === uniqueWattages[0]);
+    addField(extracted.fields, extracted.conflicts, fetch, "power.ratedW", uniqueWattages[0], "exact MPN power-distribution row", row?.line ?? variantLine, sourceKind);
+  }
+  return { ...extracted, exactVariant: true };
 }
 
 export const genericOfficialAdapter = {

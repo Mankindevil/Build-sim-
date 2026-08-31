@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { assertPublicHostname, validateOfficialUrlResolved } from "../scripts/price-server/catalog/security.mjs";
 import { renderOfficialFallback } from "../scripts/price-server/catalog/browser-fallback.mjs";
+import { discoverEmbeddedOfficialPdfUrls, extractExactVariantOfficialPdf } from "../scripts/price-server/catalog/extract.mjs";
 import { mergeFallbackExtraction, missingRequiredFields } from "../scripts/price-server/catalog/service.mjs";
 import { inspectUrl, queueSearch, waitForJob } from "../scripts/price-server/catalog/service.mjs";
 
@@ -55,6 +56,61 @@ describe("C1 browser and DNS security", () => {
     const rendered = await renderOfficialFallback("https://www.asus.com/product", { playwrightModule: fake.module, lookup: publicLookup });
     expect(rendered).toMatchObject({ status: 206, contentType: "text/html", fallback: "playwright" });
     expect(rendered.contentHash).toBe(crypto.createHash("sha256").update(body).digest("hex"));
+  });
+
+  it("uses the same SSRF and content bounds with the CloakBrowser renderer", async () => {
+    const body = "<html><title>Stealth rendered response</title></html>";
+    const fake = fakePlaywright({ body });
+    const cloakModule = { launch: fake.module.chromium.launch };
+    const rendered = await renderOfficialFallback("https://www.asus.com/product", { cloakModule, lookup: publicLookup });
+    expect(rendered).toMatchObject({ status: 200, contentType: "text/html", fallback: "cloakbrowser" });
+    const privateRoute = await fake.page.runRoute("https://127.0.0.1/metadata");
+    expect(privateRoute.abort).toHaveBeenCalledWith("blockedbyclient");
+  });
+
+  it("falls back to stock Playwright when CloakBrowser is unavailable in auto mode", async () => {
+    const fake = fakePlaywright({ body: "<html><title>Stock fallback</title></html>" });
+    const rendered = await renderOfficialFallback("https://www.asus.com/product", {
+      renderer: "auto",
+      cloakModule: { launch: vi.fn(async () => { throw new Error("signed binary unavailable"); }) },
+      playwrightModule: fake.module,
+      lookup: publicLookup,
+    });
+    expect(rendered).toMatchObject({ fallback: "playwright", status: 200 });
+  });
+
+  it("discovers href and data-url official PDFs in relevance order", () => {
+    const html = `<a data-url="/downloads/manual.pdf">User manual</a>
+      <button data-url="https://seasonic.com/downloads/focus-specification.pdf">Technical Datasheet</button>
+      <a href="javascript:alert(1)">ignore</a>`;
+    expect(discoverEmbeddedOfficialPdfUrls(html, "https://seasonic.com/products/focus/")).toEqual([
+      "https://seasonic.com/downloads/focus-specification.pdf",
+      "https://seasonic.com/downloads/manual.pdf",
+    ]);
+  });
+
+  it("extracts shared dimensions and rated power only after an exact PDF MPN row", () => {
+    const fetchResult = {
+      finalUrl: "https://seasonic.com/downloads/focus.pdf",
+      status: 200,
+      contentType: "application/pdf",
+      retrievedAt: "2026-08-31T00:00:00.000Z",
+      contentHash: "a".repeat(64),
+      body: "Seasonic\nDimensions: 140 mm (L) x 150 mm (W) x 86 mm (H)\nSSR-850FX 20 A 20 A 70 A 0.3 A 3 A 850 W",
+    };
+    const exact = extractExactVariantOfficialPdf(fetchResult, { mpn: "SSR-850FX", brand: "Seasonic" });
+    expect(exact.exactVariant).toBe(true);
+    expect(exact.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "mpn", value: "SSR-850FX" }),
+      expect.objectContaining({ field: "brand", value: "Seasonic" }),
+      expect.objectContaining({ field: "dims.lengthMm", value: 140 }),
+      expect.objectContaining({ field: "dims.widthMm", value: 150 }),
+      expect.objectContaining({ field: "dims.heightMm", value: 86 }),
+      expect.objectContaining({ field: "power.ratedW", value: 850 }),
+    ]));
+    const wrong = extractExactVariantOfficialPdf(fetchResult, { mpn: "SSR-1000FX", brand: "Seasonic" });
+    expect(wrong.exactVariant).toBe(false);
+    expect(wrong.fields).toEqual([]);
   });
 
   it("requests renderer fallback when category-required fields are absent", () => {
@@ -153,6 +209,51 @@ describe("C1 browser and DNS security", () => {
     expect(first.accessBarrier).toBeUndefined();
     expect(repeated.source).toEqual(first.source);
     expect(repeated.extraction.contentHash).toBe(renderedHash);
+  });
+
+  it("uses CloakBrowser to reach a family page and follows an exact-variant official PDF", async () => {
+    const stamp = Date.now();
+    const url = `https://seasonic.com/product/focus-plus-gold-${stamp}/`;
+    const pdfUrl = `https://seasonic.com/wp-content/uploads/focus-plus-gold-${stamp}.pdf`;
+    const initialBody = "<html><body>Forbidden</body></html>";
+    const renderedBody = `<html><head><title>Seasonic Focus Plus Gold High Quality Power Supplies</title></head><body><a data-url="${pdfUrl}">Datasheet</a></body></html>`;
+    const pdfBody = "Seasonic\nDimensions: 140 mm (L) x 150 mm (W) x 86 mm (H)\nSSR-850FX 20 A 20 A 70 A 0.3 A 3 A 850 W";
+    const hash = (body: string) => crypto.createHash("sha256").update(body).digest("hex");
+    const fetcher = vi.fn(async (requestedUrl: string) => requestedUrl === pdfUrl
+      ? { requestedUrl, finalUrl: requestedUrl, status: 200, contentType: "application/pdf", retrievedAt: "2026-08-31T16:30:02.000Z", body: pdfBody, contentHash: hash(pdfBody), redirects: [], pdfExtraction: { mode: "text", ocrAttempted: false } }
+      : { requestedUrl, finalUrl: requestedUrl, status: 403, contentType: "text/html", retrievedAt: "2026-08-31T16:30:00.000Z", body: initialBody, contentHash: hash(initialBody), redirects: [] });
+    const browserFallback = vi.fn(async () => ({ requestedUrl: url, finalUrl: url, status: 200, contentType: "text/html", retrievedAt: "2026-08-31T16:30:01.000Z", body: renderedBody, contentHash: hash(renderedBody), redirects: [], fallback: "cloakbrowser" }));
+
+    const result = await inspectUrl({ url, query: "Seasonic Focus Plus Gold 850 SSR-850FX", brand: "Seasonic", model: "Focus Plus Gold 850", mpn: "SSR-850FX", category: "psu" }, { fetcher, browserFallback, responseCache: new Map() });
+
+    expect(result.source).toMatchObject({ fetchMode: "cloakbrowser", supportingDocuments: [expect.objectContaining({ finalUrl: pdfUrl, exactVariant: true })] });
+    expect(result.identity).toMatchObject({ verdict: "exact", agentReviewRequired: false });
+    expect(result.extraction).toMatchObject({ status: "ok", adapter: expect.stringContaining("official-document"), supportingDocuments: [expect.objectContaining({ contentHash: hash(pdfBody) })] });
+    expect(result.extraction.contentHash).not.toBe(hash(renderedBody));
+    expect(result.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "mpn", value: "SSR-850FX", sourceUrl: pdfUrl }),
+      expect.objectContaining({ field: "power.ratedW", value: 850, sourceUrl: pdfUrl }),
+      expect.objectContaining({ field: "dims.lengthMm", value: 140, sourceUrl: pdfUrl }),
+    ]));
+  });
+
+  it("does not merge a same-brand PDF that lacks the requested exact variant", async () => {
+    const stamp = Date.now();
+    const url = `https://seasonic.com/product/wrong-variant-${stamp}/`;
+    const pdfUrl = `https://seasonic.com/downloads/wrong-variant-${stamp}.pdf`;
+    const renderedBody = `<html><head><title>Seasonic Focus Plus Gold</title></head><body><a href="${pdfUrl}">Specification</a></body></html>`;
+    const pdfBody = "Seasonic\nDimensions: 140 mm (L) x 150 mm (W) x 86 mm (H)\nSSR-1000FX 25 A 25 A 83 A 0.3 A 3 A 1000 W";
+    const hash = (body: string) => crypto.createHash("sha256").update(body).digest("hex");
+    const fetcher = vi.fn(async (requestedUrl: string) => requestedUrl === pdfUrl
+      ? { requestedUrl, finalUrl: requestedUrl, status: 200, contentType: "application/pdf", retrievedAt: "2026-08-31T17:00:02.000Z", body: pdfBody, contentHash: hash(pdfBody), redirects: [], pdfExtraction: { mode: "text", ocrAttempted: false } }
+      : { requestedUrl, finalUrl: requestedUrl, status: 403, contentType: "text/html", retrievedAt: "2026-08-31T17:00:00.000Z", body: "Forbidden", contentHash: hash("Forbidden"), redirects: [] });
+    const browserFallback = vi.fn(async () => ({ requestedUrl: url, finalUrl: url, status: 200, contentType: "text/html", retrievedAt: "2026-08-31T17:00:01.000Z", body: renderedBody, contentHash: hash(renderedBody), redirects: [], fallback: "cloakbrowser" }));
+
+    const result = await inspectUrl({ url, query: "Seasonic Focus Plus Gold SSR-850FX", brand: "Seasonic", mpn: "SSR-850FX", category: "psu" }, { fetcher, browserFallback, responseCache: new Map() });
+
+    expect(result.extraction.status).toBe("partial");
+    expect(result.fields.some((field: { field: string }) => field.field === "mpn")).toBe(false);
+    expect(result.source.supportingDocuments).toEqual([expect.objectContaining({ exactVariant: false })]);
   });
 
   it("does not retain a failed 403 or its failed renderer attempt in response caches", async () => {
