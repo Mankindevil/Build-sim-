@@ -360,9 +360,10 @@ sudo nginx -t
 sudo systemctl reload nginx
 
 sudo certbot certonly --nginx -d build-sim.66-245-218-148.sslip.io
-sudo htpasswd -c /etc/nginx/.htpasswd-build-sim buildsim
-sudo chown root:www-data /etc/nginx/.htpasswd-build-sim
-sudo chmod 640 /etc/nginx/.htpasswd-build-sim
+
+install -m 600 deploy/osaka/auth.env.example .env.auth
+# Edit .env.auth and set the site username and a password of at least 16 characters.
+deploy/osaka/update-basic-auth.sh .env.auth
 
 sudo cp deploy/osaka/nginx-build-sim.conf /etc/nginx/sites-available/build-sim
 sudo nginx -t
@@ -370,6 +371,9 @@ sudo systemctl reload nginx
 ```
 
 The final proxy exposes only the UI, Price/Advice/Agent routes, catalog search polling, and the narrowly scoped review endpoints under `/api/price/catalog/`. Other `/api/catalog/` administration and direct-write routes return `404`. The supplied hostname is specific to the current Osaka address; change the `server_name` and certificate paths together when deploying elsewhere.
+
+`.env.auth` is read only by the host deployment script; it is neither passed to Compose containers nor tracked by Git. After changing `BUILD_SIM_BASIC_AUTH_USERNAME` or `BUILD_SIM_BASIC_AUTH_PASSWORD`, run `deploy/osaka/deploy.sh`. Once application health checks and Doctor pass, the script atomically updates the site login, validates Nginx, and reloads it. A failed update restores the previous password file. Keep `.env.auth` owner-only (use `chmod 600 .env.auth`).
+The script may prompt for `sudo` in an interactive terminal. Unattended deployments must grant the deployment user non-interactive access to `install`, `nginx -t`, and `systemctl reload nginx`.
 
 #### 4. Verify, update, and stop
 

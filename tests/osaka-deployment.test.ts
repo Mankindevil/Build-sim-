@@ -1,5 +1,11 @@
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+
+const execFileAsync = promisify(execFile);
 
 function serviceBlock(compose: string, name: string): string {
   const marker = `  ${name}:\n`;
@@ -46,6 +52,64 @@ describe("Osaka lifecycle deployment", () => {
     const nginx = await readFile("deploy/osaka/nginx-build-sim.conf", "utf8");
     expect(nginx).toContain("location /api/workspace/");
     expect(nginx).toContain("proxy_pass http://127.0.0.1:5176;");
+  });
+
+  it("rotates the host login from a private deployment-only environment file", async () => {
+    const script = await readFile("deploy/osaka/deploy.sh", "utf8");
+    const updater = await readFile("deploy/osaka/update-basic-auth.sh", "utf8");
+    const example = await readFile("deploy/osaka/auth.env.example", "utf8");
+    const compose = await readFile("deploy/osaka/compose.yaml", "utf8");
+
+    expect(example).toContain("BUILD_SIM_BASIC_AUTH_USERNAME=buildsim");
+    expect(example).toContain("BUILD_SIM_BASIC_AUTH_PASSWORD=");
+    expect(script).toContain('AUTH_ENV_FILE="${AUTH_ENV_FILE:-$APP_DIR/.env.auth}"');
+    expect(script).toContain('update-basic-auth.sh" "$AUTH_ENV_FILE"');
+    expect(updater).toContain("htpasswd -ciB");
+    expect(updater).toContain("htpasswd -vi");
+    expect(updater).toContain("systemctl reload nginx");
+    expect(updater).not.toContain('htpasswd -b');
+    expect(compose).not.toContain(".env.auth");
+  });
+
+  it("atomically replaces the configured login without exposing the password in updater output", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "buildsim-auth-test-"));
+    const fakeBin = path.join(root, "bin");
+    const authEnv = path.join(root, ".env.auth");
+    const authFile = path.join(root, ".htpasswd-build-sim");
+    const firstPassword = "first-local-password-123";
+    const secondPassword = "second-local-password-456";
+    const [{ stdout: owner }, { stdout: group }] = await Promise.all([
+      execFileAsync("id", ["-un"]),
+      execFileAsync("id", ["-gn"]),
+    ]);
+    await mkdir(fakeBin);
+    await writeFile(path.join(fakeBin, "sudo"), "#!/usr/bin/env bash\n[[ \"$1\" == \"-n\" ]] && shift\nexec \"$@\"\n", { mode: 0o755 });
+    await writeFile(path.join(fakeBin, "nginx"), "#!/usr/bin/env bash\n[[ \"$1\" == \"-t\" ]]\n", { mode: 0o755 });
+    await writeFile(path.join(fakeBin, "systemctl"), "#!/usr/bin/env bash\n[[ \"$1\" == \"reload\" && \"$2\" == \"nginx\" ]]\n", { mode: 0o755 });
+
+    const runUpdate = async (password: string) => {
+      await writeFile(authEnv, `BUILD_SIM_BASIC_AUTH_USERNAME=buildsim\nBUILD_SIM_BASIC_AUTH_PASSWORD=${password}\n`, { mode: 0o600 });
+      await chmod(authEnv, 0o600);
+      return execFileAsync("bash", ["deploy/osaka/update-basic-auth.sh", authEnv], {
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+          BUILD_SIM_BASIC_AUTH_FILE: authFile,
+          BUILD_SIM_BASIC_AUTH_OWNER: owner.trim(),
+          BUILD_SIM_BASIC_AUTH_GROUP: group.trim(),
+        },
+      });
+    };
+
+    const first = await runUpdate(firstPassword);
+    expect(first.stdout).not.toContain(firstPassword);
+    await expect(execFileAsync("htpasswd", ["-vb", authFile, "buildsim", firstPassword])).resolves.toBeDefined();
+
+    const second = await runUpdate(secondPassword);
+    expect(second.stdout).not.toContain(secondPassword);
+    await expect(execFileAsync("htpasswd", ["-vb", authFile, "buildsim", secondPassword])).resolves.toBeDefined();
+    await expect(execFileAsync("htpasswd", ["-vb", authFile, "buildsim", firstPassword])).rejects.toBeDefined();
+    expect((await readFile(authFile, "utf8")).trim().split("\n")).toHaveLength(1);
   });
 
   it("ships a rollback-capable deployment script with bounded health checks", async () => {

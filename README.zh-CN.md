@@ -359,9 +359,10 @@ sudo nginx -t
 sudo systemctl reload nginx
 
 sudo certbot certonly --nginx -d build-sim.66-245-218-148.sslip.io
-sudo htpasswd -c /etc/nginx/.htpasswd-build-sim buildsim
-sudo chown root:www-data /etc/nginx/.htpasswd-build-sim
-sudo chmod 640 /etc/nginx/.htpasswd-build-sim
+
+install -m 600 deploy/osaka/auth.env.example .env.auth
+# 编辑 .env.auth，设置入口用户名和至少 16 位的密码。
+deploy/osaka/update-basic-auth.sh .env.auth
 
 sudo cp deploy/osaka/nginx-build-sim.conf /etc/nginx/sites-available/build-sim
 sudo nginx -t
@@ -369,6 +370,9 @@ sudo systemctl reload nginx
 ```
 
 最终代理只开放 UI、Price/Advice/Agent、目录搜索轮询与候选补全接口；其他 `/api/catalog/` 管理接口返回 `404`。示例域名绑定当前 Osaka 地址；部署到其他主机时，必须同步修改 `server_name` 与证书路径。
+
+`.env.auth` 只由宿主机部署脚本读取，不会传入 Compose 容器，也不会被 Git 跟踪。之后修改其中的 `BUILD_SIM_BASIC_AUTH_USERNAME` 或 `BUILD_SIM_BASIC_AUTH_PASSWORD`，再运行 `deploy/osaka/deploy.sh`，会在应用健康检查和 Doctor 通过后原子更新入口账号、验证 Nginx 配置并重载服务。更新失败会恢复原密码文件。该文件必须保持仅文件所有者可读写（建议 `chmod 600 .env.auth`）。
+脚本在交互式终端可提示输入 `sudo` 密码；无人值守部署则需要允许部署用户非交互执行 `install`、`nginx -t` 和 `systemctl reload nginx`。
 
 #### 4. 验证、更新与停止
 

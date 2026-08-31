@@ -7,6 +7,7 @@ APP_DIR="${BUILD_SIM_APP_DIR:-/home/linuxuser/Code/build-sim}"
 TARGET_REF=""
 HEALTH_ATTEMPTS="${BUILD_SIM_HEALTH_ATTEMPTS:-20}"
 HEALTH_DELAY_SECONDS="${BUILD_SIM_HEALTH_DELAY_SECONDS:-2}"
+AUTH_ENV_FILE="${BUILD_SIM_AUTH_ENV_FILE:-}"
 
 usage() {
   printf '%s\n' "Usage: deploy/osaka/deploy.sh [--ref <git-ref>]"
@@ -38,10 +39,13 @@ done
 cd "$APP_DIR"
 APP_DIR="$(pwd -P)"
 COMPOSE_FILE="$APP_DIR/deploy/osaka/compose.yaml"
+AUTH_ENV_FILE="${AUTH_ENV_FILE:-$APP_DIR/.env.auth}"
 
 [[ -f "$COMPOSE_FILE" ]] || { printf 'Compose file not found: %s\n' "$COMPOSE_FILE" >&2; exit 1; }
 [[ -f "$APP_DIR/.env.remote" ]] || { printf 'Missing deployment environment: %s/.env.remote\n' "$APP_DIR" >&2; exit 1; }
 [[ -d "$APP_DIR/runtime" ]] || { printf 'Missing persistent runtime directory: %s/runtime\n' "$APP_DIR" >&2; exit 1; }
+[[ -f "$AUTH_ENV_FILE" ]] \
+  || { printf 'Missing site-login environment: %s (copy deploy/osaka/auth.env.example and chmod 600).\n' "$AUTH_ENV_FILE" >&2; exit 1; }
 grep -q '^BUILDSIM_BACKUP_PASSWORD=' "$APP_DIR/.env.remote" \
   || { printf '%s\n' "Missing BUILDSIM_BACKUP_PASSWORD in .env.remote." >&2; exit 1; }
 mkdir -p "$APP_DIR/deploy-backups"
@@ -159,6 +163,8 @@ fi
 
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
   node scripts/doctor.mjs --runtime-root /app/runtime --strict
+
+"$APP_DIR/deploy/osaka/update-basic-auth.sh" "$AUTH_ENV_FILE"
 
 "${COMPOSE[@]}" ps
 RELEASE_STARTED=0
