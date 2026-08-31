@@ -208,6 +208,7 @@ describe("U1 explicit legacy runtime migration", () => {
 
     const activeRoot = await tempRoot();
     await new RuntimeCoordinator({ root: activeRoot }).initialize();
+    await writeJson(path.join(activeRoot, "release-evidence/external-reviews/review.json"), { immutable: true });
     await expect(preflightLegacyRuntimeMigration({ runtimeRoot: activeRoot })).resolves.toMatchObject({ status: "ready_active", runtimeGeneration: 1 });
   });
 

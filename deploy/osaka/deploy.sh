@@ -115,12 +115,14 @@ fi
 
 "${COMPOSE[@]}" config --quiet
 
-if "${DOCKER[@]}" image inspect build-sim-web:osaka >/dev/null 2>&1; then
-  "${DOCKER[@]}" image tag build-sim-web:osaka build-sim-web:rollback
+if "${DOCKER[@]}" container inspect build-sim-osaka-web-1 >/dev/null 2>&1; then
+  PREVIOUS_WEB_IMAGE_ID="$("${DOCKER[@]}" container inspect --format '{{.Image}}' build-sim-osaka-web-1)"
+  "${DOCKER[@]}" image tag "$PREVIOUS_WEB_IMAGE_ID" build-sim-web:rollback
   HAS_WEB_ROLLBACK=1
 fi
-if "${DOCKER[@]}" image inspect build-sim-runtime:osaka >/dev/null 2>&1; then
-  "${DOCKER[@]}" image tag build-sim-runtime:osaka build-sim-runtime:rollback
+if "${DOCKER[@]}" container inspect build-sim-osaka-price-1 >/dev/null 2>&1; then
+  PREVIOUS_RUNTIME_IMAGE_ID="$("${DOCKER[@]}" container inspect --format '{{.Image}}' build-sim-osaka-price-1)"
+  "${DOCKER[@]}" image tag "$PREVIOUS_RUNTIME_IMAGE_ID" build-sim-runtime:rollback
   HAS_RUNTIME_ROLLBACK=1
 fi
 

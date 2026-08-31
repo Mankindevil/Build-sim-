@@ -36,7 +36,11 @@ export const LEGACY_RUNTIME_MIGRATION_ID = "legacy-runtime-v1";
 export const LEGACY_RUNTIME_MIGRATION_SCHEMA = "legacy-runtime-migration-v1";
 const CATALOG_MIGRATION_ID = "catalog-user-data-v1";
 const SHA256 = /^[a-f0-9]{64}$/;
-const MANAGED_TOP_LEVEL = new Set(["control", "generations", "staging"]);
+// Release evidence is immutable deployment input, not a legacy business-data
+// repository. It is verified by its own release gate and must not invalidate
+// the migration journal or prevent an otherwise valid active generation from
+// starting.
+const MANAGED_TOP_LEVEL = new Set(["control", "generations", "staging", "release-evidence"]);
 const REGISTERED_ROOTS = new Set(RUNTIME_ROOT_REGISTRY);
 const JSON_RECORD_SUFFIXES = [".json", ".jsonl"];
 

@@ -117,6 +117,8 @@ describe("Osaka lifecycle deployment", () => {
     expect(script).toContain("git merge-base --is-ancestor");
     expect(script).toContain("build-sim-web:rollback");
     expect(script).toContain("build-sim-runtime:rollback");
+    expect(script).toContain("container inspect --format '{{.Image}}' build-sim-osaka-price-1");
+    expect(script).toContain("container inspect --format '{{.Image}}' build-sim-osaka-web-1");
     expect(script).toContain("BUILD_SIM_HEALTH_ATTEMPTS");
     expect(script).toContain("restore_previous_release");
     expect(script).toContain("/api/workspace/health");
