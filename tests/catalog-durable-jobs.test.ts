@@ -72,4 +72,20 @@ describe("durable catalog search jobs", () => {
     await repo.complete(created.record.job.jobId, advanced.fence, { status: "completed", candidates: [] });
     expect((await repo.get(created.record.job.jobId)).job.status).toBe("succeeded");
   });
+
+  it("renews a long-running worker lease at durable checkpoints", async () => {
+    let current = "2026-08-27T00:00:00.000Z";
+    const { repo } = await repository({ now: () => current, leaseDurationMs: 30_000 });
+    const created = await create(repo, "catalog renewable lease");
+    const claim = await repo.claimNext("worker-a");
+    expect(claim?.record.job.leaseExpiresAt).toBe("2026-08-27T00:00:30.000Z");
+
+    current = "2026-08-27T00:00:20.000Z";
+    const renewed = await repo.checkpoint(created.record.job.jobId, claim!.fence, { stage: "fetch" });
+    expect(renewed.record.job.leaseExpiresAt).toBe("2026-08-27T00:00:50.000Z");
+
+    // This commit is after the original lease but before the renewed lease.
+    current = "2026-08-27T00:00:35.000Z";
+    await expect(repo.complete(created.record.job.jobId, renewed.fence, { status: "completed", candidates: [] })).resolves.toBeDefined();
+  });
 });

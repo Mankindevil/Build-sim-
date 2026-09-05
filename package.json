@@ -54,6 +54,7 @@
     "workspace:build": "vite build --config vite.workspace.config.ts",
     "test:workspace:governed-dist": "npm run workspace:build && node scripts/smoke-workspace-governed-evaluation.mjs",
     "release:canary": "vite-node --script scripts/release/universal-canary.ts",
+    "release:catalog-official-canary": "node scripts/release/catalog-official-live-canary.mjs",
     "release:journey-manifest": "vite-node --script scripts/release/create-universal-journey-evidence.ts",
     "release:holdouts": "vite-node --script scripts/release/physical-holdouts.ts",
     "release:external-reviews": "vite-node --script scripts/release/external-reviews.ts",

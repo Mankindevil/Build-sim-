@@ -6,12 +6,19 @@ import { atomicWriteJson, readJson } from "../store.mjs";
 import { activeOfficialRegistry } from "./registry.mjs";
 
 const memoryCache = new Map();
+const MAX_MEMORY_CACHE_ENTRIES = 256;
 const MAX_QUERY_CHARS = 240;
 const MAX_DOMAINS = 16;
 const MAX_RESPONSE_BYTES = 1_000_000;
 
 function sha256(value) { return crypto.createHash("sha256").update(value).digest("hex"); }
 function now() { return new Date().toISOString(); }
+
+function rememberMemoryCache(key, record) {
+  memoryCache.delete(key);
+  memoryCache.set(key, record);
+  while (memoryCache.size > MAX_MEMORY_CACHE_ENTRIES) memoryCache.delete(memoryCache.keys().next().value);
+}
 
 export function validateSearXngBaseUrl(raw) {
   let url;
@@ -66,35 +73,58 @@ export class SearXngDiscoveryProvider {
 
   async loadCache(key) {
     const memory = memoryCache.get(key);
-    if (memory && Date.now() - Date.parse(memory.cachedAt) <= this.cacheTtlMs) return memory.results;
+    if (memory && Date.now() - Date.parse(memory.cachedAt) <= this.cacheTtlMs) {
+      rememberMemoryCache(key, memory);
+      return memory.results;
+    }
+    if (memory) memoryCache.delete(key);
     if (!this.cacheRoot) return null;
     const file = path.join(this.cacheRoot, `${key}.json`);
     const disk = await readJson(file, null);
     if (!disk || disk.key !== key || !Array.isArray(disk.results) || Date.now() - Date.parse(disk.cachedAt) > this.cacheTtlMs) return null;
-    memoryCache.set(key, disk);
+    rememberMemoryCache(key, disk);
     return disk.results;
   }
 
   async saveCache(key, results) {
     const record = { schemaVersion: "1.0.0", key, provider: this.id, registryVersion: this.registryVersion, cachedAt: now(), results };
-    memoryCache.set(key, record);
+    rememberMemoryCache(key, record);
     if (!this.cacheRoot) return;
     await mkdir(this.cacheRoot, { recursive: true });
     await atomicWriteJson(path.join(this.cacheRoot, `${key}.json`), record, { operation: "searxng-discovery-cache", rollbackRoot: path.join(this.cacheRoot, "rollback"), manifestPath: path.join(this.cacheRoot, "rollback", "manifest.json") });
   }
 
   async discover({ query, allowedDomains, limit, signal }) {
-    const queryText = String(query.mpn ?? query.raw ?? "").trim().slice(0, MAX_QUERY_CHARS);
+    const brand = String(query.brand ?? "").trim();
+    const mpn = String(query.mpn ?? "").trim();
+    const model = String(query.model ?? "").trim();
+    // An exact MPN is the strongest search term. Add the brand only when the
+    // MPN does not already contain it; otherwise use brand + model. This keeps
+    // exact part queries precise while avoiding weak one-token searches such
+    // as `N6 site:jonsbo.com`.
+    const comparable = (value) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+    const identityParts = mpn
+      ? [brand && !comparable(mpn).includes(comparable(brand)) ? brand : "", mpn].filter(Boolean)
+      : [brand, model].filter(Boolean);
+    const queryText = [...new Set(identityParts.length ? identityParts : [String(query.raw ?? "").trim()])].join(" ").slice(0, MAX_QUERY_CHARS);
     if (!queryText) throw new Error("SearXNG discovery query is empty");
-    const domains = [...new Set(allowedDomains.map((domain) => String(domain).toLocaleLowerCase()))].slice(0, MAX_DOMAINS);
-    if (!domains.length) return [];
+    const domains = [...new Set((allowedDomains ?? []).map((domain) => String(domain).toLocaleLowerCase()))].slice(0, MAX_DOMAINS);
     const boundedLimit = Math.min(this.resultLimit, Math.max(1, limit));
     const key = this.cacheKey(queryText, domains, boundedLimit);
     const cached = await this.loadCache(key);
     if (cached) return cached;
-    const groups = await mapLimit(domains, this.concurrency, async (domain) => {
+    // Known brands retain the strict site-scoped path. Unknown brands use a
+    // bounded open-web discovery lane whose results remain untrusted domain
+    // proposals; discoverOfficialUrls will not fetch them before user approval.
+    const searches = domains.length
+      ? domains.map((domain) => ({ domain, text: `${queryText} site:${domain}` }))
+      : [
+        { domain: null, text: `"${queryText}" official product specifications` },
+        { domain: null, text: `"${queryText}" official support manual` },
+      ];
+    const groups = await mapLimit(searches, this.concurrency, async ({ text: searchText }) => {
       const endpoint = new URL("/search", this.baseUrl);
-      endpoint.searchParams.set("q", `${queryText} site:${domain}`);
+      endpoint.searchParams.set("q", searchText);
       endpoint.searchParams.set("format", "json");
       const controller = new AbortController();
       const abort = () => controller.abort();
@@ -116,7 +146,12 @@ export class SearXngDiscoveryProvider {
         signal?.removeEventListener("abort", abort);
       }
     });
-    const results = groups.flat().slice(0, boundedLimit);
+    const seen = new Set();
+    const results = groups.flat().filter((entry) => {
+      if (seen.has(entry.url)) return false;
+      seen.add(entry.url);
+      return true;
+    }).slice(0, boundedLimit);
     await this.saveCache(key, results);
     return results;
   }

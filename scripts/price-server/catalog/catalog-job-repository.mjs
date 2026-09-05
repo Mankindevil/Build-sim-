@@ -18,6 +18,12 @@ const JOB_TRANSITIONS = Object.freeze({
   paused_restore_review: ["queued", "cancelled"],
   succeeded: [], failed: [], cancelled: [], dead_letter: [],
 });
+const DEFAULT_CATALOG_LEASE_MS = 300_000;
+
+function leaseDuration(value) {
+  const parsed = Number(value ?? process.env.CATALOG_JOB_LEASE_MS ?? DEFAULT_CATALOG_LEASE_MS);
+  return Number.isInteger(parsed) && parsed >= 30_000 && parsed <= 900_000 ? parsed : DEFAULT_CATALOG_LEASE_MS;
+}
 
 function clone(value) { return structuredClone(value); }
 function hash(value) { return createHash("sha256").update(value, "utf8").digest("hex"); }
@@ -70,7 +76,11 @@ export class CatalogJobRepositoryError extends Error {
 export class CatalogSearchJobRepository {
   constructor(options = {}) {
     this.now = options.now ?? (() => new Date().toISOString());
-    this.leaseDurationMs = options.leaseDurationMs ?? 30_000;
+    // One governed candidate may legitimately require static fetch, two
+    // browser renderers and bounded PDF/OCR fallback. Thirty seconds fences a
+    // healthy worker mid-inspection, so catalog leases use a bounded five
+    // minute default and are renewed at each durable checkpoint.
+    this.leaseDurationMs = leaseDuration(options.leaseDurationMs);
     this.leaseToken = options.leaseToken ?? randomUUID;
     this.coordinator = options.coordinator ?? new RuntimeCoordinator({ root: options.persistRoot ?? path.join(process.cwd(), "runtime"), now: this.now });
     this.restoreReview = Boolean(options.restoreReview);
@@ -266,7 +276,7 @@ export class CatalogSearchJobRepository {
     const timestamp = this.now();
     return (await this.coordinator.withWrite(async ({ state, activeRoot }) => {
       const record = await this.readJob(activeRoot, jobId); this.assertFence(record, fence, state, timestamp);
-      const job = { ...record.job, revision: record.job.revision + 1, checkpointRef: `catalog-search:${jobId}:${patch.stage ?? record.catalog.stage}`, progress: patch.progress ?? record.job.progress, updatedAt: timestamp };
+      const job = { ...record.job, revision: record.job.revision + 1, leaseExpiresAt: new Date(Date.parse(timestamp) + this.leaseDurationMs).toISOString(), checkpointRef: `catalog-search:${jobId}:${patch.stage ?? record.catalog.stage}`, progress: patch.progress ?? record.job.progress, updatedAt: timestamp };
       const next = { ...record, job, catalog: { ...record.catalog, ...clone(patch), stage: patch.stage ?? record.catalog.stage } };
       await this.writeTransition(activeRoot, record, next);
       return { record: clone(next), fence: { expectedRevision: job.revision, leaseToken: job.leaseToken, runtimeGeneration: job.runtimeGeneration } };

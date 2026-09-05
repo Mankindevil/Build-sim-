@@ -24,6 +24,63 @@ function startRecognition(): void {
   document.querySelector<HTMLButtonElement>("#transaction-start-recognition")!.click();
 }
 
+const CONFIRMED_N6 = {
+  status: "confirmed",
+  draftId: "draft-commit-safety",
+  skuId: "case.jonsbo-n6-commit-safety",
+  sku: {
+    id: "case.jonsbo-n6-commit-safety", category: "case", brand: "JONSBO", model: "N6", name: "JONSBO N6",
+    dims: { lengthMm: 353, heightMm: 318, widthMm: 305, evidence: "official" }, power: { evidence: "unknown" },
+    price: { currency: "CNY", historicalLowEvidence: "unknown", currentEvidence: "unknown" },
+    appearance: { page: "https://www.jonsbo.com/en/products/N6Black.html" }, provenance: [],
+  },
+};
+
+function catalogDraftFlowFetch(confirm: (init?: RequestInit) => Promise<Response> | Response) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
+      receiptId: "receipt-commit-safety", status: "catalog-search-required",
+      detected: { name: "JONSBO N6", brand: "JONSBO", model: "N6", category: "case", qty: 1, unitPriceCny: 799 }, catalogMatch: null,
+      evidence: { receiptId: "receipt-commit-safety", fileName: "commit.png", contentHash: "c".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 99, excerpt: "JONSBO N6" }, catalogSearch: null,
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url === "/api/price/transactions/catalog-search") return new Response(JSON.stringify({ jobId: "job-commit-safety", status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
+    if (url === "/api/catalog/search/job-commit-safety") return new Response(JSON.stringify({
+      jobId: "job-commit-safety", status: "completed", stage: "score", candidates: [{
+        candidateId: "candidate-commit-safety", expectedHash: "e".repeat(64), title: "JONSBO N6", canonicalUrl: "https://www.jonsbo.com/en/products/N6Black.html",
+        official: { trustStatus: "trusted", pageKind: "product" }, identity: { verdict: "exact", score: 1, reasons: [], unknowns: [], criticalConflicts: [] },
+        match: { kind: "brand-model", score: 1 }, extraction: { status: "partial", fieldsFound: 2 },
+        fields: [{ field: "brand", value: "JONSBO", evidence: "official" }, { field: "model", value: "N6", evidence: "official" }],
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url === "/api/catalog/candidates/candidate-commit-safety/enrich") return new Response(JSON.stringify({
+      status: "draft", candidateId: "candidate-commit-safety", draftId: "draft-commit-safety", inputHash: "f".repeat(64), writeEnabled: true,
+      draft: {
+        draftId: "draft-commit-safety", candidateId: "candidate-commit-safety", inputHash: "f".repeat(64), status: "draft", missing: [], conflicts: [],
+        fields: [{ field: "brand", value: "JONSBO", evidence: "official" }, { field: "model", value: "N6", evidence: "official" }],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (url === "/api/price/transactions/catalog-drafts/draft-commit-safety/confirm") return confirm(init);
+    throw new Error(`unexpected request ${url}`);
+  });
+}
+
+async function reachAcceptableCatalogDraft(): Promise<HTMLButtonElement> {
+  const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+  Object.defineProperty(input, "files", { configurable: true, value: [new File(["n6"], "commit.png", { type: "image/png" })] });
+  input.dispatchEvent(new Event("change"));
+  startRecognition();
+  await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
+  document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+  await vi.waitFor(() => expect(document.querySelector(".transaction-catalog-draft-review")?.textContent).toContain("已生成可审核"));
+  const approval = document.querySelector<HTMLInputElement>(".transaction-candidate-approval")!;
+  approval.checked = true;
+  approval.dispatchEvent(new Event("change"));
+  const accept = [...document.querySelectorAll<HTMLButtonElement>(".transaction-catalog-draft-review button")].find((button) => button.textContent?.includes("接纳 SKU"))!;
+  expect(accept.disabled).toBe(false);
+  return accept;
+}
+
 describe("transaction screenshot review UI", () => {
   beforeEach(mount);
   afterEach(() => vi.unstubAllGlobals());
@@ -288,8 +345,202 @@ describe("transaction screenshot review UI", () => {
       brand: "ASUS",
       model: "Pro WS W680M-ACE SE",
       mpn: "Pro WS W680M-ACE SE",
+      expectedSkuId: "board.asus-w680m-ace-se",
       category: "motherboard",
     });
+  });
+
+  it.each(["name", "category"] as const)("keeps an exact zero-field official source but makes it stale after editing %s", async (editedField) => {
+    const onImport = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
+        receiptId: "receipt-jonsbo-n6", status: "catalog-search-required",
+        detected: { name: "JONSBO N6", brand: "JONSBO", model: "N6", category: "case", qty: 1, unitPriceCny: 799 },
+        catalogMatch: null,
+        evidence: { receiptId: "receipt-jonsbo-n6", fileName: "n6.png", contentHash: "6".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 99, excerpt: "JONSBO N6" },
+        catalogSearch: null,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/price/transactions/catalog-search") return new Response(JSON.stringify({ jobId: "job-jonsbo-n6", status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/search/job-jonsbo-n6") return new Response(JSON.stringify({
+        jobId: "job-jonsbo-n6", status: "completed", stage: "score",
+        candidates: [{
+          skuId: "case.jonsbo-n6", candidateId: "candidate-jonsbo-n6", expectedHash: "e".repeat(64), title: "JONSBO N6",
+          canonicalUrl: "https://www.jonsbo.com/en/products/N6Black.html",
+          official: { trustStatus: "trusted", pageKind: "product", reasons: ["official product page"] },
+          identity: { verdict: "exact", score: 1, reasons: ["official brand and model exactly match"], unknowns: [], criticalConflicts: [] },
+          match: { kind: "brand-model", score: 1 },
+          extraction: { status: "partial", fieldsFound: 0, error: "missing official fields: dimensions" },
+          fields: [],
+        }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({ onImport });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["n6"], "n6.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    startRecognition();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+
+    await vi.waitFor(() => expect(document.querySelector<HTMLAnchorElement>(".transaction-candidate-review a")?.href).toBe("https://www.jonsbo.com/en/products/N6Black.html"));
+    expect(document.querySelector('[data-state="empty"]')).toBeNull();
+    expect(document.querySelector(".transaction-search-log")?.textContent).toContain("参数读取说明 · missing official fields: dimensions");
+    expect(document.querySelector(".transaction-candidate-warning")?.textContent).toContain("missing official fields: dimensions");
+    const approval = document.querySelector<HTMLInputElement>(".transaction-candidate-approval")!;
+    expect(approval.disabled).toBe(false);
+
+    if (editedField === "name") {
+      const name = document.querySelector<HTMLInputElement>(".transaction-review-name")!;
+      name.value = "JONSBO N5";
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+    } else {
+      const category = document.querySelector<HTMLSelectElement>(".transaction-review-category")!;
+      category.value = "accessory";
+      category.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    expect(document.querySelector<HTMLElement>(".transaction-candidate-review")?.dataset.state).toBe("stale");
+    expect(document.querySelector(".transaction-candidate-warning")?.textContent).toContain("官网候选已失效");
+    expect(approval.disabled).toBe(true);
+    expect(approval.checked).toBe(false);
+    approval.checked = true;
+    approval.dispatchEvent(new Event("change"));
+    expect(approval.checked).toBe(false);
+    document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")!.click();
+    expect(onImport).toHaveBeenCalledWith(expect.objectContaining({
+      evidence: expect.objectContaining({ candidateId: null, officialUrl: null }),
+    }), expect.any(File));
+    expect(onImport.mock.calls[0]?.[0].evidence).not.toHaveProperty("sourceReview");
+  });
+
+  it("does not let a late SKU draft re-enable a candidate after its name changed", async () => {
+    const onImport = vi.fn();
+    let resolveDraft: ((response: Response) => void) | undefined;
+    const draftResponse = new Promise<Response>((resolve) => { resolveDraft = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
+        receiptId: "receipt-late-draft", status: "catalog-search-required",
+        detected: { name: "JONSBO N6", brand: "JONSBO", model: "N6", category: "case", qty: 1, unitPriceCny: 799 }, catalogMatch: null,
+        evidence: { receiptId: "receipt-late-draft", fileName: "late.png", contentHash: "7".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 99, excerpt: "JONSBO N6" }, catalogSearch: null,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/price/transactions/catalog-search") return new Response(JSON.stringify({ jobId: "job-late-draft", status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/search/job-late-draft") return new Response(JSON.stringify({
+        jobId: "job-late-draft", status: "completed", stage: "score", candidates: [{
+          candidateId: "candidate-late-draft", expectedHash: "e".repeat(64), title: "JONSBO N6", canonicalUrl: "https://www.jonsbo.com/en/products/N6Black.html",
+          official: { trustStatus: "trusted", pageKind: "product" }, identity: { verdict: "exact", score: 1, reasons: [], unknowns: [], criticalConflicts: [] },
+          match: { kind: "brand-model", score: 1 }, extraction: { status: "partial", fieldsFound: 1 },
+          fields: [{ field: "brand", value: "JONSBO", evidence: "official" }],
+        }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/candidates/candidate-late-draft/enrich") return draftResponse;
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({ onImport });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["late"], "late.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    startRecognition();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/enrich"))).toBe(true));
+
+    const name = document.querySelector<HTMLInputElement>(".transaction-review-name")!;
+    name.value = "JONSBO N5";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    const draftReview = document.querySelector<HTMLElement>(".transaction-catalog-draft-review")!;
+    expect(draftReview.textContent).toContain("已停用");
+    resolveDraft!(new Response(JSON.stringify({
+      status: "draft", candidateId: "candidate-late-draft", draftId: "draft-late", inputHash: "f".repeat(64), writeEnabled: true,
+      draft: { draftId: "draft-late", candidateId: "candidate-late-draft", inputHash: "f".repeat(64), status: "draft", missing: [], conflicts: [], fields: [{ field: "brand", value: "JONSBO", evidence: "official" }] },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(draftReview.textContent).toContain("已停用");
+    expect(draftReview.textContent).not.toContain("已生成可审核");
+    for (const button of draftReview.querySelectorAll<HTMLButtonElement>("button")) expect(button.disabled).toBe(true);
+    expect(document.querySelector<HTMLInputElement>(".transaction-candidate-approval")?.disabled).toBe(true);
+    expect(onImport).not.toHaveBeenCalled();
+  });
+
+  it("clears the old governed identity after correction and keeps later searches clean", async () => {
+    const onImport = vi.fn();
+    const searchBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
+        receiptId: "receipt-corrected-sku", status: "matched-catalog",
+        detected: { name: "JONSBO N6", brand: "JONSBO", model: "N6", category: "case", qty: 1, unitPriceCny: 799 },
+        catalogMatch: { skuId: "case.jonsbo-n6", kind: "brand-model", score: 1 },
+        evidence: { receiptId: "receipt-corrected-sku", fileName: "correct.png", contentHash: "8".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 99, excerpt: "JONSBO N6" }, catalogSearch: null,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/price/transactions/catalog-search") {
+        searchBodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ jobId: `job-corrected-sku-${searchBodies.length}`, status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.startsWith("/api/catalog/search/job-corrected-sku-")) return new Response(JSON.stringify({ jobId: url.split("/").at(-1), status: "completed", stage: "score", candidates: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({
+      onImport,
+      getCatalogSku: (skuId) => skuId === "case.jonsbo-n6" ? ({
+        id: skuId, category: "case", brand: "JONSBO", model: "N6", mpn: "N6", name: "JONSBO N6",
+        dims: { evidence: "unknown" }, power: { evidence: "unknown" }, price: { currency: "CNY", historicalLowEvidence: "unknown", currentEvidence: "unknown" }, appearance: {},
+      }) : null,
+    });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["correct"], "correct.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    startRecognition();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
+    document.querySelector<HTMLInputElement>(".transaction-review-name")!.value = "JONSBO N5";
+    document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+    await vi.waitFor(() => expect(searchBodies).toHaveLength(1));
+    await vi.waitFor(() => expect(document.querySelector(".transaction-catalog-match")).toBeNull());
+    expect(searchBodies[0]).toMatchObject({ query: "JONSBO N5", brand: "JONSBO", category: "case" });
+    expect(searchBodies[0]).not.toHaveProperty("model");
+    expect(searchBodies[0]).not.toHaveProperty("mpn");
+    expect(searchBodies[0]).not.toHaveProperty("expectedSkuId");
+
+    document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+    await vi.waitFor(() => expect(searchBodies).toHaveLength(2));
+    expect(searchBodies[1]).not.toHaveProperty("model");
+    expect(searchBodies[1]).not.toHaveProperty("mpn");
+    expect(searchBodies[1]).not.toHaveProperty("expectedSkuId");
+  });
+
+  it("treats a cancelled catalog job as a failed terminal result", async () => {
+    const onImport = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
+        receiptId: "receipt-cancelled-job", status: "catalog-search-required",
+        detected: { name: "JONSBO N6", brand: "JONSBO", model: "N6", category: "case", qty: 1, unitPriceCny: 799 }, catalogMatch: null,
+        evidence: { receiptId: "receipt-cancelled-job", fileName: "cancelled.png", contentHash: "9".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 99, excerpt: "JONSBO N6" }, catalogSearch: null,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/price/transactions/catalog-search") return new Response(JSON.stringify({ jobId: "job-cancelled", status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/search/job-cancelled") return new Response(JSON.stringify({ jobId: "job-cancelled", status: "cancelled", stage: "fetch", candidates: [], errors: ["worker cancelled"] }), { status: 200, headers: { "Content-Type": "application/json" } });
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({ onImport });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["cancelled"], "cancelled.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    startRecognition();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+    await vi.waitFor(() => expect(document.querySelector("#transaction-screenshot-status")?.textContent).toContain("官网核验未完成"));
+    expect(document.querySelector(".transaction-search-log")?.textContent).toContain("服务错误 · worker cancelled");
+    expect(document.querySelector(".transaction-search-log")?.textContent).toContain("任务终止 · 已取消");
+    document.querySelector<HTMLButtonElement>(".transaction-review-actions button:last-child")!.click();
+    expect(onImport).toHaveBeenCalledWith(expect.objectContaining({ evidence: expect.objectContaining({ verification: "search-failed", officialUrl: null }) }), expect.any(File));
   });
 
   it("waits for corrected identity and category before starting catalog search", async () => {
@@ -532,6 +783,83 @@ describe("transaction screenshot review UI", () => {
     }), expect.any(File));
   });
 
+  it("submits an editable official URL and automatically starts a parameter refresh", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
+        receiptId: "receipt-manual-site", status: "catalog-search-required",
+        detected: { name: "ExampleBrand Model X", brand: "ExampleBrand", model: "Model X", category: "storage", qty: 1, unitPriceCny: 499 },
+        catalogMatch: null, evidence: { receiptId: "receipt-manual-site", fileName: "manual-site.png", contentHash: "b".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 90, excerpt: "Model X" }, catalogSearch: null,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/price/transactions/catalog-search") return new Response(JSON.stringify({ jobId: "job-manual-site", status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/search/job-manual-site") return new Response(JSON.stringify({ jobId: "job-manual-site", status: "completed", stage: "score", candidates: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({ onImport: vi.fn() });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["product"], "manual-site.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    startRecognition();
+    await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>(".transaction-review-official-url")).not.toBeNull());
+    const officialUrl = document.querySelector<HTMLInputElement>(".transaction-review-official-url")!;
+    officialUrl.value = "https://products.example.org/model-x#specifications";
+    officialUrl.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(document.querySelector<HTMLButtonElement>(".transaction-review-enrich")?.textContent).toContain("保存官网链接并更新参数");
+    document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([request]) => String(request) === "/api/price/transactions/catalog-search")).toBe(true));
+    const searchCall = fetchMock.mock.calls.find(([request]) => String(request) === "/api/price/transactions/catalog-search");
+    expect(JSON.parse(String(searchCall?.[1]?.body))).toMatchObject({
+      brand: "ExampleBrand",
+      officialUrl: "https://products.example.org/model-x",
+      trigger: "user-confirmed-review",
+    });
+  });
+
+  it("lets the user approve the closest untrusted official site and then re-runs parameter extraction", async () => {
+    let searchCount = 0;
+    const searchBodies: Array<Record<string, unknown>> = [];
+    const proposalId = "domain-proposal-1234567890abcdef1234";
+    const proposalHash = "d".repeat(64);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/price/transactions/analyze") return new Response(JSON.stringify({
+        receiptId: "receipt-site-choice", status: "catalog-search-required",
+        detected: { name: "ExampleBrand Model X", brand: "ExampleBrand", model: "Model X", category: "storage", qty: 1, unitPriceCny: 499 },
+        catalogMatch: null, evidence: { receiptId: "receipt-site-choice", fileName: "site-choice.png", contentHash: "a".repeat(64), capturedAt: "now", ocrEngine: "fixture", ocrConfidence: 90, excerpt: "Model X" }, catalogSearch: null,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/price/transactions/catalog-search") {
+        searchCount += 1;
+        searchBodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ jobId: `job-site-choice-${searchCount}`, status: "queued", stage: "normalize" }), { status: 202, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/catalog/search/job-site-choice-1") return new Response(JSON.stringify({
+        jobId: "job-site-choice-1", status: "completed", stage: "score", candidates: [],
+        officialSiteSuggestions: [{ proposalId, inputHash: proposalHash, brand: "ExampleBrand", domain: "products.example.org", url: "https://products.example.org/model-x", title: "ExampleBrand Model X", matchScore: 0.93, reasons: ["域名或标题包含制造商品牌", "命中 2 个型号/关键词"] }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === `/api/catalog/domain-proposals/${proposalId}/approve`) return new Response(JSON.stringify({ status: "trusted", proposalId }), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/catalog/search/job-site-choice-2") return new Response(JSON.stringify({ jobId: "job-site-choice-2", status: "completed", stage: "score", candidates: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({ onImport: vi.fn() });
+    const input = document.querySelector<HTMLInputElement>("#transaction-screenshot-input")!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["product"], "site-choice.png", { type: "image/png" })] });
+    input.dispatchEvent(new Event("change"));
+    startRecognition();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-review-enrich")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>(".transaction-review-enrich")!.click();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-official-site-list")?.textContent).toContain("ExampleBrand Model X"));
+    expect(document.querySelector(".transaction-official-site-list")?.textContent).toContain("匹配 93%");
+    const approval = document.querySelector<HTMLInputElement>(".transaction-official-site-approval")!;
+    approval.checked = true;
+    approval.dispatchEvent(new Event("change", { bubbles: true }));
+    document.querySelector<HTMLButtonElement>(".transaction-approve-official-site")!.click();
+    await vi.waitFor(() => expect(searchBodies).toHaveLength(2));
+    expect(fetchMock.mock.calls.some(([request]) => String(request) === `/api/catalog/domain-proposals/${proposalId}/approve`)).toBe(true);
+    expect(searchBodies[1]).toMatchObject({ brand: "ExampleBrand", officialUrl: "https://products.example.org/model-x" });
+  });
+
   it("distinguishes a blocked official page from finding no official URL", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -562,6 +890,85 @@ describe("transaction screenshot review UI", () => {
     await vi.waitFor(() => expect(document.querySelector('[data-state="empty"]')?.textContent).toContain("官网拒绝自动读取"));
     expect(document.querySelector('[data-state="empty"]')?.textContent).toContain("当成事实");
     expect(document.querySelector<HTMLAnchorElement>('[data-state="empty"] a')?.href).toBe("https://seasonic.com/product/focus-plus-gold/");
+    expect(document.querySelector(".transaction-search-log")?.textContent).toContain("首个读取失败 · official page returned HTTP 403");
+  });
+
+  it("locks every candidate-invalidating or review-leaving control while SKU confirmation is in flight", async () => {
+    let resolveConfirm: ((response: Response) => void) | undefined;
+    const pendingConfirm = new Promise<Response>((resolve) => { resolveConfirm = resolve; });
+    const confirmInits: Array<RequestInit | undefined> = [];
+    const fetchMock = catalogDraftFlowFetch((init) => {
+      confirmInits.push(init);
+      return pendingConfirm;
+    });
+    const onImport = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({ onImport });
+    const accept = await reachAcceptableCatalogDraft();
+    accept.click();
+    await vi.waitFor(() => expect(confirmInits).toHaveLength(1));
+
+    expect(confirmInits[0]?.signal).toBeUndefined();
+    expect(document.querySelector<HTMLElement>(".transaction-candidate-review")?.dataset.state).not.toBe("stale");
+    for (const selector of [
+      ".transaction-review-name", ".transaction-review-category", ".transaction-review-qty", ".transaction-review-price",
+      ".transaction-review-stage", ".transaction-review-link", ".transaction-candidate-approval",
+      "#transaction-screenshot-input", "#transaction-start-recognition", "#transaction-replace-image", "#transaction-manual-entry",
+      "#transaction-retry", "#transaction-cancel",
+    ]) expect(document.querySelector<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(selector)?.disabled).toBe(true);
+    for (const button of document.querySelectorAll<HTMLButtonElement>(".transaction-candidate-review button, .transaction-review-actions button")) {
+      expect(button.disabled, button.textContent ?? "unnamed control").toBe(true);
+    }
+
+    const name = document.querySelector<HTMLInputElement>(".transaction-review-name")!;
+    name.value = "JONSBO N5";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector<HTMLButtonElement>(".transaction-candidate-review button:last-child")?.click();
+    document.querySelector<HTMLButtonElement>(".transaction-review-actions button:first-child")?.click();
+    expect(document.querySelector<HTMLElement>(".transaction-candidate-review")?.dataset.state).not.toBe("stale");
+    expect(document.querySelector<HTMLElement>("#transaction-screenshot-result")?.hidden).toBe(false);
+
+    resolveConfirm!(new Response(JSON.stringify(CONFIRMED_N6), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await vi.waitFor(() => expect(onImport).toHaveBeenCalledTimes(1));
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/confirm"))).toHaveLength(1);
+  });
+
+  it("treats a successful confirm as committed and retries only failed plan/import reconciliation", async () => {
+    const fetchMock = catalogDraftFlowFetch(() => new Response(JSON.stringify(CONFIRMED_N6), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const onCatalogSkuAccepted = vi.fn()
+      .mockRejectedValueOnce(new Error("plan projection unavailable"))
+      .mockResolvedValue({ appliedToPlan: true, message: "已加入当前方案" });
+    const onImport = vi.fn()
+      .mockImplementationOnce(() => { throw new Error("staging unavailable"); })
+      .mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", fetchMock);
+    initTransactionImport({ onImport, onCatalogSkuAccepted });
+    const accept = await reachAcceptableCatalogDraft();
+    accept.click();
+
+    await vi.waitFor(() => expect(document.querySelector(".transaction-catalog-draft-review")?.textContent).toContain("方案同步失败"));
+    expect(document.querySelector<HTMLElement>(".transaction-candidate-review")?.dataset.state).toBe("committed");
+    expect(document.querySelector("#transaction-screenshot-status")?.textContent).toContain("SKU 已确认，但方案同步失败");
+    expect(document.querySelector("#transaction-screenshot-status")?.textContent).not.toContain("SKU 接纳失败");
+    expect(accept.textContent).toContain("重试方案同步");
+    expect(accept.disabled).toBe(false);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/confirm"))).toHaveLength(1);
+    expect(onImport).not.toHaveBeenCalled();
+
+    accept.click();
+    await vi.waitFor(() => expect(document.querySelector(".transaction-catalog-draft-review")?.textContent).toContain("采购记录暂存失败"));
+    expect(document.querySelector("#transaction-screenshot-status")?.textContent).toContain("SKU 已确认，但采购记录暂存失败");
+    expect(accept.textContent).toContain("重试采购记录暂存");
+    expect(onCatalogSkuAccepted).toHaveBeenCalledTimes(2);
+    expect(onImport).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/confirm"))).toHaveLength(1);
+
+    accept.click();
+    await vi.waitFor(() => expect(document.querySelector<HTMLElement>("#transaction-screenshot-result")?.hidden).toBe(true));
+    expect(onCatalogSkuAccepted).toHaveBeenCalledTimes(2);
+    expect(onImport).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/confirm"))).toHaveLength(1);
+    expect(document.querySelector("#transaction-screenshot-status")?.textContent).toContain("采购记录已加入待保存清单");
   });
 
   it("cancels an in-flight OCR request without staging or losing retry state", async () => {

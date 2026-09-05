@@ -7,6 +7,7 @@ const INTERFACES = ["slimsas", "sff-8643", "sata", "nvme", "pcie", "ddr5", "ddr4
 const SEASONIC_PSU_MODEL_TOKEN = /^(?:(?:focus|vertex|prime|core)-)?(?:gx|px|sgx|spx)-\d{3,4}(?:-v\d+)?$/i;
 const GPU_CHIP_MODEL_TOKEN = /^(?:(?:geforce|radeon)-?)?(?:(?:rtx|gtx)-?\d{3,4}(?:-?(?:ti|super))?|rx-?\d{3,4}(?:-?(?:xt|xtx|gre))?|arc-?[ab]?\d{3,4})$/i;
 const clean = (value) => value.normalize("NFKC").replace(/[‐‑‒–—−]/g, "-").replace(/[，、；]/g, " ").replace(/\s+/g, " ").trim();
+const comparableIdentity = (value) => clean(String(value ?? "")).toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 const escaped = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function inferredBrand(value) {
   for (const [brand, aliases] of BRANDS) {
@@ -36,8 +37,11 @@ export function normalizeModelQuery(raw, overrides = {}) {
       && !/^\d+(?:\.\d+)?(?:tb|gb|mb|w)$/i.test(token);
   });
   const inferredMpn = meaningful.length === 1 && candidates.includes(meaningful[0]) ? meaningful[0] : undefined;
-  const mpn = overrides.mpn ?? (overrides.model ? undefined : inferredMpn);
-  const inferredModel = normalized.replace(brand ?? "", "").replace(mpn ?? "", "").replace(/\b\d+(?:\.\d+)?\s*(?:tb|gb|mb)\b/ig, "").replace(new RegExp(INTERFACES.join("|"), "ig"), "").replace(/\s+/g, " ").trim() || undefined;
+  const suppliedMpn = overrides.mpn ?? (overrides.model ? undefined : inferredMpn);
+  const inferredModel = normalized.replace(brand ?? "", "").replace(suppliedMpn ?? "", "").replace(/\b\d+(?:\.\d+)?\s*(?:tb|gb|mb)\b/ig, "").replace(new RegExp(INTERFACES.join("|"), "ig"), "").replace(/\s+/g, " ").trim() || undefined;
   const model = overrides.model ?? inferredModel;
+  // A model duplicated into a historical catalog MPN field is not an
+  // independent identity claim and must not trigger exact-variant lookup.
+  const mpn = suppliedMpn && comparableIdentity(suppliedMpn) !== comparableIdentity(model) ? suppliedMpn : undefined;
   return { raw, ...(brand ? { brand } : {}), ...(model ? { model } : {}), ...(mpn ? { mpn } : {}), ...(category ? { category } : {}), ...(capacity ? { capacity } : {}), ...(iface ? { interface: iface } : {}), tokens: normalized.toLocaleLowerCase().split(/[^a-z0-9\u4e00-\u9fff]+/).filter(Boolean), locale: overrides.locale ?? "zh-CN" };
 }

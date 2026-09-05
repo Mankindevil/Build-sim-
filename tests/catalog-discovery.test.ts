@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createRequire } from "node:module";
-import { CatalogCacheDiscoveryProvider, CatalogDiscoveryRegistry, discoverOfficialUrls, MsiProductDiscoveryProvider } from "../scripts/price-server/catalog/discovery.mjs";
+import { CatalogCacheDiscoveryProvider, CatalogDiscoveryRegistry, discoverOfficialUrls, MsiProductDiscoveryProvider, normalizeProposedOfficialUrl, SubmittedOfficialUrlDiscoveryProvider } from "../scripts/price-server/catalog/discovery.mjs";
 import { normalizeModelQuery } from "../scripts/price-server/catalog/normalize.mjs";
 import { queueSearch, waitForJob } from "../scripts/price-server/catalog/service.mjs";
 import { registryForBrand } from "../scripts/price-server/catalog/registry.mjs";
@@ -87,6 +87,27 @@ describe("C3 provider-neutral catalog discovery", () => {
     expect(result.warnings.join(" ")).toContain("品牌未识别");
   });
 
+  it("ranks unknown-domain suggestions and treats a user URL as a proposal, never a fetchable candidate", async () => {
+    const unknown = normalizeModelQuery("ExampleBrand Model-X", { brand: "ExampleBrand", category: "storage" });
+    const search = { id: "open-search", discover: async () => [
+      { url: "https://market.example.net/listing", title: "Model-X store price", retrievedAt: "2026-08-24T00:00:00.000Z", rank: 0 },
+      { url: "https://examplebrand.example.org/products/model-x#specs", title: "ExampleBrand Model-X specifications", retrievedAt: "2026-08-24T00:00:00.000Z", rank: 1 },
+    ] };
+    const manual = new SubmittedOfficialUrlDiscoveryProvider("https://support.examplebrand.example.org/model-x#downloads");
+    const result = await discoverOfficialUrls({ query: unknown, providers: [search, manual] });
+    expect(result.candidates).toHaveLength(0);
+    expect(result.proposals).toHaveLength(3);
+    expect(result.proposals[0]).toMatchObject({ domain: "support.examplebrand.example.org", submittedByUser: true });
+    expect(result.proposals[0].url).not.toContain("#");
+    expect(result.proposals[0].matchScore).toBeGreaterThan(result.proposals.at(-1)?.matchScore ?? 1);
+  });
+
+  it("rejects unsafe manually supplied official URLs before discovery", () => {
+    expect(() => normalizeProposedOfficialUrl("http://vendor.example.org/product")).toThrow(/HTTPS/);
+    expect(() => normalizeProposedOfficialUrl("https://127.0.0.1/product")).toThrow(/private|local/);
+    expect(() => new SubmittedOfficialUrlDiscoveryProvider("https://user:secret@vendor.example.org/product")).toThrow(/HTTPS/);
+  });
+
   it("includes provider and registry versions in jobs and returns multiple product candidates", async () => {
     const stamp = Date.now();
     const provider = { id: `job-fixture-${stamp}`, discover: async () => [
@@ -98,6 +119,6 @@ describe("C3 provider-neutral catalog discovery", () => {
     expect(result?.candidates).toHaveLength(2);
     expect(result?.discovery.providerIds).toEqual([provider.id]);
     expect(result?.discovery.registryVersion).toMatch(/^[a-f0-9]{64}$/);
-    expect(result?.discovery.queryNormalizationVersion).toBe("1.2.1");
+    expect(result?.discovery.queryNormalizationVersion).toBe("1.3.0");
   });
 });

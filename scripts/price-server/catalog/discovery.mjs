@@ -1,12 +1,21 @@
 import bundledCatalog from "../../../data/skus/catalog.json" with { type: "json" };
 import { assertDiscoveryResult } from "./contracts.mjs";
-import { activeOfficialRegistry, registryForBrand } from "./registry.mjs";
-import { validateOfficialUrl } from "./security.mjs";
+import { activeOfficialRegistry, registryForBrand, registryForUrl } from "./registry.mjs";
+import { isPrivateHostname, validateOfficialUrl } from "./security.mjs";
 
-export const QUERY_NORMALIZATION_VERSION = "1.2.1";
+export const QUERY_NORMALIZATION_VERSION = "1.3.0";
 
 function now() { return new Date().toISOString(); }
 function safeText(value, limit = 240) { return String(value ?? "").slice(0, limit); }
+function comparableBrand(value) { return String(value ?? "").normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
+function comparableText(value) { return String(value ?? "").normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").replace(/\s+/g, " ").trim(); }
+function registryBrandMatches(expectedBrand, domainEntry, registry) {
+  if (!expectedBrand || !domainEntry) return false;
+  const expectedEntry = registryForBrand(expectedBrand, registry);
+  return expectedEntry
+    ? expectedEntry.brand === domainEntry.brand
+    : comparableBrand(expectedBrand) === comparableBrand(domainEntry.brand);
+}
 
 export function discoveredPageHint(rawUrl) {
   const url = new URL(rawUrl);
@@ -25,22 +34,86 @@ export function canonicalizeDiscoveredUrl(raw, registry) {
   return url.toString();
 }
 
+/** A user/search supplied URL may be proposed before it is trusted, but it
+ * must still pass the non-network URL safety boundary. It is not fetched until
+ * the user approves its domain into the governed registry. */
+export function normalizeProposedOfficialUrl(raw) {
+  const value = String(raw ?? "").trim();
+  if (!value || value.length > 2_048) throw new Error("proposed official URL is invalid");
+  let url;
+  try { url = new URL(value); } catch { throw new Error("proposed official URL is invalid"); }
+  if (url.protocol !== "https:" || url.username || url.password || url.port) throw new Error("proposed official URL must use canonical HTTPS");
+  if (isPrivateHostname(url.hostname)) throw new Error("private or local URL is blocked");
+  url.hash = "";
+  return url.toString();
+}
+
+function officialSiteFit(query, result, url) {
+  const queryTokens = [...new Set([query.brand, query.model, query.mpn, ...(query.tokens ?? [])]
+    .flatMap((value) => comparableText(value).split(" "))
+    .filter((token) => token.length >= 2))];
+  const haystack = comparableText(`${url.hostname} ${url.pathname} ${result.title ?? ""} ${result.snippet ?? ""}`);
+  const hits = queryTokens.filter((token) => haystack.includes(token));
+  const coverage = queryTokens.length ? hits.length / queryTokens.length : 0;
+  const brand = comparableText(query.brand).replace(/\s+/g, "");
+  const hostname = comparableText(url.hostname).replace(/\s+/g, "");
+  const brandSignal = Boolean(brand && (hostname.includes(brand) || comparableText(result.title).includes(comparableText(query.brand))));
+  const productPath = /\/(?:product|products|spec|specification|support|download)(?:\/|s|$)/i.test(url.pathname);
+  const marketplace = /(?:amazon|aliexpress|alibaba|ebay|jd\.com|taobao|tmall|newegg|walmart)/i.test(url.hostname)
+    || /\b(?:shop|store|retailer|review|price)\b/i.test(String(result.title ?? ""));
+  const score = Math.max(0, Math.min(1, coverage * 0.6 + (brandSignal ? 0.25 : 0) + (productPath ? 0.1 : 0) + (result.submittedByUser ? 0.2 : 0) - (marketplace ? 0.45 : 0)));
+  const reasons = [
+    ...(result.submittedByUser ? ["用户提供了这个官网入口"] : []),
+    ...(brandSignal ? ["域名或标题包含制造商品牌"] : []),
+    ...(hits.length ? [`命中 ${hits.length} 个型号/关键词`] : []),
+    ...(productPath ? ["URL 看起来是产品、规格或支持页面"] : []),
+    ...(marketplace ? ["页面具有商城或第三方特征，已降权"] : []),
+  ];
+  return { score, reasons: reasons.length ? reasons : ["搜索引擎返回的待核对站点"] };
+}
+
+export class SubmittedOfficialUrlDiscoveryProvider {
+  id = "user-submitted-url";
+  constructor(rawUrl) { this.url = normalizeProposedOfficialUrl(rawUrl); }
+  async discover({ query }) {
+    return [{
+      url: this.url,
+      title: `${safeText(query.brand ?? query.raw)} · 用户输入官网`,
+      provider: this.id,
+      retrievedAt: now(),
+      rank: 0,
+      submittedByUser: true,
+    }];
+  }
+}
+
 export class CatalogCacheDiscoveryProvider {
   id = "catalog-cache";
+  /** @param {any} catalog */
   constructor(catalog = bundledCatalog) { this.catalog = catalog; }
-  async discover({ query, limit }) {
+  async discover({ query, limit, expectedSkuId = undefined, registry = activeOfficialRegistry() }) {
+    const expected = expectedSkuId ? (this.catalog.skus ?? []).find((sku) => sku.id === expectedSkuId) : null;
+    const expectedBrand = expected?.brand ?? query.brand;
     const wanted = `${query.brand ?? ""} ${query.model ?? ""} ${query.mpn ?? ""}`.trim().toLocaleLowerCase();
-    return (this.catalog.skus ?? []).flatMap((sku) => {
+    const rows = [...(this.catalog.skus ?? [])].flatMap((sku) => {
       const aliases = Array.isArray(sku.attrs?.searchTerms) ? sku.attrs.searchTerms.join(" ") : "";
       const haystack = `${sku.brand} ${sku.model} ${sku.name} ${sku.mpn ?? ""} ${aliases}`.toLocaleLowerCase();
       const exactMpn = Boolean(query.mpn && sku.mpn && query.mpn.toLocaleLowerCase() === sku.mpn.toLocaleLowerCase());
       const significantTokens = (query.tokens ?? []).filter((token) => token.length >= 2);
       const tokenMatch = significantTokens.length >= 2 && significantTokens.every((token) => haystack.includes(token));
-      if (!exactMpn && !tokenMatch && (!wanted || !haystack.includes(wanted))) return [];
+      if (sku.id !== expected?.id && !exactMpn && !tokenMatch && (!wanted || !haystack.includes(wanted))) return [];
       const url = sku.appearance?.page ?? sku.price?.listingUrl;
       if (!url) return [];
-      return [{ url, title: sku.name, skuId: sku.id, matchKind: exactMpn ? "exact-mpn" : "brand-model", matchScore: exactMpn ? 1 : 0.85, provider: this.id, retrievedAt: now(), rank: exactMpn ? 0 : 1 }];
-    }).slice(0, limit);
+      let officialEntry;
+      try { officialEntry = registryForUrl(new URL(url), registry); } catch { return []; }
+      if (expectedBrand && !registryBrandMatches(expectedBrand, officialEntry, registry)) return [];
+      const expectedMatch = sku.id === expected?.id;
+      return [{ url, title: sku.name, skuId: sku.id, matchKind: exactMpn ? "exact-mpn" : "brand-model", matchScore: exactMpn || expectedMatch ? 1 : 0.85, provider: this.id, retrievedAt: now(), rank: exactMpn || expectedMatch ? 0 : 1 }];
+    });
+    // A server-validated SKU is a stronger identity signal than fuzzy query
+    // matching. Keep its governed official URL deterministic and ahead of
+    // sibling/family catalog hits while retaining later fallbacks if it fails.
+    return rows.sort((left, right) => Number(right.skuId === expected?.id) - Number(left.skuId === expected?.id)).slice(0, limit);
   }
 }
 
@@ -104,19 +177,25 @@ export function allowedDomainsForQuery(query, registry) {
   return [];
 }
 
-/** @param {{query:any, catalog?:any, providers?:Array<any>, limit?:number, signal?:AbortSignal, registry?:any}} options */
-export async function discoverOfficialUrls({ query, catalog = bundledCatalog, providers, limit = 10, signal = new AbortController().signal, registry }) {
+/** @param {{query:any, catalog?:any, providers?:Array<any>, limit?:number, signal?:AbortSignal, registry?:any, expectedSkuId?:string}} options */
+export async function discoverOfficialUrls({ query, catalog = bundledCatalog, providers, limit = 10, signal = new AbortController().signal, registry, expectedSkuId }) {
   const resolvedRegistry = registry ?? activeOfficialRegistry();
   const selected = providers ?? [new CatalogCacheDiscoveryProvider(catalog), new RegistrySearchDiscoveryProvider()];
   const providerRegistry = new CatalogDiscoveryRegistry(selected);
+  const expectedSku = expectedSkuId ? (catalog.skus ?? []).find((sku) => sku.id === expectedSkuId) : null;
+  const expectedBrand = expectedSku?.brand ?? query.brand;
   const allowedDomains = allowedDomainsForQuery(query, resolvedRegistry);
-  const warnings = allowedDomains.length ? [] : ["品牌未识别或未进入可信域名表；已跳过跨品牌官网搜索"];
-  const proposals = [];
+  const warnings = allowedDomains.length ? [] : ["品牌未识别或尚未进入可信域名表；开放搜索结果只会作为待确认官网，不会在用户批准前读取"];
+  const proposalsByDomain = new Map();
   const byCanonical = new Map();
-  for (const provider of providerRegistry.providers) {
+  const providerPriority = (provider) => provider.id === "user-submitted-url" ? 2 : provider.id === "catalog-cache" ? 1 : 0;
+  const executionProviders = expectedSkuId
+    ? [...providerRegistry.providers].sort((left, right) => providerPriority(right) - providerPriority(left))
+    : providerRegistry.providers;
+  for (const provider of executionProviders) {
     let results;
     try {
-      results = await provider.discover({ query, allowedDomains, limit, signal, registry: resolvedRegistry });
+      results = await provider.discover({ query, allowedDomains, limit, signal, registry: resolvedRegistry, expectedSkuId });
       if (!Array.isArray(results)) throw new Error("provider result must be an array");
     } catch (error) {
       warnings.push(`${provider.id}: ${safeText(error?.message ?? error)}`);
@@ -126,17 +205,39 @@ export async function discoverOfficialUrls({ query, catalog = bundledCatalog, pr
       try {
         const result = assertDiscoveryResult({ ...raw, provider: provider.id });
         const url = canonicalizeDiscoveredUrl(result.url, resolvedRegistry);
+        const domainEntry = registryForUrl(new URL(url), resolvedRegistry);
+        if (expectedBrand && !registryBrandMatches(expectedBrand, domainEntry, resolvedRegistry)) {
+          warnings.push(`${provider.id}: skipped cross-brand official domain ${new URL(url).hostname} for ${safeText(expectedBrand)}`);
+          continue;
+        }
         const pageHint = discoveredPageHint(url);
         if (provider.id !== "catalog-cache" && provider.id !== "registry-search" && pageHint !== "candidate") {
           warnings.push(`${provider.id}: skipped ${pageHint} page: ${url}`);
           continue;
         }
-        if (!byCanonical.has(url)) byCanonical.set(url, { ...result, url, title: safeText(result.title), snippet: safeText(result.snippet), provider: provider.id, pageHint });
+        const discovered = { ...result, url, title: safeText(result.title), snippet: safeText(result.snippet), provider: provider.id, pageHint };
+        if (!byCanonical.has(url) || (result.skuId === expectedSkuId && byCanonical.get(url)?.skuId !== expectedSkuId)) byCanonical.set(url, discovered);
       } catch (error) {
         try {
-          const proposedUrl = new URL(raw?.url);
-          if (proposedUrl.protocol === "https:" && !resolvedRegistry.brands.some((entry) => entry.domains.some((domain) => proposedUrl.hostname === domain || proposedUrl.hostname.endsWith(`.${domain}`)))) {
-            proposals.push({ brand: query.brand, domain: proposedUrl.hostname.toLocaleLowerCase(), url: proposedUrl.toString(), title: safeText(raw?.title), snippet: safeText(raw?.snippet), provider: provider.id, retrievedAt: raw?.retrievedAt });
+          const proposed = normalizeProposedOfficialUrl(raw?.url);
+          const proposedUrl = new URL(proposed);
+          if (!resolvedRegistry.brands.some((entry) => entry.domains.some((domain) => proposedUrl.hostname === domain || proposedUrl.hostname.endsWith(`.${domain}`)))) {
+            const fit = officialSiteFit(query, raw ?? {}, proposedUrl);
+            const proposal = {
+              brand: query.brand,
+              domain: proposedUrl.hostname.toLocaleLowerCase(),
+              url: proposed,
+              title: safeText(raw?.title),
+              snippet: safeText(raw?.snippet),
+              provider: provider.id,
+              retrievedAt: raw?.retrievedAt,
+              rank: Number.isInteger(raw?.rank) ? raw.rank : 0,
+              matchScore: fit.score,
+              reasons: fit.reasons,
+              submittedByUser: raw?.submittedByUser === true,
+            };
+            const prior = proposalsByDomain.get(proposal.domain);
+            if (!prior || proposal.matchScore > prior.matchScore || (proposal.matchScore === prior.matchScore && proposal.rank < prior.rank)) proposalsByDomain.set(proposal.domain, proposal);
           }
         } catch { /* malformed discovery values are warnings only */ }
         warnings.push(`${provider.id}: candidate blocked: ${safeText(error?.message ?? error)}`);
@@ -145,5 +246,13 @@ export async function discoverOfficialUrls({ query, catalog = bundledCatalog, pr
     }
     if (byCanonical.size >= limit) break;
   }
-  return { providerIds: providerRegistry.ids(), registryVersion: resolvedRegistry.version, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, candidates: [...byCanonical.values()], proposals, warnings };
+  const candidates = [...byCanonical.values()];
+  if (expectedSkuId) candidates.sort((left, right) => {
+    const priority = (entry) => entry.provider === "user-submitted-url" ? 2 : entry.skuId === expectedSkuId ? 1 : 0;
+    return priority(right) - priority(left);
+  });
+  const proposals = [...proposalsByDomain.values()]
+    .sort((left, right) => right.matchScore - left.matchScore || left.rank - right.rank || left.domain.localeCompare(right.domain))
+    .slice(0, Math.min(5, limit));
+  return { providerIds: providerRegistry.ids(), registryVersion: resolvedRegistry.version, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, candidates, proposals, warnings };
 }

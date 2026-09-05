@@ -16,8 +16,14 @@ function fakePlaywright({ finalUrl = "https://www.asus.com/final", body = "<html
     url: vi.fn(() => finalUrl),
     content: vi.fn(async () => body),
     mainFrame: vi.fn(() => page),
-    runRoute: async (url: string, main = false) => {
-      const route = { request: () => ({ url: () => url, isNavigationRequest: () => main, frame: () => page }), continue: vi.fn(), abort: vi.fn() };
+    runRoute: async (url: string, main = false, options: { method?: string; resourceType?: string } = {}) => {
+      const route = { request: () => ({
+        url: () => url,
+        method: () => options.method ?? "GET",
+        resourceType: () => options.resourceType ?? (main ? "document" : "script"),
+        isNavigationRequest: () => main,
+        frame: () => page,
+      }), continue: vi.fn(), abort: vi.fn() };
       await handler?.(route);
       return route;
     },
@@ -50,6 +56,20 @@ describe("C1 browser and DNS security", () => {
     expect(route.continue).not.toHaveBeenCalled();
   });
 
+  it("pins the official host and blocks cross-origin or mutating browser requests", async () => {
+    const fake = fakePlaywright();
+    await renderOfficialFallback("https://www.asus.com/product", { playwrightModule: fake.module, lookup: publicLookup });
+    expect(fake.module.chromium.launch).toHaveBeenCalledWith(expect.objectContaining({
+      args: [expect.stringContaining("MAP www.asus.com 93.184.216.34")],
+    }));
+    const crossOrigin = await fake.page.runRoute("https://cdn.example.org/script.js", false, { resourceType: "script" });
+    expect(crossOrigin.abort).toHaveBeenCalledWith("blockedbyclient");
+    const post = await fake.page.runRoute("https://www.asus.com/api/track", false, { method: "POST", resourceType: "fetch" });
+    expect(post.abort).toHaveBeenCalledWith("blockedbyclient");
+    const image = await fake.page.runRoute("https://www.asus.com/hero.jpg", false, { resourceType: "image" });
+    expect(image.abort).toHaveBeenCalledWith("blockedbyclient");
+  });
+
   it("reports the effective navigation status and content hash", async () => {
     const body = "<html><title>Rendered response</title></html>";
     const fake = fakePlaywright({ body, status: 206, contentType: "text/html; charset=utf-8" });
@@ -77,6 +97,56 @@ describe("C1 browser and DNS security", () => {
       lookup: publicLookup,
     });
     expect(rendered).toMatchObject({ fallback: "playwright", status: 200 });
+  });
+
+  it("falls back to stock Playwright when CloakBrowser returns an HTTP error and audits both attempts", async () => {
+    const cloak = fakePlaywright({ status: 403, body: "<html>Forbidden</html>" });
+    const stock = fakePlaywright({ status: 200, body: "<html><title>Recovered</title></html>" });
+    const rendered = await renderOfficialFallback("https://www.asus.com/product", {
+      renderer: "auto",
+      cloakModule: { launch: cloak.module.chromium.launch },
+      playwrightModule: stock.module,
+      lookup: publicLookup,
+    });
+    expect(rendered).toMatchObject({
+      fallback: "playwright",
+      status: 200,
+      rendererAttempts: [
+        { renderer: "cloakbrowser", outcome: "http-error", httpStatus: 403 },
+        { renderer: "playwright", outcome: "succeeded", httpStatus: 200 },
+      ],
+    });
+  });
+
+  it("does not retry terminal HTTP responses with a different browser fingerprint", async () => {
+    const cloak = fakePlaywright({ status: 404, body: "<html>Not found</html>" });
+    const stock = fakePlaywright({ status: 200, body: "<html>wrong retry</html>" });
+    const rendered = await renderOfficialFallback("https://www.asus.com/product", {
+      renderer: "auto",
+      cloakModule: { launch: cloak.module.chromium.launch },
+      playwrightModule: stock.module,
+      lookup: publicLookup,
+    });
+    expect(rendered).toMatchObject({ status: 404, rendererAttempts: [{ renderer: "cloakbrowser", outcome: "http-error", httpStatus: 404 }] });
+    expect(stock.module.chromium.launch).not.toHaveBeenCalled();
+  });
+
+  it("does not accept a 200 captcha page as a successful rendered product", async () => {
+    const cloak = fakePlaywright({ status: 200, body: "<html><body>Verify that you are human</body></html>" });
+    const stock = fakePlaywright({ status: 200, body: "<html><title>Recovered product</title></html>" });
+    const rendered = await renderOfficialFallback("https://www.asus.com/product", {
+      renderer: "auto",
+      cloakModule: { launch: cloak.module.chromium.launch },
+      playwrightModule: stock.module,
+      lookup: publicLookup,
+    });
+    expect(rendered).toMatchObject({
+      fallback: "playwright",
+      rendererAttempts: [
+        { renderer: "cloakbrowser", outcome: "http-error", httpStatus: 200, error: "access barrier: captcha" },
+        { renderer: "playwright", outcome: "succeeded", httpStatus: 200 },
+      ],
+    });
   });
 
   it("discovers href and data-url official PDFs in relevance order", () => {
@@ -111,6 +181,30 @@ describe("C1 browser and DNS security", () => {
     const wrong = extractExactVariantOfficialPdf(fetchResult, { mpn: "SSR-1000FX", brand: "Seasonic" });
     expect(wrong.exactVariant).toBe(false);
     expect(wrong.fields).toEqual([]);
+  });
+
+  it("does not copy a sibling variant's global PDF fields onto an exact MPN", () => {
+    const fetchResult = {
+      finalUrl: "https://seasonic.com/downloads/focus-family.pdf",
+      status: 200,
+      contentType: "application/pdf",
+      retrievedAt: "2026-08-31T00:00:00.000Z",
+      contentHash: "b".repeat(64),
+      body: [
+        "Seasonic",
+        "Dimensions: 200 mm (L) x 160 mm (W) x 90 mm (H)",
+        "SSR-1000FX 1000 W",
+        "SSR-850FX 850 W",
+      ].join("\n"),
+    };
+    const exact = extractExactVariantOfficialPdf(fetchResult, { mpn: "SSR-850FX", brand: "Seasonic" });
+    expect(exact.exactVariant).toBe(true);
+    expect(exact.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "mpn", value: "SSR-850FX" }),
+      expect.objectContaining({ field: "power.ratedW", value: 850 }),
+    ]));
+    expect(exact.fields.some((field) => field.field.startsWith("dims."))).toBe(false);
+    expect(exact.warnings.join(" ")).toContain("competing variants");
   });
 
   it("requests renderer fallback when category-required fields are absent", () => {
@@ -226,6 +320,7 @@ describe("C1 browser and DNS security", () => {
 
     const result = await inspectUrl({ url, query: "Seasonic Focus Plus Gold 850 SSR-850FX", brand: "Seasonic", model: "Focus Plus Gold 850", mpn: "SSR-850FX", category: "psu" }, { fetcher, browserFallback, responseCache: new Map() });
 
+    expect(fetcher).toHaveBeenCalledWith(pdfUrl, expect.objectContaining({ expectedBrand: "Seasonic", maxBytes: 15_000_000 }));
     expect(result.source).toMatchObject({ fetchMode: "cloakbrowser", supportingDocuments: [expect.objectContaining({ finalUrl: pdfUrl, exactVariant: true })] });
     expect(result.identity).toMatchObject({ verdict: "exact", agentReviewRequired: false });
     expect(result.extraction).toMatchObject({ status: "ok", adapter: expect.stringContaining("official-document"), supportingDocuments: [expect.objectContaining({ contentHash: hash(pdfBody) })] });

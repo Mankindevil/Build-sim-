@@ -24,6 +24,10 @@ function clean(value: string): string {
   return value.normalize("NFKC").replace(/[‐‑‒–—−]/g, "-").replace(/[，、；]/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function comparableIdentity(value: string | undefined): string {
+  return clean(value ?? "").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
 function findBrand(normalized: string): string | undefined {
   const lower = normalized.toLocaleLowerCase();
   for (const [brand, aliases] of BRANDS) {
@@ -73,10 +77,15 @@ export function normalizeModelQuery(raw: string, overrides: NormalizedModelQuery
   const category = overrides.category ?? findCategory(normalized);
   const capacity = findCapacity(normalized);
   const iface = findInterface(normalized);
-  const mpn = overrides.mpn ?? (overrides.model ? undefined : findMpn(normalized, brand, category));
+  const suppliedMpn = overrides.mpn ?? (overrides.model ? undefined : findMpn(normalized, brand, category));
   const withoutBrand = brand ? normalized.replace(new RegExp(brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ") : normalized;
-  const withoutMpn = mpn ? withoutBrand.replace(mpn, " ") : withoutBrand;
+  const withoutMpn = suppliedMpn ? withoutBrand.replace(suppliedMpn, " ") : withoutBrand;
   const model = overrides.model ?? (withoutMpn.replace(/\b\d+(?:\.\d+)?\s*(?:tb|gb|mb)\b/ig, " ").replace(new RegExp(INTERFACES.join("|"), "ig"), " ").replace(/\s+/g, " ").trim() || undefined);
+  // A catalog often stores a model code in both `model` and the historical
+  // `mpn` slot. It is not an independent discriminator in that case and must
+  // not force an exact-MPN document lookup or make an otherwise exact product
+  // page look incomplete.
+  const mpn = suppliedMpn && comparableIdentity(suppliedMpn) !== comparableIdentity(model) ? suppliedMpn : undefined;
   const tokens = normalized.toLocaleLowerCase().split(/[^a-z0-9\u4e00-\u9fff]+/).filter(Boolean);
   return { raw, ...(brand ? { brand } : {}), ...(model ? { model } : {}), ...(mpn ? { mpn } : {}), ...(category ? { category } : {}), ...(capacity ? { capacity } : {}), ...(iface ? { interface: iface } : {}), tokens, locale: overrides.locale ?? "zh-CN" };
 }

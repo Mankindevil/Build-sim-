@@ -19,6 +19,7 @@ function timeout(promise, timeoutMs) {
 }
 function text(value) { return String(value ?? "").normalize("NFKC").replace(/[‐‑‒–—−]/g, "-").replace(/\s+/g, " ").trim(); }
 function comparable(value) { return text(value).toLocaleLowerCase().replace(/[^a-z0-9]+/g, ""); }
+function comparableBrand(value) { return text(value).toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
 function boundedNumber(value, min, max, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
@@ -121,9 +122,19 @@ const STRONG_GPU_MODELS = [
 ];
 
 const GENERIC_MODEL_PATTERN = /[A-Za-z0-9]+(?:[-_./][A-Za-z0-9]+)+|[A-Za-z]{1,12}\d{2,}[A-Za-z0-9-]*/g;
+const SHORT_CATALOG_IDENTITY_MAX_LENGTH = 4;
 const REJECTED_MODEL_TOKEN = /^(?:20\d{2}|\d{8,}|order|total|amount)$/i;
 const ORDER_ID_LINE = /(?:\border\s*(?:id|no\.?|number)?|\btransaction\s*(?:id|no\.?|number)|订单(?:号|编号)?|交易号|流水号)\s*[:：#-]?/iu;
+const PURE_IDENTIFIER_LINE = /^(?:(?:order|transaction)\s*(?:id|no\.?|number)?|(?:serial|sequence)\s*(?:id|no\.?|number)?|s\/?n|订单(?:号|编号)?|交易号|流水号|序列号|序号)\s*[:：#-]?\s*[a-z0-9][a-z0-9._/-]*$/iu;
+const IDENTIFIER_PREFIX_LINE = /(?:(?:order|transaction)\s*(?:id|no\.?|number)?|(?:serial|sequence)\s*(?:id|no\.?|number)?|s\/?n|订单(?:号|编号)?|交易号|流水号|序列号|序号)\s*[:：#-]?/iu;
+const PRODUCT_CONTEXT_CUE = /(?:商品|产品|货品|品名)|\b(?:item|product|qty|quantity)\b/iu;
 const NAVIGATION_LINE = /(?:品牌馆|品牌专区|店铺首页|商家店铺|导航|\bbrand\s+store\b|\bshop\s+home\b)/iu;
+const PRODUCT_BRAND_FIELD_LINE = /^(?:(?:商品|产品|货品)\s*)?(?:品牌|brand)\s*[:：]/iu;
+const PRODUCT_MODEL_FIELD_LINE = /^(?:(?:商品|产品|货品)\s*)?(?:型号|model|mpn)\s*[:：]/iu;
+
+function identifierOnlyContext(line) {
+  return PURE_IDENTIFIER_LINE.test(line) || (IDENTIFIER_PREFIX_LINE.test(line) && !PRODUCT_CONTEXT_CUE.test(line));
+}
 
 function ocrLines(value) {
   return String(value ?? "")
@@ -190,6 +201,40 @@ function nearestBrand(lines, occurrences, lineIndex, modelIndex, modelLength, fa
     .sort((a, b) => b.score - a.score)[0]?.brand ?? null;
 }
 
+function boundedIdentityOccurrences(lines, identity) {
+  const parts = text(identity).toLocaleLowerCase().match(/[a-z0-9]+/g) ?? [];
+  if (!parts.length) return [];
+  const source = `(^|[^a-z0-9])(${parts.map(escaped).join("[^a-z0-9]*")})(?=$|[^a-z0-9])`;
+  return lines.flatMap((line, lineIndex) => {
+    if (identifierOnlyContext(line)) return [];
+    return [...line.matchAll(new RegExp(source, "ig"))].map((match) => ({
+      lineIndex,
+      index: Number(match.index ?? 0) + String(match[1] ?? "").length,
+      length: String(match[2] ?? identity).length,
+    }));
+  });
+}
+
+function shortCatalogIdentityMatch(lines, identities, sku, brandMatches) {
+  if (!identities.length || !sku?.brand) return null;
+  const expectedBrand = comparableBrand(sku.brand);
+  for (const identity of identities) {
+    for (const occurrence of boundedIdentityOccurrences(lines, identity.value)) {
+      const sameLineBrands = brandMatches
+        .filter((entry) => entry.lineIndex === occurrence.lineIndex && !NAVIGATION_LINE.test(lines[entry.lineIndex]))
+        .sort((a, b) => Math.abs(a.index + a.length / 2 - (occurrence.index + occurrence.length / 2)) - Math.abs(b.index + b.length / 2 - (occurrence.index + occurrence.length / 2)));
+      if (sameLineBrands[0] && comparableBrand(sameLineBrands[0].brand) === expectedBrand) return { ...identity, occurrence };
+
+      if (!PRODUCT_MODEL_FIELD_LINE.test(lines[occurrence.lineIndex])) continue;
+      const pairedBrand = brandMatches.find((entry) => Math.abs(entry.lineIndex - occurrence.lineIndex) === 1
+        && PRODUCT_BRAND_FIELD_LINE.test(lines[entry.lineIndex])
+        && comparableBrand(entry.brand) === expectedBrand);
+      if (pairedBrand) return { ...identity, occurrence };
+    }
+  }
+  return null;
+}
+
 function normalizedGpuModel(value) {
   return text(value).replace(/\boverclocked\b/gi, "OC");
 }
@@ -199,6 +244,7 @@ function detectStrongGpuIdentity(lines, brandEntries) {
   const detected = [];
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex];
+    if (identifierOnlyContext(line)) continue;
     for (const definition of STRONG_GPU_MODELS) {
       const match = line.match(definition.pattern);
       if (!match?.[1]) continue;
@@ -235,22 +281,51 @@ function quantityFromText(raw) {
 }
 
 function matchCatalog(raw, catalog) {
-  const haystack = comparable(raw);
+  const lines = ocrLines(raw);
+  const brandMatches = brandOccurrences(lines, governedBrandCandidates(catalog));
   const rows = (catalog?.skus ?? []).flatMap((sku) => {
-    const identities = [sku.mpn, sku.model, sku.name, ...(Array.isArray(sku.attrs?.searchTerms) ? sku.attrs.searchTerms : [])].filter(Boolean).map((value) => comparable(value));
-    const exact = identities.find((identity) => identity.length >= 2 && haystack.includes(identity));
+    const identities = [
+      ["mpn", sku.mpn],
+      ["model", sku.model],
+      ["name", sku.name],
+      ...(Array.isArray(sku.attrs?.searchTerms) ? sku.attrs.searchTerms.map((value) => ["search-term", value]) : []),
+    ].filter(([, value]) => value).map(([kind, value]) => ({ kind, value, normalized: comparable(value) }));
+    const matches = identities.flatMap((identity) => identity.normalized.length >= 2
+      ? boundedIdentityOccurrences(lines, identity.value).map((occurrence) => ({ ...identity, occurrence }))
+      : []);
+    const primaryMatches = matches.filter((match) => match.kind === "mpn" || match.kind === "model");
+    const shortPrimaryIdentities = identities.filter((identity) => (identity.kind === "mpn" || identity.kind === "model")
+      && identity.normalized.length >= 2
+      && identity.normalized.length <= SHORT_CATALOG_IDENTITY_MAX_LENGTH);
+    const longPrimaryMatch = primaryMatches.find((match) => match.normalized.length > SHORT_CATALOG_IDENTITY_MAX_LENGTH);
+    const shortIdentity = !longPrimaryMatch && shortPrimaryIdentities.length
+      ? shortCatalogIdentityMatch(lines, shortPrimaryIdentities, sku, brandMatches)
+      : null;
+    // Every primary identity is matched against complete OCR tokens. Compact
+    // identities add a stricter product-context gate so an adjacent brand line
+    // or a larger serial/order token cannot create a deterministic local hit.
+    const exact = longPrimaryMatch ?? (shortPrimaryIdentities.length ? shortIdentity : matches[0]);
     if (!exact) return [];
-    const kind = sku.mpn && haystack.includes(comparable(sku.mpn)) ? "exact-mpn" : "brand-model";
-    return [{ sku, score: kind === "exact-mpn" ? 1 : Math.min(0.98, 0.72 + exact.length / 100), kind }];
+    const kind = exact.kind === "mpn" ? "exact-mpn" : "brand-model";
+    return [{ sku, score: kind === "exact-mpn" ? 1 : Math.min(0.98, 0.72 + exact.normalized.length / 100), kind }];
   });
-  const exactMatch = rows.sort((a, b) => b.score - a.score)[0];
-  if (exactMatch) return exactMatch;
+  const ranked = rows.sort((a, b) => b.score - a.score);
+  const exactMatch = ranked[0];
+  if (exactMatch) {
+    const equallyStrong = ranked.filter((row) => row.score === exactMatch.score);
+    // One receipt can contain multiple products, and catalogs can temporarily
+    // contain duplicate identities. Neither situation is a deterministic 100%
+    // match, so leave it for review instead of selecting insertion order.
+    if (new Set(equallyStrong.map((row) => row.sku.id)).size === 1) return exactMatch;
+    return null;
+  }
 
   // Transaction titles often omit a product-family prefix or revision, for
   // example "GX-850" instead of "FOCUS GX-850 V5". Treat a sufficiently
   // specific model fragment as a catalog match only when it identifies one SKU
   // unambiguously; generic fragments such as "850" must remain reviewable.
-  const fragments = (text(raw).match(/[A-Za-z0-9]+(?:[-_./][A-Za-z0-9]+)+|[A-Za-z]{1,12}\d{2,}[A-Za-z0-9-]*/g) ?? [])
+  const fragments = lines.filter((line) => !identifierOnlyContext(line))
+    .flatMap((line) => line.match(/[A-Za-z0-9]+(?:[-_./][A-Za-z0-9]+)+|[A-Za-z]{1,12}\d{2,}[A-Za-z0-9-]*/g) ?? [])
     .map((value) => comparable(value))
     .filter((value) => value.length >= 5 && /[a-z]{2,}/.test(value) && /\d{2,}/.test(value));
   for (const fragment of [...new Set(fragments)].sort((a, b) => b.length - a.length)) {
@@ -271,6 +346,7 @@ function detectIdentity(raw, catalog) {
 
   const occurrences = brandOccurrences(lines, brandEntries);
   const tokens = lines.flatMap((line, lineIndex) => {
+    if (identifierOnlyContext(line)) return [];
     const lineBrands = occurrences.filter((entry) => entry.lineIndex === lineIndex && !NAVIGATION_LINE.test(line));
     return [...line.matchAll(new RegExp(GENERIC_MODEL_PATTERN.source, "g"))].flatMap((match) => {
       const token = String(match[0] ?? "");
@@ -286,7 +362,9 @@ function detectIdentity(raw, catalog) {
   const model = modelCandidate?.token;
   const brand = modelCandidate
     ? nearestBrand(lines, occurrences, modelCandidate.lineIndex, modelCandidate.index, modelCandidate.token.length)
-    : occurrences.find((entry) => !NAVIGATION_LINE.test(lines[entry.lineIndex]) && !ORDER_ID_LINE.test(lines[entry.lineIndex]))?.brand ?? null;
+    : occurrences.find((entry) => !NAVIGATION_LINE.test(lines[entry.lineIndex])
+      && !ORDER_ID_LINE.test(lines[entry.lineIndex])
+      && !identifierOnlyContext(lines[entry.lineIndex]))?.brand ?? null;
   const categoryText = modelCandidate?.lineIndex !== undefined ? lines[modelCandidate.lineIndex].toLocaleLowerCase() : normalized.toLocaleLowerCase();
   const explicitCategory = CATEGORY_WORDS.find(([, words]) => words.some((word) => categoryText.includes(word.toLocaleLowerCase())))?.[0];
   const modelFragment = comparable(model);
@@ -306,7 +384,7 @@ function detectIdentity(raw, catalog) {
 export function analyzeTransactionText(raw, catalog, meta = {}) {
   const normalized = text(raw);
   if (!normalized) throw new Error("没有从截图中识别到可用文字");
-  const catalogMatch = matchCatalog(normalized, catalog);
+  const catalogMatch = matchCatalog(raw, catalog);
   const identity = catalogMatch
     ? { brand: catalogMatch.sku.brand, model: catalogMatch.sku.model, category: catalogMatch.sku.category, query: catalogMatch.sku.mpn ?? `${catalogMatch.sku.brand} ${catalogMatch.sku.model}` }
     : detectIdentity(raw, catalog);

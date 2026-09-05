@@ -23,9 +23,35 @@ function clean(value) {
 }
 
 function comparable(value) { return clean(value).replace(/[^a-z0-9]+/g, ""); }
+function comparableBrand(value) { return String(value ?? "").normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
 function first(text, pattern, map = (match) => match[1]?.toLocaleLowerCase()) { const match = text.match(pattern); return match ? map(match) : undefined; }
 function fieldValue(fields, name) { return fields?.find((field) => field.field === name)?.value; }
 function unique(values) { return [...new Set(values.filter(Boolean))]; }
+function brandMatches(left, right, officialEntry) {
+  const leftKey = comparableBrand(left);
+  const rightKey = comparableBrand(right);
+  if (!leftKey || !rightKey) return false;
+  if (leftKey === rightKey) return true;
+  const registryNames = [officialEntry?.brand, ...(officialEntry?.aliases ?? [])].filter(Boolean).map(comparableBrand).filter(Boolean);
+  return registryNames.includes(leftKey) && registryNames.includes(rightKey);
+}
+
+function explicitIdentityField(fields, name) {
+  return fields?.find((field) => field.field === name
+    && !(name === "brand" && field.extractor === "official-domain-registry-v1")
+    && !(name === "model" && String(field.locator ?? "").trim().toLocaleLowerCase() === "html title fallback"));
+}
+
+function softNotFound(fetchResult, extracted) {
+  if (fetchResult?.contentType?.includes("pdf")) return false;
+  const body = String(fetchResult?.body ?? "");
+  const visible = `${extracted?.title ?? ""} ${body
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")}`.replace(/\s+/g, " ").trim();
+  if (!visible || visible.length > 2_000) return false;
+  return /(?:^404(?:\s|$)|\b404\b.{0,80}\b(?:error|not found|page)\b|\b(?:page|product|content)\s+(?:was\s+)?not found\b|^not found\b|页面不存在|找不到(?:该|此)?页面)/i.test(visible);
+}
 
 function identityTokens(value) {
   return unique(clean(value).split(/[^a-z0-9]+/).filter((token) => token.length >= 2 && !GENERIC_TOKENS.has(token)));
@@ -49,7 +75,10 @@ function wattage(text) {
 function fingerprint(textValue, category, explicit = {}) {
   const text = clean(textValue);
   const result = {
-    brand: explicit.brand ? clean(explicit.brand) : undefined,
+    // Brand identity must retain non-ASCII letters. The generic product-token
+    // cleaner is intentionally ASCII-focused and would collapse every Chinese
+    // brand to the same empty value.
+    brand: explicit.brand ? comparableBrand(explicit.brand) : undefined,
     mpn: explicit.mpn ? comparable(explicit.mpn) : undefined,
     model: explicit.model ? clean(explicit.model) : undefined,
     // Official pages often publish capacity and memory technology together
@@ -93,6 +122,7 @@ function evidenceId(fields, name) { return fields?.find((field) => field.field =
 export function classifyOfficialPage(fetchResult, extracted, urlValue = fetchResult?.finalUrl) {
   const status = Number(fetchResult?.status ?? 0);
   if (status < 200 || status >= 300 || extracted?.accessBarrier) return { kind: "blocked", reasons: [`official fetch returned HTTP ${status || "unknown"}`] };
+  if (softNotFound(fetchResult, extracted)) return { kind: "blocked", reasons: ["official page is a soft not-found response"] };
   let url;
   try { url = new URL(urlValue); } catch { return { kind: "unknown", reasons: ["canonical URL is invalid"] }; }
   const path = url.pathname.toLocaleLowerCase();
@@ -102,7 +132,8 @@ export function classifyOfficialPage(fetchResult, extracted, urlValue = fetchRes
   if (/\/(?:news|blog|insights|press)(?:\/|$)/.test(path)) return { kind: "article", reasons: ["official editorial path"] };
   if (/\/(?:support|supportonly|helpdesk|download|manual)(?:\/|$|_)/.test(path)) return { kind: "support", reasons: ["official support path"] };
   const fields = extracted?.fields ?? [];
-  const identityCount = fields.filter((field) => ["brand", "model", "mpn"].includes(field.field)).length;
+  const identityCount = new Set(fields.filter((field) => ["brand", "model", "mpn"].includes(field.field)
+    && explicitIdentityField(fields, field.field) === field).map((field) => field.field)).size;
   const specificationCount = fields.filter((field) => /^(?:dims|power|attrs|harness)\./.test(field.field)).length;
   if (/specification|specifications|specs/.test(path) && identityCount) return { kind: "spec", reasons: ["official specification path with identity fields"] };
   if (identityCount >= 2 && specificationCount >= 1) return { kind: "product", reasons: ["identity and specification fields extracted"] };
@@ -119,17 +150,23 @@ export function assessCatalogIdentity(candidate, extracted, officialEntry) {
   // Discovery titles/snippets are intentionally excluded: only the fetched
   // official artifact, its canonical URL and extracted fields may prove identity.
   const candidateText = [extracted?.title, fieldValue(fields, "model"), fieldValue(fields, "mpn"), candidate.canonicalUrl].filter(Boolean).join(" ");
+  const requestedModel = candidate.query?.model ?? candidate.model;
+  const requestedMpn = candidate.query?.mpn ?? candidate.mpn;
+  const distinctRequestedMpn = requestedMpn && comparable(requestedMpn) !== comparable(requestedModel) ? requestedMpn : undefined;
+  const explicitBrand = explicitIdentityField(fields, "brand");
+  const explicitModel = explicitIdentityField(fields, "model");
+  const explicitMpn = explicitIdentityField(fields, "mpn");
   const query = fingerprint(queryText, category, {
     brand: candidate.query?.brand ?? candidate.brand,
-    model: candidate.query?.model ?? candidate.model,
-    mpn: candidate.query?.mpn ?? candidate.mpn,
+    model: requestedModel,
+    mpn: distinctRequestedMpn,
     capacity: candidate.query?.capacity,
     interface: candidate.query?.interface,
   });
   const found = fingerprint(candidateText, category, {
-    brand: fieldValue(fields, "brand") ?? officialEntry?.brand,
-    model: fieldValue(fields, "model"),
-    mpn: fieldValue(fields, "mpn"),
+    brand: explicitBrand?.value ?? officialEntry?.brand,
+    model: explicitModel?.value,
+    mpn: explicitMpn?.value,
     capacity: fieldValue(fields, "attrs.capacity"),
     interface: fieldValue(fields, "attrs.interface"),
   });
@@ -140,11 +177,17 @@ export function assessCatalogIdentity(candidate, extracted, officialEntry) {
     if (left === undefined || left === "") return;
     if (right === undefined || right === "") { unknowns.push(field); return; }
     const entry = { field, input: left, candidate: right, ...(provenanceId ? { evidenceId: provenanceId } : {}) };
-    if (String(left) === String(right)) criticalMatches.push(entry); else criticalConflicts.push(entry);
+    if (field === "brand" ? brandMatches(left, right, officialEntry) : String(left) === String(right)) criticalMatches.push(entry); else criticalConflicts.push(entry);
   };
-  compare("brand", query.brand, found.brand, evidenceId(fields, "brand"));
-  compare("mpn", query.mpn, found.mpn, evidenceId(fields, "mpn"));
-  const modelEvidenceId = evidenceId(fields, "model");
+  const officialDomainBrands = unique([officialEntry?.brand, ...(candidate.officialDomainBrands ?? [])]);
+  for (const domainBrand of officialDomainBrands) {
+    if (query.brand && !brandMatches(query.brand, domainBrand, officialEntry)) {
+      criticalConflicts.push({ field: "officialDomainBrand", input: query.brand, candidate: clean(domainBrand) });
+    }
+  }
+  compare("brand", query.brand, found.brand, explicitBrand?.provenanceId);
+  compare("mpn", query.mpn, found.mpn, explicitMpn?.provenanceId);
+  const modelEvidenceId = explicitModel?.provenanceId;
   for (const dimension of CATEGORY_DIMENSIONS[category] ?? ["capacity", "interface", "generation"]) {
     const field = ["capacity", "memoryTechnology"].includes(dimension) ? "attrs.capacity" : dimension === "interface" ? "attrs.interface" : dimension;
     compare(dimension, query[dimension], found[dimension], evidenceId(fields, field) ?? modelEvidenceId);
@@ -157,11 +200,11 @@ export function assessCatalogIdentity(candidate, extracted, officialEntry) {
   const foundTokenSet = new Set(found.tokens);
   const overlap = queryTokens.filter((token) => foundTokenSet.has(token));
   const tokenCoverage = queryTokens.length ? overlap.length / queryTokens.length : 0;
-  const brandProven = Boolean(query.brand && found.brand && comparable(query.brand) === comparable(found.brand));
+  const brandProven = Boolean(query.brand && found.brand && brandMatches(query.brand, found.brand, officialEntry));
   const comparedDimensions = criticalMatches.filter((entry) => entry.field !== "brand" && entry.field !== "mpn").length;
   const missingCritical = unknowns.length > 0;
   const strongStructured = brandProven && comparedDimensions >= 2 && !missingCritical && tokenCoverage >= 0.55;
-  const exactModel = Boolean(query.model && found.model && comparable(query.model) === comparable(found.model) && brandProven);
+  const exactModel = Boolean(query.model && found.model && comparable(query.model) === comparable(found.model) && brandProven && !missingCritical);
   if (exactMpn || exactModel || strongStructured) {
     return { verdict: "exact", score: exactMpn ? 1 : exactModel ? 0.95 : Math.min(0.94, 0.75 + tokenCoverage * 0.2), criticalMatches, criticalConflicts, unknowns: [], queryFingerprint: query, candidateFingerprint: found, tokenCoverage, reasons: exactMpn ? ["official MPN exactly matches"] : exactModel ? ["official brand and model exactly match"] : ["all supplied category discriminators match"], agentReviewRequired: false };
   }

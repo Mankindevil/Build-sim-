@@ -6,12 +6,12 @@ import { describe, expect, it, afterEach, vi } from "vitest";
 import { normalizeModelQuery } from "../src/catalog-search/normalize";
 import { normalizeModelQuery as normalizeServerModelQuery } from "../scripts/price-server/catalog/normalize.mjs";
 import { extractOfficialHtml, extractOfficialPdf } from "../scripts/price-server/catalog/extract.mjs";
-import { assessCatalogIdentity } from "../scripts/price-server/catalog/identity.mjs";
+import { assessCatalogIdentity, classifyOfficialPage } from "../scripts/price-server/catalog/identity.mjs";
 import { extractPdfText, fetchOfficial } from "../scripts/price-server/catalog/fetch.mjs";
 import { validateOfficialUrl, validateRedirect } from "../scripts/price-server/catalog/security.mjs";
 import { getJob, queueSearch, waitForJob } from "../scripts/price-server/catalog/service.mjs";
 import { OFFICIAL_ADAPTERS, adapterForUrl } from "../scripts/price-server/catalog/adapters.mjs";
-import { MsiProductDiscoveryProvider } from "../scripts/price-server/catalog/discovery.mjs";
+import { CatalogCacheDiscoveryProvider, MsiProductDiscoveryProvider } from "../scripts/price-server/catalog/discovery.mjs";
 import { transactionCatalogSearchRequest } from "../scripts/price-server/transactions/catalog-search-request.mjs";
 import { acceptOfficial, confirmDraft, createDraft, rejectDraft, rollbackCatalogAcceptance } from "../scripts/price-server/catalog/write.mjs";
 import { catalogCandidateInputHash } from "../scripts/price-server/catalog/contracts.mjs";
@@ -107,6 +107,26 @@ describe("G3 model query normalization", () => {
       })).toMatchObject({ model: "Pro WS W680M-ACE SE", mpn: "90MB1A20-M0EAY0" });
     }
   });
+
+  it("does not treat a duplicated catalog model as an independent MPN", () => {
+    for (const normalize of [normalizeModelQuery, normalizeServerModelQuery]) {
+      expect(normalize("JONSBO N6", { brand: "JONSBO", model: "N6", mpn: "N6", category: "case" })).toMatchObject({
+        brand: "JONSBO",
+        model: "N6",
+        category: "case",
+      });
+      expect(normalize("JONSBO N6", { brand: "JONSBO", model: "N6", mpn: "N6", category: "case" }).mpn).toBeUndefined();
+    }
+  });
+
+  it("keeps distinct non-Latin model and MPN identities separate", () => {
+    for (const normalize of [normalizeModelQuery, normalizeServerModelQuery]) {
+      expect(normalize("示例品牌 星舰", { brand: "示例品牌", model: "星舰", mpn: "远征", category: "accessory" })).toMatchObject({
+        model: "星舰",
+        mpn: "远征",
+      });
+    }
+  });
 });
 
 describe("G3 official extraction and provenance", () => {
@@ -186,6 +206,36 @@ describe("G3 official extraction and provenance", () => {
       expect.objectContaining({ field: "mpn", value: "WD80EFPX" }),
       expect.objectContaining({ field: "power.ratedW", value: 850 }),
     ]));
+  });
+
+  it("parses the real JONSBO N6 DOM shape and keeps explicit Model above the site title", async () => {
+    const body = await readFile(new URL("./fixtures/catalog/jonsbo-n6-product.rendered.html", import.meta.url), "utf8");
+    const result = {
+      ...fetchResult,
+      requestedUrl: "https://www.jonsbo.com/en/products/N6Black.html",
+      finalUrl: "https://www.jonsbo.com/en/products/N6Black.html",
+      body,
+      contentHash: crypto.createHash("sha256").update(body).digest("hex"),
+    };
+    const extracted = extractOfficialHtml(result);
+    expect(extracted.fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ field: "model", value: "N6" }),
+      expect.objectContaining({ field: "dims.widthMm", value: 305 }),
+      expect.objectContaining({ field: "dims.lengthMm", value: 353 }),
+      expect.objectContaining({ field: "dims.heightMm", value: 318 }),
+      expect.objectContaining({ field: "dims.slots", value: 4 }),
+    ]));
+    expect(extracted.fields.some((field) => field.field === "model" && field.value === "乔思伯JONSBO")).toBe(false);
+    expect(extracted.conflicts).toHaveLength(0);
+    expect(classifyOfficialPage(result, extracted).kind).toBe("spec");
+    const query = normalizeServerModelQuery("JONSBO N6", { brand: "JONSBO", model: "N6", mpn: "N6", category: "case" });
+    expect(assessCatalogIdentity({ query, category: "case", canonicalUrl: result.finalUrl }, extracted, { brand: "JONSBO" }).verdict).toBe("exact");
+  });
+
+  it("does not borrow a model value across nested category-filter markup", () => {
+    const body = `<title>Cases</title><div class="filter"><span>Model</span><div>sort</div><span>N6</span></div>`;
+    const extracted = extractOfficialHtml({ ...fetchResult, body, contentHash: "nested-filter-page" });
+    expect(extracted.fields.some((field) => field.field === "model" && field.value === "N6")).toBe(false);
   });
 
   it("keeps conflicting field values and missing facts visible", async () => {
@@ -362,6 +412,74 @@ describe("G3 catalog search job", () => {
       expect(draft).toMatchObject({ status: "draft", missing: [], proposed: { dims: { lengthMm: 232, thicknessMm: 52, slots: 3 }, power: { tgpW: 220 } } });
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("matches JONSBO N6 through the real transaction search path without needing its manual", async () => {
+    const persistRoot = await mkdtemp(path.join(os.tmpdir(), "build-sim-jonsbo-n6-"));
+    const body = await readFile(new URL("./fixtures/catalog/jonsbo-n6-product.rendered.html", import.meta.url), "utf8");
+    const url = "https://www.jonsbo.com/en/products/N6Black.html";
+    const result = {
+      ...fetchResult,
+      requestedUrl: url,
+      finalUrl: url,
+      body,
+      contentHash: crypto.createHash("sha256").update(body).digest("hex"),
+    };
+    const catalog: SkuCatalog = {
+      schemaVersion: "2.0.0",
+      updatedAt: "2026-09-01",
+      skus: [{
+        id: "case.jonsbo-n6",
+        category: "case",
+        brand: "JONSBO",
+        model: "N6",
+        name: "JONSBO N6",
+        mpn: "N6",
+        dims: { evidence: "unknown" },
+        power: { evidence: "unknown" },
+        price: { currency: "CNY", historicalLowEvidence: "unknown", currentEvidence: "unknown" },
+        appearance: { page: url },
+      }],
+    };
+    try {
+      const request = transactionCatalogSearchRequest({
+        query: "JONSBO N6",
+        brand: "JONSBO",
+        model: "N6",
+        mpn: "N6",
+        expectedSkuId: "case.jonsbo-n6",
+        category: "case",
+        requestId: "transaction-jonsbo-n6-regression",
+        trigger: "user-confirmed-review",
+      });
+      const queued = await queueSearch(request, {
+        persistRoot,
+        catalog,
+        discoveryProviders: [new CatalogCacheDiscoveryProvider(catalog)],
+        fetcher: vi.fn(async (requestedUrl: string) => {
+          expect(requestedUrl).toBe(url);
+          return result;
+        }),
+        inspect: true,
+      });
+      const completed = await waitForJob(queued.jobId, 5_000, { persistRoot });
+      expect(completed).toMatchObject({ status: "completed", summary: { discovered: 1, fetchSucceeded: 1, productPages: 1, exact: 1, conflicts: 0 } });
+      expect(completed?.candidates).toHaveLength(1);
+      expect(completed?.candidates[0]).toMatchObject({
+        skuId: "case.jonsbo-n6",
+        canonicalUrl: url,
+        official: { trustStatus: "trusted", pageKind: "spec" },
+        identity: { verdict: "exact" },
+        extraction: { status: "ok", fieldsMissing: 0 },
+      });
+      expect(completed?.candidates[0]?.fields).toEqual(expect.arrayContaining([
+        expect.objectContaining({ field: "brand", value: "JONSBO", extractor: "official-domain-registry-v1" }),
+        expect.objectContaining({ field: "model", value: "N6" }),
+        expect.objectContaining({ field: "dims.lengthMm", value: 353 }),
+      ]));
+    } finally {
+      await rm(persistRoot, { recursive: true, force: true });
     }
   });
 

@@ -26,6 +26,25 @@ describe("C4 SearXNG discovery provider", () => {
     expect(result.warnings.join(" ")).toContain("blocked");
   });
 
+  it("uses bounded open-web searches for unknown brands without trusting the results", async () => {
+    const searches: string[] = [];
+    const fetchImpl = vi.fn(async (input: URL) => {
+      searches.push(String(input.searchParams.get("q")));
+      return new Response(JSON.stringify({ results: [{ url: "https://products.example.org/model-x", title: "Example Model X official product" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const provider = new SearXngDiscoveryProvider({ fetchImpl, resultLimit: 10, registryVersion: `unknown-${Date.now()}` });
+    const unknown = normalizeModelQuery("ExampleBrand Model-X", { brand: "ExampleBrand", category: "storage" });
+    const results = await provider.discover({ query: unknown, allowedDomains: [], limit: 10, signal: new AbortController().signal });
+    expect(searches).toHaveLength(2);
+    expect(searches.every((entry) => !entry.includes("site:"))).toBe(true);
+    expect(searches.some((entry) => entry.includes("official product specifications"))).toBe(true);
+    expect(results).toHaveLength(1);
+    expect(results[0].url).toBe("https://products.example.org/model-x");
+  });
+
   it("rejects non-loopback endpoints and range-checks env configuration", () => {
     expect(() => validateSearXngBaseUrl("https://search.example.com")).toThrow(/loopback/);
     expect(() => createSearXngDiscoveryProvider({ SEARXNG_TIMEOUT_MS: "999999" })).toThrow(/between/);

@@ -128,7 +128,12 @@ async function resolveOfficialTarget(rawUrl, options) {
 }
 
 export async function fetchOfficial(rawUrl, options = {}) {
-  const limits = { ...DEFAULT_FETCH_LIMITS, ...options };
+  const limits = {
+    maxBytes: boundedEnvInt("CATALOG_FETCH_MAX_BYTES", DEFAULT_FETCH_LIMITS.maxBytes, 100_000, 25_000_000),
+    timeoutMs: boundedEnvInt("CATALOG_FETCH_TIMEOUT_MS", DEFAULT_FETCH_LIMITS.timeoutMs, 1_000, 60_000),
+    maxRedirects: boundedEnvInt("CATALOG_FETCH_MAX_REDIRECTS", DEFAULT_FETCH_LIMITS.maxRedirects, 0, 10),
+    ...options,
+  };
   const fetchImpl = options.fetchImpl;
   const requestHeaders = conditionalRequestHeaders(options.requestHeaders);
   let target = await resolveOfficialTarget(rawUrl, limits);

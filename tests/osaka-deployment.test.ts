@@ -25,6 +25,11 @@ describe("Osaka lifecycle deployment", () => {
     expect(compose).toContain("../../runtime:/app/runtime");
     expect(env).toContain("WORKSPACE_SERVER_PORT=5176");
     expect(env).toContain("PLAN_REPOSITORY_ROOT=/app/runtime/plans");
+    expect(env).toContain("CATALOG_OFFICIAL_BROWSER_RENDERER=auto");
+    expect(env).toContain("CATALOG_BROWSER_MAX_REQUESTS=80");
+    expect(env).toContain("CATALOG_FETCH_CACHE_TTL_MS=900000");
+    expect(env).toContain("CATALOG_OFFICIAL_DOCUMENT_MAX_BYTES=15000000");
+    expect(env).toContain("CATALOG_JOB_LEASE_MS=300000");
   });
 
   it("runs one preflight before every runtime-backed business service", async () => {
@@ -46,6 +51,14 @@ describe("Osaka lifecycle deployment", () => {
     expect(agent).toContain("price:");
     expect(agent).toContain("condition: service_started");
     expect(agent).not.toContain("--preflight");
+  });
+
+  it("requires the official live canary to exercise and prove CloakBrowser fallback", async () => {
+    const canary = await readFile("scripts/release/catalog-official-live-canary.mjs", "utf8");
+    expect(canary).toContain('browserFallback: (url) => renderOfficialFallback(url, { renderer: "cloakbrowser" })');
+    expect(canary).toContain('candidate?.source?.fetchMode === "cloakbrowser"');
+    expect(canary).toContain('attempt.renderer === "cloakbrowser" && attempt.outcome === "succeeded"');
+    expect(canary).toContain("status: 403");
   });
 
   it("publishes the authenticated workspace API through host Nginx", async () => {
@@ -134,6 +147,7 @@ describe("Osaka lifecycle deployment", () => {
   it("blocks release startup until the universal canary and independent professional review validation pass", async () => {
     const script = await readFile("deploy/osaka/deploy.sh", "utf8");
     const canary = script.indexOf("npm run release:canary");
+    const officialCatalogCanary = script.indexOf("npm run release:catalog-official-canary");
     const holdouts = script.indexOf("npm run release:external-reviews -- /app/runtime/release-evidence/external-reviews");
     const backup = script.indexOf("node scripts/backup/create.mjs");
     const releaseStart = script.indexOf("RELEASE_STARTED=1", holdouts);
@@ -144,7 +158,8 @@ describe("Osaka lifecycle deployment", () => {
 
     expect(canary).toBeGreaterThan(-1);
     expect(script).toContain("npm run release:canary -- --source-runtime-root /app/runtime --generic-platform");
-    expect(holdouts).toBeGreaterThan(canary);
+    expect(officialCatalogCanary).toBeGreaterThan(canary);
+    expect(holdouts).toBeGreaterThan(officialCatalogCanary);
     expect(backup).toBeGreaterThan(holdouts);
     expect(releaseStart).toBeGreaterThan(backup);
     expect(startup).toBeGreaterThan(releaseStart);

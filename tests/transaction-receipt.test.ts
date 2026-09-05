@@ -29,6 +29,72 @@ describe("transaction screenshot receipt agent", () => {
     expect(result.evidence.excerpt).not.toContain("12345678901");
   });
 
+  it("matches the short JONSBO N6 model only with a bounded token and nearby governed brand", () => {
+    const result = analyzeTransactionText("商品品牌: JONSBO\n商品型号: N6 computer case 数量 1 实付 ¥699", catalog);
+    expect(result).toMatchObject({
+      status: "matched-catalog",
+      detected: { name: "JONSBO N6", brand: "JONSBO", model: "N6", category: "case" },
+      catalogMatch: { skuId: "case.jonsbo-n6", kind: "exact-mpn", score: 1 },
+    });
+  });
+
+  it("matches the short JONSBO N6 model when its governed brand is on the same product line", () => {
+    const result = analyzeTransactionText("商品名称: JONSBO N6 computer case 数量 1 实付 ¥699", catalog);
+    expect(result).toMatchObject({
+      status: "matched-catalog",
+      catalogMatch: { skuId: "case.jonsbo-n6", kind: "exact-mpn", score: 1 },
+    });
+  });
+
+  it.each(["SN600", "N600"])("does not match JONSBO N6 inside the %s token", (model) => {
+    const result = analyzeTransactionText(`商品名称: JONSBO ${model} computer case 数量 1 实付 ¥699`, catalog);
+    expect(result.status).not.toBe("matched-catalog");
+    expect(result.catalogMatch).toBeNull();
+    expect(result.detected.model).toBe(model);
+  });
+
+  it("does not promote a standalone short model without nearby brand evidence", () => {
+    const result = analyzeTransactionText("商品名称: N6 computer case 数量 1 实付 ¥699", catalog);
+    expect(result.status).not.toBe("matched-catalog");
+    expect(result.catalogMatch).toBeNull();
+  });
+
+  it.each([
+    ["XXSSR850FXYY", "Seasonic XXSSR850FXYY power supply"],
+    ["2026CP9020284999", "Corsair 2026CP9020284999 power supply"],
+  ])("does not find a catalog MPN inside the larger %s token", (_token, receiptText) => {
+    const result = analyzeTransactionText(`商品名称: ${receiptText} 数量 1`, catalog);
+    expect(result.status).not.toBe("matched-catalog");
+    expect(result.catalogMatch).toBeNull();
+  });
+
+  it("does not borrow JONSBO from an arbitrary adjacent line for a short N6 token", () => {
+    const result = analyzeTransactionText("JONSBO 机箱\nTP-LINK N6 路由器", catalog);
+    expect(result.status).not.toBe("matched-catalog");
+    expect(result.catalogMatch).toBeNull();
+  });
+
+  it.each([
+    "订单号: SSR-850FX",
+    "订单号: REF SSR-850FX",
+    "流水号: CP-9020284",
+    "Serial Number: i5-14500",
+  ])("does not treat an identifier-only field as a purchased model: %s", (receiptText) => {
+    const result = analyzeTransactionText(receiptText, catalog);
+    expect(result.status).toBe("identity-review-required");
+    expect(result.catalogMatch).toBeNull();
+  });
+
+  it("does not report a 100% local match when multiple SKUs share the same short identity", () => {
+    const ambiguousCatalog = {
+      ...catalog,
+      skus: [...catalog.skus, { ...catalog.skus[0], id: "case.jonsbo-n6-duplicate" }],
+    };
+    const result = analyzeTransactionText("商品名称: JONSBO N6 computer case 数量 1 实付 ¥699", ambiguousCatalog);
+    expect(result.status).not.toBe("matched-catalog");
+    expect(result.catalogMatch).toBeNull();
+  });
+
   it("infers the category but keeps a cross-generation model fragment unresolved", () => {
     const result = analyzeTransactionText("GX-850 数量 1 实付 ¥400", catalog);
     expect(result).toMatchObject({

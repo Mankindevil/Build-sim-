@@ -135,6 +135,8 @@ IMAGES_CHANGED=1
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
   npm run release:canary -- --source-runtime-root /app/runtime --generic-platform
 "${COMPOSE[@]}" run --rm --no-deps release-gate \
+  npm run release:catalog-official-canary
+"${COMPOSE[@]}" run --rm --no-deps release-gate \
   npm run release:external-reviews -- /app/runtime/release-evidence/external-reviews
 BACKUP_NAME="predeploy-${PREVIOUS_SHA}-$(date -u +%Y%m%dT%H%M%SZ).backup"
 "${COMPOSE[@]}" run --rm --no-deps release-gate \

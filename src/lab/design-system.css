@@ -630,9 +630,13 @@ body:has(#n6-lab#n6-lab) {
 
 #n6-lab#n6-lab .transaction-review-fields {
   display: grid;
-  grid-template-columns: minmax(190px, 1.5fr) minmax(90px, .7fr) 68px 100px 100px minmax(180px, 1.3fr);
+  grid-template-columns: minmax(180px, 1.4fr) minmax(110px, .8fr) minmax(90px, .65fr) 68px 100px 100px minmax(180px, 1.2fr);
   gap: 8px;
   margin-top: 7px;
+}
+
+.transaction-review-official-url-field {
+  grid-column: 1 / -1;
 }
 
 #n6-lab#n6-lab .transaction-review-evidence {
@@ -698,6 +702,30 @@ body:has(#n6-lab#n6-lab) {
 
 #n6-lab#n6-lab .transaction-candidate-review > a {
   color: var(--primary);
+}
+
+.transaction-official-site-list {
+  display: grid;
+  gap: 7px;
+  margin: 7px 0 10px;
+  padding-left: 18px;
+  color: var(--muted-foreground);
+}
+
+.transaction-official-site-list li {
+  overflow-wrap: anywhere;
+}
+
+.transaction-official-site-list input {
+  margin-right: 6px;
+}
+
+.transaction-official-site-list a {
+  color: var(--primary);
+}
+
+.transaction-use-official-site {
+  margin-left: 6px;
 }
 
 #n6-lab#n6-lab .transaction-candidate-fields {

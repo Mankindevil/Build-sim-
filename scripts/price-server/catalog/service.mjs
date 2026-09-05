@@ -9,7 +9,7 @@ import { validateOfficialUrl } from "./security.mjs";
 import { discoverEmbeddedOfficialPdfUrls, extractExactVariantOfficialPdf, extractOfficialHtml, extractOfficialPdf } from "./extract.mjs";
 import { adapterForUrl } from "./adapters.mjs";
 import { discoverOfficialUrls, QUERY_NORMALIZATION_VERSION } from "./discovery.mjs";
-import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider } from "./discovery.mjs";
+import { CatalogCacheDiscoveryProvider, RegistrySearchDiscoveryProvider, SubmittedOfficialUrlDiscoveryProvider, normalizeProposedOfficialUrl } from "./discovery.mjs";
 import { createSearXngDiscoveryProvider } from "./searxng-discovery.mjs";
 import { loadEnv } from "../env.mjs";
 import { createDomainProposal } from "./domain-proposals.mjs";
@@ -17,8 +17,54 @@ import { catalogCandidateInputHash } from "./contracts.mjs";
 import { assessCatalogIdentity, classifyOfficialPage, summarizeCatalogCandidates } from "./identity.mjs";
 import { CatalogSearchJobRepository } from "./catalog-job-repository.mjs";
 
-const contentCache = new Map();
-const fetchCache = new Map();
+class BoundedTtlCache {
+  constructor({ maxEntries, maxBytes, ttlMs }) {
+    this.maxEntries = maxEntries;
+    this.maxBytes = maxBytes;
+    this.ttlMs = ttlMs;
+    this.entries = new Map();
+    this.totalBytes = 0;
+  }
+  sizeOf(value) {
+    try {
+      if (typeof value?.body === "string") return Buffer.byteLength(value.body);
+      return Buffer.byteLength(JSON.stringify(value));
+    } catch { return this.maxBytes + 1; }
+  }
+  get(key) {
+    const entry = this.entries.get(key);
+    if (!entry) return undefined;
+    if (entry.expiresAt <= Date.now()) { this.delete(key); return undefined; }
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    return entry.value;
+  }
+  set(key, value) {
+    const bytes = this.sizeOf(value);
+    this.delete(key);
+    if (bytes > this.maxBytes) return this;
+    this.entries.set(key, { value, bytes, expiresAt: Date.now() + this.ttlMs });
+    this.totalBytes += bytes;
+    while (this.entries.size > this.maxEntries || this.totalBytes > this.maxBytes) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      this.delete(oldest);
+    }
+    return this;
+  }
+  delete(key) {
+    const entry = this.entries.get(key);
+    if (!entry) return false;
+    this.totalBytes -= entry.bytes;
+    return this.entries.delete(key);
+  }
+}
+
+const cacheTtlMs = Number.isInteger(Number(process.env.CATALOG_FETCH_CACHE_TTL_MS))
+  ? Math.min(3_600_000, Math.max(10_000, Number(process.env.CATALOG_FETCH_CACHE_TTL_MS)))
+  : 900_000;
+const contentCache = new BoundedTtlCache({ maxEntries: 256, maxBytes: 8_000_000, ttlMs: cacheTtlMs });
+const fetchCache = new BoundedTtlCache({ maxEntries: 64, maxBytes: 40_000_000, ttlMs: cacheTtlMs });
 // These two maps only route a request to the durable store / retain a
 // read-through copy for legacy synchronous catalog-write callers. Neither map
 // carries lifecycle state or makes an unpersisted candidate authoritative.
@@ -26,6 +72,11 @@ const repositoriesByRoot = new Map();
 const jobRootHints = new Map();
 const candidateReadThroughCache = new Map();
 const activeRuns = new Set();
+let officialDocumentQueue = Promise.resolve();
+// Production always supplies an explicit runtime root. Standalone/test calls
+// share one private root for this process, but a startup nonce prevents PID
+// reuse from resurrecting stale jobs left by an unrelated prior process.
+const processFallbackRoot = path.join(os.tmpdir(), `build-sim-catalog-service-${process.pid}-${crypto.randomUUID()}`);
 
 function sha256(value) { return crypto.createHash("sha256").update(value).digest("hex"); }
 function now() { return new Date().toISOString(); }
@@ -33,6 +84,31 @@ function candidateId(input) { return `catalog-candidate-${sha256(input).slice(0,
 function jobId(input) { return `catalog-search-${sha256(input).slice(0, 20)}`; }
 function domainOf(url) { return new URL(url).hostname; }
 function safeText(value) { return String(value ?? "").slice(0, 240); }
+function comparableCatalogIdentity(value) {
+  return String(value ?? "").normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+function catalogBrandsMatch(left, right, registry = activeOfficialRegistry()) {
+  const leftEntry = registryForBrand(left, registry);
+  const rightEntry = registryForBrand(right, registry);
+  if (leftEntry && rightEntry) return leftEntry.brand === rightEntry.brand;
+  return comparableCatalogIdentity(left) === comparableCatalogIdentity(right);
+}
+function expectedCatalogSku(body, query, catalog) {
+  if (!Object.prototype.hasOwnProperty.call(body, "expectedSkuId")) return null;
+  if (typeof body.expectedSkuId !== "string" || !/^[A-Za-z0-9._:-]{1,160}$/.test(body.expectedSkuId)) {
+    throw new Error("expectedSkuId must be a valid catalog SKU id");
+  }
+  const expected = (catalog.skus ?? []).find((sku) => sku.id === body.expectedSkuId);
+  if (!expected) throw new Error("expectedSkuId does not exist in the active catalog");
+  const conflicts = ["brand", "model", "category", "mpn"].filter((field) => query[field] !== undefined
+    && comparableCatalogIdentity(query[field]) !== comparableCatalogIdentity(expected[field]));
+  if (conflicts.length) throw new Error(`expectedSkuId conflicts with query ${conflicts.join(", ")}`);
+  return expected;
+}
+function boundedOfficialDocumentBytes(value) {
+  const parsed = Number(value ?? process.env.CATALOG_OFFICIAL_DOCUMENT_MAX_BYTES ?? 15_000_000);
+  return Number.isInteger(parsed) && parsed >= 5_000_000 && parsed <= 25_000_000 ? parsed : 15_000_000;
+}
 function successfulFetch(fetchResult) {
   const status = Number(fetchResult?.status ?? 0);
   return status >= 200 && status < 300;
@@ -49,12 +125,20 @@ function fetchAudit(fetchResult) {
   };
 }
 
+async function serializedOfficialDocument(task) {
+  const previous = officialDocumentQueue;
+  let release;
+  officialDocumentQueue = new Promise((resolve) => { release = resolve; });
+  await previous;
+  try { return await task(); } finally { release(); }
+}
+
 function persistRootFor(options = {}) {
   if (options.coordinator?.root) return path.resolve(options.coordinator.root);
   // The production server always passes its explicit runtime root. The private
   // temporary fallback keeps standalone tooling/tests durable without trying to
   // mutate the read-only release artifact.
-  return path.resolve(options.persistRoot ?? process.env.CATALOG_JOB_PERSIST_ROOT ?? path.join(os.tmpdir(), `build-sim-catalog-service-${process.pid}`));
+  return path.resolve(options.persistRoot ?? process.env.CATALOG_JOB_PERSIST_ROOT ?? processFallbackRoot);
 }
 
 async function repositoryFor(options = {}) {
@@ -83,6 +167,7 @@ async function hydrateJob(record, repository) {
     backgroundStatus: lifecycle,
     stage: record.catalog.stage,
     query: record.catalog.query,
+    ...(record.catalog.expectedSkuId ? { expectedSkuId: record.catalog.expectedSkuId } : {}),
     ...(record.catalog.requestContext ? { requestContext: record.catalog.requestContext } : {}),
     limit: record.catalog.limit,
     candidates,
@@ -90,6 +175,7 @@ async function hydrateJob(record, repository) {
     errors: record.catalog.errors ?? [],
     ...(record.catalog.discovery ? { discovery: record.catalog.discovery } : {}),
     ...(record.catalog.domainProposals ? { domainProposals: record.catalog.domainProposals } : {}),
+    ...(record.catalog.officialSiteSuggestions ? { officialSiteSuggestions: record.catalog.officialSiteSuggestions } : {}),
     ...(record.catalog.summary ? { summary: record.catalog.summary } : {}),
     revision: record.job.revision,
     runtimeGeneration: record.job.runtimeGeneration,
@@ -215,6 +301,31 @@ function renderedExtraction(extracted, fetchResult) {
   };
 }
 
+function withOfficialDomainBrand(extracted, fetchResult, expectedBrand, registry) {
+  const entry = registryForUrl(new URL(fetchResult.finalUrl), registry);
+  if (entry?.trustStatus !== "trusted" || extracted.fields?.some((field) => field.field === "brand")) return extracted;
+  if (expectedBrand && !catalogBrandsMatch(expectedBrand, entry.brand, registry)) {
+    return { ...extracted, warnings: [...(extracted.warnings ?? []), `official domain brand ${entry.brand} conflicts with requested brand ${expectedBrand}`] };
+  }
+  const sourceKind = fetchResult.fallback ? "official-rendered-page" : fetchResult.contentType?.includes("pdf") ? "official-pdf" : "official-page";
+  return {
+    ...extracted,
+    fields: [{
+      provenanceId: `prov-${fetchResult.contentHash.slice(0, 12)}-official-domain-brand`,
+      field: "brand",
+      value: entry.brand,
+      evidence: "official",
+      sourceUrl: fetchResult.finalUrl,
+      sourceKind,
+      retrievedAt: fetchResult.retrievedAt,
+      extractor: "official-domain-registry-v1",
+      locator: `trusted official domain: ${new URL(fetchResult.finalUrl).hostname}`,
+      snippet: entry.brand,
+      confidence: 1,
+    }, ...(extracted.fields ?? [])],
+  };
+}
+
 /** Rendered values win per field, while static-only evidence and diagnostics survive. */
 export function mergeFallbackExtraction(initial, rendered, renderer = "playwright") {
   const fields = [...(initial.fields ?? [])];
@@ -267,6 +378,8 @@ async function inspectCandidate(candidate, {
   fetcher = fetchOfficial,
   browserFallback,
   officialDocumentLimit = 3,
+  officialDocumentMaxBytes,
+  registry = activeOfficialRegistry(),
   responseCache = fetcher === fetchOfficial ? fetchCache : null,
 } = {}) {
   try {
@@ -279,12 +392,14 @@ async function inspectCandidate(candidate, {
       extracted = adapter?.extract(fetchResult) ?? (fetchResult.contentType.includes("pdf") ? extractOfficialPdf(fetchResult) : extractOfficialHtml(fetchResult));
       if (successfulFetch(fetchResult) && !extracted.accessBarrier) contentCache.set(initialCacheKey, extracted);
     }
+    const requestedBrand = candidate.query?.brand ?? candidate.brand;
+    extracted = withOfficialDomainBrand(extracted, fetchResult, requestedBrand, registry);
     if (missingRequiredFields(candidate, extracted).length && browserFallback && !fetchResult.contentType.includes("pdf") && !fetchResult.fallback) {
       try {
         const initialFetch = fetchResult.initialFetch ?? fetchAudit(fetchResult);
         const fallbackResult = await browserFallback(fetchResult.finalUrl);
         const fallbackAdapter = adapterForUrl(fallbackResult.finalUrl);
-        const fallbackExtracted = renderedExtraction(fallbackAdapter?.extract(fallbackResult) ?? extractOfficialHtml(fallbackResult, { sourceKind: "official-rendered-page" }), fallbackResult);
+        const fallbackExtracted = withOfficialDomainBrand(renderedExtraction(fallbackAdapter?.extract(fallbackResult) ?? extractOfficialHtml(fallbackResult, { sourceKind: "official-rendered-page" }), fallbackResult), fallbackResult, requestedBrand, registry);
         extracted = mergeFallbackExtraction(extracted, fallbackExtracted, fallbackResult.fallback ?? "browser");
         fetchResult = { ...fallbackResult, initialFetch };
         if (successfulFetch(fetchResult) && !extracted.accessBarrier) contentCache.set(fetchContentCacheKey(fetchResult), extracted);
@@ -292,14 +407,16 @@ async function inspectCandidate(candidate, {
         extracted = { ...extracted, warnings: [...extracted.warnings, `browser fallback failed: ${safeText(error?.message ?? error)}`] };
       }
     }
-    const expectedBrand = registryForUrl(new URL(fetchResult.finalUrl))?.brand;
+    const expectedBrand = registryForUrl(new URL(fetchResult.finalUrl), registry)?.brand;
     const requestedMpn = candidate.query?.mpn ?? candidate.mpn;
     if (requestedMpn && missingRequiredFields(candidate, extracted).length && !fetchResult.contentType.includes("pdf")) {
       for (const documentUrl of officialDocumentUrls(fetchResult, expectedBrand, officialDocumentLimit)) {
         try {
-          const documentFetch = responseCache?.get(documentUrl) ?? await fetcher(documentUrl, { expectedBrand });
-          if (!successfulFetch(documentFetch) || !documentFetch.contentType.includes("pdf")) throw new Error("embedded official document is not a successful PDF response");
-          const documentExtracted = extractExactVariantOfficialPdf(documentFetch, { mpn: requestedMpn, brand: expectedBrand });
+          const { documentFetch, documentExtracted } = await serializedOfficialDocument(async () => {
+            const boundedFetch = responseCache?.get(documentUrl) ?? await fetcher(documentUrl, { expectedBrand, maxBytes: boundedOfficialDocumentBytes(officialDocumentMaxBytes) });
+            if (!successfulFetch(boundedFetch) || !boundedFetch.contentType.includes("pdf")) throw new Error("embedded official document is not a successful PDF response");
+            return { documentFetch: boundedFetch, documentExtracted: extractExactVariantOfficialPdf(boundedFetch, { mpn: requestedMpn, brand: expectedBrand }) };
+          });
           const audit = { ...fetchAudit(documentFetch), exactVariant: documentExtracted.exactVariant === true };
           supportingDocuments.push(audit);
           if (responseCache) responseCache.set(documentUrl, documentFetch);
@@ -326,17 +443,23 @@ async function inspectCandidate(candidate, {
       ? extracted.warnings.filter((warning) => !/^missing official (?:PDF )?fields:|^access barrier detected:/i.test(warning))
       : extracted.warnings;
     const canonical = canonicalUrl ?? fetchResult.canonicalUrl ?? fetchResult.finalUrl;
-    const officialEntry = registryForUrl(new URL(canonical));
+    const finalOfficialEntry = registryForUrl(new URL(fetchResult.finalUrl), registry);
+    const canonicalOfficialEntry = registryForUrl(new URL(canonical), registry);
+    const officialEntry = finalOfficialEntry ?? canonicalOfficialEntry;
     const page = classifyOfficialPage(fetchResult, extracted, canonical);
-    const identity = assessCatalogIdentity({ ...candidate, canonicalUrl: canonical }, extracted, officialEntry);
+    const identity = assessCatalogIdentity({
+      ...candidate,
+      canonicalUrl: canonical,
+      officialDomainBrands: [...new Set([finalOfficialEntry?.brand, canonicalOfficialEntry?.brand].filter(Boolean))],
+    }, extracted, officialEntry);
     const inspected = {
       ...candidate,
       canonicalUrl: canonical,
-      source: { ...candidate.source, kind: "official", retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.fallback ? { fetchMode: fetchResult.fallback } : {}), ...(fetchResult.initialFetch ? { initialFetch: fetchResult.initialFetch } : {}), ...(supportingDocuments.length ? { supportingDocuments } : {}), ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
+      source: { ...candidate.source, kind: "official", retrievedAt: fetchResult.retrievedAt, httpStatus: fetchResult.status, finalUrl: fetchResult.finalUrl, ...(fetchResult.fallback ? { fetchMode: fetchResult.fallback } : {}), ...(fetchResult.rendererAttempts?.length ? { rendererAttempts: fetchResult.rendererAttempts } : {}), ...(fetchResult.initialFetch ? { initialFetch: fetchResult.initialFetch } : {}), ...(supportingDocuments.length ? { supportingDocuments } : {}), ...(fetchResult.etag ? { etag: fetchResult.etag } : {}), ...(fetchResult.lastModified ? { lastModified: fetchResult.lastModified } : {}) },
       official: { trustStatus: officialEntry?.trustStatus ?? "untrusted", brand: officialEntry?.brand, pageKind: page.kind, reasons: page.reasons },
       identity,
       match: scoreExtracted(identity),
-      extraction: { status: extractionStatus(candidate, extracted, fetchResult), fieldsFound: fields.length, fieldsMissing: Math.max(0, 6 - fields.length), adapter: extracted.adapter, ...(fetchResult.contentHash ? { contentHash: extractionEvidenceHash(fetchResult, supportingDocuments) } : {}), ...(supportingDocuments.length ? { supportingDocuments } : {}), ...(finalWarnings.length ? { error: safeText(finalWarnings.join("; ")) } : {}) },
+      extraction: { status: extractionStatus(candidate, extracted, fetchResult), fieldsFound: fields.length, fieldsMissing: missingRequiredFields(candidate, extracted).length, adapter: extracted.adapter, ...(fetchResult.contentHash ? { contentHash: extractionEvidenceHash(fetchResult, supportingDocuments) } : {}), ...(supportingDocuments.length ? { supportingDocuments } : {}), ...(finalWarnings.length ? { error: safeText(finalWarnings.join("; ")) } : {}) },
       fields,
       ...(extracted.accessBarrier ? { accessBarrier: extracted.accessBarrier } : {}),
       ...(extracted.conflicts.length ? { conflicts: extracted.conflicts } : {}),
@@ -360,34 +483,73 @@ async function processClaim(claim, repository, options) {
     if (!["registry", "searxng"].includes(mode)) throw new Error("CATALOG_DISCOVERY_PROVIDER must be registry or searxng");
     discoveryProviders = [new CatalogCacheDiscoveryProvider(options.catalog ?? catalogJson), ...(mode === "searxng" ? [createSearXngDiscoveryProvider(env, { cacheRoot: options.discoveryCacheRoot, registryVersion: registry.version })] : []), new RegistrySearchDiscoveryProvider()];
   }
-  const discovery = await discoverOfficialUrls({ query: job.query, catalog: options.catalog ?? catalogJson, providers: discoveryProviders, limit: job.limit, signal: options.signal, registry });
+  if (job.requestedOfficialUrl) {
+    discoveryProviders = [new SubmittedOfficialUrlDiscoveryProvider(job.requestedOfficialUrl), ...discoveryProviders.filter((provider) => provider.id !== "user-submitted-url")];
+  }
+  const discovery = await discoverOfficialUrls({ query: job.query, catalog: options.catalog ?? catalogJson, providers: discoveryProviders, limit: job.limit, signal: options.signal, registry, expectedSkuId: job.expectedSkuId });
   const discoveryMetadata = { providerIds: discovery.providerIds, registryVersion: discovery.registryVersion, queryNormalizationVersion: discovery.queryNormalizationVersion };
   const warnings = [...(job.warnings ?? []), ...discovery.warnings];
   const domainProposals = [];
+  const officialSiteSuggestions = [];
   if (options.persistRoot) {
     for (const proposal of discovery.proposals ?? []) {
-      const saved = await createDomainProposal({ ...proposal, brand: proposal.brand ?? job.query.brand, mpn: job.query.mpn, reason: "discovery candidate domain is not governed" }, options.coordinator ? { coordinator: options.coordinator, generationAware: true } : { persistRoot: options.persistRoot });
-      if (saved?.proposalId) domainProposals.push(saved);
+      const proposalBrand = proposal.brand ?? job.query.brand;
+      if (!proposalBrand) {
+        warnings.push(`${proposal.provider}: skipped ungoverned domain ${proposal.domain}; manufacturer brand is required for approval`);
+        continue;
+      }
+      try {
+        const saved = await createDomainProposal({ ...proposal, brand: proposalBrand, mpn: job.query.mpn, reason: "discovery candidate domain is not governed" }, options.coordinator ? { coordinator: options.coordinator, generationAware: true } : { persistRoot: options.persistRoot });
+        if (saved?.proposalId) {
+          domainProposals.push(saved);
+          if (saved.trustStatus === "proposed") {
+            officialSiteSuggestions.push({
+              proposalId: saved.proposalId,
+              inputHash: saved.inputHash,
+              brand: saved.brand,
+              domain: saved.domain,
+              url: proposal.url,
+              title: proposal.title || saved.domain,
+              snippet: proposal.snippet || "",
+              matchScore: Number(proposal.matchScore ?? 0),
+              reasons: Array.isArray(proposal.reasons) ? proposal.reasons : ["待用户核对是否为制造商官网"],
+              submittedByUser: proposal.submittedByUser === true,
+            });
+          }
+        }
+      } catch (error) {
+        warnings.push(`${proposal.provider}: domain proposal rejected: ${safeText(error?.message ?? error)}`);
+      }
     }
   }
-  const candidates = discovery.candidates.map((entry) => ({
-    candidateId: candidateId(`${job.query.raw}|${entry.url}`),
-    ...(entry.skuId ? { skuId: entry.skuId } : {}),
-    query: job.query,
-    ...(job.query.brand ? { brand: job.query.brand } : {}),
-    ...(job.query.model ? { model: job.query.model } : {}),
-    ...(job.query.mpn ? { mpn: job.query.mpn } : {}),
-    ...(job.query.category ? { category: job.query.category } : {}),
-    title: entry.title || job.query.raw,
-    url: entry.url,
-    discovery: entry,
-    source: { kind: entry.provider === "catalog-cache" ? "official" : "search", provider: entry.provider, domain: domainOf(entry.url), retrievedAt: entry.retrievedAt },
-    official: { trustStatus: "trusted", brand: registryForUrl(new URL(entry.url))?.brand, pageKind: entry.provider === "registry-search" ? "search" : "unknown", reasons: [entry.provider === "registry-search" ? "official site-search link" : "official page inspection pending"] },
-    match: { score: entry.matchScore ?? 0.3, kind: entry.matchKind ?? "weak", reasons: [entry.provider === "catalog-cache" ? "catalog candidate" : "discovery candidate; inspection required"] },
-    extraction: { status: "not-run", fieldsFound: 0, fieldsMissing: 0 },
-  }));
+  const candidates = discovery.candidates.map((entry) => {
+    const boundSkuId = entry.skuId ?? (entry.provider === "user-submitted-url" ? job.expectedSkuId : null);
+    return {
+      // Candidate records live in one durable namespace. Include the owning job
+      // so two concurrent searches for the same URL cannot overwrite each
+      // other's inspected/not-run lifecycle state.
+      candidateId: candidateId(`${record.job.jobId}|${entry.url}`),
+      ...(boundSkuId ? { skuId: boundSkuId } : {}),
+      query: job.query,
+      ...(job.query.brand ? { brand: job.query.brand } : {}),
+      ...(job.query.model ? { model: job.query.model } : {}),
+      ...(job.query.mpn ? { mpn: job.query.mpn } : {}),
+      ...(job.query.category ? { category: job.query.category } : {}),
+      title: entry.title || job.query.raw,
+      url: entry.url,
+      discovery: entry,
+      source: { kind: entry.provider === "catalog-cache" ? "official" : "search", provider: entry.provider, domain: domainOf(entry.url), retrievedAt: entry.retrievedAt },
+      official: { trustStatus: "trusted", brand: registryForUrl(new URL(entry.url))?.brand, pageKind: entry.provider === "registry-search" ? "search" : "unknown", reasons: [entry.provider === "registry-search" ? "official site-search link" : "official page inspection pending"] },
+      match: { score: entry.matchScore ?? 0.3, kind: entry.matchKind ?? "weak", reasons: [entry.provider === "catalog-cache" ? "catalog candidate" : "discovery candidate; inspection required"] },
+      extraction: { status: "not-run", fieldsFound: 0, fieldsMissing: 0 },
+    };
+  });
+  if (job.expectedSkuId) candidates.sort((left, right) => {
+    const priority = (candidate) => candidate.discovery?.provider === "user-submitted-url" ? 2 : candidate.skuId === job.expectedSkuId ? 1 : 0;
+    return priority(right) - priority(left);
+  });
   ({ record, fence } = await repository.checkpoint(record.job.jobId, fence, {
-    stage: "fetch", discovery: discoveryMetadata, warnings, domainProposals,
+    stage: "fetch", discovery: discoveryMetadata, warnings, domainProposals, officialSiteSuggestions,
     progress: { stage: "fetch", completed: 0, total: Math.min(job.limit, candidates.length) },
   }));
   claim.fence = fence;
@@ -400,17 +562,26 @@ async function processClaim(claim, repository, options) {
     const candidateOptions = options.browserFallback && browserFallbackUses < browserFallbackLimit
       ? { ...options, browserFallback: async (url) => { browserFallbackUses += 1; return options.browserFallback(url); } }
       : { ...options, browserFallback: undefined };
-    inspectedCandidates.push(inspectable && options.inspect !== false ? await inspectCandidate(candidate, candidateOptions) : candidate);
+    const inspected = inspectable && options.inspect !== false ? await inspectCandidate(candidate, candidateOptions) : candidate;
+    inspectedCandidates.push(inspected);
     ({ record, fence } = await repository.checkpoint(record.job.jobId, fence, {
       stage: "fetch", progress: { stage: "fetch", completed: inspectedCandidates.length, total: Math.min(job.limit, candidates.length) },
     }));
     claim.fence = fence;
+    const expectedCatalogMatch = job.expectedSkuId
+      && inspected.skuId === job.expectedSkuId
+      && inspected.discovery?.provider === "catalog-cache";
+    const requestedOfficialMatch = job.requestedOfficialUrl && inspected.discovery?.provider === "user-submitted-url";
+    if ((requestedOfficialMatch || expectedCatalogMatch || (!job.expectedSkuId && job.requestContext?.source === "transaction-import"))
+      && inspected.identity?.verdict === "exact"
+      && ["product", "spec", "datasheet", "support"].includes(inspected.official?.pageKind)
+      && inspected.extraction?.status === "ok") break;
   }
   const status = inspectedCandidates.some((candidate) => candidate.extraction.status === "partial" || candidate.extraction.status === "failed") ? "partial" : "completed";
   const finalWarnings = inspectedCandidates.length === 0 ? [...warnings, "未找到官方候选；第三方价格发现请使用 /api/price/collect，不混入官方参数"] : warnings;
   const completed = await repository.complete(record.job.jobId, fence, {
     status, stage: "score", candidates: inspectedCandidates, warnings: finalWarnings,
-    discovery: discoveryMetadata, domainProposals, summary: summarizeCatalogCandidates(inspectedCandidates, discovery.candidates.length),
+    discovery: discoveryMetadata, domainProposals, officialSiteSuggestions, summary: { ...summarizeCatalogCandidates(inspectedCandidates, discovery.candidates.length), suggestedSites: officialSiteSuggestions.length },
     progress: { stage: "score", completed: inspectedCandidates.length, total: Math.min(job.limit, candidates.length) },
   });
   return hydrateJob(completed, repository);
@@ -435,19 +606,24 @@ async function runOne(repository, options) {
 }
 
 export async function queueSearch(body, options = {}) {
-  const query = normalizeModelQuery(String(body.query ?? ""), { brand: body.brand, model: body.model, mpn: body.mpn, category: body.category, locale: body.locale ?? "zh-CN" });
+  let query = normalizeModelQuery(String(body.query ?? ""), { brand: body.brand, model: body.model, mpn: body.mpn, category: body.category, locale: body.locale ?? "zh-CN" });
+  const catalog = options.catalog ?? catalogJson;
+  const expectedSku = expectedCatalogSku(body, query, catalog);
+  if (expectedSku && !query.brand) query = { ...query, brand: expectedSku.brand };
+  const expectedSkuId = expectedSku?.id ?? null;
   const limit = Math.min(20, Math.max(1, Number(body.limit ?? 10)));
   const providerIds = (options.discoveryProviders ?? []).map((provider) => provider.id);
   const requestId = typeof body.requestId === "string" && /^[A-Za-z0-9._:-]{8,160}$/.test(body.requestId) ? body.requestId : null;
   const trigger = body.trigger === "user-confirmed-review" ? body.trigger : null;
   const requestContext = trigger ? { source: "transaction-import", trigger, ...(requestId ? { requestId } : {}) } : null;
+  const requestedOfficialUrl = body.officialUrl ? normalizeProposedOfficialUrl(String(body.officialUrl)) : null;
   const registry = options.registry ?? activeOfficialRegistry();
-  const key = JSON.stringify({ query, officialOnly: body.officialOnly !== false, limit, providerIds: providerIds.length ? providerIds : ["catalog-cache", "registry-search"], registryVersion: registry.version, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, ...(requestId ? { requestId } : {}) });
+  const key = JSON.stringify({ query, officialOnly: body.officialOnly !== false, limit, providerIds: providerIds.length ? providerIds : ["catalog-cache", "registry-search"], registryVersion: registry.version, queryNormalizationVersion: QUERY_NORMALIZATION_VERSION, ...(expectedSkuId ? { expectedSkuId } : {}), ...(requestedOfficialUrl ? { requestedOfficialUrl } : {}), ...(requestId ? { requestId } : {}) });
   const id = jobId(key);
   const { repository, persistRoot } = await repositoryFor(options);
   const created = await repository.create({
     jobId: id, idempotencyKey: sha256(key), inputHash: sha256(key), payloadRef: `catalog-search-payload:${sha256(key)}`,
-    catalog: { query, ...(requestContext ? { requestContext } : {}), limit, registryVersion: registry.version },
+    catalog: { query, ...(expectedSkuId ? { expectedSkuId } : {}), ...(requestedOfficialUrl ? { requestedOfficialUrl } : {}), ...(requestContext ? { requestContext } : {}), limit, registryVersion: registry.version },
   });
   jobRootHints.set(id, persistRoot);
   if (created.created || ["queued"].includes(created.record.job.status)) {
@@ -458,9 +634,15 @@ export async function queueSearch(body, options = {}) {
 
 export async function waitForJob(jobId, timeoutMs = 5_000, options = {}) {
   const started = Date.now();
+  const root = options.persistRoot ? persistRootFor(options) : (jobRootHints.get(jobId) ?? persistRootFor(options));
+  const localRunKey = `${root}:${jobId}`;
   while (Date.now() - started < timeoutMs) {
     const job = await getJob(jobId, options);
-    if (!job || job.status === "paused_restore_review" || (["completed", "partial", "failed"].includes(job.status) && job.persisted === true)) return job;
+    const terminal = job?.status === "paused_restore_review" || (["completed", "partial", "failed"].includes(job?.status) && job?.persisted === true);
+    // A durable terminal record is externally visible just before the local
+    // worker releases its final read/lock scope. Local waiters must not tear
+    // down a temporary repository while that epilogue is still running.
+    if (!job || (terminal && !activeRuns.has(localRunKey))) return job;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   return getJob(jobId, options);

@@ -64,6 +64,12 @@ export interface ModelCandidate {
     httpStatus?: number;
     finalUrl?: string;
     fetchMode?: "playwright" | "cloakbrowser";
+    rendererAttempts?: Array<{
+      renderer: "playwright" | "cloakbrowser";
+      outcome: "succeeded" | "http-error" | "failed";
+      httpStatus?: number;
+      error?: string;
+    }>;
     initialFetch?: { requestedUrl: string; finalUrl: string; httpStatus: number; retrievedAt: string; contentHash: string; redirects: string[] };
     supportingDocuments?: Array<{ requestedUrl: string; finalUrl: string; httpStatus: number; retrievedAt: string; contentHash: string; redirects: string[]; exactVariant: boolean }>;
     etag?: string;
@@ -115,6 +121,8 @@ export interface OfficialFetchResult {
   etag?: string;
   lastModified?: string;
   redirects: string[];
+  fallback?: "playwright" | "cloakbrowser";
+  rendererAttempts?: ModelCandidate["source"]["rendererAttempts"];
   pdfExtraction?: {
     mode: "text" | "ocr";
     ocrAttempted: boolean;

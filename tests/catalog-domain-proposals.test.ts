@@ -30,9 +30,44 @@ describe("C5 governed domain proposals", () => {
       expect(result?.candidates).toHaveLength(0);
       expect(result?.domainProposals).toHaveLength(1);
       expect(result?.domainProposals[0].trustStatus).toBe("proposed");
+      expect(result?.officialSiteSuggestions).toEqual([
+        expect.objectContaining({
+          proposalId: result?.domainProposals[0].proposalId,
+          inputHash: result?.domainProposals[0].inputHash,
+          brand: "ExampleBrand",
+          domain: "products.example.org",
+          url: `https://products.example.org/${stamp}`,
+        }),
+      ]);
+      expect(result?.summary.suggestedSites).toBe(1);
       const listed = await listDomainProposals({ persistRoot: root });
       expect(listed.proposals).toHaveLength(1);
       expect(listed.events).toHaveLength(1);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("turns a user-entered official URL into a reviewable proposal before any fetch", async () => {
+    const { root } = await tempRegistryRoot();
+    const stamp = Date.now();
+    const officialUrl = `https://support-${stamp}.example.org/products/model-x#specifications`;
+    try {
+      const job = await queueSearch({
+        query: "ExampleBrand Model X",
+        brand: "ExampleBrand",
+        category: "storage",
+        officialUrl,
+      }, { discoveryProviders: [], persistRoot: root, inspect: false });
+      const result = await waitForJob(job.jobId);
+      expect(result?.candidates).toHaveLength(0);
+      expect(result?.officialSiteSuggestions).toEqual([
+        expect.objectContaining({
+          brand: "ExampleBrand",
+          domain: `support-${stamp}.example.org`,
+          url: `https://support-${stamp}.example.org/products/model-x`,
+          submittedByUser: true,
+        }),
+      ]);
+      await expect(queueSearch({ query: "ExampleBrand Model X", brand: "ExampleBrand", category: "storage", officialUrl: "https://127.0.0.1/private" }, { persistRoot: root })).rejects.toThrow(/private|local/);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
